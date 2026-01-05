@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+
+{% block title %}Importer Excel - ProspectLab{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Importer un fichier Excel</h1>
+    <p>Uploadez un fichier Excel contenant vos entreprises à analyser</p>
+</div>
+
+<div class="upload-section">
+    <form method="POST" enctype="multipart/form-data" class="upload-form" id="upload-form">
+        <div class="form-group">
+            <label for="file">Fichier Excel (.xlsx, .xls)</label>
+            <input type="file" id="file" name="file" accept=".xlsx,.xls" required>
+            <small>Format attendu : colonnes avec au minimum "name" et "website"</small>
+        </div>
+        
+        <button type="submit" class="btn btn-primary" id="upload-btn">Importer</button>
+    </form>
+    
+    <!-- Barre de progression -->
+    <div id="upload-progress" class="upload-progress" style="display: none; margin-top: 1rem;">
+        <div class="progress-bar" style="width: 100%; height: 30px; background: #f0f0f0; border-radius: 4px; overflow: hidden; margin-bottom: 0.5rem;">
+            <div id="progress-fill" class="progress-fill" style="height: 100%; background: linear-gradient(90deg, #3498db, #2980b9); width: 0%; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 12px;">0%</div>
+        </div>
+        <p id="progress-text" style="text-align: center; color: #666; margin: 0;">Préparation de l'upload...</p>
+    </div>
+    
+    <!-- Messages d'erreur -->
+    <div id="upload-status" class="status-message" style="display: none; margin-top: 1rem;"></div>
+</div>
+
+<div class="info-box">
+    <h3>Format du fichier Excel</h3>
+    <p>Votre fichier Excel doit contenir au minimum les colonnes suivantes :</p>
+    
+    <h4>Champs obligatoires</h4>
+    <ul>
+        <li><strong>name</strong> : Nom de l'entreprise (obligatoire)</li>
+    </ul>
+    
+    <h4>Champs recommandés</h4>
+    <ul>
+        <li><strong>website</strong> : URL du site web (recommandé pour les analyses techniques)</li>
+        <li><strong>category</strong> : Catégorie de l'entreprise (ex: restaurant, bank, bar, etc.)</li>
+        <li><strong>category_translate</strong> : Catégorie traduite en français</li>
+    </ul>
+    
+    <h4>Adresse et localisation</h4>
+    <ul>
+        <li><strong>address_1</strong> : Nom et numéro de la rue</li>
+        <li><strong>address_2</strong> : Ville et code postal</li>
+        <li><strong>address_full</strong> : Adresse complète (nom, numéro, ville, région, code postal) - utilisé si address_1/address_2 absents</li>
+        <li><strong>country</strong> : Pays</li>
+        <li><strong>longitude</strong> : Longitude (coordonnées GPS)</li>
+        <li><strong>latitude</strong> : Latitude (coordonnées GPS)</li>
+        <li><strong>timezone</strong> : Fuseau horaire de l'adresse</li>
+    </ul>
+    
+    <h4>Contact</h4>
+    <ul>
+        <li><strong>phone_number</strong> : Numéro de téléphone</li>
+    </ul>
+    
+    <h4>Évaluations Google</h4>
+    <ul>
+        <li><strong>rating</strong> : Note moyenne (sur 5) depuis Google Business</li>
+        <li><strong>reviews_count</strong> : Nombre d'avis depuis Google Business</li>
+    </ul>
+    
+    <h4>Informations supplémentaires</h4>
+    <ul>
+        <li><strong>language</strong> : Langue dans laquelle les informations sont écrites</li>
+        <li><strong>language_code</strong> : Code de langue (ex: en, fr, it, etc.)</li>
+        <li><strong>image_source</strong> : Lien de l'image par défaut affichée sur Google Maps</li>
+        <li><strong>place_url</strong> : URL Google Maps de l'établissement</li>
+    </ul>
+    
+    <div class="info-note">
+        <p><strong>Note importante :</strong> Le système détecte automatiquement les doublons basés sur le nom, le site web et l'adresse. Les entreprises en double seront ignorées lors de l'import.</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    const form = document.getElementById('upload-form');
+    const fileInput = document.getElementById('file');
+    const uploadBtn = document.getElementById('upload-btn');
+    const progressContainer = document.getElementById('upload-progress');
+    const progressFill = document.getElementById('progress-fill');
+    const progressText = document.getElementById('progress-text');
+    const statusDiv = document.getElementById('upload-status');
+    
+    function showStatus(message, type = 'info') {
+        statusDiv.style.display = 'block';
+        statusDiv.className = `status-message status-${type}`;
+        statusDiv.textContent = message;
+    }
+    
+    function hideStatus() {
+        statusDiv.style.display = 'none';
+    }
+    
+    form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const file = fileInput.files[0];
+        if (!file) {
+            showStatus('Veuillez sélectionner un fichier', 'error');
+            return;
+        }
+        
+        // Vérifier la taille du fichier (max 50MB)
+        const maxSize = 50 * 1024 * 1024; // 50MB
+        if (file.size > maxSize) {
+            showStatus('Le fichier est trop volumineux (max 50MB)', 'error');
+            return;
+        }
+        
+        // Désactiver le bouton et afficher la progression
+        uploadBtn.disabled = true;
+        progressContainer.style.display = 'block';
+        progressFill.style.width = '0%';
+        progressFill.textContent = '0%';
+        progressText.textContent = 'Préparation de l\'upload...';
+        hideStatus();
+        
+        // Créer FormData
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        // Utiliser XMLHttpRequest pour avoir la progression
+        const xhr = new XMLHttpRequest();
+        
+        // Écouter la progression de l'upload
+        xhr.upload.addEventListener('progress', function(e) {
+            if (e.lengthComputable) {
+                const percentComplete = Math.round((e.loaded / e.total) * 100);
+                progressFill.style.width = percentComplete + '%';
+                progressFill.textContent = percentComplete + '%';
+                progressText.textContent = `Upload en cours... ${percentComplete}%`;
+            }
+        });
+        
+        // Écouter le chargement complet
+        xhr.addEventListener('load', function() {
+            if (xhr.status === 200) {
+                try {
+                    const data = JSON.parse(xhr.responseText);
+                    
+                    if (data.success) {
+                        progressFill.style.width = '100%';
+                        progressFill.textContent = '100%';
+                        progressFill.style.background = 'linear-gradient(90deg, #27ae60, #229954)';
+                        progressText.textContent = 'Upload réussi ! Redirection...';
+                        
+                        // Afficher les avertissements de validation si présents
+                        if (data.validation_warnings && data.validation_warnings.length > 0) {
+                            const warnings = data.validation_warnings.slice(0, 5).join(', ');
+                            showStatus(`Upload réussi. Avertissements: ${warnings}${data.validation_warnings.length > 5 ? '...' : ''}`, 'warning');
+                        }
+                        
+                        // Rediriger vers la prévisualisation après un court délai
+                        setTimeout(() => {
+                            window.location.href = `/preview/${data.filename}`;
+                        }, 1000);
+                    } else {
+                        showStatus(data.error || 'Erreur lors de l\'upload', 'error');
+                        uploadBtn.disabled = false;
+                        progressContainer.style.display = 'none';
+                    }
+                } catch (error) {
+                    showStatus('Erreur lors de la lecture de la réponse', 'error');
+                    uploadBtn.disabled = false;
+                    progressContainer.style.display = 'none';
+                }
+            } else {
+                try {
+                    const error = JSON.parse(xhr.responseText);
+                    showStatus(error.error || 'Erreur lors de l\'upload', 'error');
+                } catch {
+                    showStatus('Erreur lors de l\'upload (code ' + xhr.status + ')', 'error');
+                }
+                uploadBtn.disabled = false;
+                progressContainer.style.display = 'none';
+            }
+        });
+        
+        // Écouter les erreurs
+        xhr.addEventListener('error', function() {
+            showStatus('Erreur de connexion lors de l\'upload', 'error');
+            uploadBtn.disabled = false;
+            progressContainer.style.display = 'none';
+        });
+        
+        // Écouter l'annulation
+        xhr.addEventListener('abort', function() {
+            showStatus('Upload annulé', 'warning');
+            uploadBtn.disabled = false;
+            progressContainer.style.display = 'none';
+        });
+        
+        // Envoyer la requête
+        xhr.open('POST', '/api/upload');
+        xhr.send(formData);
+    });
+})();
+</script>
+{% endblock %}
+

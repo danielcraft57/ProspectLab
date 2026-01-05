@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}Carte des entreprises - ProspectLab{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+    #map {
+        height: 600px;
+        width: 100%;
+        border-radius: 8px;
+        margin-top: 1rem;
+    }
+    
+    .map-controls {
+        background: white;
+        padding: 1rem;
+        border-radius: 8px;
+        margin-bottom: 1rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .controls-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+    }
+    
+    .info-popup {
+        max-width: 250px;
+    }
+    
+    .info-popup h4 {
+        margin: 0 0 0.5rem 0;
+        color: #2c3e50;
+    }
+    
+    .info-popup p {
+        margin: 0.25rem 0;
+        font-size: 0.9rem;
+    }
+    
+    .distance-badge {
+        background: #667eea;
+        color: white;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.85rem;
+        display: inline-block;
+        margin-top: 0.5rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Carte des entreprises</h1>
+    <p>Visualisation géographique et analyse de concurrence</p>
+</div>
+
+<div class="map-controls">
+    <div class="controls-grid">
+        <div class="form-group">
+            <label for="filter-secteur">Secteur</label>
+            <select id="filter-secteur" class="form-select">
+                <option value="">Tous les secteurs</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label for="search-radius">Rayon de recherche (km)</label>
+            <input type="number" id="search-radius" class="form-input" value="10" min="1" max="100" step="1">
+        </div>
+        
+        <div class="form-group">
+            <label for="search-lat">Latitude</label>
+            <input type="number" id="search-lat" class="form-input" step="any" placeholder="Ex: 49.1193">
+        </div>
+        
+        <div class="form-group">
+            <label for="search-lng">Longitude</label>
+            <input type="number" id="search-lng" class="form-input" step="any" placeholder="Ex: 6.1757">
+        </div>
+        
+        <div class="form-group" style="display: flex; align-items: flex-end;">
+            <button id="btn-search-nearby" class="btn btn-primary">Rechercher les entreprises proches</button>
+        </div>
+        
+        <div class="form-group" style="display: flex; align-items: flex-end;">
+            <button id="btn-load-all" class="btn btn-secondary">Charger toutes les entreprises</button>
+        </div>
+    </div>
+</div>
+
+<div id="map"></div>
+
+<div id="results-info" style="margin-top: 1rem; padding: 1rem; background: #f8f9fa; border-radius: 8px; display: none;">
+    <h3 id="results-count">0 entreprise(s) trouvée(s)</h3>
+    <div id="results-list"></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="{{ url_for('static', filename='js/carte_entreprises.js') }}" defer></script>
+{% endblock %}
+

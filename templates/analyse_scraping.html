@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}Scraping Web - ProspectLab{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Scraping Web</h1>
+    <p>Analyse complète d'un site web : emails, personnes, téléphones, réseaux sociaux, technologies et métadonnées</p>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <form id="scrape-form" class="scrape-form">
+            <div class="form-group">
+                <label for="scrape-url">URL du site web</label>
+                <input type="url" id="scrape-url" name="url" class="form-input" placeholder="https://example.com" required>
+            </div>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="max-depth">Profondeur maximale</label>
+                    <input type="number" id="max-depth" name="max_depth" class="form-input" value="3" min="1" max="5">
+                </div>
+                
+                <div class="form-group">
+                    <label for="max-workers">Workers parallèles</label>
+                    <input type="number" id="max-workers" name="max_workers" class="form-input" value="5" min="1" max="10">
+                </div>
+                
+                <div class="form-group">
+                    <label for="max-time">Temps max (secondes)</label>
+                    <input type="number" id="max-time" name="max_time" class="form-input" value="300" min="60" max="600">
+                </div>
+            </div>
+            
+            <div class="form-group" style="display: none;">
+                <label for="entreprise-id">ID Entreprise (optionnel)</label>
+                <input type="number" id="entreprise-id" name="entreprise_id" class="form-input">
+            </div>
+            
+            <div class="form-actions">
+                <button type="submit" id="btn-start-scraping" class="btn btn-primary">Lancer l'analyse</button>
+                <button type="button" id="btn-stop-scraping" class="btn btn-danger" style="display: none;">Arrêter</button>
+            </div>
+        </form>
+        
+        <div id="scrape-status" class="status-message" style="display: none; margin-top: 1rem;"></div>
+        <div id="scrape-progress" class="progress-section" style="display: none; margin-top: 1rem;">
+            <div class="progress-bar-container">
+                <div id="progress-bar" class="progress-bar" style="width: 0%;"></div>
+            </div>
+            <p id="progress-text" class="progress-text"></p>
+        </div>
+        
+        <div id="scrape-results" class="results-section" style="display: none; margin-top: 2rem;">
+            <h3>Résultats de l'analyse</h3>
+            
+            <div class="results-tabs">
+                <button class="tab-button active" data-tab="emails">Emails (<span id="count-emails">0</span>)</button>
+                <button class="tab-button" data-tab="people">Personnes (<span id="count-people">0</span>)</button>
+                <button class="tab-button" data-tab="phones">Téléphones (<span id="count-phones">0</span>)</button>
+                <button class="tab-button" data-tab="social">Réseaux sociaux (<span id="count-social">0</span>)</button>
+                <button class="tab-button" data-tab="technologies">Technologies (<span id="count-tech">0</span>)</button>
+                <button class="tab-button" data-tab="metadata">Métadonnées</button>
+            </div>
+            
+            <div id="tab-emails" class="tab-content active">
+                <div id="emails-list" class="results-list"></div>
+            </div>
+            
+            <div id="tab-people" class="tab-content">
+                <div id="people-list" class="results-list"></div>
+            </div>
+            
+            <div id="tab-phones" class="tab-content">
+                <div id="phones-list" class="results-list"></div>
+            </div>
+            
+            <div id="tab-social" class="tab-content">
+                <div id="social-list" class="results-list"></div>
+            </div>
+            
+            <div id="tab-technologies" class="tab-content">
+                <div id="technologies-list" class="results-list"></div>
+            </div>
+            
+            <div id="tab-metadata" class="tab-content">
+                <div id="metadata-list" class="results-list"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/analyse_scraping.js') }}" defer></script>
+{% endblock %}
+

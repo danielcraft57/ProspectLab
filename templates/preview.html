@@ -1,0 +1,425 @@
+{% extends "base.html" %}
+
+{% block title %}Prévisualisation - ProspectLab{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Prévisualisation du fichier</h1>
+    <p>Fichier : <strong>{{ filename }}</strong> ({{ total_rows }} lignes)</p>
+</div>
+
+{% if validation_warnings %}
+<div class="info-box" style="background-color: #fff3cd; border-left: 4px solid #ffc107; margin-bottom: 2rem;">
+    <h3 style="color: #856404; margin-bottom: 0.5rem;">⚠️ Avertissements de validation</h3>
+    <p style="color: #856404; margin-bottom: 0.5rem;">Les erreurs suivantes ont été détectées dans votre fichier. Les lignes concernées seront ignorées lors de l'analyse :</p>
+    <ul style="color: #856404; margin-left: 1.5rem;">
+        {% for warning in validation_warnings %}
+        <li>{{ warning }}</li>
+        {% endfor %}
+    </ul>
+    {% if validation_warnings|length >= 10 %}
+    <p style="color: #856404; margin-top: 0.5rem; font-style: italic;">... et d'autres erreurs (seules les 10 premières sont affichées)</p>
+    {% endif %}
+</div>
+{% endif %}
+
+<div class="preview-section">
+    <h2>Aperçu des données (10 premières lignes)</h2>
+    <div class="table-container">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    {% for col in columns %}
+                    <th>{{ col }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in preview %}
+                <tr>
+                    {% for col in columns %}
+                    <td>{{ row.get(col, '') }}</td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="analyze-section">
+    <h2>Lancer l'analyse</h2>
+    
+    <form id="analyze-form" class="analyze-form">
+        <div class="form-group">
+            <label for="max_workers">Nombre de threads parallèles</label>
+            <input type="number" id="max_workers" name="max_workers" value="3" min="1" max="10">
+            <small>Plus de threads = analyse plus rapide mais plus de charge sur les serveurs</small>
+        </div>
+        
+        <div class="form-group">
+            <label for="delay">Délai entre requêtes (secondes)</label>
+            <input type="number" id="delay" name="delay" value="2.0" min="0.5" max="10" step="0.5">
+            <small>Délai recommandé : 2 secondes pour éviter les blocages</small>
+        </div>
+        
+        <div class="form-group">
+            <label>
+                <input type="checkbox" id="enable_osint" name="enable_osint" checked>
+                Activer l'analyse OSINT (recherche approfondie sur les responsables)
+            </label>
+            <small>Recherche LinkedIn, réseaux sociaux, emails, actualités. Peut ralentir l'analyse.</small>
+        </div>
+        
+        <div class="form-actions" style="display: flex; gap: 1rem; align-items: center;">
+            <button type="submit" class="btn btn-primary" id="start-analysis-btn">Lancer l'analyse</button>
+            <button type="button" class="btn btn-danger" id="stop-analysis-btn" style="display: none;">Arrêter l'analyse</button>
+        </div>
+    </form>
+    
+    <div id="analyze-status" class="status-message" style="display: none;"></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    const form = document.getElementById('analyze-form');
+    const statusDiv = document.getElementById('analyze-status');
+    const progressContainer = document.createElement('div');
+    progressContainer.id = 'progress-container';
+    progressContainer.style.cssText = 'margin-top: 1rem;';
+    
+    // Barre de progression
+    const progressBar = document.createElement('div');
+    progressBar.className = 'progress-bar';
+    progressBar.style.cssText = 'width: 100%; height: 30px; background: #f0f0f0; border-radius: 4px; overflow: hidden; margin-bottom: 1rem;';
+    
+    const progressFill = document.createElement('div');
+    progressFill.className = 'progress-fill';
+    progressFill.style.cssText = 'height: 100%; background: linear-gradient(90deg, #3498db, #2980b9); width: 0%; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 12px;';
+    
+    const progressText = document.createElement('div');
+    progressText.className = 'progress-text';
+    progressText.style.cssText = 'padding: 0.5rem; text-align: center; color: #666;';
+    
+    progressBar.appendChild(progressFill);
+    progressContainer.appendChild(progressBar);
+    progressContainer.appendChild(progressText);
+    
+    // Fonction pour vérifier et attendre la connexion WebSocket
+    function waitForWebSocket(callback, maxWait = 10000) {
+        const startTime = Date.now();
+        
+        function checkConnection() {
+            if (typeof window.wsManager !== 'undefined' && window.wsManager && window.wsManager.connected) {
+                callback(true);
+                return;
+            }
+            
+            if (Date.now() - startTime < maxWait) {
+                setTimeout(checkConnection, 100);
+            } else {
+                // Essayer de se connecter une dernière fois
+                if (typeof window.wsManager !== 'undefined' && window.wsManager) {
+                    if (!window.wsManager.connected) {
+                        window.wsManager.connect();
+                        setTimeout(() => {
+                            if (window.wsManager.connected) {
+                                callback(true);
+                            } else {
+                                callback(false);
+                            }
+                        }, 1000);
+                    } else {
+                        callback(true);
+                    }
+                } else {
+                    callback(false);
+                }
+            }
+        }
+        
+        checkConnection();
+    }
+    
+    form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const maxWorkers = parseInt(document.getElementById('max_workers').value) || 3;
+        const delay = parseFloat(document.getElementById('delay').value) || 2.0;
+        const enableOsint = document.getElementById('enable_osint').checked;
+        
+        // Afficher le statut
+        statusDiv.style.display = 'block';
+        statusDiv.className = 'status-message status-info';
+        statusDiv.innerHTML = 'Connexion au serveur...';
+        
+        // Ajouter la barre de progression
+        if (!statusDiv.nextElementSibling || statusDiv.nextElementSibling.id !== 'progress-container') {
+            statusDiv.after(progressContainer);
+        }
+        
+        progressFill.style.width = '0%';
+        progressFill.textContent = '0%';
+        progressText.textContent = 'Connexion en cours...';
+        
+        // Désactiver le formulaire et afficher le bouton stop
+        const startBtn = document.getElementById('start-analysis-btn');
+        const stopBtn = document.getElementById('stop-analysis-btn');
+        startBtn.disabled = true;
+        stopBtn.style.display = 'inline-block';
+        
+        // Attendre la connexion WebSocket avant de lancer l'analyse
+        waitForWebSocket(function(connected) {
+            if (!connected) {
+                statusDiv.className = 'status-message status-error';
+                statusDiv.textContent = 'Connexion WebSocket non disponible. Veuillez recharger la page.';
+                startBtn.disabled = false;
+                stopBtn.style.display = 'none';
+                return;
+            }
+            
+            // Connexion établie, lancer l'analyse
+            statusDiv.className = 'status-message status-info';
+            statusDiv.innerHTML = 'Connexion établie. Démarrage de l\'analyse...';
+            progressText.textContent = 'Initialisation...';
+            
+            window.wsManager.startAnalysis('{{ filename }}', {
+                max_workers: maxWorkers,
+                delay: delay,
+                enable_osint: enableOsint
+            });
+        });
+    });
+    
+    // Gestion du bouton stop
+    document.getElementById('stop-analysis-btn').addEventListener('click', function() {
+        if (window.wsManager && window.wsManager.stopAnalysis) {
+            window.wsManager.stopAnalysis();
+        }
+    });
+    
+    // Écouter les événements WebSocket
+    document.addEventListener('analysis:started', function(e) {
+        statusDiv.className = 'status-message status-info';
+        statusDiv.textContent = e.detail.message || 'Analyse démarrée...';
+        progressText.textContent = 'Analyse en cours...';
+    });
+    
+    document.addEventListener('analysis:stopping', function(e) {
+        statusDiv.className = 'status-message status-info';
+        statusDiv.textContent = e.detail.message || 'Arrêt de l\'analyse en cours...';
+        progressText.textContent = 'Arrêt en cours...';
+    });
+    
+    document.addEventListener('analysis:stopped', function(e) {
+        const data = e.detail;
+        statusDiv.className = 'status-message status-warning';
+        statusDiv.innerHTML = `
+            ${data.message}<br>
+            ${data.output_file ? `<a href="{{ url_for('download_file', filename='') }}${data.output_file}" class="btn btn-success" style="margin-top: 1rem;">Télécharger les résultats partiels</a>` : ''}
+        `;
+        
+        progressFill.style.background = '#f39c12';
+        progressText.textContent = `Arrêté : ${data.current}/${data.total} entreprises analysées`;
+        
+        // Réactiver le formulaire et masquer le bouton stop
+        const startBtn = document.getElementById('start-analysis-btn');
+        const stopBtn = document.getElementById('stop-analysis-btn');
+        startBtn.disabled = false;
+        stopBtn.style.display = 'none';
+    });
+    
+    // Section pour l'avancement du scraping
+    const scrapingProgressContainer = document.createElement('div');
+    scrapingProgressContainer.id = 'scraping-progress-container';
+    scrapingProgressContainer.style.cssText = 'margin-top: 1.5rem; padding: 1rem; background: #f8f9fa; border-radius: 4px; border-left: 4px solid #3498db; display: none;';
+    
+    const scrapingProgressTitle = document.createElement('div');
+    scrapingProgressTitle.style.cssText = 'font-weight: bold; margin-bottom: 0.5rem; color: #2c3e50;';
+    scrapingProgressTitle.textContent = 'Scraping du site web en cours...';
+    
+    const scrapingProgressText = document.createElement('div');
+    scrapingProgressText.id = 'scraping-progress-text';
+    scrapingProgressText.style.cssText = 'color: #666; font-size: 0.9rem;';
+    scrapingProgressText.textContent = 'Initialisation...';
+    
+    scrapingProgressContainer.appendChild(scrapingProgressTitle);
+    scrapingProgressContainer.appendChild(scrapingProgressText);
+    
+    document.addEventListener('analysis:progress', function(e) {
+        const data = e.detail;
+        const percentage = data.percentage || 0;
+        
+        progressFill.style.width = percentage + '%';
+        progressFill.textContent = percentage + '%';
+        progressText.textContent = data.message || `${data.current}/${data.total} entreprises analysées`;
+        
+        if (data.current_entreprise) {
+            statusDiv.innerHTML = `Analyse en cours: <strong>${data.current_entreprise}</strong> (${data.current}/${data.total})`;
+        }
+    });
+    
+    // Écouter les événements de scraping
+    function setupScrapingListener() {
+        if (window.wsManager && window.wsManager.socket) {
+            // Retirer l'ancien listener s'il existe
+            window.wsManager.socket.off('scraping_progress');
+            
+            window.wsManager.socket.on('scraping_progress', function(data) {
+                if (!scrapingProgressContainer.parentNode) {
+                    progressContainer.after(scrapingProgressContainer);
+                }
+                scrapingProgressContainer.style.display = 'block';
+                const message = data.message || 'Scraping en cours...';
+                
+                // Extraire le domaine depuis l'URL si disponible
+                let domaine = '';
+                if (data.url) {
+                    try {
+                        const url = new URL(data.url);
+                        domaine = url.hostname.replace('www.', '');
+                    } catch (e) {
+                        // Si l'URL n'est pas valide, essayer d'extraire le domaine manuellement
+                        const match = data.url.match(/https?:\/\/(?:www\.)?([^\/]+)/);
+                        if (match) {
+                            domaine = match[1];
+                        }
+                    }
+                }
+                
+                // Afficher le message avec le domaine et l'entreprise
+                let displayText = message;
+                if (domaine) {
+                    displayText += ` - ${domaine}`;
+                }
+                if (data.entreprise) {
+                    displayText += ` (${data.entreprise})`;
+                }
+                scrapingProgressText.textContent = displayText;
+            });
+        }
+    }
+    
+    // Section pour l'avancement de l'analyse technique
+    const technicalProgressContainer = document.createElement('div');
+    technicalProgressContainer.id = 'technical-progress-container';
+    technicalProgressContainer.style.cssText = 'margin-top: 1.5rem; padding: 1rem; background: #f8f9fa; border-radius: 4px; border-left: 4px solid #27ae60; display: none;';
+    
+    const technicalProgressTitle = document.createElement('div');
+    technicalProgressTitle.style.cssText = 'font-weight: bold; margin-bottom: 0.5rem; color: #2c3e50;';
+    technicalProgressTitle.textContent = 'Analyse technique en cours...';
+    
+    const technicalProgressText = document.createElement('div');
+    technicalProgressText.id = 'technical-progress-text';
+    technicalProgressText.style.cssText = 'color: #666; font-size: 0.9rem;';
+    technicalProgressText.textContent = 'Initialisation...';
+    
+    technicalProgressContainer.appendChild(technicalProgressTitle);
+    technicalProgressContainer.appendChild(technicalProgressText);
+    
+    // Écouter les événements de l'analyse technique
+    function setupTechnicalListener() {
+        if (window.wsManager && window.wsManager.socket) {
+            // Retirer l'ancien listener s'il existe
+            window.wsManager.socket.off('technical_analysis_progress');
+            
+            window.wsManager.socket.on('technical_analysis_progress', function(data) {
+                if (!technicalProgressContainer.parentNode) {
+                    scrapingProgressContainer.after(technicalProgressContainer);
+                }
+                technicalProgressContainer.style.display = 'block';
+                
+                const message = data.message || 'Analyse technique en cours...';
+                
+                // Extraire le domaine depuis l'URL si disponible
+                let domaine = '';
+                if (data.url) {
+                    try {
+                        const url = new URL(data.url);
+                        domaine = url.hostname.replace('www.', '');
+                    } catch (e) {
+                        const match = data.url.match(/https?:\/\/(?:www\.)?([^\/]+)/);
+                        if (match) {
+                            domaine = match[1];
+                        }
+                    }
+                }
+                
+                // Afficher le message avec le domaine et l'entreprise
+                let displayText = message;
+                if (domaine) {
+                    displayText += ` - ${domaine}`;
+                }
+                if (data.entreprise) {
+                    displayText += ` (${data.entreprise})`;
+                }
+                technicalProgressText.textContent = displayText;
+            });
+        }
+    }
+    
+    // Configurer l'écoute au chargement et après connexion WebSocket
+    setupScrapingListener();
+    setupTechnicalListener();
+    document.addEventListener('websocket:connected', function() {
+        setupScrapingListener();
+        setupTechnicalListener();
+    });
+    
+    document.addEventListener('analysis:complete', function(e) {
+        const data = e.detail;
+        statusDiv.className = 'status-message status-success';
+        statusDiv.innerHTML = `
+            ${data.message}<br>
+            <a href="{{ url_for('download_file', filename='') }}${data.output_file}" class="btn btn-success" style="margin-top: 1rem;">Télécharger le résultat</a>
+        `;
+        
+        progressFill.style.width = '100%';
+        progressFill.textContent = '100%';
+        progressText.textContent = `Terminé ! ${data.total} entreprises analysées`;
+        
+        // Réactiver le formulaire et masquer le bouton stop
+        const startBtn = document.getElementById('start-analysis-btn');
+        const stopBtn = document.getElementById('stop-analysis-btn');
+        startBtn.disabled = false;
+        stopBtn.style.display = 'none';
+    });
+    
+    document.addEventListener('analysis:error', function(e) {
+        statusDiv.className = 'status-message status-error';
+        statusDiv.textContent = 'Erreur : ' + (e.detail.error || 'Erreur inconnue');
+        
+        progressFill.style.background = '#e74c3c';
+        progressText.textContent = 'Erreur lors de l\'analyse';
+        
+        // Réactiver le formulaire et masquer le bouton stop
+        const startBtn = document.getElementById('start-analysis-btn');
+        const stopBtn = document.getElementById('stop-analysis-btn');
+        startBtn.disabled = false;
+        stopBtn.style.display = 'none';
+    });
+    
+    document.addEventListener('analysis:error_item', function(e) {
+        console.warn('Erreur pour une entreprise:', e.detail);
+    });
+    
+    // Gestion de la connexion WebSocket
+    document.addEventListener('websocket:connected', function() {
+        console.log('WebSocket connecté');
+    });
+    
+    document.addEventListener('websocket:disconnected', function() {
+        statusDiv.className = 'status-message status-error';
+        statusDiv.textContent = 'Connexion perdue. Reconnexion...';
+    });
+    
+    document.addEventListener('websocket:error', function(e) {
+        statusDiv.className = 'status-message status-error';
+        statusDiv.textContent = 'Erreur de connexion WebSocket';
+    });
+})();
+</script>
+{% endblock %}
+

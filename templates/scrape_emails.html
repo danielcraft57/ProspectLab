@@ -1,0 +1,433 @@
+{% extends "base.html" %}
+
+{% block title %}Scraper Emails - ProspectLab{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Scraper les emails d'un site web</h1>
+    <p>Extrayez automatiquement les adresses email depuis un site web</p>
+</div>
+
+<div class="scrape-section">
+    <form id="scrape-form" class="scrape-form">
+        <div class="form-group">
+            <label for="url">URL du site web</label>
+            <input type="url" id="url" name="url" placeholder="https://example.com" required>
+        </div>
+        
+        <div class="form-row">
+            <div class="form-group">
+                <label for="max_depth">Profondeur maximale</label>
+                <input type="number" id="max_depth" name="max_depth" value="3" min="1" max="5">
+            </div>
+            
+            <div class="form-group">
+                <label for="max_workers">Nombre de threads</label>
+                <input type="number" id="max_workers" name="max_workers" value="5" min="1" max="10">
+            </div>
+            
+            <div class="form-group">
+                <label for="max_time">Temps max (secondes)</label>
+                <input type="number" id="max_time" name="max_time" value="300" min="60" max="1800">
+            </div>
+        </div>
+        
+        <button type="submit" id="btn-start-scraping" class="btn btn-primary">Lancer le scraping</button>
+        <button type="button" id="btn-stop-scraping" class="btn btn-danger" style="display: none; margin-left: 10px;">Arrêter le scraping</button>
+    </form>
+    
+    <div id="scrape-status" class="status-message" style="display: none;"></div>
+    <div id="scrape-results" class="results-section" style="display: none;">
+        <h3>Résultats</h3>
+        <div id="emails-list" class="emails-list"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    const form = document.getElementById('scrape-form');
+    const statusDiv = document.getElementById('scrape-status');
+    const resultsDiv = document.getElementById('scrape-results');
+    const emailsList = document.getElementById('emails-list');
+    
+    // Barre de progression
+    const progressContainer = document.createElement('div');
+    progressContainer.id = 'scrape-progress-container';
+    progressContainer.style.cssText = 'margin-top: 1rem;';
+    
+    const progressBar = document.createElement('div');
+    progressBar.className = 'progress-bar';
+    progressBar.style.cssText = 'width: 100%; height: 30px; background: #f0f0f0; border-radius: 4px; overflow: hidden; margin-bottom: 1rem;';
+    
+    const progressFill = document.createElement('div');
+    progressFill.className = 'progress-fill';
+    progressFill.style.cssText = 'height: 100%; background: linear-gradient(90deg, #27ae60, #229954); width: 0%; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 12px;';
+    
+    const progressText = document.createElement('div');
+    progressText.className = 'progress-text';
+    progressText.style.cssText = 'padding: 0.5rem; text-align: center; color: #666;';
+    
+    progressBar.appendChild(progressFill);
+    progressContainer.appendChild(progressBar);
+    progressContainer.appendChild(progressText);
+    
+    form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const url = document.getElementById('url').value;
+        const maxDepth = parseInt(document.getElementById('max_depth').value) || 3;
+        const maxWorkers = parseInt(document.getElementById('max_workers').value) || 5;
+        const maxTime = parseInt(document.getElementById('max_time').value) || 300;
+        
+        if (!url) {
+            statusDiv.className = 'status-message status-error';
+            statusDiv.textContent = 'Veuillez entrer une URL';
+            statusDiv.style.display = 'block';
+            return;
+        }
+        
+        // Afficher le statut
+        statusDiv.style.display = 'block';
+        statusDiv.className = 'status-message status-info';
+        statusDiv.textContent = 'Connexion au serveur...';
+        resultsDiv.style.display = 'none';
+        
+        // Ajouter la barre de progression
+        if (!statusDiv.nextElementSibling || statusDiv.nextElementSibling.id !== 'scrape-progress-container') {
+            statusDiv.after(progressContainer);
+        }
+        
+        progressFill.style.width = '0%';
+        progressFill.textContent = '0%';
+        progressText.textContent = 'Initialisation...';
+        
+        // Desactiver le formulaire et afficher le bouton stop
+        const btnStart = document.getElementById('btn-start-scraping');
+        const btnStop = document.getElementById('btn-stop-scraping');
+        btnStart.disabled = true;
+        btnStop.style.display = 'inline-block';
+        
+        // Demarrer le scraping via WebSocket
+        wsManager.startScraping(url, {
+            max_depth: maxDepth,
+            max_workers: maxWorkers,
+            max_time: maxTime
+        });
+    });
+    
+    // Gestionnaire pour le bouton d'arret
+    document.getElementById('btn-stop-scraping').addEventListener('click', function() {
+        wsManager.stopScraping();
+    });
+    
+    // Ecouter les evenements WebSocket
+    document.addEventListener('scraping:started', function(e) {
+        statusDiv.className = 'status-message status-info';
+        statusDiv.textContent = e.detail.message || 'Scraping demarre...';
+        progressText.textContent = 'Scraping en cours...';
+        
+        // Reinitialiser la liste des emails
+        emailsList.innerHTML = '<ul style="list-style: none; padding: 0;"></ul>';
+        resultsDiv.style.display = 'block';
+        
+        // Afficher le bouton stop
+        document.getElementById('btn-stop-scraping').style.display = 'inline-block';
+    });
+    
+    document.addEventListener('scraping:progress', function(e) {
+        const data = e.detail;
+        const visited = data.visited || 0;
+        const emails = data.emails || 0;
+        
+        progressText.textContent = `${visited} pages visitées, ${emails} emails trouvés`;
+        statusDiv.textContent = data.message || `Scraping en cours... ${visited} pages, ${emails} emails`;
+    });
+    
+    /**
+     * Echappe les caracteres HTML pour prevenir les attaques XSS.
+     * 
+     * Cette fonction convertit les caracteres speciaux HTML en leurs equivalents
+     * encodes pour eviter l'injection de code malveillant.
+     * 
+     * @param {string} text - Le texte a echapper
+     * @returns {string} Le texte echappe, ou chaine vide si text est null/undefined
+     */
+    function escapeHtml(text) {
+        if (!text) return '';
+        // Utiliser textContent pour échapper automatiquement, puis récupérer innerHTML
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    /**
+     * Cree un element badge HTML avec une classe CSS specifique.
+     * 
+     * Les badges sont utilises pour afficher des informations visuelles
+     * sur l'email (format valide, type, fournisseur, etc.)
+     * 
+     * @param {string} text - Le texte a afficher dans le badge
+     * @param {string} className - La classe CSS a appliquer (ex: badge-success)
+     * @returns {string} Le HTML du badge
+     */
+    function createBadge(text, className) {
+        return `<span class="badge ${className}">${escapeHtml(text)}</span>`;
+    }
+    
+    /**
+     * Cree une carte HTML complete pour afficher un email avec toutes ses informations.
+     * 
+     * Cette fonction genere une carte visuelle riche contenant :
+     * - L'adresse email en en-tete
+     * - Des badges colores pour les informations cles (format, type, fournisseur, MX, risque)
+     * - Une section detaillee avec nom detecte, domaine, source
+     * 
+     * @param {string} email - L'adresse email a afficher
+     * @param {Object|null} analysis - L'objet d'analyse contenant toutes les informations
+     * @returns {string} Le HTML complet de la carte d'email
+     */
+    function createEmailCard(email, analysis) {
+        // Si l'analyse n'est pas encore disponible, afficher un etat de chargement
+        if (!analysis) {
+            return `
+                <div class="email-card" data-email="${escapeHtml(email)}" style="padding: 1rem; margin-bottom: 1rem; border: 1px solid #ddd; border-radius: 8px; background: white; animation: fadeIn 0.3s ease-in;">
+                    <div style="font-weight: bold; color: #333; margin-bottom: 0.5rem; font-size: 1.1rem;">
+                        ${escapeHtml(email)}
+                    </div>
+                    <div style="color: #999; font-size: 0.9rem;">Analyse en cours...</div>
+                </div>
+            `;
+        }
+        
+        // Tableaux pour stocker les badges et informations detaillees
+        const badges = [];  // Badges a afficher en haut de la carte
+        const infoItems = [];  // Informations detaillees en bas de la carte
+        
+        // Badge de validation du format
+        // Indique si l'email respecte le format standard RFC
+        if (analysis.format_valid) {
+            badges.push(createBadge('Format valide', 'badge-success'));
+        } else {
+            badges.push(createBadge('Format invalide', 'badge-danger'));
+        }
+        
+        // Badge du type d'email
+        // Personnel = email grand public, Professionnel = domaine entreprise, Generique = contact/service
+        if (analysis.type) {
+            // Mapping des types vers les couleurs de badges
+            const typeColors = {
+                'Personnel': 'badge-info',        // Bleu clair
+                'Professionnel': 'badge-primary', // Violet
+                'Generique': 'badge-warning',     // Orange
+                'Inconnu': 'badge-secondary'      // Gris
+            };
+            badges.push(createBadge(analysis.type, typeColors[analysis.type] || 'badge-secondary'));
+        }
+        
+        // Badge du fournisseur d'email
+        // Affiche Gmail, Outlook, etc. ou "Personnalise" pour les domaines d'entreprise
+        if (analysis.provider && analysis.provider !== 'Inconnu') {
+            badges.push(createBadge(analysis.provider, 'badge-outline'));
+        }
+        
+        // Badge de validation MX
+        // Indique si le domaine peut recevoir des emails (enregistrements MX valides)
+        if (analysis.mx_valid !== null) {
+            if (analysis.mx_valid) {
+                badges.push(createBadge('MX valide', 'badge-success'));
+            } else {
+                badges.push(createBadge('MX invalide', 'badge-danger'));
+            }
+        }
+        
+        // Badge du score de risque
+        // Calcule et affiche le niveau de risque base sur plusieurs criteres
+        if (analysis.risk_score !== undefined) {
+            let riskColor = 'badge-success';  // Vert par defaut (faible risque)
+            let riskText = 'Faible risque';
+            
+            // Determiner le niveau de risque selon le score
+            if (analysis.risk_score >= 70) {
+                riskColor = 'badge-danger';   // Rouge (risque eleve)
+                riskText = 'Risque eleve';
+            } else if (analysis.risk_score >= 40) {
+                riskColor = 'badge-warning';  // Orange (risque moyen)
+                riskText = 'Risque moyen';
+            }
+            
+            // Afficher le texte et le pourcentage
+            badges.push(createBadge(riskText + ' (' + analysis.risk_score + '%)', riskColor));
+        }
+        
+        // Section des informations detaillees (en bas de la carte)
+        
+        // Nom/prenom extrait depuis l'email
+        // Tente de reconstituer le nom complet depuis la partie locale de l'email
+        if (analysis.name_info) {
+            // Construire le nom complet selon les donnees disponibles
+            const name = analysis.name_info.full_name || 
+                        (analysis.name_info.first_name && analysis.name_info.last_name ? 
+                         analysis.name_info.first_name + ' ' + analysis.name_info.last_name : 
+                         analysis.name_info.last_name || '');
+            if (name) {
+                infoItems.push('<div style="margin-bottom: 0.25rem;"><strong>Nom detecte:</strong> ' + escapeHtml(name) + '</div>');
+            }
+        }
+        
+        // Domaine de l'email
+        if (analysis.domain) {
+            infoItems.push('<div style="margin-bottom: 0.25rem;"><strong>Domaine:</strong> ' + escapeHtml(analysis.domain) + '</div>');
+        }
+        
+        // URL source ou l'email a ete trouve
+        // Lien cliquable vers la page d'origine
+        if (analysis.source_url) {
+            infoItems.push('<div style="margin-bottom: 0.25rem;"><strong>Source:</strong> <a href="' + escapeHtml(analysis.source_url) + '" target="_blank" style="color: #667eea; text-decoration: none;">' + escapeHtml(analysis.source_url) + '</a></div>');
+        }
+        
+        return `
+            <div class="email-card" data-email="${escapeHtml(email)}" style="padding: 1rem; margin-bottom: 1rem; border: 1px solid #ddd; border-radius: 8px; background: white; animation: fadeIn 0.3s ease-in; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.75rem;">
+                    <div style="flex: 1;">
+                        <div style="font-weight: bold; color: #333; font-size: 1.1rem; margin-bottom: 0.5rem;">
+                            ${escapeHtml(email)}
+                        </div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem;">
+                            ${badges.join('')}
+                        </div>
+                    </div>
+                </div>
+                ${infoItems.length > 0 ? `
+                    <div style="padding-top: 0.75rem; border-top: 1px solid #eee; font-size: 0.9rem; color: #666;">
+                        ${infoItems.join('')}
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }
+    
+    /**
+     * Ecouteur d'evenement pour les nouveaux emails trouves en temps reel.
+     * 
+     * Cet evenement est declenche par le serveur via WebSocket chaque fois
+     * qu'un nouvel email est decouvert pendant le scraping. La fonction
+     * cree ou met a jour une carte d'email enrichie avec toutes les informations.
+     */
+    document.addEventListener('scraping:email_found', function(e) {
+        const data = e.detail;
+        const email = data.email;
+        const analysis = data.analysis;
+        const totalEmails = data.total_emails || 0;
+        
+        // Afficher la section resultats si elle est cachee
+        // Initialiser la liste vide si c'est le premier email
+        if (resultsDiv.style.display === 'none') {
+            resultsDiv.style.display = 'block';
+            emailsList.innerHTML = '';
+        }
+        
+        // Verifier si l'email n'est pas deja dans la liste pour eviter les doublons
+        // On utilise l'attribut data-email pour identifier les cartes existantes
+        const existingCards = emailsList.querySelectorAll('.email-card');
+        const existingEmails = Array.from(existingCards).map(card => card.getAttribute('data-email'));
+        
+        if (!existingEmails.includes(email)) {
+            // Nouvel email : creer une nouvelle carte
+            const cardHtml = createEmailCard(email, analysis);
+            
+            // Creer un element temporaire pour parser le HTML
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = cardHtml;
+            const card = tempDiv.firstElementChild;
+            
+            // Ajouter la carte a la liste
+            emailsList.appendChild(card);
+            
+            // Faire defiler automatiquement vers le nouvel email pour le rendre visible
+            card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } else {
+            // Email deja present : mettre a jour la carte si l'analyse est maintenant disponible
+            // (l'analyse peut arriver apres l'affichage initial de l'email)
+            const existingCard = Array.from(existingCards).find(card => card.getAttribute('data-email') === email);
+            
+            if (existingCard && analysis) {
+                // Recreer la carte avec l'analyse complete et remplacer l'ancienne
+                const newCardHtml = createEmailCard(email, analysis);
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = newCardHtml;
+                existingCard.replaceWith(tempDiv.firstElementChild);
+            }
+        }
+        
+        // Mettre a jour le compteur dans le texte de progression
+        // Gerer le pluriel correctement en francais
+        const pluralS = totalEmails > 1 ? 's' : '';
+        const pluralT = totalEmails > 1 ? 's' : '';
+        progressText.textContent = totalEmails + ' email' + pluralS + ' trouve' + pluralT;
+    });
+    
+    document.addEventListener('scraping:stopping', function(e) {
+        statusDiv.className = 'status-message status-info';
+        statusDiv.textContent = e.detail.message || 'Arret en cours...';
+        progressText.textContent = 'Arret du scraping...';
+    });
+    
+    document.addEventListener('scraping:stopped', function(e) {
+        const data = e.detail;
+        const totalEmails = data.total_emails || 0;
+        const visitedUrls = data.visited_urls || 0;
+        const pluralE = totalEmails > 1 ? 's' : '';
+        const pluralT = totalEmails > 1 ? 's' : '';
+        const pluralP = visitedUrls > 1 ? 's' : '';
+        const pluralV = visitedUrls > 1 ? 's' : '';
+        
+        statusDiv.className = 'status-message status-warning';
+        statusDiv.textContent = 'Scraping arrete ! ' + totalEmails + ' email' + pluralE + ' trouve' + pluralT + ' sur ' + visitedUrls + ' page' + pluralP + ' visites' + pluralV + '.';
+        
+        progressFill.style.width = '100%';
+        progressFill.style.background = '#f39c12';
+        progressFill.textContent = 'Arrete';
+        progressText.textContent = 'Arrete - ' + totalEmails + ' email' + pluralE + ' trouve' + pluralT;
+        
+        // Masquer le bouton stop et reactiver le formulaire
+        document.getElementById('btn-stop-scraping').style.display = 'none';
+        document.getElementById('btn-start-scraping').disabled = false;
+    });
+    
+    document.addEventListener('scraping:complete', function(e) {
+        const data = e.detail;
+        statusDiv.className = 'status-message status-success';
+        statusDiv.textContent = 'Scraping termine ! ' + data.total_emails + ' emails trouves sur ' + data.visited_urls + ' pages visites.';
+        
+        progressFill.style.width = '100%';
+        progressFill.textContent = '100%';
+        progressText.textContent = 'Termine ! ' + data.total_emails + ' emails trouves';
+        
+        // Les emails sont deja affiches via scraping:email_found
+        // On s'assure juste que la section est visible
+        if (data.emails && data.emails.length > 0) {
+            resultsDiv.style.display = 'block';
+        }
+        
+        // Masquer le bouton stop et reactiver le formulaire
+        document.getElementById('btn-stop-scraping').style.display = 'none';
+        document.getElementById('btn-start-scraping').disabled = false;
+    });
+    
+    document.addEventListener('scraping:error', function(e) {
+        statusDiv.className = 'status-message status-error';
+        statusDiv.textContent = 'Erreur : ' + (e.detail.error || 'Erreur inconnue');
+        
+        progressFill.style.background = '#e74c3c';
+        progressText.textContent = 'Erreur lors du scraping';
+        
+        // Masquer le bouton stop et reactiver le formulaire
+        document.getElementById('btn-stop-scraping').style.display = 'none';
+        document.getElementById('btn-start-scraping').disabled = false;
+    });
+})();
+</script>
+{% endblock %}
+

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}Détails entreprise - ProspectLab{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="header-actions">
+        <a href="{{ url_for('liste_entreprises') }}" class="btn btn-secondary">← Retour à la liste</a>
+        <button id="btn-toggle-favori" class="btn btn-outline">⭐</button>
+    </div>
+    <h1 id="entreprise-nom">Chargement...</h1>
+</div>
+
+<div id="entreprise-detail" class="entreprise-detail">
+    <div class="loading">Chargement des détails...</div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/entreprise_detail.js') }}"></script>
+{% endblock %}
+

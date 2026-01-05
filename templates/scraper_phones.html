@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Scraper Téléphones - ProspectLab{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>📞 Scraper Téléphones</h1>
+    <p>Extrayez automatiquement les numéros de téléphone depuis un site web</p>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <form id="scrape-phones-form" class="scrape-form">
+            <div class="form-group">
+                <label for="phones-url">URL du site web</label>
+                <input type="url" id="phones-url" name="url" class="form-input" placeholder="https://example.com" required>
+            </div>
+            
+            <div class="form-row" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem;">
+                <div class="form-group">
+                    <label for="phones-max-pages">Nombre de pages max</label>
+                    <input type="number" id="phones-max-pages" name="max_pages" class="form-input" value="20" min="5" max="50">
+                </div>
+                
+                <div class="form-group">
+                    <label for="phones-max-depth">Profondeur maximale</label>
+                    <input type="number" id="phones-max-depth" name="max_depth" class="form-input" value="3" min="1" max="5">
+                </div>
+            </div>
+            
+            <div class="form-group" style="display: none;">
+                <label for="phones-entreprise-id">ID Entreprise (optionnel)</label>
+                <input type="number" id="phones-entreprise-id" name="entreprise_id" class="form-input">
+            </div>
+            
+            <div class="form-actions">
+                <button type="submit" id="btn-start-phones-scraping" class="btn btn-primary">Lancer le scraping</button>
+                <button type="button" id="btn-stop-phones-scraping" class="btn btn-danger" style="display: none;">Arrêter</button>
+            </div>
+        </form>
+        
+        <div id="phones-scrape-status" class="status-message" style="display: none; margin-top: 1rem;"></div>
+        <div id="phones-scrape-results" class="results-section" style="display: none; margin-top: 1.5rem;">
+            <h3>Résultats - Téléphones trouvés</h3>
+            <div id="phones-list" class="phones-list"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/scraper_phones.js') }}" defer></script>
+{% endblock %}
+

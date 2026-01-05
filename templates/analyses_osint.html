@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}Analyses OSINT - ProspectLab{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Analyses OSINT</h1>
+    <p>Collecte d'informations depuis des sources publiques</p>
+</div>
+
+<div class="new-analysis-section">
+    <div class="card">
+        <div class="card-header">
+            <h2>Nouvelle analyse OSINT</h2>
+        </div>
+        <div class="card-body">
+            <form id="form-new-osint" class="form-inline">
+                <div class="form-group">
+                    <label for="osint-url">URL ou domaine</label>
+                    <input type="text" id="osint-url" class="form-input" placeholder="https://example.com ou example.com" required>
+                </div>
+                <div class="form-group">
+                    <button type="submit" id="btn-start-osint" class="btn btn-primary">
+                        <span id="btn-text">Lancer l'analyse OSINT</span>
+                        <span id="btn-loading" style="display: none;">Analyse en cours...</span>
+                    </button>
+                </div>
+            </form>
+            
+            <div id="osint-progress" style="display: none;" class="progress-section">
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="osint-progress-bar" style="width: 0%"></div>
+                </div>
+                <p id="osint-progress-message" class="progress-message">Initialisation...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="results-section">
+    <div class="results-header">
+        <h3 id="results-count">Chargement...</h3>
+    </div>
+    
+    <div id="analyses-container" class="analyses-techniques-grid">
+        <p>Chargement des analyses...</p>
+    </div>
+</div>
+
+<!-- Modale pour les détails de l'analyse OSINT -->
+<div id="osint-modal" class="modal">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 id="osint-modal-title">Détails de l'analyse OSINT</h2>
+            <button class="modal-close" id="osint-modal-close" aria-label="Fermer">&times;</button>
+        </div>
+        <div class="modal-body" id="osint-modal-body">
+            <div class="loading">Chargement des détails...</div>
+        </div>
+        <div class="modal-footer" id="osint-modal-footer">
+            <!-- Les boutons seront ajoutés dynamiquement -->
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/analyses_osint.js') }}" defer></script>
+{% endblock %}
+

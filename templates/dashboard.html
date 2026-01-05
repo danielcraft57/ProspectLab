@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - ProspectLab{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="header-actions">
+        <button id="btn-clear-db" class="btn btn-danger" title="Vider toute la base de données">🗑️ Vider la BDD</button>
+    </div>
+    <h1>Dashboard</h1>
+    <p>Vue d'ensemble de vos analyses et prospects</p>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <h3>Total analyses</h3>
+        <p class="stat-number" id="stat-total-analyses">-</p>
+    </div>
+    
+    <div class="stat-card">
+        <h3>Entreprises analysées</h3>
+        <p class="stat-number" id="stat-total-entreprises">-</p>
+    </div>
+    
+    <div class="stat-card">
+        <h3>Prospects intéressants</h3>
+        <p class="stat-number" id="stat-prospects">-</p>
+    </div>
+    
+    <div class="stat-card">
+        <h3>Favoris</h3>
+        <p class="stat-number" id="stat-favoris">-</p>
+    </div>
+</div>
+
+<div class="charts-section">
+    <div class="chart-card">
+        <h3>Répartition par secteur</h3>
+        <canvas id="chart-secteurs"></canvas>
+    </div>
+    
+    <div class="chart-card">
+        <h3>Opportunités détectées</h3>
+        <canvas id="chart-opportunites"></canvas>
+    </div>
+</div>
+
+<div class="recent-analyses">
+    <h2>Analyses récentes</h2>
+    <div id="analyses-list" class="analyses-list">
+        <p>Chargement...</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}
+

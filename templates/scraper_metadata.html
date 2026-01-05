@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Scraper Métadonnées - ProspectLab{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>📋 Scraper Métadonnées</h1>
+    <p>Extrayez automatiquement les métadonnées (meta tags, Open Graph, etc.) d'un site web</p>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <form id="scrape-metadata-form" class="scrape-form">
+            <div class="form-group">
+                <label for="metadata-url">URL du site web</label>
+                <input type="url" id="metadata-url" name="url" class="form-input" placeholder="https://example.com" required>
+            </div>
+            
+            <div class="form-group" style="display: none;">
+                <label for="metadata-entreprise-id">ID Entreprise (optionnel)</label>
+                <input type="number" id="metadata-entreprise-id" name="entreprise_id" class="form-input">
+            </div>
+            
+            <div class="form-actions">
+                <button type="submit" id="btn-start-metadata-scraping" class="btn btn-primary">Lancer l'extraction</button>
+            </div>
+        </form>
+        
+        <div id="metadata-scrape-status" class="status-message" style="display: none; margin-top: 1rem;"></div>
+        <div id="metadata-scrape-results" class="results-section" style="display: none; margin-top: 1.5rem;">
+            <h3>Résultats - Métadonnées extraites</h3>
+            <div id="metadata-list" class="metadata-list"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/scraper_metadata.js') }}" defer></script>
+{% endblock %}
+

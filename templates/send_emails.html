@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block title %}Envoyer Emails - ProspectLab{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Envoyer des emails de prospection</h1>
+    <p>Envoyez des campagnes personnalisées à vos prospects</p>
+</div>
+
+<div class="send-emails-section">
+    <form id="send-emails-form" class="send-emails-form">
+        <div class="form-group">
+            <label for="template-select">Modèle de message (optionnel)</label>
+            <select id="template-select" name="template_id">
+                <option value="">Aucun (message personnalisé)</option>
+                {% for template in templates %}
+                <option value="{{ template.id }}">{{ template.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label for="subject">Sujet de l'email</label>
+            <input type="text" id="subject" name="subject" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="recipients">Destinataires (JSON)</label>
+            <textarea id="recipients" name="recipients" rows="10" required placeholder='[{"email": "contact@example.com", "nom": "Jean Dupont", "entreprise": "Example Corp"}]'></textarea>
+            <small>Format JSON : liste d'objets avec email, nom (optionnel), entreprise (optionnel)</small>
+        </div>
+        
+        <div class="form-group">
+            <label for="custom-message">Message personnalisé (si aucun modèle sélectionné)</label>
+            <textarea id="custom-message" name="custom_message" rows="10" placeholder="Votre message... (peut contenir {nom} et {entreprise})"></textarea>
+        </div>
+        
+        <button type="submit" class="btn btn-primary">Envoyer les emails</button>
+    </form>
+    
+    <div id="send-status" class="status-message" style="display: none;"></div>
+    <div id="send-results" class="results-section" style="display: none;"></div>
+</div>
+
+<div class="info-box">
+    <h3>Configuration requise</h3>
+    <p>Pour envoyer des emails, configurez les paramètres SMTP dans <code>config.py</code> ou via les variables d'environnement :</p>
+    <ul>
+        <li>MAIL_SERVER</li>
+        <li>MAIL_PORT</li>
+        <li>MAIL_USERNAME</li>
+        <li>MAIL_PASSWORD</li>
+    </ul>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('send-emails-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    let recipients;
+    try {
+        recipients = JSON.parse(document.getElementById('recipients').value);
+    } catch (error) {
+        alert('Erreur dans le format JSON des destinataires');
+        return;
+    }
+    
+    const formData = {
+        recipients: recipients,
+        template_id: document.getElementById('template-select').value || null,
+        subject: document.getElementById('subject').value,
+        custom_message: document.getElementById('custom-message').value || null
+    };
+    
+    const statusDiv = document.getElementById('send-status');
+    const resultsDiv = document.getElementById('send-results');
+    
+    statusDiv.style.display = 'block';
+    statusDiv.className = 'status-message status-info';
+    statusDiv.textContent = 'Envoi en cours...';
+    resultsDiv.style.display = 'none';
+    
+    try {
+        const response = await fetch('{{ url_for("send_emails") }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(formData)
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            statusDiv.className = 'status-message status-success';
+            statusDiv.textContent = `Envoi terminé ! ${data.total_sent} emails envoyés, ${data.total_failed} échecs.`;
+            
+            if (data.results) {
+                let resultsHtml = '<h3>Détails par destinataire</h3><ul>';
+                data.results.forEach(result => {
+                    const status = result.success ? '✅' : '❌';
+                    resultsHtml += `<li>${status} ${result.email}: ${result.message}</li>`;
+                });
+                resultsHtml += '</ul>';
+                resultsDiv.innerHTML = resultsHtml;
+                resultsDiv.style.display = 'block';
+            }
+        } else {
+            statusDiv.className = 'status-message status-error';
+            statusDiv.textContent = 'Erreur : ' + (data.error || 'Erreur inconnue');
+        }
+    } catch (error) {
+        statusDiv.className = 'status-message status-error';
+        statusDiv.textContent = 'Erreur : ' + error.message;
+    }
+});
+</script>
+{% endblock %}
+

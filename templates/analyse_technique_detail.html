@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}Détails analyse technique - ProspectLab{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="header-actions">
+        <a href="{{ url_for('liste_analyses_techniques') }}" class="btn btn-secondary">← Retour à la liste</a>
+    </div>
+    <h1 id="analyse-title">Analyse technique</h1>
+</div>
+
+<div id="analyse-detail" class="analyse-technique-detail">
+    <div class="loading">Chargement des détails...</div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const ANALYSIS_ID = {{ analysis_id }};
+</script>
+<script src="{{ url_for('static', filename='js/analyse_technique_detail.js') }}"></script>
+{% endblock %}
+
