@@ -2,10 +2,18 @@
 
 Bienvenue dans la documentation de ProspectLab. Cette documentation est organisée par thème pour faciliter la navigation.
 
+## Démarrage rapide
+
+- [README principal](../README.md) - Vue d'ensemble et installation rapide
+- [Guide Celery](CELERY.md) - Configuration et utilisation de Celery pour les taches asynchrones
+- [Guide Scraping](SCRAPING.md) - Documentation complete du systeme de scraping unifie
+
 ## Installation
 
 - [Installation générale](installation/INSTALLATION.md) - Guide d'installation et configuration de base
 - [Installation des outils](installation/INSTALLATION_TOOLS.md) - Installation des outils OSINT et Pentest
+- [Scripts utilitaires](scripts/SCRIPTS.md) - Documentation des scripts PowerShell et Bash
+- [Architecture des scripts](scripts/ARCHITECTURE.md) - Organisation et structure des scripts
 
 ## Configuration
 
@@ -18,6 +26,9 @@ Bienvenue dans la documentation de ProspectLab. Cette documentation est organis�
 
 ## Documentation technique
 
+- [Architecture](architecture/ARCHITECTURE.md) - Documentation de l'architecture modulaire
+- [Architecture distribuée (Raspberry Pi)](developpement/ARCHITECTURE_DISTRIBUEE_RASPBERRY.md) - Utilisation d'un cluster de Raspberry Pi comme workers Celery
+- [Migration](architecture/MIGRATION.md) - Guide de migration vers la nouvelle architecture
 - [WebSocket](techniques/WEBSOCKET.md) - Documentation sur la communication WebSocket
 - [Outils OSINT](techniques/OSINT_TOOLS.md) - Guide des outils OSINT disponibles
 - [Outils Pentest](techniques/PENTEST_TOOLS.md) - Guide des outils de test de pénétration
@@ -25,6 +36,30 @@ Bienvenue dans la documentation de ProspectLab. Cette documentation est organis�
 ## Développement
 
 - [Améliorations](developpement/AMELIORATIONS.md) - Liste des améliorations possibles
-- [Notes Cursor - Barre de progression](developpement/cursor_barre_de_progression_du_scraper.md) - Notes de développement
-- [Notes Cursor - PowerShell](developpement/cursor_powershell_script_lines_310_318.md) - Notes de développement
+- [Architecture distribuée Raspberry Pi](developpement/ARCHITECTURE_DISTRIBUEE_RASPBERRY.md) - Notes de travail sur l'utilisation des Raspberry Pi comme workers Celery
+
+## Structure de la base de donnees
+
+### Tables principales
+
+- **analyses** : Historique des analyses Excel
+- **entreprises** : Informations sur les entreprises
+- **scrapers** : Resultats de scraping (totaux et metadonnees)
+- **scraper_emails** : Emails extraits avec contexte
+- **scraper_people** : Personnes identifiees avec coordonnees
+- **scraper_phones** : Telephones extraits avec page source
+- **scraper_social** : Profils de reseaux sociaux
+- **scraper_technologies** : Technologies detectees
+- **scraper_images** : Images du site avec dimensions
+- **entreprise_og_data** : Donnees OpenGraph normalisees
+- **entreprise_og_images** : Images OpenGraph
+- **entreprise_og_videos** : Videos OpenGraph
+- **entreprise_og_audios** : Audios OpenGraph
+- **entreprise_og_locales** : Locales supportees
+- **technical_analyses** : Analyses techniques (frameworks, serveurs)
+- **osint_analyses** : Analyses OSINT (recherche responsables)
+- **pentest_analyses** : Analyses Pentest (securite)
+- **templates** : Modeles d'emails
+
+Toutes les relations utilisent `ON DELETE CASCADE` pour maintenir l'integrite referentielle.
 

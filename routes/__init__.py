@@ -1,0 +1,4 @@
+"""
+Blueprints Flask pour ProspectLab
+"""
+

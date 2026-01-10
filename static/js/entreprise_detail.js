@@ -27,6 +27,20 @@
             }
             
             entrepriseData = await response.json();
+            
+            // Charger les scrapers
+            try {
+                const scrapersResponse = await fetch(`/api/entreprise/${entrepriseId}/scrapers`);
+                if (scrapersResponse.ok) {
+                    entrepriseData.scrapers = await scrapersResponse.json();
+                } else {
+                    entrepriseData.scrapers = [];
+                }
+            } catch (e) {
+                console.warn('Erreur lors du chargement des scrapers:', e);
+                entrepriseData.scrapers = [];
+            }
+            
             renderDetail();
         } catch (error) {
             console.error('Erreur lors du chargement:', error);
@@ -95,6 +109,13 @@
                 </div>
                 ` : ''}
                 
+                ${entrepriseData.scrapers && entrepriseData.scrapers.length > 0 ? `
+                <div class="detail-section full-width">
+                    <h2>Données scrapées</h2>
+                    ${createScrapersHTML(entrepriseData.scrapers)}
+                </div>
+                ` : ''}
+                
                 <div class="detail-section full-width">
                     <h2>Tags</h2>
                     <div id="tags-container" class="tags-editable">
@@ -135,6 +156,90 @@
         };
         const class_name = classes[statut] || 'secondary';
         return `<span class="badge badge-${class_name}">${statut}</span>`;
+    }
+    
+    function createScrapersHTML(scrapers) {
+        if (!scrapers || scrapers.length === 0) {
+            return '<p>Aucune donnée scrapée disponible</p>';
+        }
+        
+        // Prendre le scraper le plus récent
+        const scraper = scrapers[0];
+        
+        let html = '<div class="scraper-data">';
+        
+        // Emails
+        if (scraper.emails && scraper.emails.length > 0) {
+            html += '<div class="scraper-section"><h3>Emails (' + scraper.emails.length + ')</h3><ul>';
+            scraper.emails.slice(0, 10).forEach(email => {
+                const emailStr = typeof email === 'string' ? email : (email.email || email.value || '');
+                html += `<li><a href="mailto:${emailStr}">${emailStr}</a></li>`;
+            });
+            if (scraper.emails.length > 10) {
+                html += `<li><em>... et ${scraper.emails.length - 10} autres</em></li>`;
+            }
+            html += '</ul></div>';
+        }
+        
+        // Personnes
+        if (scraper.people && scraper.people.length > 0) {
+            html += '<div class="scraper-section"><h3>Personnes (' + scraper.people.length + ')</h3><ul>';
+            scraper.people.slice(0, 10).forEach(person => {
+                const name = person.name || 'Inconnu';
+                const title = person.title ? ` - ${person.title}` : '';
+                const email = person.email ? ` (<a href="mailto:${person.email}">${person.email}</a>)` : '';
+                html += `<li>${name}${title}${email}</li>`;
+            });
+            if (scraper.people.length > 10) {
+                html += `<li><em>... et ${scraper.people.length - 10} autres</em></li>`;
+            }
+            html += '</ul></div>';
+        }
+        
+        // Téléphones
+        if (scraper.phones && scraper.phones.length > 0) {
+            html += '<div class="scraper-section"><h3>Téléphones (' + scraper.phones.length + ')</h3><ul>';
+            scraper.phones.slice(0, 10).forEach(phone => {
+                const phoneStr = typeof phone === 'string' ? phone : (phone.phone || phone.value || '');
+                html += `<li><a href="tel:${phoneStr}">${phoneStr}</a></li>`;
+            });
+            if (scraper.phones.length > 10) {
+                html += `<li><em>... et ${scraper.phones.length - 10} autres</em></li>`;
+            }
+            html += '</ul></div>';
+        }
+        
+        // Réseaux sociaux
+        if (scraper.social_profiles && Object.keys(scraper.social_profiles).length > 0) {
+            html += '<div class="scraper-section"><h3>Réseaux sociaux</h3><ul>';
+            for (const [platform, urls] of Object.entries(scraper.social_profiles)) {
+                const urlList = Array.isArray(urls) ? urls : [urls];
+                urlList.forEach(urlData => {
+                    const url = typeof urlData === 'string' ? urlData : (urlData.url || '');
+                    html += `<li><strong>${platform}:</strong> <a href="${url}" target="_blank">${url}</a></li>`;
+                });
+            }
+            html += '</ul></div>';
+        }
+        
+        // Technologies
+        if (scraper.technologies && Object.keys(scraper.technologies).length > 0) {
+            html += '<div class="scraper-section"><h3>Technologies</h3><ul>';
+            for (const [category, techs] of Object.entries(scraper.technologies)) {
+                const techList = Array.isArray(techs) ? techs : [techs];
+                html += `<li><strong>${category}:</strong> ${techList.join(', ')}</li>`;
+            }
+            html += '</ul></div>';
+        }
+        
+        // Images
+        if (scraper.total_images && scraper.total_images > 0) {
+            html += `<div class="scraper-section"><h3>Images (${scraper.total_images})</h3>`;
+            html += `<p>${scraper.total_images} image(s) trouvée(s) sur le site</p></div>`;
+        }
+        
+        html += '</div>';
+        return html;
     }
     
     function setupDetailInteractions() {

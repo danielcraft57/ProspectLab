@@ -96,19 +96,6 @@ class Database:
             ('nb_avis_google', 'INTEGER')
         ]
         
-        # Migration : si adresse_complete existe, la supprimer après migration
-        try:
-            cursor.execute('SELECT adresse_complete FROM entreprises LIMIT 1')
-            # Si la colonne existe, migrer les données vers address_1 et address_2
-            cursor.execute('''
-                UPDATE entreprises 
-                SET address_1 = adresse_complete 
-                WHERE adresse_complete IS NOT NULL AND address_1 IS NULL
-            ''')
-            # Supprimer l'ancienne colonne (SQLite ne supporte pas DROP COLUMN directement)
-            # On la laisse pour l'instant, elle sera ignorée
-        except sqlite3.OperationalError:
-            pass  # La colonne n'existe pas
         
         for col_name, col_type in new_columns:
             try:
@@ -126,14 +113,109 @@ class Database:
         icon_columns = [
             ('og_image', 'TEXT'),
             ('favicon', 'TEXT'),
-            ('logo', 'TEXT'),
-            ('og_data', 'TEXT')  # Stocker toutes les données OpenGraph en JSON
+            ('logo', 'TEXT')
         ]
         for col_name, col_type in icon_columns:
             try:
                 cursor.execute(f'ALTER TABLE entreprises ADD COLUMN {col_name} {col_type}')
             except sqlite3.OperationalError:
                 pass  # La colonne existe déjà
+        
+        # Table des données OpenGraph (normalisée selon ogp.me)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS entreprise_og_data (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entreprise_id INTEGER NOT NULL,
+                -- Propriétés de base (requises)
+                og_title TEXT,
+                og_type TEXT,
+                og_url TEXT,
+                -- Propriétés optionnelles
+                og_description TEXT,
+                og_determiner TEXT,
+                og_locale TEXT,
+                og_site_name TEXT,
+                -- Audio/Video (URLs simples)
+                og_audio TEXT,
+                og_video TEXT,
+                -- Dates de mise à jour
+                date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                date_modification TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE,
+                UNIQUE(entreprise_id)
+            )
+        ''')
+        
+        # Table des images OpenGraph (propriétés structurées)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS entreprise_og_images (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entreprise_id INTEGER NOT NULL,
+                og_data_id INTEGER,
+                image_url TEXT NOT NULL,
+                secure_url TEXT,
+                image_type TEXT,
+                width INTEGER,
+                height INTEGER,
+                alt_text TEXT,
+                date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE,
+                FOREIGN KEY (og_data_id) REFERENCES entreprise_og_data(id) ON DELETE CASCADE
+            )
+        ''')
+        
+        # Table des vidéos OpenGraph (propriétés structurées)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS entreprise_og_videos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entreprise_id INTEGER NOT NULL,
+                og_data_id INTEGER,
+                video_url TEXT NOT NULL,
+                secure_url TEXT,
+                video_type TEXT,
+                width INTEGER,
+                height INTEGER,
+                date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE,
+                FOREIGN KEY (og_data_id) REFERENCES entreprise_og_data(id) ON DELETE CASCADE
+            )
+        ''')
+        
+        # Table des audios OpenGraph (propriétés structurées)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS entreprise_og_audios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entreprise_id INTEGER NOT NULL,
+                og_data_id INTEGER,
+                audio_url TEXT NOT NULL,
+                secure_url TEXT,
+                audio_type TEXT,
+                date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE,
+                FOREIGN KEY (og_data_id) REFERENCES entreprise_og_data(id) ON DELETE CASCADE
+            )
+        ''')
+        
+        # Table des locales alternatives OpenGraph
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS entreprise_og_locales (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entreprise_id INTEGER NOT NULL,
+                og_data_id INTEGER,
+                locale TEXT NOT NULL,
+                date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE,
+                FOREIGN KEY (og_data_id) REFERENCES entreprise_og_data(id) ON DELETE CASCADE,
+                UNIQUE(og_data_id, locale)
+            )
+        ''')
+        
+        # Index pour les recherches
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_og_data_entreprise_id ON entreprise_og_data(entreprise_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_og_images_entreprise_id ON entreprise_og_images(entreprise_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_og_videos_entreprise_id ON entreprise_og_videos(entreprise_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_og_audios_entreprise_id ON entreprise_og_audios(entreprise_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_og_locales_entreprise_id ON entreprise_og_locales(entreprise_id)')
         
         # Table des campagnes email
         cursor.execute('''
@@ -797,42 +879,17 @@ class Database:
     
     def migrate_foreign_keys_cascade(self):
         """
-        Migre les contraintes de clés étrangères pour ajouter ON DELETE CASCADE.
-        Cette méthode recrée les tables si nécessaire pour les bases existantes.
+        Active les clés étrangères pour SQLite.
         """
         conn = self.get_connection()
         cursor = conn.cursor()
         
         try:
-            # Vérifier si la migration a déjà été effectuée
-            cursor.execute('''
-                SELECT name FROM sqlite_master 
-                WHERE type='table' AND name='_migrations'
-            ''')
-            if not cursor.fetchone():
-                cursor.execute('CREATE TABLE _migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
-            
-            cursor.execute('SELECT name FROM _migrations WHERE name = ?', ('foreign_keys_cascade',))
-            if cursor.fetchone():
-                # Migration déjà effectuée
-                conn.close()
-                return
-            
             # Activer les clés étrangères
             cursor.execute('PRAGMA foreign_keys = ON')
-            
-            # Pour SQLite, on ne peut pas modifier une contrainte existante.
-            # Les nouvelles installations auront les bonnes contraintes grâce aux CREATE TABLE modifiés.
-            # Pour les bases existantes, on marque simplement la migration comme effectuée
-            # car les contraintes seront appliquées lors de la prochaine recréation de la base.
-            # En pratique, clear_all_data() supprime dans le bon ordre pour gérer les bases existantes.
-            
-            cursor.execute('INSERT INTO _migrations (name) VALUES (?)', ('foreign_keys_cascade',))
             conn.commit()
-            
         except Exception as e:
-            # Si la migration échoue, on continue quand même
-            # Les nouvelles installations auront les bonnes contraintes
+            # Si l'activation échoue, on continue quand même
             conn.rollback()
         finally:
             conn.close()
@@ -940,6 +997,9 @@ class Database:
         # Mapper les champs Excel vers les champs de la base de données
         # Supporte les noms de colonnes Excel standards
         nom = entreprise_data.get('name') or entreprise_data.get('nom')
+        # Garantir un nom pour éviter l'échec NOT NULL
+        if not nom:
+            nom = entreprise_data.get('website') or 'Entreprise inconnue'
         website = entreprise_data.get('website')
         secteur = entreprise_data.get('secteur') or entreprise_data.get('category_translate') or entreprise_data.get('category')
         telephone = entreprise_data.get('phone_number') or entreprise_data.get('telephone')
@@ -1063,21 +1123,13 @@ class Database:
             if logo and not logo.startswith(('http://', 'https://')):
                 logo = urljoin(website, logo)
         
-        # Stocker toutes les données OpenGraph en JSON
-        og_data_json = None
-        if og_tags:
-            try:
-                og_data_json = json.dumps(og_tags, ensure_ascii=False)
-            except Exception:
-                og_data_json = None
-        
         cursor.execute('''
             INSERT INTO entreprises (
                 analyse_id, nom, website, secteur, statut, opportunite,
                 email_principal, responsable, taille_estimee, hosting_provider,
                 framework, score_securite, telephone, pays, address_1, address_2,
-                longitude, latitude, note_google, nb_avis_google, resume, og_image, favicon, logo, og_data
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                longitude, latitude, note_google, nb_avis_google, resume, og_image, favicon, logo
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             analyse_id,
             nom,
@@ -1102,15 +1154,233 @@ class Database:
             resume,
             og_image,
             favicon,
-            logo,
-            og_data_json
+            logo
         ))
         
         entreprise_id = cursor.lastrowid
+        
+        # Sauvegarder les données OpenGraph normalisées si présentes
+        if og_tags:
+            self._save_og_data_in_transaction(cursor, entreprise_id, og_tags)
+        
         conn.commit()
         conn.close()
         
         return entreprise_id
+    
+    def _save_og_data_in_transaction(self, cursor, entreprise_id, og_tags):
+        """
+        Sauvegarde les données OpenGraph normalisées dans les tables dédiées.
+        Inspiré de https://ogp.me/
+        
+        Args:
+            cursor: Curseur SQLite dans une transaction
+            entreprise_id: ID de l'entreprise
+            og_tags: Dictionnaire contenant les tags OpenGraph (ex: {'og:title': '...', 'og:image': '...'})
+        """
+        # Extraire les propriétés de base
+        og_title = og_tags.get('og:title') or og_tags.get('title')
+        og_type = og_tags.get('og:type') or og_tags.get('type') or 'website'
+        og_url = og_tags.get('og:url') or og_tags.get('url')
+        og_description = og_tags.get('og:description') or og_tags.get('description')
+        og_determiner = og_tags.get('og:determiner') or og_tags.get('determiner')
+        og_locale = og_tags.get('og:locale') or og_tags.get('locale')
+        og_site_name = og_tags.get('og:site_name') or og_tags.get('site_name')
+        og_audio = og_tags.get('og:audio') or og_tags.get('audio')
+        og_video = og_tags.get('og:video') or og_tags.get('video')
+        
+        # Supprimer l'ancienne entrée si elle existe (pour mise à jour)
+        cursor.execute('DELETE FROM entreprise_og_data WHERE entreprise_id = ?', (entreprise_id,))
+        
+        # Insérer les données principales
+        cursor.execute('''
+            INSERT INTO entreprise_og_data (
+                entreprise_id, og_title, og_type, og_url, og_description,
+                og_determiner, og_locale, og_site_name, og_audio, og_video
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            entreprise_id, og_title, og_type, og_url, og_description,
+            og_determiner, og_locale, og_site_name, og_audio, og_video
+        ))
+        
+        og_data_id = cursor.lastrowid
+        
+        # Traiter les images (og:image peut être multiple)
+        images = []
+        if 'og:image' in og_tags:
+            img = og_tags['og:image']
+            if isinstance(img, str):
+                images.append({'url': img})
+            elif isinstance(img, list):
+                images.extend([{'url': i} if isinstance(i, str) else i for i in img])
+            elif isinstance(img, dict):
+                images.append(img)
+        elif 'image' in og_tags:
+            img = og_tags['image']
+            if isinstance(img, str):
+                images.append({'url': img})
+            elif isinstance(img, list):
+                images.extend([{'url': i} if isinstance(i, str) else i for i in img])
+            elif isinstance(img, dict):
+                images.append(img)
+        
+        # Sauvegarder chaque image avec ses propriétés structurées
+        for img_data in images:
+            if isinstance(img_data, dict):
+                image_url = img_data.get('og:image:url') or img_data.get('url') or img_data.get('og:image')
+                if image_url:
+                    cursor.execute('''
+                        INSERT INTO entreprise_og_images (
+                            entreprise_id, og_data_id, image_url, secure_url,
+                            image_type, width, height, alt_text
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        entreprise_id,
+                        og_data_id,
+                        image_url,
+                        img_data.get('og:image:secure_url') or img_data.get('secure_url'),
+                        img_data.get('og:image:type') or img_data.get('type'),
+                        img_data.get('og:image:width') or img_data.get('width'),
+                        img_data.get('og:image:height') or img_data.get('height'),
+                        img_data.get('og:image:alt') or img_data.get('alt')
+                    ))
+        
+        # Traiter les vidéos (og:video peut être multiple)
+        videos = []
+        if 'og:video' in og_tags:
+            vid = og_tags['og:video']
+            if isinstance(vid, str):
+                videos.append({'url': vid})
+            elif isinstance(vid, list):
+                videos.extend([{'url': v} if isinstance(v, str) else v for v in vid])
+            elif isinstance(vid, dict):
+                videos.append(vid)
+        elif 'video' in og_tags:
+            vid = og_tags['video']
+            if isinstance(vid, str):
+                videos.append({'url': vid})
+            elif isinstance(vid, list):
+                videos.extend([{'url': v} if isinstance(v, str) else v for v in vid])
+            elif isinstance(vid, dict):
+                videos.append(vid)
+        
+        for vid_data in videos:
+            if isinstance(vid_data, dict):
+                video_url = vid_data.get('og:video:url') or vid_data.get('url') or vid_data.get('og:video')
+                if video_url:
+                    cursor.execute('''
+                        INSERT INTO entreprise_og_videos (
+                            entreprise_id, og_data_id, video_url, secure_url,
+                            video_type, width, height
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        entreprise_id,
+                        og_data_id,
+                        video_url,
+                        vid_data.get('og:video:secure_url') or vid_data.get('secure_url'),
+                        vid_data.get('og:video:type') or vid_data.get('type'),
+                        vid_data.get('og:video:width') or vid_data.get('width'),
+                        vid_data.get('og:video:height') or vid_data.get('height')
+                    ))
+        
+        # Traiter les audios
+        audios = []
+        if 'og:audio' in og_tags:
+            aud = og_tags['og:audio']
+            if isinstance(aud, str):
+                audios.append({'url': aud})
+            elif isinstance(aud, list):
+                audios.extend([{'url': a} if isinstance(a, str) else a for a in aud])
+            elif isinstance(aud, dict):
+                audios.append(aud)
+        elif 'audio' in og_tags:
+            aud = og_tags['audio']
+            if isinstance(aud, str):
+                audios.append({'url': aud})
+            elif isinstance(aud, list):
+                audios.extend([{'url': a} if isinstance(a, str) else a for a in aud])
+            elif isinstance(aud, dict):
+                audios.append(aud)
+        
+        for aud_data in audios:
+            if isinstance(aud_data, dict):
+                audio_url = aud_data.get('og:audio:url') or aud_data.get('url') or aud_data.get('og:audio')
+                if audio_url:
+                    cursor.execute('''
+                        INSERT INTO entreprise_og_audios (
+                            entreprise_id, og_data_id, audio_url, secure_url, audio_type
+                        ) VALUES (?, ?, ?, ?, ?)
+                    ''', (
+                        entreprise_id,
+                        og_data_id,
+                        audio_url,
+                        aud_data.get('og:audio:secure_url') or aud_data.get('secure_url'),
+                        aud_data.get('og:audio:type') or aud_data.get('type')
+                    ))
+        
+        # Traiter les locales alternatives
+        locales = og_tags.get('og:locale:alternate') or og_tags.get('locale:alternate') or []
+        if isinstance(locales, str):
+            locales = [locales]
+        for locale in locales:
+            if locale:
+                cursor.execute('''
+                    INSERT OR IGNORE INTO entreprise_og_locales (entreprise_id, og_data_id, locale)
+                    VALUES (?, ?, ?)
+                ''', (entreprise_id, og_data_id, locale))
+    
+    def get_og_data(self, entreprise_id):
+        """
+        Récupère les données OpenGraph normalisées pour une entreprise.
+        
+        Returns:
+            dict: Dictionnaire contenant toutes les données OG structurées
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Récupérer les données principales
+        cursor.execute('''
+            SELECT * FROM entreprise_og_data WHERE entreprise_id = ?
+        ''', (entreprise_id,))
+        og_row = cursor.fetchone()
+        
+        if not og_row:
+            conn.close()
+            return None
+        
+        og_data = dict(og_row)
+        
+        # Récupérer les images
+        cursor.execute('''
+            SELECT * FROM entreprise_og_images WHERE entreprise_id = ?
+            ORDER BY id
+        ''', (entreprise_id,))
+        og_data['images'] = [dict(row) for row in cursor.fetchall()]
+        
+        # Récupérer les vidéos
+        cursor.execute('''
+            SELECT * FROM entreprise_og_videos WHERE entreprise_id = ?
+            ORDER BY id
+        ''', (entreprise_id,))
+        og_data['videos'] = [dict(row) for row in cursor.fetchall()]
+        
+        # Récupérer les audios
+        cursor.execute('''
+            SELECT * FROM entreprise_og_audios WHERE entreprise_id = ?
+            ORDER BY id
+        ''', (entreprise_id,))
+        og_data['audios'] = [dict(row) for row in cursor.fetchall()]
+        
+        # Récupérer les locales alternatives
+        cursor.execute('''
+            SELECT locale FROM entreprise_og_locales WHERE entreprise_id = ?
+            ORDER BY locale
+        ''', (entreprise_id,))
+        og_data['locales_alternate'] = [row[0] for row in cursor.fetchall()]
+        
+        conn.close()
+        return og_data
     
     def get_analyses(self, limit=50):
         """Récupère les analyses récentes"""
@@ -1163,7 +1433,7 @@ class Database:
         rows = cursor.fetchall()
         conn.close()
         
-        # Parser les tags et données OpenGraph pour chaque entreprise
+        # Parser les tags et charger les données OpenGraph pour chaque entreprise
         entreprises = []
         for row in rows:
             entreprise = dict(row)
@@ -1175,12 +1445,8 @@ class Database:
             else:
                 entreprise['tags'] = []
             
-            # Parser les données OpenGraph si présentes
-            if entreprise.get('og_data'):
-                try:
-                    entreprise['og_data'] = json.loads(entreprise['og_data']) if isinstance(entreprise['og_data'], str) else entreprise['og_data']
-                except:
-                    entreprise['og_data'] = None
+            # Charger les données OpenGraph depuis les tables normalisées
+            entreprise['og_data'] = self.get_og_data(entreprise['id'])
             
             entreprises.append(entreprise)
         
@@ -1921,23 +2187,38 @@ class Database:
         
         # Sauvegarder les données normalisées dans les tables séparées (au lieu de JSON)
         # Utiliser la même connexion pour éviter les verrouillages
-        if emails:
-            self._save_scraper_emails_in_transaction(cursor, scraper_id, entreprise_id, emails)
-        if phones:
-            self._save_scraper_phones_in_transaction(cursor, scraper_id, entreprise_id, phones)
-        if social_profiles:
-            self._save_scraper_social_profiles_in_transaction(cursor, scraper_id, entreprise_id, social_profiles)
-        if technologies:
-            self._save_scraper_technologies_in_transaction(cursor, scraper_id, entreprise_id, technologies)
-        if people:
-            self._save_scraper_people_in_transaction(cursor, scraper_id, entreprise_id, people)
-        
-        # Sauvegarder les images dans la table séparée (optimisation BDD, liées à l'entreprise)
-        if images and isinstance(images, list) and len(images) > 0:
-            self._save_images_in_transaction(cursor, entreprise_id, scraper_id, images)
+        try:
+            if emails:
+                self._save_scraper_emails_in_transaction(cursor, scraper_id, entreprise_id, emails)
+            if phones:
+                self._save_scraper_phones_in_transaction(cursor, scraper_id, entreprise_id, phones)
+            if social_profiles:
+                self._save_scraper_social_profiles_in_transaction(cursor, scraper_id, entreprise_id, social_profiles)
+            if technologies:
+                self._save_scraper_technologies_in_transaction(cursor, scraper_id, entreprise_id, technologies)
+            if people:
+                self._save_scraper_people_in_transaction(cursor, scraper_id, entreprise_id, people)
+            
+            # Sauvegarder les images dans la table séparée (optimisation BDD, liées à l'entreprise)
+            if images and isinstance(images, list) and len(images) > 0:
+                self._save_images_in_transaction(cursor, entreprise_id, scraper_id, images)
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f'Erreur lors de la sauvegarde des données normalisées pour scraper {scraper_id}: {e}', exc_info=True)
+            # On continue quand même pour sauvegarder le scraper principal
         
         conn.commit()
         conn.close()
+        
+        # Log après sauvegarde pour vérification
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(
+            f'Scraper sauvegardé (id={scraper_id}) pour entreprise {entreprise_id}: '
+            f'emails={total_emails}, people={total_people}, phones={total_phones}, '
+            f'social={total_social_profiles}, technologies={total_technologies}, images={total_images}'
+        )
         
         return scraper_id
     
@@ -2417,6 +2698,9 @@ class Database:
             scraper['social_profiles'] = self.get_scraper_social_profiles(scraper_id)
             scraper['technologies'] = self.get_scraper_technologies(scraper_id)
             scraper['people'] = self.get_scraper_people(scraper_id)
+            
+            # Charger les images depuis la table images
+            scraper['images'] = self.get_images_by_scraper(scraper_id)
             
             # Metadata reste en JSON pour l'instant (structure complexe)
             if scraper.get('metadata'):
@@ -2999,6 +3283,32 @@ class Database:
         conn.close()
         
         return analysis_id
+    
+    def update_pentest_analysis(self, analysis_id, pentest_data):
+        """Met à jour une analyse Pentest existante"""
+        # Supprimer l'ancienne analyse et en créer une nouvelle
+        # (plus simple que de mettre à jour toutes les tables normalisées)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Récupérer l'entreprise_id et l'URL de l'analyse existante
+        cursor.execute('SELECT entreprise_id, url FROM analyses_pentest WHERE id = ?', (analysis_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return None
+        
+        entreprise_id = row[0]
+        url = row[1]
+        
+        # Supprimer l'ancienne analyse (les CASCADE supprimeront les données normalisées)
+        cursor.execute('DELETE FROM analyses_pentest WHERE id = ?', (analysis_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        # Créer une nouvelle analyse avec les mêmes données
+        return self.save_pentest_analysis(entreprise_id, url, pentest_data)
     
     def get_pentest_analysis_by_url(self, url):
         """Récupère une analyse Pentest par son URL avec données normalisées"""

@@ -620,7 +620,15 @@ class EntrepriseAnalyzer:
         return None
     
     def scrape_website(self, url, max_pages=3, use_global_scraper=True):
-        """Scrape un site web et extrait les informations (amélioré)"""
+        """Scrape un site web et extrait les informations (amélioré)
+        
+        Cette méthode peut utiliser un callback de progression optionnel
+        stocké dans self.progress_callback (utilisé notamment pour remonter
+        l'avancement en temps réel via Celery/WebSocket).
+        
+        Note: Si use_global_scraper=False, seul un scraping basique est effectué
+        (pour l'analyse initiale). Le scraping complet est fait séparément via scrape_analysis_task.
+        """
         if not url:
             return None
         
@@ -630,16 +638,18 @@ class EntrepriseAnalyzer:
                 return None
             
             # Utiliser le scraper unifié si demandé
+            # Si use_global_scraper=False, on fait juste un scraping basique pour l'analyse initiale
             if use_global_scraper:
                 try:
                     from services.unified_scraper import UnifiedScraper
-                    # Pas de callback pour l'import Excel (sera géré via WebSocket dans app.py)
+                    # Callback de progression optionnel (peut être défini par un wrapper)
+                    progress_callback = getattr(self, 'progress_callback', None)
                     unified_scraper = UnifiedScraper(
                         base_url=url,
                         max_workers=min(5, max_pages),
                         max_depth=2,
                         max_time=300,
-                        progress_callback=None
+                        progress_callback=progress_callback
                     )
                     scraper_results = unified_scraper.scrape()
                     
@@ -652,7 +662,8 @@ class EntrepriseAnalyzer:
                         'social_media': scraper_results.get('social_links', {}),
                         'technologies': scraper_results.get('technologies', {}),
                         'metadata': scraper_results.get('metadata', {}),
-                        'resume': scraper_results.get('resume', '')
+                        'resume': scraper_results.get('resume', ''),
+                        'scraper_data': scraper_results  # Garder les données brutes pour la sauvegarde BDD
                     }
                     
                     # Extraire les informations de base du site
@@ -686,6 +697,8 @@ class EntrepriseAnalyzer:
             emails = self.extract_emails(response.text, domain)
             
             # Chercher sur la page contact si pas d'emails
+            contact_soup = None
+            contact_text = ''
             if not emails:
                 contact_url = self.find_contact_page(url, soup)
                 if contact_url and contact_url != url:
@@ -697,10 +710,7 @@ class EntrepriseAnalyzer:
                             # Mettre à jour le soup pour chercher le responsable sur la page contact
                             contact_soup = BeautifulSoup(contact_response.text, 'html.parser')
                             contact_text = contact_soup.get_text()
-                    except:
-                        contact_soup = None
-                        contact_text = ''
-            else:
+                    except Exception as e:
                 contact_soup = None
                 contact_text = ''
             
@@ -858,8 +868,12 @@ class EntrepriseAnalyzer:
         text_for_sector = ''
         
         if website:
-            site_data = self.scrape_website(website, use_global_scraper=True)
+            # Désactiver le scraping complet ici car il sera fait séparément via scrape_analysis_task
+            # On fait juste un scraping basique pour obtenir les infos essentielles (titre, description, etc.)
+            site_data = self.scrape_website(website, use_global_scraper=False)
             if site_data and not site_data.get('error'):
+                # Garder les données brutes du scraper pour la sauvegarde BDD
+                result['scraper_data'] = site_data.get('scraper_data', site_data)
                 # Formater les résultats du scraper global
                 if 'emails' in site_data and isinstance(site_data['emails'], list):
                     emails_list = [e.get('email', e) if isinstance(e, dict) else e for e in site_data['emails']]
@@ -973,9 +987,18 @@ class EntrepriseAnalyzer:
         
         results = []
         
+        # Vérifier si la méthode avec progression existe
+        use_progress = hasattr(self, 'analyze_entreprise_with_progress')
+        
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures = {executor.submit(self.analyze_entreprise, row): idx 
-                      for idx, row in df.iterrows()}
+            if use_progress:
+                # Utiliser la méthode avec progression qui prend (row, idx)
+                futures = {executor.submit(self.analyze_entreprise_with_progress, row, idx): idx 
+                          for idx, row in df.iterrows()}
+            else:
+                # Utiliser la méthode standard qui prend seulement (row)
+                futures = {executor.submit(self.analyze_entreprise, row): idx 
+                        for idx, row in df.iterrows()}
             
             for future in as_completed(futures):
                 idx = futures[future]
@@ -993,9 +1016,6 @@ class EntrepriseAnalyzer:
         new_cols = [col for col in results_df.columns if col not in original_cols]
         final_df = final_df[original_cols + new_cols]
         
-        try:
-            final_df.to_excel(self.output_file, index=False)
-            return final_df
-        except Exception as e:
-            raise Exception(f"Erreur lors de la sauvegarde : {e}")
+        # Ne plus exporter en Excel (retourne simplement le DataFrame)
+        return final_df
 

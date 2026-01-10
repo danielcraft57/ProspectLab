@@ -84,7 +84,7 @@ document.getElementById('send-emails-form').addEventListener('submit', async fun
     resultsDiv.style.display = 'none';
     
     try {
-        const response = await fetch('{{ url_for("send_emails") }}', {
+        const response = await fetch('{{ url_for("other.send_emails") }}', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'

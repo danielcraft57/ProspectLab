@@ -22,6 +22,15 @@ try:
 except ImportError:
     dns = None
 
+# Importer la configuration
+try:
+    from config import WSL_DISTRO, WSL_USER
+except ImportError:
+    # Valeurs par défaut si config n'est pas disponible
+    import os
+    WSL_DISTRO = os.environ.get('WSL_DISTRO', 'kali-linux')
+    WSL_USER = os.environ.get('WSL_USER', 'loupix')
+
 
 class TechnicalAnalyzer:
     def __init__(self):
@@ -98,17 +107,32 @@ class TechnicalAnalyzer:
         # Vérifier WSL
         wsl_path = shutil.which('wsl')
         if wsl_path:
-            # Tester si nmap est disponible dans WSL (Kali Linux)
+            # Essayer d'abord avec l'utilisateur configuré
             try:
                 test_result = subprocess.run(
-                    ['wsl', '-d', 'kali-linux', '-u', 'loupix', 'which', 'nmap'],
+                    ['wsl', '-d', WSL_DISTRO, '-u', WSL_USER, 'which', 'nmap'],
                     capture_output=True,
                     text=True,
                     timeout=5
                 )
                 if test_result.returncode == 0:
                     self.nmap_method = 'wsl'
-                    self.nmap_cmd_base = ['wsl', '-d', 'kali-linux', '-u', 'loupix', 'nmap']
+                    self.nmap_cmd_base = ['wsl', '-d', WSL_DISTRO, '-u', WSL_USER, 'nmap']
+                    return
+            except:
+                pass
+            
+            # Si ça échoue, essayer sans spécifier l'utilisateur
+            try:
+                test_result = subprocess.run(
+                    ['wsl', '-d', WSL_DISTRO, 'nmap', '--version'],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if test_result.returncode == 0 or 'Nmap version' in test_result.stdout:
+                    self.nmap_method = 'wsl'
+                    self.nmap_cmd_base = ['wsl', '-d', WSL_DISTRO, 'nmap']
                     return
             except:
                 pass
@@ -404,7 +428,7 @@ class TechnicalAnalyzer:
         # Construire la commande complète
         # Note: pour WSL, on doit passer les arguments après 'nmap'
         if self.nmap_method == 'wsl':
-            cmd = ['wsl', '-d', 'kali-linux', '-u', 'loupix', 'nmap', '-F', '-sV', '--version-intensity', '0', '-O', '--osscan-guess', ip]
+            cmd = self.nmap_cmd_base + ['-F', '-sV', '--version-intensity', '0', '-O', '--osscan-guess', ip]
         else:
             cmd = self.nmap_cmd_base + ['-F', '-sV', '--version-intensity', '0', '-O', '--osscan-guess', ip]
         

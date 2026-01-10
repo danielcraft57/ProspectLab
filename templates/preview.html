@@ -218,7 +218,7 @@
         statusDiv.className = 'status-message status-warning';
         statusDiv.innerHTML = `
             ${data.message}<br>
-            ${data.output_file ? `<a href="{{ url_for('download_file', filename='') }}${data.output_file}" class="btn btn-success" style="margin-top: 1rem;">Télécharger les résultats partiels</a>` : ''}
+            ${data.output_file ? `<a href="{{ url_for('other.download_file', filename='') }}${data.output_file}" class="btn btn-success" style="margin-top: 1rem;">Télécharger les résultats partiels</a>` : ''}
         `;
         
         progressFill.style.background = '#f39c12';
@@ -266,6 +266,7 @@
         if (window.wsManager && window.wsManager.socket) {
             // Retirer l'ancien listener s'il existe
             window.wsManager.socket.off('scraping_progress');
+            window.wsManager.socket.off('scraping_complete');
             
             window.wsManager.socket.on('scraping_progress', function(data) {
                 if (!scrapingProgressContainer.parentNode) {
@@ -289,7 +290,7 @@
                     }
                 }
                 
-                // Afficher le message avec le domaine et l'entreprise
+                // Afficher le message avec le domaine, l'entreprise et les compteurs si disponibles
                 let displayText = message;
                 if (domaine) {
                     displayText += ` - ${domaine}`;
@@ -297,7 +298,70 @@
                 if (data.entreprise) {
                     displayText += ` (${data.entreprise})`;
                 }
+
+                // Ajouter les compteurs en temps réel si envoyés
+                const counters = [];
+                if (typeof data.total_emails === 'number') {
+                    counters.push(`${data.total_emails} emails`);
+                }
+                if (typeof data.total_people === 'number') {
+                    counters.push(`${data.total_people} personnes`);
+                }
+                if (typeof data.total_phones === 'number') {
+                    counters.push(`${data.total_phones} téléphones`);
+                }
+                if (typeof data.total_social_platforms === 'number') {
+                    counters.push(`${data.total_social_platforms} réseaux sociaux`);
+                }
+                if (typeof data.total_technologies === 'number') {
+                    counters.push(`${data.total_technologies} technos`);
+                }
+                if (typeof data.total_images === 'number') {
+                    counters.push(`${data.total_images} images`);
+                }
+                if (counters.length > 0) {
+                    displayText += ` - ${counters.join(', ')}`;
+                }
+
                 scrapingProgressText.textContent = displayText;
+            });
+
+            // Afficher un résumé final quand le scraping est terminé
+            window.wsManager.socket.on('scraping_complete', function(data) {
+                if (!scrapingProgressContainer.parentNode) {
+                    progressContainer.after(scrapingProgressContainer);
+                }
+                scrapingProgressContainer.style.display = 'block';
+
+                const counters = [];
+                if (typeof data.total_emails === 'number') {
+                    counters.push(`${data.total_emails} emails`);
+                }
+                if (typeof data.total_people === 'number') {
+                    counters.push(`${data.total_people} personnes`);
+                }
+                if (typeof data.total_phones === 'number') {
+                    counters.push(`${data.total_phones} téléphones`);
+                }
+                if (typeof data.total_social_platforms === 'number') {
+                    counters.push(`${data.total_social_platforms} réseaux sociaux`);
+                }
+                if (typeof data.total_technologies === 'number') {
+                    counters.push(`${data.total_technologies} technos`);
+                }
+                if (typeof data.total_images === 'number') {
+                    counters.push(`${data.total_images} images`);
+                }
+
+                let text = 'Scraping terminé';
+                if (counters.length > 0) {
+                    text += ` : ${counters.join(', ')}`;
+                }
+                scrapingProgressText.textContent = text;
+                
+                // Déclencher l'événement personnalisé pour la redirection
+                const event = new CustomEvent('scraping_complete', { detail: data });
+                document.dispatchEvent(event);
             });
         }
     }
@@ -370,21 +434,26 @@
     
     document.addEventListener('analysis:complete', function(e) {
         const data = e.detail;
-        statusDiv.className = 'status-message status-success';
-        statusDiv.innerHTML = `
-            ${data.message}<br>
-            <a href="{{ url_for('download_file', filename='') }}${data.output_file}" class="btn btn-success" style="margin-top: 1rem;">Télécharger le résultat</a>
-        `;
+        statusDiv.className = '';
+        statusDiv.textContent = '';
         
         progressFill.style.width = '100%';
         progressFill.textContent = '100%';
-        progressText.textContent = `Terminé ! ${data.total} entreprises analysées`;
+        const totalProcessed = data.total_processed || data.total || 0;
+        progressText.textContent = `Terminé ! ${totalProcessed} entreprises analysées`;
         
         // Réactiver le formulaire et masquer le bouton stop
         const startBtn = document.getElementById('start-analysis-btn');
         const stopBtn = document.getElementById('stop-analysis-btn');
         startBtn.disabled = false;
         stopBtn.style.display = 'none';
+    });
+
+    // Redirection uniquement quand l'analyse ET le scraping sont terminés
+    document.addEventListener('scraping_complete', function(e) {
+        setTimeout(function() {
+            window.location.href = '/entreprises';
+        }, 1500);
     });
     
     document.addEventListener('analysis:error', function(e) {

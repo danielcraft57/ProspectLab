@@ -1,13 +1,17 @@
 # ProspectLab
 
-Application Flask pour la prospection et l'analyse d'entreprises.
+Application Flask professionnelle pour la prospection et l'analyse approfondie d'entreprises.
 
-## Fonctionnalités
+## Fonctionnalités principales
 
 - **Import et analyse d'entreprises** : Importez un fichier Excel et analysez automatiquement les sites web des entreprises
-- **Scraping d'emails** : Extrayez automatiquement les adresses email depuis les sites web
-- **Envoi d'emails de prospection** : Envoyez des campagnes personnalisées à vos prospects
-- **Gestion de modèles** : Créez et gérez vos modèles de messages réutilisables
+- **Scraping complet et unifié** : Extraction automatique d'emails, personnes, téléphones, réseaux sociaux, technologies et images
+- **Analyse technique avancée** : Détection de frameworks, serveurs, hébergeurs, versions et vulnérabilités
+- **Analyse OSINT** : Recherche approfondie sur les responsables (LinkedIn, réseaux sociaux, actualités)
+- **Analyse Pentest** : Scan de sécurité et détection de vulnérabilités (nécessite outils externes)
+- **Envoi d'emails de prospection** : Campagnes personnalisées avec modèles réutilisables
+- **Suivi en temps réel** : WebSocket pour suivre la progression des analyses et scraping
+- **Base de données normalisée** : Stockage structuré avec OpenGraph, images, et métadonnées
 
 ## Installation
 
@@ -33,34 +37,88 @@ pip install -r requirements.txt
    
    Voir `env.example` pour la liste complète des variables.
 
-3. Lancer l'application :
+3. Installer et démarrer Redis (nécessaire pour Celery) :
+   
+   **Option 1 - Avec Docker (recommandé) :**
+   ```powershell
+   .\scripts\windows\start-redis.ps1
+   ```
+   
+   **Option 2 - Avec WSL :**
+   ```powershell
+   .\scripts\windows\start-redis-wsl.ps1
+   ```
+   
+   Voir [la documentation des scripts](docs/scripts/SCRIPTS.md) pour plus de détails.
+
+4. Démarrer Celery (dans un terminal séparé) :
+   
+   **Windows (PowerShell) :**
+   ```powershell
+   .\scripts\windows\start-celery.ps1
+   ```
+   
+   **Ou manuellement :**
+   ```bash
+   python run_celery.py
+   ```
+   
+   **Linux/Mac :**
+   ```bash
+   celery -A celery_app worker --loglevel=info
+   ```
+
+5. Lancer l'application :
 ```bash
-python app.py
+python app_new.py
 ```
 
 L'application sera accessible sur http://localhost:5000
 
+**Note** : L'application utilise Celery pour les tâches asynchrones (analyses, scraping) et WebSocket pour les mises à jour en temps réel. Redis doit être démarré avant de lancer l'application.
+
 ## Utilisation
 
-### Import Excel
+### Import et analyse Excel
 
 1. Allez sur "Importer Excel"
 2. Uploadez un fichier Excel avec au minimum les colonnes :
    - `name` : Nom de l'entreprise
    - `website` : URL du site web
    - `category` : Catégorie (optionnel)
-   - `address_1` : Adresse (optionnel)
-   - `phone_number` : Téléphone (optionnel)
+   - `address` : Adresse (optionnel)
+   - `phone` : Téléphone (optionnel)
 
-3. Prévisualisez les données
-4. Lancez l'analyse avec les paramètres souhaités
+3. Prévisualisez les données et vérifiez les avertissements de validation
+4. Lancez l'analyse avec les paramètres souhaités :
+   - **Nombre de threads** : Traitement parallèle (recommandé : 3-5)
+   - **Délai entre requêtes** : Évite les blocages (recommandé : 2 secondes)
+   - **Analyse OSINT** : Recherche approfondie sur les responsables (optionnel, ralentit l'analyse)
 
-### Scraping d'emails
+5. Suivez la progression en temps réel :
+   - Analyse des entreprises (extraction des informations de base)
+   - Scraping complet (emails, personnes, téléphones, réseaux sociaux, technologies, images)
+   
+6. Redirection automatique vers la liste des entreprises une fois terminé
 
-1. Allez sur "Scraper Emails"
+### Scraping complet d'un site
+
+1. Allez sur "Scraper Emails" ou "Analyse & Scraping"
 2. Entrez l'URL du site web à scraper
-3. Configurez les paramètres (profondeur, nombre de threads, temps max)
-4. Lancez le scraping
+3. Configurez les paramètres :
+   - **Profondeur max** : Nombre de niveaux de navigation (recommandé : 3)
+   - **Nombre de threads** : Traitement parallèle (recommandé : 5)
+   - **Temps max** : Limite de temps par site en secondes (recommandé : 300)
+   - **Pages max** : Limite de pages à scraper (recommandé : 50)
+
+4. Lancez le scraping et suivez la progression en temps réel
+5. Consultez les résultats détaillés par catégorie :
+   - Emails trouvés
+   - Personnes identifiées (noms, titres)
+   - Téléphones extraits
+   - Réseaux sociaux détectés
+   - Technologies utilisées
+   - Images du site
 
 ### Envoi d'emails
 
@@ -79,25 +137,101 @@ L'application sera accessible sur http://localhost:5000
 
 ```
 prospectlab/
-├── app.py                 # Application Flask principale
-├── config.py              # Configuration
-├── requirements.txt        # Dépendances Python
-├── docs/                   # Documentation
-│   ├── installation/       # Guides d'installation
-│   ├── configuration/      # Guides de configuration
-│   ├── guides/             # Guides d'utilisation
-│   ├── techniques/         # Documentation technique
-│   └── developpement/      # Notes de développement
-├── services/              # Services adaptés des scripts
-│   ├── entreprise_analyzer.py
-│   ├── email_scraper.py
-│   ├── email_sender.py
-│   └── template_manager.py
-├── templates/             # Templates HTML
-├── static/                # CSS et JS
-├── uploads/               # Fichiers uploadés
-└── exports/               # Fichiers exportés
+├── app_new.py             # Application Flask principale (architecture moderne)
+├── celery_app.py          # Configuration Celery pour les tâches asynchrones
+├── run_celery.py          # Wrapper pour lancer Celery avec gestion Ctrl+C
+├── config.py              # Configuration centralisée
+├── requirements.txt       # Dépendances Python
+├── prospectlab.db         # Base de données SQLite (générée automatiquement)
+├── docs/                  # Documentation complète
+│   ├── INDEX.md           # Index de la documentation
+│   ├── architecture/      # Documentation de l'architecture
+│   ├── installation/      # Guides d'installation
+│   ├── configuration/     # Guides de configuration
+│   ├── guides/            # Guides d'utilisation
+│   ├── techniques/        # Documentation technique (OSINT, Pentest, WebSocket)
+│   └── developpement/     # Notes de développement
+├── routes/                # Blueprints Flask (architecture modulaire)
+│   ├── main.py            # Routes principales (pages HTML)
+│   ├── api.py             # Routes API REST (entreprises, analyses)
+│   ├── api_extended.py    # Routes API étendues (scrapers, OSINT, Pentest)
+│   ├── upload.py          # Routes d'upload de fichiers
+│   ├── other.py           # Routes diverses (download, templates)
+│   └── websocket_handlers.py  # Handlers WebSocket (progression temps réel)
+├── tasks/                 # Tâches Celery (opérations asynchrones)
+│   ├── analysis_tasks.py  # Analyse d'entreprises depuis Excel
+│   ├── scraping_tasks.py  # Scraping complet (emails, personnes, phones, etc.)
+│   ├── email_tasks.py     # Envoi d'emails en masse
+│   ├── technical_analysis_tasks.py  # Analyse technique (frameworks, serveurs)
+│   └── technical_advanced_tasks.py  # Analyse avancée (OSINT, Pentest)
+├── services/              # Services métier (logique métier)
+│   ├── database.py        # Gestion base de données (ORM simplifié)
+│   ├── entreprise_analyzer.py  # Analyse d'entreprises
+│   ├── unified_scraper.py # Scraper unifié (emails, personnes, phones, social, tech, images)
+│   ├── email_sender.py    # Envoi d'emails SMTP
+│   ├── template_manager.py # Gestion des modèles d'emails
+│   ├── technical_analyzer.py  # Analyse technique de sites
+│   ├── technical_analyzer_advanced.py  # Analyse technique avancée
+│   ├── osint_analyzer.py  # Analyse OSINT (recherche responsables)
+│   ├── pentest_analyzer.py  # Analyse Pentest (sécurité)
+│   └── logging_config.py  # Configuration centralisée des logs
+├── utils/                 # Utilitaires
+│   └── helpers.py         # Fonctions utilitaires
+├── scripts/               # Scripts utilitaires
+│   ├── windows/           # Scripts PowerShell (Windows)
+│   │   ├── start-redis.ps1      # Démarrer Redis (Docker)
+│   │   ├── start-celery.ps1     # Démarrer Celery
+│   │   ├── stop-redis.ps1       # Arrêter Redis
+│   │   └── stop-celery.ps1      # Arrêter Celery
+│   └── linux/             # Scripts Bash (Linux)
+│       ├── install_osint_tools.sh   # Installer outils OSINT
+│       └── install_pentest_tools.sh # Installer outils Pentest
+├── templates/             # Templates HTML (Jinja2)
+├── static/                # Ressources statiques
+│   ├── css/               # Feuilles de style
+│   ├── js/                # Scripts JavaScript
+│   └── favicon/           # Favicons
+├── logs/                  # Logs de l'application (rotation automatique)
+│   ├── prospectlab.log    # Logs Flask
+│   ├── celery.log         # Logs Celery
+│   ├── analysis_tasks.log # Logs des tâches d'analyse
+│   └── scraping_tasks.log # Logs des tâches de scraping
+├── uploads/               # Fichiers uploadés (Excel)
+└── exports/               # Fichiers exportés (résultats)
 ```
+
+## Architecture
+
+L'application utilise une architecture moderne et modulaire :
+
+### Backend
+- **Flask** : Framework web Python avec architecture Blueprints
+- **Celery** : Exécution asynchrone des tâches longues (scraping, analyses)
+- **Redis** : Broker de messages pour Celery
+- **SQLite** : Base de données normalisée avec tables relationnelles
+- **Flask-SocketIO** : Communication bidirectionnelle en temps réel
+
+### Frontend
+- **HTML5/CSS3** : Interface responsive et moderne
+- **JavaScript vanilla** : Pas de framework lourd, code optimisé
+- **Socket.IO client** : Mises à jour en temps réel de la progression
+- **Fetch API** : Appels API REST asynchrones
+
+### Flux de traitement
+1. **Upload Excel** : Validation et prévisualisation
+2. **Analyse entreprises** : Extraction informations de base (tâche Celery)
+3. **Scraping complet** : Extraction détaillée (tâche Celery séparée)
+4. **Mise à jour temps réel** : WebSocket pour suivre la progression
+5. **Stockage BDD** : Sauvegarde normalisée avec relations
+6. **Affichage résultats** : Interface interactive avec modals
+
+### Logs centralisés
+Tous les logs sont centralisés dans le dossier `logs/` avec rotation automatique :
+- Logs Flask : `prospectlab.log`
+- Logs Celery : `celery.log`
+- Logs par tâche : `analysis_tasks.log`, `scraping_tasks.log`, etc.
+
+Pour plus de détails, voir [la documentation de l'architecture](docs/architecture/ARCHITECTURE.md).
 
 ## Analyse technique approfondie
 
@@ -133,6 +267,7 @@ La documentation complète est disponible dans le dossier `docs/`. Consultez [do
 - **Installation** : [docs/installation/INSTALLATION.md](docs/installation/INSTALLATION.md)
 - **Configuration** : [docs/configuration/CONFIGURATION.md](docs/configuration/CONFIGURATION.md)
 - **Outils OSINT/Pentest** : [docs/installation/INSTALLATION_TOOLS.md](docs/installation/INSTALLATION_TOOLS.md)
+- **Scripts utilitaires** : [docs/scripts/SCRIPTS.md](docs/scripts/SCRIPTS.md) - Scripts PowerShell et Bash
 
 ## Notes
 

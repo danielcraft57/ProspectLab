@@ -12,31 +12,31 @@
     <div class="feature-card">
         <h3>📊 Dashboard</h3>
         <p>Vue d'ensemble de vos analyses avec statistiques, graphiques et historique</p>
-        <a href="{{ url_for('dashboard') }}" class="btn btn-primary">Voir le dashboard</a>
+        <a href="{{ url_for('main.dashboard') }}" class="btn btn-primary">Voir le dashboard</a>
     </div>
 
     <div class="feature-card">
         <h3>📈 Analyse d'entreprises</h3>
         <p>Importez un fichier Excel et analysez automatiquement les sites web des entreprises pour extraire des informations clés</p>
-        <a href="{{ url_for('upload_file') }}" class="btn btn-primary">Commencer</a>
+        <a href="{{ url_for('upload.upload_file') }}" class="btn btn-primary">Commencer</a>
     </div>
 
     <div class="feature-card">
         <h3>📧 Scraping d'emails</h3>
         <p>Extrayez automatiquement les adresses email depuis les sites web de vos prospects</p>
-        <a href="{{ url_for('scrape_emails') }}" class="btn btn-primary">Scraper</a>
+        <a href="{{ url_for('other.scrape_emails') }}" class="btn btn-primary">Scraper</a>
     </div>
 
     <div class="feature-card">
         <h3>✉️ Envoi d'emails</h3>
         <p>Envoyez des campagnes de prospection personnalisées avec vos modèles de messages</p>
-        <a href="{{ url_for('send_emails') }}" class="btn btn-primary">Envoyer</a>
+        <a href="{{ url_for('other.send_emails') }}" class="btn btn-primary">Envoyer</a>
     </div>
 
     <div class="feature-card">
         <h3>📝 Gestion de modèles</h3>
         <p>Créez et gérez vos modèles de messages de prospection réutilisables</p>
-        <a href="{{ url_for('manage_templates') }}" class="btn btn-primary">Gérer</a>
+        <a href="{{ url_for('other.manage_templates') }}" class="btn btn-primary">Gérer</a>
     </div>
 </div>
 {% endblock %}

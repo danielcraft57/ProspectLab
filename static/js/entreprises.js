@@ -538,7 +538,15 @@
             loadPentestAnalysis(entrepriseId);
         } catch (error) {
             console.error('Erreur lors du chargement:', error);
-            modalBody.innerHTML = '<div class="error">Erreur lors du chargement des détails</div>';
+            modalBody.innerHTML = `
+                <div class="error">
+                    <p>Erreur lors du chargement des détails</p>
+                    <p style="font-size: 0.9rem; color: #666; margin-top: 0.5rem;">${error.message || 'Erreur inconnue'}</p>
+                    <button class="btn btn-secondary" style="margin-top: 1rem;" onclick="document.getElementById('entreprise-modal').style.display='none'">Fermer</button>
+                </div>
+            `;
+            // S'assurer que la modal peut quand même se fermer
+            setupModalInteractions();
         }
     }
     
@@ -589,27 +597,51 @@
                             ` : ''}
                             ${entreprise.og_data ? (() => {
                                 try {
-                                    const ogData = typeof entreprise.og_data === 'string' ? JSON.parse(entreprise.og_data) : entreprise.og_data;
-                                    if (ogData && Object.keys(ogData).length > 0) {
+                                    const ogData = entreprise.og_data;
+                                    if (ogData && (ogData.og_title || ogData.og_type || ogData.og_url || ogData.images?.length > 0)) {
                                         return `
                                             <div style="background: rgba(255,255,255,0.1); padding: 1.5rem; border-radius: 8px;">
-                                                <h3 style="color: white; margin: 0 0 1rem 0; font-size: 1.1rem;">📊 Données OpenGraph</h3>
+                                                <h3 style="color: white; margin: 0 0 1rem 0; font-size: 1.1rem;">Données OpenGraph</h3>
                                                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; color: white;">
-                                                    ${ogData.title ? `<div><strong>Titre:</strong> ${ogData.title}</div>` : ''}
-                                                    ${ogData.type ? `<div><strong>Type:</strong> <span style="background: rgba(255,255,255,0.2); padding: 0.25rem 0.5rem; border-radius: 4px;">${ogData.type}</span></div>` : ''}
-                                                    ${ogData.url ? `<div><strong>URL:</strong> <a href="${ogData.url}" target="_blank" style="color: #ffd700; text-decoration: underline;">${ogData.url}</a></div>` : ''}
-                                                    ${ogData.site_name ? `<div><strong>Site:</strong> ${ogData.site_name}</div>` : ''}
-                                                    ${ogData.description ? `<div style="grid-column: 1 / -1;"><strong>Description:</strong> ${ogData.description}</div>` : ''}
-                                                    ${ogData.locale ? `<div><strong>Locale:</strong> ${ogData.locale}</div>` : ''}
-                                                    ${ogData.updated_time ? `<div><strong>Mis à jour:</strong> ${ogData.updated_time}</div>` : ''}
-                                                    ${ogData.email ? `<div><strong>Email:</strong> <a href="mailto:${ogData.email}" style="color: #ffd700;">${ogData.email}</a></div>` : ''}
-                                                    ${ogData.phone_number ? `<div><strong>Téléphone:</strong> ${ogData.phone_number}</div>` : ''}
-                                                    ${ogData.street_address ? `<div><strong>Adresse:</strong> ${ogData.street_address}${ogData.locality ? ', ' + ogData.locality : ''}${ogData.postal_code ? ' ' + ogData.postal_code : ''}</div>` : ''}
+                                                    ${ogData.og_title ? `<div><strong>Titre:</strong> ${ogData.og_title}</div>` : ''}
+                                                    ${ogData.og_type ? `<div><strong>Type:</strong> <span style="background: rgba(255,255,255,0.2); padding: 0.25rem 0.5rem; border-radius: 4px;">${ogData.og_type}</span></div>` : ''}
+                                                    ${ogData.og_url ? `<div><strong>URL:</strong> <a href="${ogData.og_url}" target="_blank" style="color: #ffd700; text-decoration: underline;">${ogData.og_url}</a></div>` : ''}
+                                                    ${ogData.og_site_name ? `<div><strong>Site:</strong> ${ogData.og_site_name}</div>` : ''}
+                                                    ${ogData.og_description ? `<div style="grid-column: 1 / -1;"><strong>Description:</strong> ${ogData.og_description}</div>` : ''}
+                                                    ${ogData.og_locale ? `<div><strong>Locale:</strong> ${ogData.og_locale}</div>` : ''}
+                                                    ${ogData.locales_alternate && ogData.locales_alternate.length > 0 ? `<div><strong>Locales alternatives:</strong> ${ogData.locales_alternate.join(', ')}</div>` : ''}
+                                                    ${ogData.images && ogData.images.length > 0 ? `
+                                                        <div style="grid-column: 1 / -1;">
+                                                            <strong>Images OpenGraph:</strong>
+                                                            <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.5rem;">
+                                                                ${ogData.images.map(img => `
+                                                                    <div style="flex: 0 0 auto;">
+                                                                        <img src="${img.image_url}" alt="${img.alt_text || 'OG Image'}" 
+                                                                             style="max-width: 150px; max-height: 150px; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.2);"
+                                                                             onerror="this.style.display='none'">
+                                                                        ${img.width && img.height ? `<div style="font-size: 0.8rem; opacity: 0.8; margin-top: 0.25rem;">${img.width}x${img.height}</div>` : ''}
+                                                                    </div>
+                                                                `).join('')}
+                                                            </div>
+                                                        </div>
+                                                    ` : ''}
+                                                    ${ogData.videos && ogData.videos.length > 0 ? `
+                                                        <div style="grid-column: 1 / -1;">
+                                                            <strong>Vidéos OpenGraph:</strong> ${ogData.videos.length} vidéo(s)
+                                                        </div>
+                                                    ` : ''}
+                                                    ${ogData.audios && ogData.audios.length > 0 ? `
+                                                        <div style="grid-column: 1 / -1;">
+                                                            <strong>Audios OpenGraph:</strong> ${ogData.audios.length} audio(s)
+                                                        </div>
+                                                    ` : ''}
                                                 </div>
                                             </div>
                                         `;
                                     }
-                                } catch(e) {}
+                                } catch(e) {
+                                    console.error('Erreur affichage og_data:', e);
+                                }
                                 return '';
                             })() : ''}
                         </div>
@@ -867,32 +899,54 @@
         return `<span class="badge badge-${class_name}">${statut}</span>`;
     }
     
+    function closeEntrepriseModal() {
+        const modal = document.getElementById('entreprise-modal');
+        if (modal) {
+            modal.style.display = 'none';
+            currentModalEntrepriseId = null;
+            currentModalEntrepriseData = null;
+        }
+    }
+    
     function setupModalInteractions() {
         // Fermeture de la modale
         const closeBtn = document.getElementById('modal-close-btn');
         const closeFooterBtn = document.getElementById('modal-close-footer-btn');
         const modal = document.getElementById('entreprise-modal');
         
+        // Fermeture au clic sur le bouton X
         if (closeBtn) {
-            closeBtn.addEventListener('click', () => {
-                modal.style.display = 'none';
-            });
+            closeBtn.onclick = (e) => {
+                e.stopPropagation();
+                closeEntrepriseModal();
+            };
         }
         
+        // Fermeture au clic sur le bouton "Fermer"
         if (closeFooterBtn) {
-            closeFooterBtn.addEventListener('click', () => {
-                modal.style.display = 'none';
-            });
+            closeFooterBtn.onclick = (e) => {
+                e.stopPropagation();
+                closeEntrepriseModal();
+            };
         }
         
-        // Fermer en cliquant en dehors
+        // Fermeture au clic sur l'overlay (fond sombre)
         if (modal) {
-            modal.addEventListener('click', (e) => {
+            modal.onclick = (e) => {
                 if (e.target === modal) {
-                    modal.style.display = 'none';
+                    closeEntrepriseModal();
+                }
+            };
+        }
+        
+        // Fermeture avec la touche Escape
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && modal && modal.style.display !== 'none') {
+                closeEntrepriseModal();
                 }
             });
-        }
+        
+        // Fermer en cliquant en dehors (déjà géré par la fonction closeEntrepriseModal)
         
         // Onglets
         const tabBtns = document.querySelectorAll('.tab-btn');
@@ -1964,8 +2018,8 @@
                 console.log('Tous les scrapers récupérés:', scrapers);
                 console.log('Types de scrapers:', scrapers.map(s => s.scraper_type));
                 
-                // Prendre le scraper le plus récent de type "unified"
-                const unifiedScrapers = scrapers.filter(s => s.scraper_type === 'unified').sort((a, b) => {
+                // Prendre le scraper le plus récent de type "unified_scraper"
+                const unifiedScrapers = scrapers.filter(s => s.scraper_type === 'unified_scraper').sort((a, b) => {
                     const dateA = new Date(a.date_modification || a.date_creation || 0);
                     const dateB = new Date(b.date_modification || b.date_creation || 0);
                     return dateB - dateA;

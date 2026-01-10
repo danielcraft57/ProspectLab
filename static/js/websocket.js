@@ -97,6 +97,8 @@ class ProspectLabWebSocket {
         });
 
         this.socket.on('analysis_complete', (data) => {
+            // Cacher les messages finis côté front (demande utilisateur)
+            data.message = '';
             this.onAnalysisComplete(data);
         });
 

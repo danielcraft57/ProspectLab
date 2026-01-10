@@ -101,7 +101,7 @@ function deleteTemplate(templateId) {
         return;
     }
     
-    fetch('{{ url_for("manage_templates") }}', {
+    fetch('{{ url_for("other.manage_templates") }}', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -136,7 +136,7 @@ document.getElementById('template-form').addEventListener('submit', async functi
     };
     
     try {
-        const response = await fetch('{{ url_for("manage_templates") }}', {
+        const response = await fetch('{{ url_for("other.manage_templates") }}', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'

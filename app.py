@@ -23,18 +23,11 @@ sys.path.insert(0, str(Path(__file__).parent))
 from config import UPLOAD_FOLDER, EXPORT_FOLDER, ALLOWED_EXTENSIONS, MAX_CONTENT_LENGTH
 from services.entreprise_analyzer import EntrepriseAnalyzer
 from services.unified_scraper import UnifiedScraper
-import logging
-from logging.handlers import RotatingFileHandler
 
-# Configuration des logs
-logging.basicConfig(
-    level=logging.WARNING,  # Réduire le niveau de logging
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        RotatingFileHandler('prospectlab.log', encoding='utf-8', maxBytes=10*1024*1024, backupCount=1)  # Limiter à 10MB, 1 backup
-    ]
-)
+# Configuration des logs via le module centralisé
+from services.logging_config import setup_root_logger
+import logging
+
 from services.email_analyzer import EmailAnalyzer
 from services.email_sender import EmailSender
 from services.template_manager import TemplateManager
@@ -44,6 +37,9 @@ from services.osint_analyzer import OSINTAnalyzer
 from services.pentest_analyzer import PentestAnalyzer
 
 app = Flask(__name__)
+
+# Configurer les logs de l'application Flask (après création de l'app)
+setup_root_logger(app)
 app.config['UPLOAD_FOLDER'] = str(UPLOAD_FOLDER)
 app.config['EXPORT_FOLDER'] = str(EXPORT_FOLDER)
 app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
@@ -2449,5 +2445,22 @@ def api_export_data(format):
 
 if __name__ == '__main__':
     # Désactiver le reloader pour éviter les problèmes de socket sur Windows
+    import signal
+    import sys
+    
+    def signal_handler(sig, frame):
+        """Gère Ctrl+C proprement"""
+        print('\nArrêt de l\'application...')
+        sys.exit(0)
+    
+    # Enregistrer le gestionnaire de signal pour Windows
+    if sys.platform == 'win32':
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+    
+    try:
     socketio.run(app, debug=True, host='0.0.0.0', port=5000, use_reloader=False, allow_unsafe_werkzeug=True)
+    except KeyboardInterrupt:
+        print('\nArrêt de l\'application...')
+        sys.exit(0)
 

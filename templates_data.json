@@ -1,0 +1,22 @@
+{
+  "templates": [
+    {
+      "id": "cold_email_1",
+      "name": "Cold Email - Entreprise Locale",
+      "category": "cold_email",
+      "subject": "Développeur web freelance à Metz - Partenariat pour vos startups",
+      "content": "Bonjour,\n\nJe suis Loïc DANIEL, développeur web freelance basé à Metz, spécialisé en TypeScript, React et Node.js avec 10 ans d'expérience.\n\nJe vois que {entreprise} accompagne de nombreuses startups et entreprises innovantes. Beaucoup d'entre elles ont besoin de sites web modernes, d'applications web ou d'optimisation de leurs outils numériques.\n\nJe propose mes services aux entreprises que vous accompagnez :\n- Sites vitrines modernes et performants (600€)\n- Applications web sur mesure\n- Audit et optimisation de sites existants (800€)\n- Automatisation de processus (900€)\n\nPourriez-vous me mettre en relation avec des entreprises qui auraient des besoins en développement web ? Je peux également intervenir lors d'événements ou proposer des ateliers techniques.\n\nDisponible pour un échange de 15 minutes cette semaine pour discuter d'un éventuel partenariat ?\n\nCordialement,\nLoïc DANIEL\nDéveloppeur web freelance\ndanielcraft.fr",
+      "created_at": "2026-01-02T19:30:35.771405",
+      "updated_at": "2026-01-02T19:30:35.771405"
+    },
+    {
+      "id": "cold_email_2",
+      "name": "Cold Email - PME avec site obsolète",
+      "category": "cold_email",
+      "subject": "Modernisation de votre site web - {entreprise}",
+      "content": "Bonjour {nom},\n\nJ'ai remarqué que le site web de {entreprise} pourrait bénéficier d'une modernisation pour améliorer l'expérience utilisateur et les performances.\n\nEn tant que développeur web freelance spécialisé en TypeScript, React et Node.js, j'ai aidé plusieurs entreprises similaires à moderniser leur présence en ligne, avec des résultats concrets :\n- Amélioration de la vitesse de chargement (réduction de 40-60%)\n- Meilleure expérience utilisateur mobile\n- Optimisation SEO pour plus de visibilité\n\nJe propose un audit gratuit de votre site actuel pour identifier les opportunités d'amélioration.\n\nSeriez-vous disponible pour un échange de 15 minutes cette semaine ?\n\nCordialement,\nLoïc DANIEL\nDéveloppeur web freelance\ndanielcraft.fr",
+      "created_at": "2026-01-02T19:30:35.771405",
+      "updated_at": "2026-01-02T19:30:35.771405"
+    }
+  ]
+}

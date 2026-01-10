@@ -72,16 +72,45 @@ class OSINTAnalyzer:
         if shutil.which(tool_name):
             return True
         if self.wsl_available:
+            # Essayer d'abord avec l'utilisateur configuré
             try:
                 result = subprocess.run(
                     self.wsl_cmd_base + ['which', tool_name],
                     capture_output=True,
                     text=True,
-                    timeout=3
+                    timeout=5
                 )
-                return result.returncode == 0
+                if result.returncode == 0:
+                    return True
             except:
                 pass
+            
+            # Si ça échoue, essayer sans utilisateur
+            try:
+                result = subprocess.run(
+                    ['wsl', '-d', WSL_DISTRO, 'which', tool_name],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.returncode == 0:
+                    return True
+            except:
+                pass
+            
+            # Pour theharvester, vérifier aussi theHarvester (nouveau nom)
+            if tool_name == 'theharvester':
+                try:
+                    result = subprocess.run(
+                        self.wsl_cmd_base + ['which', 'theHarvester'],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    if result.returncode == 0:
+                        return True
+                except:
+                    pass
         return False
     
     def _clean_ansi_codes(self, text: str) -> str:
@@ -97,18 +126,29 @@ class OSINTAnalyzer:
         """
         Exécute une commande via WSL
         Optimisé pour réduire la surcharge de démarrage WSL
+        Gère les cas où l'utilisateur spécifié ne fonctionne pas
         """
         if not self.wsl_available:
             return {'error': 'WSL non disponible'}
         
+        # Remplacer theharvester par theHarvester si nécessaire
+        if len(command) > 0 and command[0] == 'theharvester':
+            # Vérifier si theHarvester existe
+            try:
+                result = subprocess.run(
+                    self.wsl_cmd_base + ['which', 'theHarvester'],
+                    capture_output=True,
+                    text=True,
+                    timeout=3
+                )
+                if result.returncode == 0:
+                    command[0] = 'theHarvester'
+            except:
+                pass
+        
+        # Essayer d'abord avec l'utilisateur configuré
         try:
-            # Utiliser directement subprocess.run avec les options optimisées
-            # WSL a une surcharge de démarrage, mais pour les commandes longues
-            # (comme sublist3r, amass), c'est acceptable car elles prennent déjà du temps
             cmd = self.wsl_cmd_base + command
-            
-            # Utiliser start_new_session=False pour éviter les problèmes de groupe
-            # Utiliser encoding='utf-8' avec errors='ignore' pour éviter les erreurs Unicode
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -127,7 +167,28 @@ class OSINTAnalyzer:
         except subprocess.TimeoutExpired:
             return {'error': 'Timeout'}
         except Exception as e:
-            return {'error': str(e)}
+            # Si ça échoue avec l'utilisateur, essayer sans
+            try:
+                cmd = ['wsl', '-d', WSL_DISTRO] + command
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    encoding='utf-8',
+                    errors='ignore',
+                    timeout=timeout,
+                    start_new_session=False
+                )
+                return {
+                    'success': result.returncode == 0,
+                    'stdout': result.stdout,
+                    'stderr': result.stderr,
+                    'returncode': result.returncode
+                }
+            except subprocess.TimeoutExpired:
+                return {'error': 'Timeout'}
+            except Exception as e2:
+                return {'error': str(e2)}
     
     def discover_subdomains(self, domain: str, progress_callback=None) -> List[str]:
         """
@@ -294,7 +355,7 @@ class OSINTAnalyzer:
                 progress_callback(f'Recherche d\'emails via {source}...')
             
             result = self._run_wsl_command([
-                'theharvester',
+                'theHarvester',
                 '-d', domain,
                 '-b', source,
                 '-l', '100'  # Augmenter le nombre de résultats
@@ -357,7 +418,7 @@ class OSINTAnalyzer:
             progress_callback('Recherche de personnes sur LinkedIn...')
         
         result = self._run_wsl_command([
-            'theharvester',
+            'theHarvester',
             '-d', domain,
             '-b', 'linkedin',
             '-l', '200'
