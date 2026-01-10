@@ -62,7 +62,8 @@ class UnifiedScraper:
         self.phones: Set[str] = set()
         self.social_links: Dict[str, List[Dict]] = {}
         self.technologies: Dict[str, List[str]] = {}
-        self.metadata: Dict = {}
+        self.metadata: Dict = {}  # Métadonnées de la page d'accueil (pour compatibilité)
+        self.og_data_by_page: Dict[str, Dict] = {}  # OG de toutes les pages scrapées {page_url: og_tags}
         self.images: List[Dict] = []  # Liste des images trouvées avec {url, alt, page_url, width, height}
         
         # État du scraping
@@ -890,10 +891,18 @@ class UnifiedScraper:
             if depth == 0:
                 self.detect_technologies(text, response.headers)
             
-            # 6. Extraire les métadonnées (seulement sur la page d'accueil)
-            if depth == 0:
-                with self.lock:
-                    self.metadata = self.extract_metadata(soup)
+            # 6. Extraire les métadonnées de toutes les pages
+            page_metadata = self.extract_metadata(soup)
+            
+            with self.lock:
+                # Garder les métadonnées de la page d'accueil pour compatibilité
+                if depth == 0:
+                    self.metadata = page_metadata
+                
+                # Collecter les OG de toutes les pages
+                og_tags = page_metadata.get('open_graph', {})
+                if og_tags:  # Ne stocker que si des OG sont présents
+                    self.og_data_by_page[url] = og_tags
             
             # 7. Extraire les images depuis les balises <img> du HTML
             page_images = self.extract_images_from_page(soup, url)
@@ -1056,6 +1065,11 @@ class UnifiedScraper:
         # Générer le résumé de l'entreprise
         resume = self.generate_company_summary()
         
+        # Log final du nombre de pages avec OG collectées
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f'[UnifiedScraper] Scraping terminé pour {self.base_url}: {len(self.og_data_by_page)} page(s) avec OG collectées sur {len(self.visited_urls)} page(s) visitées')
+        
         return {
             'emails': list(self.emails),
             'people': self.people,
@@ -1063,6 +1077,7 @@ class UnifiedScraper:
             'social_links': self.social_links,
             'technologies': self.technologies,
             'metadata': self.metadata,
+            'og_data_by_page': self.og_data_by_page,  # OG de toutes les pages scrapées
             'images': self.images,  # Images extraites depuis les balises <img>
             'visited_urls': list(self.visited_urls),
             'duration': duration,
@@ -1072,6 +1087,7 @@ class UnifiedScraper:
             'total_social_platforms': len(self.social_links),
             'total_technologies': sum(len(v) if isinstance(v, list) else 1 for v in self.technologies.values()),
             'total_images': len(self.images),
+            'total_og_pages': len(self.og_data_by_page),  # Nombre de pages avec OG
             'people_with_email': len([p for p in self.people if p.get('email')]),
             'people_with_linkedin': len([p for p in self.people if p.get('linkedin_url')]),
             'people_with_title': len([p for p in self.people if p.get('title')]),

@@ -6,6 +6,7 @@ Application Flask professionnelle pour la prospection et l'analyse approfondie d
 
 - **Import et analyse d'entreprises** : Importez un fichier Excel et analysez automatiquement les sites web des entreprises
 - **Scraping complet et unifié** : Extraction automatique d'emails, personnes, téléphones, réseaux sociaux, technologies et images
+- **Données OpenGraph multi-pages** : Collecte des métadonnées OG de toutes les pages visitées, affichées dans l'onglet "Pages"
 - **Analyse technique avancée** : Détection de frameworks, serveurs, hébergeurs, versions et vulnérabilités
 - **Analyse OSINT** : Recherche approfondie sur les responsables (LinkedIn, réseaux sociaux, actualités)
 - **Analyse Pentest** : Scan de sécurité et détection de vulnérabilités (nécessite outils externes)
@@ -96,8 +97,11 @@ L'application sera accessible sur http://localhost:5000
    - **Analyse OSINT** : Recherche approfondie sur les responsables (optionnel, ralentit l'analyse)
 
 5. Suivez la progression en temps réel :
+   - Barre de progression globale (X / Y entreprises)
+   - Statistiques de l'entreprise actuelle
+   - Statistiques cumulées globales
    - Analyse des entreprises (extraction des informations de base)
-   - Scraping complet (emails, personnes, téléphones, réseaux sociaux, technologies, images)
+   - Scraping complet (emails, personnes, téléphones, réseaux sociaux, technologies, images, métadonnées OG)
    
 6. Redirection automatique vers la liste des entreprises une fois terminé
 
@@ -119,6 +123,7 @@ L'application sera accessible sur http://localhost:5000
    - Réseaux sociaux détectés
    - Technologies utilisées
    - Images du site
+   - Métadonnées OpenGraph de toutes les pages visitées (onglet "Pages")
 
 ### Envoi d'emails
 
@@ -266,6 +271,9 @@ La documentation complète est disponible dans le dossier `docs/`. Consultez [do
 
 - **Installation** : [docs/installation/INSTALLATION.md](docs/installation/INSTALLATION.md)
 - **Configuration** : [docs/configuration/CONFIGURATION.md](docs/configuration/CONFIGURATION.md)
+- **Interface utilisateur** : [docs/guides/INTERFACE_UTILISATEUR.md](docs/guides/INTERFACE_UTILISATEUR.md) - Guide complet de l'interface
+- **Scraping** : [docs/SCRAPING.md](docs/SCRAPING.md) - Documentation du système de scraping unifié
+- **Celery** : [docs/CELERY.md](docs/CELERY.md) - Configuration et utilisation de Celery
 - **Outils OSINT/Pentest** : [docs/installation/INSTALLATION_TOOLS.md](docs/installation/INSTALLATION_TOOLS.md)
 - **Scripts utilitaires** : [docs/scripts/SCRIPTS.md](docs/scripts/SCRIPTS.md) - Scripts PowerShell et Bash
 

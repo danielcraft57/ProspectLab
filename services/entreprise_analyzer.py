@@ -711,8 +711,8 @@ class EntrepriseAnalyzer:
                             contact_soup = BeautifulSoup(contact_response.text, 'html.parser')
                             contact_text = contact_soup.get_text()
                     except Exception as e:
-                contact_soup = None
-                contact_text = ''
+                        contact_soup = None
+                        contact_text = ''
             
             # Extraire toutes les informations
             logo = self.extract_logo(soup, url)

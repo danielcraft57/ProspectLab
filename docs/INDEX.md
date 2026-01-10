@@ -21,6 +21,7 @@ Bienvenue dans la documentation de ProspectLab. Cette documentation est organis√
 
 ## Guides d'utilisation
 
+- [Interface utilisateur](guides/INTERFACE_UTILISATEUR.md) - Guide complet de l'interface utilisateur
 - [Crit√®res de recherche Google Maps](guides/CRITERES_RECHERCHE_GOOGLE_MAPS.md) - Guide pour les recherches Google Maps
 - [Recommandations AJAX](guides/RECOMMANDATIONS_AJAX.md) - Bonnes pratiques pour l'utilisation d'AJAX
 

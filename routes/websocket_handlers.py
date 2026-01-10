@@ -189,6 +189,8 @@ def register_websocket_handlers(socketio, app):
                                                                         'message': meta_scraping.get('message', ''),
                                                                         'entreprise': meta_scraping.get('entreprise'),
                                                                         'url': meta_scraping.get('url'),
+                                                                        'current': meta_scraping.get('current', 0),
+                                                                        'total': meta_scraping.get('total', 0),
                                                                         'total_emails': meta_scraping.get('total_emails', 0),
                                                                         'total_people': meta_scraping.get('total_people', 0),
                                                                         'total_phones': meta_scraping.get('total_phones', 0),

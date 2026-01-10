@@ -29,7 +29,6 @@ def _safe_update_state(task, task_id, **kwargs):
     try:
         effective_id = getattr(task.request, 'id', None) or task_id
         if not effective_id:
-            logger.debug('update_state ignoré (task_id manquant)')
             return
         task.update_state(task_id=effective_id, **kwargs)
     except Exception as exc:
@@ -265,19 +264,28 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 3, max_workers
                 else:
                     emails_count = people_count = phones_count = social_count = tech_count = images_count = 0
                 
-                # Afficher seulement les compteurs de cette entreprise (pas les totaux globaux)
-                # pour éviter les mélanges entre entreprises en parallèle
-                current_stats = {
-                    'total_emails': global_stats['total_emails'] + emails_count,
-                    'total_people': global_stats['total_people'] + people_count,
-                    'total_phones': global_stats['total_phones'] + phones_count,
-                    'total_social_platforms': global_stats['total_social_platforms'] + social_count,
-                    'total_technologies': global_stats['total_technologies'] + tech_count,
-                    'total_images': global_stats['total_images'] + images_count,
-                }
-                # Message avec seulement les compteurs de cette entreprise
-                message_with_counters = f"{message} - {emails_count} emails, {people_count} personnes, {phones_count} téléphones, {social_count} réseaux sociaux, {tech_count} technos, {images_count} images"
-                update_progress(message_with_counters, current_index, entreprise_name, website_str, current_stats)
+                # Formater le message avec les compteurs de cette entreprise uniquement
+                # Les totaux globaux sont passés séparément dans global_stats
+                current_stats_str = f"{emails_count} emails, {people_count} personnes, {phones_count} téléphones, {social_count} réseaux sociaux"
+                if tech_count > 0:
+                    current_stats_str += f", {tech_count} technos"
+                if images_count > 0:
+                    current_stats_str += f", {images_count} images"
+                
+                # Message formaté : entreprise actuelle | total cumulé
+                total_stats_str = f"{global_stats['total_emails']} emails, {global_stats['total_people']} personnes, {global_stats['total_phones']} téléphones"
+                if global_stats['total_social_platforms'] > 0:
+                    total_stats_str += f", {global_stats['total_social_platforms']} réseaux sociaux"
+                if global_stats['total_technologies'] > 0:
+                    total_stats_str += f", {global_stats['total_technologies']} technos"
+                if global_stats['total_images'] > 0:
+                    total_stats_str += f", {global_stats['total_images']} images"
+                
+                message_with_counters = f"{message} - {current_stats_str} | Total: {total_stats_str}"
+                
+                # Utiliser les totaux globaux actuels (sans ajouter les compteurs de cette entreprise)
+                # car cette entreprise n'est pas encore terminée
+                update_progress(message_with_counters, current_index, entreprise_name, website_str, global_stats)
             except Exception as e:
                 logger.warning(f'Erreur dans progress_callback pour {website_str}: {e}')
         
@@ -293,17 +301,6 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 3, max_workers
             
             results = scraper.scrape()
             
-            # Log des résultats pour déboguer
-            logger.debug(
-                f'[Scraping Analyse {analysis_id}] Résultats scraper pour {entreprise_name}: '
-                f'emails={len(results.get("emails", []))}, '
-                f'people={len(results.get("people", []))}, '
-                f'phones={len(results.get("phones", []))}, '
-                f'social={len(results.get("social_links", {}))}, '
-                f'technologies={len(results.get("technologies", {}))}, '
-                f'images={len(results.get("images", []))}, '
-                f'metadata={bool(results.get("metadata"))}'
-            )
             
             # Sauvegarder les résultats complets en BDD
             try:
@@ -318,16 +315,6 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 3, max_workers
                 metadata_value = results.get('metadata', {})
                 metadata_total = len(metadata_value) if isinstance(metadata_value, dict) else 0
                 
-                # Log avant sauvegarde
-                logger.debug(
-                    f'[Scraping Analyse {analysis_id}] Sauvegarde scraper pour entreprise {entreprise_id}: '
-                    f'emails={results.get("total_emails", 0)}, '
-                    f'people={results.get("total_people", 0)}, '
-                    f'phones={results.get("total_phones", 0)}, '
-                    f'social={results.get("total_social_platforms", 0)}, '
-                    f'technologies={results.get("total_technologies", 0)}, '
-                    f'images={results.get("total_images", 0)}'
-                )
                 
                 scraper_id = db.save_scraper(
                     entreprise_id=entreprise_id,
@@ -369,7 +356,23 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 3, max_workers
                     logo = icons.get('logo') if isinstance(icons, dict) else None
                     favicon = icons.get('favicon') if isinstance(icons, dict) else None
                     og_image = icons.get('og_image') if isinstance(icons, dict) else None
-                    og_tags = metadata_dict.get('open_graph', {}) if isinstance(metadata_dict, dict) else {}
+                    
+                    # Récupérer les OG de toutes les pages scrapées
+                    og_data_by_page = results.get('og_data_by_page', {})
+                    logger.info(f'[Scraping Analyse {analysis_id}] OG récupérés pour {entreprise_name}: {len(og_data_by_page)} page(s) depuis le scraper')
+                    
+                    if not og_data_by_page:
+                        # Fallback : utiliser les OG de la page d'accueil si disponibles
+                        og_tags = metadata_dict.get('open_graph', {}) if isinstance(metadata_dict, dict) else {}
+                        if og_tags:
+                            og_data_by_page = {website_str: og_tags}
+                            logger.info(f'[Scraping Analyse {analysis_id}] Utilisation des OG de la page d\'accueil pour {entreprise_name} (fallback)')
+                        else:
+                            logger.warning(f'[Scraping Analyse {analysis_id}] ⚠ Aucun OG trouvé pour {entreprise_name} (ni dans og_data_by_page ni dans metadata)')
+                    else:
+                        # Log des URLs des pages avec OG
+                        page_urls = list(og_data_by_page.keys())
+                        logger.info(f'[Scraping Analyse {analysis_id}] Pages avec OG pour {entreprise_name}: {len(page_urls)} page(s) - {page_urls[:3]}...' if len(page_urls) > 3 else f'[Scraping Analyse {analysis_id}] Pages avec OG pour {entreprise_name}: {page_urls}')
                     
                     # Convertir les URLs relatives en absolues si nécessaire
                     if website_str:
@@ -390,9 +393,21 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 3, max_workers
                         WHERE id = ?
                     ''', (resume, logo, favicon, og_image, entreprise_id))
                     
-                    # Sauvegarder les données OpenGraph dans les tables normalisées
-                    if og_tags:
-                        db._save_og_data_in_transaction(cursor_update, entreprise_id, og_tags)
+                    # Sauvegarder toutes les données OpenGraph de toutes les pages dans les tables normalisées
+                    if og_data_by_page:
+                        logger.info(
+                            f'[Scraping Analyse {analysis_id}] Sauvegarde de {len(og_data_by_page)} page(s) avec OG pour entreprise {entreprise_id} ({entreprise_name})'
+                        )
+                        try:
+                            db._save_multiple_og_data_in_transaction(cursor_update, entreprise_id, og_data_by_page)
+                            logger.info(
+                                f'[Scraping Analyse {analysis_id}] ✓ OG sauvegardés avec succès pour entreprise {entreprise_id}: {len(og_data_by_page)} page(s)'
+                            )
+                        except Exception as og_error:
+                            logger.error(
+                                f'[Scraping Analyse {analysis_id}] ✗ Erreur lors de la sauvegarde des OG pour entreprise {entreprise_id}: {og_error}',
+                                exc_info=True
+                            )
                     
                     conn_update.commit()
                     conn_update.close()
@@ -400,7 +415,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 3, max_workers
                     logger.info(
                         f'Entreprise {entreprise_id} mise à jour: resume={bool(resume)}, '
                         f'logo={bool(logo)}, favicon={bool(favicon)}, og_image={bool(og_image)}, '
-                        f'og_tags={bool(og_tags)}'
+                        f'og_pages={len(og_data_by_page)}'
                     )
                 except Exception as e:
                     logger.error(f'Erreur lors de la mise à jour de l\'entreprise {entreprise_id} (resume/logo/favicon/og_data): {e}', exc_info=True)

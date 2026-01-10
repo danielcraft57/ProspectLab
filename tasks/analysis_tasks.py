@@ -31,7 +31,6 @@ def _safe_update_state(task, task_id, **kwargs):
     try:
         effective_id = getattr(task.request, 'id', None) or task_id
         if not effective_id:
-            logger.debug('update_state ignoré (task_id manquant)')
             return
         task.update_state(task_id=effective_id, **kwargs)
     except Exception as exc:
@@ -125,8 +124,6 @@ def analyze_entreprise_task(self, filepath, output_path, max_workers=3, delay=2.
 
                 # Exposer le callback pour EntrepriseAnalyzer.scrape_website
                 self.progress_callback = scraper_progress
-
-                logger.debug('ProgressAnalyzer initialisé')
         
             def process_all(self):
                 logger.info('Chargement du fichier Excel...')
@@ -179,12 +176,10 @@ def analyze_entreprise_task(self, filepath, output_path, max_workers=3, delay=2.
                                 'message': f'Analyse de {row.get("name", "entreprise")} ({percentage}%)'
                             }
                         )
-                        logger.debug(f'Progression {self.current_index}/{self.total} ({percentage}%)')
                     except Exception as e:
                         logger.warning(f'Erreur lors de la mise à jour de progression: {e}')
                 
                 # Analyser l'entreprise
-                logger.debug(f'Début analyse ligne {idx} ({row.get("name", "inconnu")})')
                 try:
                     result = super().analyze_entreprise(row)
                 except Exception as exc:
@@ -193,7 +188,6 @@ def analyze_entreprise_task(self, filepath, output_path, max_workers=3, delay=2.
                         exc_info=True
                     )
                     result = {'name': row.get('name'), 'error': str(exc)}
-                logger.info(f'Résultat ligne {idx}: {result}')
                 
                 # Sauvegarder l'entreprise dans la BDD (comme l'ancien système)
                 if result and not result.get('error'):
@@ -202,7 +196,6 @@ def analyze_entreprise_task(self, filepath, output_path, max_workers=3, delay=2.
                         if database:
                             # Préparer les données pour la sauvegarde
                             row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
-                            logger.info(f'Sauvegarde ligne {idx} name={row_dict.get("name")} website={row_dict.get("website")}')
                             # Fusionner avec les résultats de l'analyse
                             row_dict.update(result)
                             
@@ -223,16 +216,12 @@ def analyze_entreprise_task(self, filepath, output_path, max_workers=3, delay=2.
                                     with stats_lock:
                                         if entreprise_id in existing_ids_before:
                                             stats['duplicates'] = stats.get('duplicates', 0) + 1
-                                            logger.info(f'Doublon détecté pour {row.get("name")} id={entreprise_id}')
                                         else:
                                             stats['inserted'] = stats.get('inserted', 0) + 1
-                                            logger.info(f'Insertion entreprise id={entreprise_id} name={row.get("name")}')
                                             existing_ids_before.add(entreprise_id)
                             else:
-                                logger.info(f'Pas d\'insertion (save_entreprise a renvoyé None) pour {row.get("name")}')
-                            
-                            # Sauvegarder aussi les données du scraper global (emails, people, etc.)
-                            scraper_data = result.get('scraper_data')
+                                # Sauvegarder aussi les données du scraper global (emails, people, etc.)
+                                scraper_data = result.get('scraper_data')
                             if scraper_data and entreprise_id:
                                 try:
                                     social_profiles = scraper_data.get('social_media') or scraper_data.get('social_links')
@@ -266,7 +255,6 @@ def analyze_entreprise_task(self, filepath, output_path, max_workers=3, delay=2.
                                         total_images=scraper_data.get('total_images', 0),
                                         duration=scraper_data.get('duration', 0)
                                     )
-                                    logger.debug(f'Sauvegarde scraper OK pour entreprise id={entreprise_id}')
                                 except Exception as e:
                                     logger.warning(f'Erreur lors de la sauvegarde du scraper pour {row.get("name", "inconnu")}: {e}')
                     except Exception as e:

@@ -104,6 +104,19 @@ results = scraper.scrape()
             'og:description': 'Description OpenGraph',
             'og:image': 'https://example.com/og-image.jpg',
             ...
+        },
+        'og_data_by_page': {
+            'https://example.com/': {
+                'og:title': 'Titre page accueil',
+                'og:description': 'Description page accueil',
+                ...
+            },
+            'https://example.com/about': {
+                'og:title': 'Titre page a propos',
+                'og:description': 'Description page a propos',
+                ...
+            },
+            ...
         }
     },
     'resume': 'Resume automatique du site...',
@@ -147,7 +160,10 @@ Technologies utilisees par categorie.
 Images du site avec dimensions et alt text.
 
 #### entreprise_og_data
-Donnees OpenGraph normalisees (titre, description, type, etc.).
+Donnees OpenGraph normalisees (titre, description, type, etc.). Une entree par page scrapee, permettant de stocker les metadonnees de toutes les pages visitees, pas seulement la page d'accueil. Chaque entree contient :
+- `entreprise_id` : Reference vers l'entreprise
+- `page_url` : URL de la page source des donnees OG
+- `og_title`, `og_description`, `og_type`, `og_url`, `og_site_name`, `og_locale` : Metadonnees principales
 
 #### entreprise_og_images
 Images OpenGraph avec dimensions et type.
@@ -223,6 +239,40 @@ socket.on('scraping_complete', function(data) {
     console.log('Total emails:', data.total_emails);
     // Redirection automatique vers /entreprises
 });
+```
+
+## Donnees OpenGraph multi-pages
+
+Le scraper collecte les donnees OpenGraph de **toutes les pages visitees**, pas seulement la page d'accueil. Cela permet d'obtenir une vision complete des metadonnees du site :
+
+- Chaque page scrapee peut avoir ses propres metadonnees OG
+- Les donnees sont stockees dans `entreprise_og_data` avec le champ `page_url` pour identifier la source
+- L'interface utilisateur affiche ces donnees dans l'onglet "Pages" de la fiche entreprise
+- Les images OG sont liees a chaque entree via `entreprise_og_images`
+
+### Structure des donnees OG
+
+```python
+{
+    'page_url': 'https://example.com/page',
+    'og_title': 'Titre de la page',
+    'og_description': 'Description de la page',
+    'og_type': 'website',
+    'og_url': 'https://example.com/page',
+    'og_site_name': 'Nom du site',
+    'og_locale': 'fr_FR',
+    'images': [
+        {
+            'image_url': 'https://example.com/image.jpg',
+            'width': 1200,
+            'height': 630,
+            'alt_text': 'Description de l image'
+        }
+    ],
+    'videos': [...],
+    'audios': [...],
+    'locales_alternate': ['en_US', 'es_ES']
+}
 ```
 
 ## Limitations

@@ -163,7 +163,6 @@
             });
             
             window.wsManager.socket.on('scraping_complete', (data) => {
-                console.log('Scraping terminé, données reçues:', data);
                 updateProgress(100, 'Analyse terminée');
                 showStatus(`Analyse terminée avec succès ! ${data.total_emails || 0} emails, ${data.total_people || 0} personnes, ${data.total_phones || 0} téléphones`, 'success');
                 

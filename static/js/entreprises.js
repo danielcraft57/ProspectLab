@@ -559,6 +559,7 @@
                 <div class="tabs-header">
                     <button class="tab-btn active" data-tab="info">Info</button>
                     <button class="tab-btn" data-tab="images">Images</button>
+                    <button class="tab-btn" data-tab="pages">Pages</button>
                     <button class="tab-btn" data-tab="scraping">Résultats scraping</button>
                     <button class="tab-btn" data-tab="technique">Analyse technique</button>
                     <button class="tab-btn" data-tab="osint">Analyse OSINT</button>
@@ -595,55 +596,6 @@
                                 </div>
                             </div>
                             ` : ''}
-                            ${entreprise.og_data ? (() => {
-                                try {
-                                    const ogData = entreprise.og_data;
-                                    if (ogData && (ogData.og_title || ogData.og_type || ogData.og_url || ogData.images?.length > 0)) {
-                                        return `
-                                            <div style="background: rgba(255,255,255,0.1); padding: 1.5rem; border-radius: 8px;">
-                                                <h3 style="color: white; margin: 0 0 1rem 0; font-size: 1.1rem;">Données OpenGraph</h3>
-                                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; color: white;">
-                                                    ${ogData.og_title ? `<div><strong>Titre:</strong> ${ogData.og_title}</div>` : ''}
-                                                    ${ogData.og_type ? `<div><strong>Type:</strong> <span style="background: rgba(255,255,255,0.2); padding: 0.25rem 0.5rem; border-radius: 4px;">${ogData.og_type}</span></div>` : ''}
-                                                    ${ogData.og_url ? `<div><strong>URL:</strong> <a href="${ogData.og_url}" target="_blank" style="color: #ffd700; text-decoration: underline;">${ogData.og_url}</a></div>` : ''}
-                                                    ${ogData.og_site_name ? `<div><strong>Site:</strong> ${ogData.og_site_name}</div>` : ''}
-                                                    ${ogData.og_description ? `<div style="grid-column: 1 / -1;"><strong>Description:</strong> ${ogData.og_description}</div>` : ''}
-                                                    ${ogData.og_locale ? `<div><strong>Locale:</strong> ${ogData.og_locale}</div>` : ''}
-                                                    ${ogData.locales_alternate && ogData.locales_alternate.length > 0 ? `<div><strong>Locales alternatives:</strong> ${ogData.locales_alternate.join(', ')}</div>` : ''}
-                                                    ${ogData.images && ogData.images.length > 0 ? `
-                                                        <div style="grid-column: 1 / -1;">
-                                                            <strong>Images OpenGraph:</strong>
-                                                            <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.5rem;">
-                                                                ${ogData.images.map(img => `
-                                                                    <div style="flex: 0 0 auto;">
-                                                                        <img src="${img.image_url}" alt="${img.alt_text || 'OG Image'}" 
-                                                                             style="max-width: 150px; max-height: 150px; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.2);"
-                                                                             onerror="this.style.display='none'">
-                                                                        ${img.width && img.height ? `<div style="font-size: 0.8rem; opacity: 0.8; margin-top: 0.25rem;">${img.width}x${img.height}</div>` : ''}
-                                                                    </div>
-                                                                `).join('')}
-                                                            </div>
-                                                        </div>
-                                                    ` : ''}
-                                                    ${ogData.videos && ogData.videos.length > 0 ? `
-                                                        <div style="grid-column: 1 / -1;">
-                                                            <strong>Vidéos OpenGraph:</strong> ${ogData.videos.length} vidéo(s)
-                                                        </div>
-                                                    ` : ''}
-                                                    ${ogData.audios && ogData.audios.length > 0 ? `
-                                                        <div style="grid-column: 1 / -1;">
-                                                            <strong>Audios OpenGraph:</strong> ${ogData.audios.length} audio(s)
-                                                        </div>
-                                                    ` : ''}
-                                                </div>
-                                            </div>
-                                        `;
-                                    }
-                                } catch(e) {
-                                    console.error('Erreur affichage og_data:', e);
-                                }
-                                return '';
-                            })() : ''}
                         </div>
                         ` : ''}
                         ${entreprise.resume ? `
@@ -687,6 +639,108 @@
                     <div class="tab-panel" id="tab-images">
                         <div id="entreprise-images-container" class="images-tab-content">
                             <p class="empty-state">Aucune image disponible pour le moment. Lancez un scraping pour récupérer les visuels du site.</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Onglet Pages (OpenGraph) -->
+                    <div class="tab-panel" id="tab-pages">
+                        <div id="entreprise-pages-container" class="pages-tab-content">
+                            ${entreprise.og_data ? (() => {
+                                try {
+                                    const ogDataList = Array.isArray(entreprise.og_data) ? entreprise.og_data : [entreprise.og_data];
+                                    const validOgData = ogDataList.filter(ogData => ogData && (ogData.og_title || ogData.og_type || ogData.og_url || ogData.page_url || (ogData.images && ogData.images.length > 0)));
+                                    
+                                    if (validOgData.length > 0) {
+                                        return validOgData.map((ogData, idx) => {
+                                            const hasImage = ogData.images && ogData.images.length > 0 && ogData.images[0].image_url;
+                                            return `
+                                                <div class="page-card" style="background: white; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-left: 4px solid #667eea;">
+                                                    <div style="display: flex; gap: 1.5rem; align-items: flex-start;">
+                                                        ${hasImage ? `
+                                                        <div style="flex: 0 0 200px;">
+                                                            <img src="${ogData.images[0].image_url}" alt="${ogData.og_title || 'Page preview'}" 
+                                                                 style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.1);"
+                                                                 onerror="this.style.display='none'">
+                                                        </div>
+                                                        ` : ''}
+                                                        <div style="flex: 1; min-width: 0;">
+                                                            ${ogData.page_url ? `
+                                                            <div style="margin-bottom: 0.75rem;">
+                                                                <a href="${ogData.page_url}" target="_blank" 
+                                                                   style="color: #667eea; font-weight: 600; font-size: 0.9rem; text-decoration: none; word-break: break-all; display: inline-block; max-width: 100%;">
+                                                                    ${ogData.page_url}
+                                                                </a>
+                                                            </div>
+                                                            ` : ''}
+                                                            ${ogData.og_title ? `
+                                                            <h3 style="margin: 0 0 0.75rem 0; color: #2c3e50; font-size: 1.2rem; font-weight: 600;">
+                                                                ${ogData.og_title}
+                                                            </h3>
+                                                            ` : ''}
+                                                            ${ogData.og_description ? `
+                                                            <p style="margin: 0 0 1rem 0; color: #555; line-height: 1.6; font-size: 0.95rem;">
+                                                                ${ogData.og_description}
+                                                            </p>
+                                                            ` : ''}
+                                                            <div style="display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 1rem;">
+                                                                ${ogData.og_type ? `
+                                                                <span style="background: #e8f0fe; color: #1967d2; padding: 0.35rem 0.75rem; border-radius: 6px; font-size: 0.85rem; font-weight: 500;">
+                                                                    ${ogData.og_type}
+                                                                </span>
+                                                                ` : ''}
+                                                                ${ogData.og_site_name ? `
+                                                                <span style="background: #f0f4f8; color: #4a5568; padding: 0.35rem 0.75rem; border-radius: 6px; font-size: 0.85rem;">
+                                                                    Site: ${ogData.og_site_name}
+                                                                </span>
+                                                                ` : ''}
+                                                                ${ogData.og_locale ? `
+                                                                <span style="background: #f0f4f8; color: #4a5568; padding: 0.35rem 0.75rem; border-radius: 6px; font-size: 0.85rem;">
+                                                                    ${ogData.og_locale}
+                                                                </span>
+                                                                ` : ''}
+                                                            </div>
+                                                            ${ogData.images && ogData.images.length > 1 ? `
+                                                            <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e2e8f0;">
+                                                                <div style="font-size: 0.85rem; color: #718096; margin-bottom: 0.5rem;">
+                                                                    ${ogData.images.length} image(s) supplémentaire(s)
+                                                                </div>
+                                                                <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+                                                                    ${ogData.images.slice(1).map(img => `
+                                                                        <img src="${img.image_url}" alt="${img.alt_text || 'OG Image'}" 
+                                                                             style="max-width: 100px; max-height: 100px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer;"
+                                                                             onclick="window.open('${img.image_url}', '_blank')"
+                                                                             onerror="this.style.display='none'"
+                                                                             title="${img.alt_text || ''}">
+                                                                    `).join('')}
+                                                                </div>
+                                                            </div>
+                                                            ` : ''}
+                                                            ${(ogData.videos && ogData.videos.length > 0) || (ogData.audios && ogData.audios.length > 0) ? `
+                                                            <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e2e8f0; display: flex; gap: 1rem; flex-wrap: wrap;">
+                                                                ${ogData.videos && ogData.videos.length > 0 ? `
+                                                                <span style="font-size: 0.85rem; color: #718096;">
+                                                                    🎥 ${ogData.videos.length} vidéo(s)
+                                                                </span>
+                                                                ` : ''}
+                                                                ${ogData.audios && ogData.audios.length > 0 ? `
+                                                                <span style="font-size: 0.85rem; color: #718096;">
+                                                                    🎵 ${ogData.audios.length} audio(s)
+                                                                </span>
+                                                                ` : ''}
+                                                            </div>
+                                                            ` : ''}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            `;
+                                        }).join('');
+                                    }
+                                    return '<p class="empty-state">Aucune donnée OpenGraph disponible pour le moment. Lancez un scraping pour récupérer les métadonnées des pages.</p>';
+                                } catch(e) {
+                                    console.error('Erreur affichage og_data:', e);
+                                    return '<p class="empty-state">Erreur lors du chargement des données OpenGraph.</p>';
+                                }
+                            })() : '<p class="empty-state">Aucune donnée OpenGraph disponible pour le moment. Lancez un scraping pour récupérer les métadonnées des pages.</p>'}
                         </div>
                     </div>
                     
@@ -1392,11 +1446,22 @@
             
             socket.on('scraping_progress', (data) => {
                 if (progressBar) {
+                    // Utiliser le pourcentage basé sur current/total si disponible
+                    if (data.current && data.total) {
+                        const percent = Math.min(90, (data.current / data.total) * 90);
+                        progressBar.style.width = percent + '%';
+                    } else {
                     const percent = Math.min(90, (data.visited || 0) * 5);
                     progressBar.style.width = percent + '%';
+                    }
                 }
                 if (progressText) {
+                    // Afficher le message formaté s'il est disponible, sinon utiliser les données individuelles
+                    if (data.message) {
+                        progressText.textContent = data.message;
+                    } else {
                     progressText.textContent = `${data.visited || 0} page(s) analysée(s) - ${data.emails || 0} emails, ${data.people || 0} personnes`;
+                    }
                 }
             });
             
@@ -2015,8 +2080,6 @@
             
             if (response.ok) {
                 const scrapers = await response.json();
-                console.log('Tous les scrapers récupérés:', scrapers);
-                console.log('Types de scrapers:', scrapers.map(s => s.scraper_type));
                 
                 // Prendre le scraper le plus récent de type "unified_scraper"
                 const unifiedScrapers = scrapers.filter(s => s.scraper_type === 'unified_scraper').sort((a, b) => {
@@ -2025,14 +2088,8 @@
                     return dateB - dateA;
                 });
                 
-                console.log('Scrapers unifiés trouvés:', unifiedScrapers.length);
-                
                 if (unifiedScrapers.length > 0) {
                     const latestScraper = unifiedScrapers[0];
-                    console.log('Scraper trouvé:', latestScraper);
-                    console.log('Emails:', latestScraper.emails);
-                    console.log('People:', latestScraper.people);
-                    console.log('Phones:', latestScraper.phones);
                     
                     // Construire l'objet data au format attendu
                     // Les emails sont une liste de strings depuis get_scraper_emails
@@ -2062,15 +2119,12 @@
                         metadata: latestScraper.metadata || {}
                     };
                     
-                    console.log('Data formatée:', data);
-                    
                     // Afficher les résultats avec le même style que la page scraping
                     displayAllScrapingResults(data);
                     
                     // Charger les images depuis la table images (optimisation BDD) et les afficher dans l'onglet Images principal
                     loadEntrepriseImages(entrepriseId);
                 } else {
-                    console.log('Aucun scraper unifié trouvé');
                     // Aucun scraper trouvé, garder les messages vides
                 }
             }

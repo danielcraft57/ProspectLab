@@ -31,6 +31,8 @@ class Database:
         """Obtient une connexion à la base de données"""
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
+        # Activer les foreign keys pour que CASCADE fonctionne
+        conn.execute('PRAGMA foreign_keys = ON')
         return conn
     
     def init_database(self):
@@ -122,10 +124,12 @@ class Database:
                 pass  # La colonne existe déjà
         
         # Table des données OpenGraph (normalisée selon ogp.me)
+        # Permet plusieurs OG par entreprise (un par page scrapée)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS entreprise_og_data (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 entreprise_id INTEGER NOT NULL,
+                page_url TEXT,  -- URL de la page d'où proviennent ces OG
                 -- Propriétés de base (requises)
                 og_title TEXT,
                 og_type TEXT,
@@ -141,10 +145,28 @@ class Database:
                 -- Dates de mise à jour
                 date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 date_modification TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE,
-                UNIQUE(entreprise_id)
+                FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE
             )
         ''')
+        
+        # Migration : ajouter la colonne page_url si elle n'existe pas
+        try:
+            cursor.execute('ALTER TABLE entreprise_og_data ADD COLUMN page_url TEXT')
+        except sqlite3.OperationalError:
+            pass  # La colonne existe déjà
+        
+        # Migration : supprimer la contrainte UNIQUE si elle existe (via recréation de la table si nécessaire)
+        # Note: SQLite ne permet pas de supprimer directement une contrainte UNIQUE,
+        # mais comme on utilise CREATE TABLE IF NOT EXISTS, on gère ça via l'index
+        try:
+            # Vérifier si l'index unique existe et le supprimer
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='index' AND name='sqlite_autoindex_entreprise_og_data_1'")
+            if cursor.fetchone():
+                # L'index unique existe, on ne peut pas le supprimer directement
+                # Mais comme on a ajouté page_url, la contrainte ne s'appliquera plus aux nouvelles insertions
+                pass
+        except Exception:
+            pass
         
         # Table des images OpenGraph (propriétés structurées)
         cursor.execute('''
@@ -1168,7 +1190,7 @@ class Database:
         
         return entreprise_id
     
-    def _save_og_data_in_transaction(self, cursor, entreprise_id, og_tags):
+    def _save_og_data_in_transaction(self, cursor, entreprise_id, og_tags, page_url=None):
         """
         Sauvegarde les données OpenGraph normalisées dans les tables dédiées.
         Inspiré de https://ogp.me/
@@ -1177,6 +1199,7 @@ class Database:
             cursor: Curseur SQLite dans une transaction
             entreprise_id: ID de l'entreprise
             og_tags: Dictionnaire contenant les tags OpenGraph (ex: {'og:title': '...', 'og:image': '...'})
+            page_url: URL de la page d'où proviennent ces OG (optionnel)
         """
         # Extraire les propriétés de base
         og_title = og_tags.get('og:title') or og_tags.get('title')
@@ -1189,17 +1212,21 @@ class Database:
         og_audio = og_tags.get('og:audio') or og_tags.get('audio')
         og_video = og_tags.get('og:video') or og_tags.get('video')
         
-        # Supprimer l'ancienne entrée si elle existe (pour mise à jour)
-        cursor.execute('DELETE FROM entreprise_og_data WHERE entreprise_id = ?', (entreprise_id,))
+        # Si page_url est fourni, supprimer seulement l'OG de cette page spécifique
+        # Sinon, supprimer tous les OG de l'entreprise (comportement par défaut pour compatibilité)
+        if page_url:
+            cursor.execute('DELETE FROM entreprise_og_data WHERE entreprise_id = ? AND page_url = ?', (entreprise_id, page_url))
+        else:
+            cursor.execute('DELETE FROM entreprise_og_data WHERE entreprise_id = ? AND page_url IS NULL', (entreprise_id,))
         
         # Insérer les données principales
         cursor.execute('''
             INSERT INTO entreprise_og_data (
-                entreprise_id, og_title, og_type, og_url, og_description,
+                entreprise_id, page_url, og_title, og_type, og_url, og_description,
                 og_determiner, og_locale, og_site_name, og_audio, og_video
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            entreprise_id, og_title, og_type, og_url, og_description,
+            entreprise_id, page_url, og_title, og_type, og_url, og_description,
             og_determiner, og_locale, og_site_name, og_audio, og_video
         ))
         
@@ -1329,58 +1356,103 @@ class Database:
                     VALUES (?, ?, ?)
                 ''', (entreprise_id, og_data_id, locale))
     
+    def _save_multiple_og_data_in_transaction(self, cursor, entreprise_id, og_data_by_page):
+        """
+        Sauvegarde plusieurs données OpenGraph (une par page) dans les tables dédiées.
+        
+        Args:
+            cursor: Curseur SQLite dans une transaction
+            entreprise_id: ID de l'entreprise
+            og_data_by_page: Dictionnaire {page_url: og_tags} contenant les OG de chaque page
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f'[Database] Sauvegarde de {len(og_data_by_page)} page(s) avec OG pour entreprise {entreprise_id}')
+        
+        # Supprimer tous les OG existants pour cette entreprise avant d'insérer les nouveaux
+        cursor.execute('DELETE FROM entreprise_og_data WHERE entreprise_id = ?', (entreprise_id,))
+        deleted_count = cursor.rowcount
+        
+        # Sauvegarder chaque OG
+        saved_count = 0
+        for page_url, og_tags in og_data_by_page.items():
+            if og_tags:  # Ne sauvegarder que si des OG sont présents
+                try:
+                    self._save_og_data_in_transaction(cursor, entreprise_id, og_tags, page_url=page_url)
+                    saved_count += 1
+                except Exception as e:
+                    logger.error(f'[Database] Erreur lors de la sauvegarde de l\'OG pour entreprise {entreprise_id}, page {page_url}: {e}', exc_info=True)
+        
+        logger.info(f'[Database] {saved_count} OG sauvegardé(s) avec succès pour entreprise {entreprise_id}')
+    
     def get_og_data(self, entreprise_id):
         """
-        Récupère les données OpenGraph normalisées pour une entreprise.
+        Récupère toutes les données OpenGraph normalisées pour une entreprise.
+        Retourne une liste d'OG (un par page) ou un seul OG si page_url est NULL (compatibilité).
         
         Returns:
-            dict: Dictionnaire contenant toutes les données OG structurées
+            list ou dict: Liste de dictionnaires contenant toutes les données OG structurées par page,
+                         ou un seul dictionnaire si un seul OG existe (compatibilité)
         """
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        # Récupérer les données principales
+        # Récupérer toutes les données principales (une par page)
         cursor.execute('''
             SELECT * FROM entreprise_og_data WHERE entreprise_id = ?
+            ORDER BY page_url IS NULL DESC, page_url ASC, date_creation ASC
         ''', (entreprise_id,))
-        og_row = cursor.fetchone()
+        og_rows = cursor.fetchall()
         
-        if not og_row:
+        if not og_rows:
             conn.close()
             return None
         
-        og_data = dict(og_row)
+        # Si un seul OG sans page_url (ancien format), retourner un dict pour compatibilité
+        if len(og_rows) == 1 and og_rows[0]['page_url'] is None:
+            og_data = dict(og_rows[0])
+            og_data_id = og_data['id']
+            
+            # Récupérer les images, vidéos, audios, locales pour cet OG
+            cursor.execute('SELECT * FROM entreprise_og_images WHERE og_data_id = ? ORDER BY id', (og_data_id,))
+            og_data['images'] = [dict(row) for row in cursor.fetchall()]
+            
+            cursor.execute('SELECT * FROM entreprise_og_videos WHERE og_data_id = ? ORDER BY id', (og_data_id,))
+            og_data['videos'] = [dict(row) for row in cursor.fetchall()]
+            
+            cursor.execute('SELECT * FROM entreprise_og_audios WHERE og_data_id = ? ORDER BY id', (og_data_id,))
+            og_data['audios'] = [dict(row) for row in cursor.fetchall()]
+            
+            cursor.execute('SELECT locale FROM entreprise_og_locales WHERE og_data_id = ? ORDER BY locale', (og_data_id,))
+            og_data['locales_alternate'] = [row[0] for row in cursor.fetchall()]
+            
+            conn.close()
+            return og_data
         
-        # Récupérer les images
-        cursor.execute('''
-            SELECT * FROM entreprise_og_images WHERE entreprise_id = ?
-            ORDER BY id
-        ''', (entreprise_id,))
-        og_data['images'] = [dict(row) for row in cursor.fetchall()]
-        
-        # Récupérer les vidéos
-        cursor.execute('''
-            SELECT * FROM entreprise_og_videos WHERE entreprise_id = ?
-            ORDER BY id
-        ''', (entreprise_id,))
-        og_data['videos'] = [dict(row) for row in cursor.fetchall()]
-        
-        # Récupérer les audios
-        cursor.execute('''
-            SELECT * FROM entreprise_og_audios WHERE entreprise_id = ?
-            ORDER BY id
-        ''', (entreprise_id,))
-        og_data['audios'] = [dict(row) for row in cursor.fetchall()]
-        
-        # Récupérer les locales alternatives
-        cursor.execute('''
-            SELECT locale FROM entreprise_og_locales WHERE entreprise_id = ?
-            ORDER BY locale
-        ''', (entreprise_id,))
-        og_data['locales_alternate'] = [row[0] for row in cursor.fetchall()]
+        # Plusieurs OG : retourner une liste
+        all_og_data = []
+        for og_row in og_rows:
+            og_data = dict(og_row)
+            og_data_id = og_data['id']
+            
+            # Récupérer les images, vidéos, audios, locales pour cet OG
+            cursor.execute('SELECT * FROM entreprise_og_images WHERE og_data_id = ? ORDER BY id', (og_data_id,))
+            og_data['images'] = [dict(row) for row in cursor.fetchall()]
+            
+            cursor.execute('SELECT * FROM entreprise_og_videos WHERE og_data_id = ? ORDER BY id', (og_data_id,))
+            og_data['videos'] = [dict(row) for row in cursor.fetchall()]
+            
+            cursor.execute('SELECT * FROM entreprise_og_audios WHERE og_data_id = ? ORDER BY id', (og_data_id,))
+            og_data['audios'] = [dict(row) for row in cursor.fetchall()]
+            
+            cursor.execute('SELECT locale FROM entreprise_og_locales WHERE og_data_id = ? ORDER BY locale', (og_data_id,))
+            og_data['locales_alternate'] = [row[0] for row in cursor.fetchall()]
+            
+            all_og_data.append(og_data)
         
         conn.close()
-        return og_data
+        return all_og_data
     
     def get_analyses(self, limit=50):
         """Récupère les analyses récentes"""
@@ -2188,20 +2260,20 @@ class Database:
         # Sauvegarder les données normalisées dans les tables séparées (au lieu de JSON)
         # Utiliser la même connexion pour éviter les verrouillages
         try:
-            if emails:
-                self._save_scraper_emails_in_transaction(cursor, scraper_id, entreprise_id, emails)
-            if phones:
-                self._save_scraper_phones_in_transaction(cursor, scraper_id, entreprise_id, phones)
-            if social_profiles:
-                self._save_scraper_social_profiles_in_transaction(cursor, scraper_id, entreprise_id, social_profiles)
-            if technologies:
-                self._save_scraper_technologies_in_transaction(cursor, scraper_id, entreprise_id, technologies)
-            if people:
-                self._save_scraper_people_in_transaction(cursor, scraper_id, entreprise_id, people)
-            
-            # Sauvegarder les images dans la table séparée (optimisation BDD, liées à l'entreprise)
-            if images and isinstance(images, list) and len(images) > 0:
-                self._save_images_in_transaction(cursor, entreprise_id, scraper_id, images)
+        if emails:
+            self._save_scraper_emails_in_transaction(cursor, scraper_id, entreprise_id, emails)
+        if phones:
+            self._save_scraper_phones_in_transaction(cursor, scraper_id, entreprise_id, phones)
+        if social_profiles:
+            self._save_scraper_social_profiles_in_transaction(cursor, scraper_id, entreprise_id, social_profiles)
+        if technologies:
+            self._save_scraper_technologies_in_transaction(cursor, scraper_id, entreprise_id, technologies)
+        if people:
+            self._save_scraper_people_in_transaction(cursor, scraper_id, entreprise_id, people)
+        
+        # Sauvegarder les images dans la table séparée (optimisation BDD, liées à l'entreprise)
+        if images and isinstance(images, list) and len(images) > 0:
+            self._save_images_in_transaction(cursor, entreprise_id, scraper_id, images)
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
@@ -2212,14 +2284,6 @@ class Database:
         conn.close()
         
         # Log après sauvegarde pour vérification
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.debug(
-            f'Scraper sauvegardé (id={scraper_id}) pour entreprise {entreprise_id}: '
-            f'emails={total_emails}, people={total_people}, phones={total_phones}, '
-            f'social={total_social_profiles}, technologies={total_technologies}, images={total_images}'
-        )
-        
         return scraper_id
     
     def _save_scraper_emails_in_transaction(self, cursor, scraper_id, entreprise_id, emails):

@@ -68,7 +68,6 @@
         container.querySelectorAll('.btn-view-details').forEach(btn => {
             btn.addEventListener('click', function() {
                 const analysisId = parseInt(this.getAttribute('data-analysis-id'));
-                console.log('Ouverture de la modale OSINT pour l\'analyse:', analysisId);
                 if (isNaN(analysisId)) {
                     console.error('ID d\'analyse invalide:', this.getAttribute('data-analysis-id'));
                     return;
@@ -397,7 +396,6 @@
     
     async function loadOSINTDetail(analysisId) {
         try {
-            console.log('Chargement des détails OSINT pour l\'ID:', analysisId);
             const response = await fetch('/api/analyse-osint/' + analysisId);
             if (!response.ok) {
                 const errorText = await response.text();
@@ -406,7 +404,6 @@
             }
             
             currentOSINTData = await response.json();
-            console.log('Données OSINT chargées:', currentOSINTData);
             renderOSINTDetail();
         } catch (error) {
             console.error('Erreur lors du chargement:', error);

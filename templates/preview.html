@@ -63,14 +63,6 @@
             <small>Délai recommandé : 2 secondes pour éviter les blocages</small>
         </div>
         
-        <div class="form-group">
-            <label>
-                <input type="checkbox" id="enable_osint" name="enable_osint" checked>
-                Activer l'analyse OSINT (recherche approfondie sur les responsables)
-            </label>
-            <small>Recherche LinkedIn, réseaux sociaux, emails, actualités. Peut ralentir l'analyse.</small>
-        </div>
-        
         <div class="form-actions" style="display: flex; gap: 1rem; align-items: center;">
             <button type="submit" class="btn btn-primary" id="start-analysis-btn">Lancer l'analyse</button>
             <button type="button" class="btn btn-danger" id="stop-analysis-btn" style="display: none;">Arrêter l'analyse</button>
@@ -148,7 +140,6 @@
         
         const maxWorkers = parseInt(document.getElementById('max_workers').value) || 3;
         const delay = parseFloat(document.getElementById('delay').value) || 2.0;
-        const enableOsint = document.getElementById('enable_osint').checked;
         
         // Afficher le statut
         statusDiv.style.display = 'block';
@@ -187,8 +178,7 @@
             
             window.wsManager.startAnalysis('{{ filename }}', {
                 max_workers: maxWorkers,
-                delay: delay,
-                enable_osint: enableOsint
+                delay: delay
             });
         });
     });
@@ -234,19 +224,43 @@
     // Section pour l'avancement du scraping
     const scrapingProgressContainer = document.createElement('div');
     scrapingProgressContainer.id = 'scraping-progress-container';
-    scrapingProgressContainer.style.cssText = 'margin-top: 1.5rem; padding: 1rem; background: #f8f9fa; border-radius: 4px; border-left: 4px solid #3498db; display: none;';
+    scrapingProgressContainer.style.cssText = 'margin-top: 1.5rem; padding: 1.5rem; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #3498db; display: none; box-shadow: 0 2px 4px rgba(0,0,0,0.1);';
     
     const scrapingProgressTitle = document.createElement('div');
-    scrapingProgressTitle.style.cssText = 'font-weight: bold; margin-bottom: 0.5rem; color: #2c3e50;';
+    scrapingProgressTitle.style.cssText = 'font-weight: bold; margin-bottom: 1rem; color: #2c3e50; font-size: 1.1rem;';
     scrapingProgressTitle.textContent = 'Scraping du site web en cours...';
+    
+    // Barre de progression pour les entreprises
+    const entreprisesProgressBar = document.createElement('div');
+    entreprisesProgressBar.style.cssText = 'width: 100%; height: 24px; background: #e0e0e0; border-radius: 12px; overflow: hidden; margin-bottom: 1rem; position: relative;';
+    
+    const entreprisesProgressFill = document.createElement('div');
+    entreprisesProgressFill.id = 'entreprises-progress-fill';
+    entreprisesProgressFill.style.cssText = 'height: 100%; background: linear-gradient(90deg, #3498db, #2980b9); width: 0%; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 11px;';
+    
+    const entreprisesProgressText = document.createElement('div');
+    entreprisesProgressText.id = 'entreprises-progress-text';
+    entreprisesProgressText.style.cssText = 'position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #666; font-size: 0.85rem; font-weight: 500; pointer-events: none;';
+    entreprisesProgressText.textContent = '0 / 0 entreprises';
+    
+    entreprisesProgressBar.appendChild(entreprisesProgressFill);
+    entreprisesProgressBar.appendChild(entreprisesProgressText);
+    
+    // Conteneur pour les stats avec design amélioré
+    const scrapingStatsContainer = document.createElement('div');
+    scrapingStatsContainer.id = 'scraping-stats-container';
+    scrapingStatsContainer.style.cssText = 'display: flex; flex-direction: column; gap: 0.75rem;';
     
     const scrapingProgressText = document.createElement('div');
     scrapingProgressText.id = 'scraping-progress-text';
-    scrapingProgressText.style.cssText = 'color: #666; font-size: 0.9rem;';
+    scrapingProgressText.style.cssText = 'color: #666; font-size: 0.9rem; line-height: 1.6;';
     scrapingProgressText.textContent = 'Initialisation...';
     
+    scrapingStatsContainer.appendChild(scrapingProgressText);
+    
     scrapingProgressContainer.appendChild(scrapingProgressTitle);
-    scrapingProgressContainer.appendChild(scrapingProgressText);
+    scrapingProgressContainer.appendChild(entreprisesProgressBar);
+    scrapingProgressContainer.appendChild(scrapingStatsContainer);
     
     document.addEventListener('analysis:progress', function(e) {
         const data = e.detail;
@@ -273,6 +287,18 @@
                     progressContainer.after(scrapingProgressContainer);
                 }
                 scrapingProgressContainer.style.display = 'block';
+                
+                // Mettre à jour la barre de progression des entreprises
+                if (typeof data.current === 'number' && typeof data.total === 'number' && data.total > 0) {
+                    const percent = Math.min(100, (data.current / data.total) * 100);
+                    entreprisesProgressFill.style.width = percent + '%';
+                    entreprisesProgressText.textContent = `${data.current} / ${data.total} entreprises`;
+                } else if (typeof data.current === 'number' && data.current > 0) {
+                    // Si on a seulement current, afficher quand même
+                    entreprisesProgressFill.style.width = '0%';
+                    entreprisesProgressText.textContent = `${data.current} entreprise(s) en cours...`;
+                }
+                
                 const message = data.message || 'Scraping en cours...';
                 
                 // Extraire le domaine depuis l'URL si disponible
@@ -290,40 +316,102 @@
                     }
                 }
                 
-                // Afficher le message avec le domaine, l'entreprise et les compteurs si disponibles
-                let displayText = message;
+                // Parser le message pour séparer les stats de l'entreprise et le total
+                // Format attendu: "{message} - {stats entreprise} | Total: {stats globales}"
+                // Ou: "{message} - {stats entreprise} - {domaine} ({entreprise}) - {stats entreprise}"
+                let currentStats = '';
+                let totalStats = '';
+                let baseMessage = message;
+                
+                if (message.includes(' | Total: ')) {
+                    const parts = message.split(' | Total: ');
+                    const beforeTotal = parts[0];
+                    totalStats = parts[1] || '';
+                    
+                    // Extraire le message de base (avant les stats)
+                    // Format: "{message} - {stats entreprise}"
+                    if (beforeTotal.includes(' - ')) {
+                        const messageParts = beforeTotal.split(' - ');
+                        // Le premier élément est le message de base (ex: "25 page(s)")
+                        baseMessage = messageParts[0];
+                        // Les éléments suivants sont les stats, mais il peut y avoir le domaine/entreprise dedans
+                        // On cherche la partie qui contient les stats (emails, personnes, téléphones, etc.)
+                        const statsParts = messageParts.slice(1);
+                        // Filtrer pour ne garder que les parties avec des stats (contiennent "emails", "personnes", etc.)
+                        currentStats = statsParts.filter(part => 
+                            part.includes('emails') || part.includes('personnes') || 
+                            part.includes('téléphones') || part.includes('réseaux') || 
+                            part.includes('technos') || part.includes('images')
+                        ).join(' - ');
+                        
+                        // Si on n'a pas trouvé de stats, prendre tout sauf le premier élément
+                        if (!currentStats && statsParts.length > 0) {
+                            currentStats = statsParts.join(' - ');
+                        }
+                    } else {
+                        baseMessage = beforeTotal;
+                    }
+                } else if (message.includes(' - ')) {
+                    // Format sans total séparé
+                    const parts = message.split(' - ');
+                    baseMessage = parts[0];
+                    // Filtrer pour ne garder que les parties avec des stats
+                    const statsParts = parts.slice(1).filter(part => 
+                        part.includes('emails') || part.includes('personnes') || 
+                        part.includes('téléphones') || part.includes('réseaux') || 
+                        part.includes('technos') || part.includes('images')
+                    );
+                    currentStats = statsParts.length > 0 ? statsParts.join(' - ') : parts.slice(1).join(' - ');
+                }
+                
+                // Construire l'affichage HTML avec des balises stylisées
+                let htmlContent = '';
+                
+                // Message de base avec entreprise et domaine
+                if (baseMessage) {
+                    htmlContent += `<div style="margin-bottom: 0.75rem; font-weight: 500; color: #2c3e50;">${baseMessage}`;
                 if (domaine) {
-                    displayText += ` - ${domaine}`;
+                        htmlContent += ` <span style="color: #3498db;">- ${domaine}</span>`;
+                    }
+                    if (data.entreprise) {
+                        htmlContent += ` <span style="color: #27ae60;">(${data.entreprise})</span>`;
+                    }
+                    htmlContent += `</div>`;
                 }
-                if (data.entreprise) {
-                    displayText += ` (${data.entreprise})`;
+                
+                // Stats de l'entreprise courante dans une balise stylisée
+                if (currentStats) {
+                    htmlContent += `<div style="background: linear-gradient(135deg, #e8f4f8 0%, #d4e9f0 100%); padding: 0.75rem 1rem; border-radius: 6px; border-left: 3px solid #3498db; margin-bottom: 0.75rem;">`;
+                    htmlContent += `<div style="font-size: 0.8rem; color: #2980b9; font-weight: 600; margin-bottom: 0.25rem; text-transform: uppercase; letter-spacing: 0.5px;">Entreprise actuelle</div>`;
+                    htmlContent += `<div style="color: #2c3e50; font-size: 0.9rem;">${currentStats}</div>`;
+                    htmlContent += `</div>`;
+                }
+                
+                // Total cumulé dans une balise stylisée différente
+                if (totalStats) {
+                    htmlContent += `<div style="background: linear-gradient(135deg, #f0f9f4 0%, #e0f5ea 100%); padding: 0.75rem 1rem; border-radius: 6px; border-left: 3px solid #27ae60;">`;
+                    htmlContent += `<div style="font-size: 0.8rem; color: #229954; font-weight: 600; margin-bottom: 0.25rem; text-transform: uppercase; letter-spacing: 0.5px;">Total cumulé</div>`;
+                    htmlContent += `<div style="color: #2c3e50; font-size: 0.9rem; font-weight: 500;">${totalStats}</div>`;
+                    htmlContent += `</div>`;
+                } else if (typeof data.total_emails === 'number' || typeof data.total_phones === 'number') {
+                    // Fallback: utiliser les données individuelles si le parsing échoue
+                    const counters = [];
+                    if (typeof data.total_emails === 'number') counters.push(`${data.total_emails} emails`);
+                    if (typeof data.total_people === 'number') counters.push(`${data.total_people} personnes`);
+                    if (typeof data.total_phones === 'number') counters.push(`${data.total_phones} téléphones`);
+                    if (typeof data.total_social_platforms === 'number') counters.push(`${data.total_social_platforms} réseaux sociaux`);
+                    if (typeof data.total_technologies === 'number') counters.push(`${data.total_technologies} technos`);
+                    if (typeof data.total_images === 'number') counters.push(`${data.total_images} images`);
+                    
+                    if (counters.length > 0) {
+                        htmlContent += `<div style="background: linear-gradient(135deg, #f0f9f4 0%, #e0f5ea 100%); padding: 0.75rem 1rem; border-radius: 6px; border-left: 3px solid #27ae60;">`;
+                        htmlContent += `<div style="font-size: 0.8rem; color: #229954; font-weight: 600; margin-bottom: 0.25rem; text-transform: uppercase; letter-spacing: 0.5px;">Total cumulé</div>`;
+                        htmlContent += `<div style="color: #2c3e50; font-size: 0.9rem; font-weight: 500;">${counters.join(', ')}</div>`;
+                        htmlContent += `</div>`;
+                    }
                 }
 
-                // Ajouter les compteurs en temps réel si envoyés
-                const counters = [];
-                if (typeof data.total_emails === 'number') {
-                    counters.push(`${data.total_emails} emails`);
-                }
-                if (typeof data.total_people === 'number') {
-                    counters.push(`${data.total_people} personnes`);
-                }
-                if (typeof data.total_phones === 'number') {
-                    counters.push(`${data.total_phones} téléphones`);
-                }
-                if (typeof data.total_social_platforms === 'number') {
-                    counters.push(`${data.total_social_platforms} réseaux sociaux`);
-                }
-                if (typeof data.total_technologies === 'number') {
-                    counters.push(`${data.total_technologies} technos`);
-                }
-                if (typeof data.total_images === 'number') {
-                    counters.push(`${data.total_images} images`);
-                }
-                if (counters.length > 0) {
-                    displayText += ` - ${counters.join(', ')}`;
-                }
-
-                scrapingProgressText.textContent = displayText;
+                scrapingProgressText.innerHTML = htmlContent || 'Scraping en cours...';
             });
 
             // Afficher un résumé final quand le scraping est terminé
@@ -332,6 +420,12 @@
                     progressContainer.after(scrapingProgressContainer);
                 }
                 scrapingProgressContainer.style.display = 'block';
+                
+                // Mettre à jour la barre de progression à 100%
+                if (data.current && data.total) {
+                    entreprisesProgressFill.style.width = '100%';
+                    entreprisesProgressText.textContent = `${data.total} / ${data.total} entreprises`;
+                }
 
                 const counters = [];
                 if (typeof data.total_emails === 'number') {
@@ -353,15 +447,37 @@
                     counters.push(`${data.total_images} images`);
                 }
 
-                let text = 'Scraping terminé';
+                // Afficher le résumé final avec le même style
+                let htmlContent = '<div style="background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); padding: 1rem; border-radius: 6px; border-left: 3px solid #27ae60;">';
+                htmlContent += '<div style="font-size: 0.9rem; color: #229954; font-weight: 600; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px;">✓ Scraping terminé</div>';
                 if (counters.length > 0) {
-                    text += ` : ${counters.join(', ')}`;
+                    htmlContent += `<div style="color: #2c3e50; font-size: 0.95rem; font-weight: 500;">${counters.join(', ')}</div>`;
+                } else {
+                    htmlContent += '<div style="color: #2c3e50; font-size: 0.95rem;">Scraping terminé avec succès</div>';
                 }
-                scrapingProgressText.textContent = text;
+                htmlContent += '</div>';
+                
+                scrapingProgressText.innerHTML = htmlContent;
                 
                 // Déclencher l'événement personnalisé pour la redirection
                 const event = new CustomEvent('scraping_complete', { detail: data });
                 document.dispatchEvent(event);
+            });
+            
+            // Initialiser la barre de progression au démarrage
+            window.wsManager.socket.on('scraping_started', function(data) {
+                if (!scrapingProgressContainer.parentNode) {
+                    progressContainer.after(scrapingProgressContainer);
+                }
+                scrapingProgressContainer.style.display = 'block';
+                entreprisesProgressFill.style.width = '0%';
+                // Si on a le total dans les données, l'afficher, sinon afficher un message générique
+                if (data.total && data.total > 0) {
+                    entreprisesProgressText.textContent = `0 / ${data.total} entreprises`;
+                } else {
+                    entreprisesProgressText.textContent = 'Initialisation...';
+                }
+                scrapingProgressText.innerHTML = '<div style="color: #666;">Initialisation du scraping...</div>';
             });
         }
     }

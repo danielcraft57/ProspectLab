@@ -11,6 +11,8 @@ import os
 import threading
 import time
 import subprocess
+import socket
+import uuid
 
 def signal_handler(sig, frame):
     """Gère Ctrl+C proprement"""
@@ -33,9 +35,15 @@ def run_celery_worker():
     """Lance le worker Celery via subprocess"""
     global celery_process
     try:
-        # Lancer Celery comme une commande système
+        # Générer un nom unique pour ce worker (hostname + UUID court)
+        hostname = socket.gethostname()
+        worker_id = str(uuid.uuid4())[:8]
+        worker_name = f"{hostname}-{worker_id}"
+        
+        # Lancer Celery comme une commande système avec un nom unique
         celery_process = subprocess.Popen(
-            [sys.executable, '-m', 'celery', '-A', 'celery_app', 'worker', '--loglevel=info', '--pool=solo'],
+            [sys.executable, '-m', 'celery', '-A', 'celery_app', 'worker', 
+             '--loglevel=info', '--pool=solo', '-n', worker_name],
             stdout=sys.stdout,
             stderr=sys.stderr
         )

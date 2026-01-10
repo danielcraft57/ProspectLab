@@ -50,13 +50,11 @@ class ProspectLabWebSocket {
         this.socket.on('connect', () => {
             this.connected = true;
             this.reconnectAttempts = 0;
-            console.log('WebSocket connecté');
             this.onConnect();
         });
 
         this.socket.on('disconnect', () => {
             this.connected = false;
-            console.log('WebSocket déconnecté');
             this.onDisconnect();
         });
 
@@ -67,14 +65,12 @@ class ProspectLabWebSocket {
             if (this.reconnectAttempts < this.maxReconnectAttempts) {
                 this.reconnectAttempts++;
                 setTimeout(() => {
-                    console.log(`Tentative de reconnexion ${this.reconnectAttempts}/${this.maxReconnectAttempts}...`);
                     this.connect();
                 }, this.reconnectDelay);
             }
         });
 
         this.socket.on('reconnect', (attemptNumber) => {
-            console.log(`Reconnecté après ${attemptNumber} tentatives`);
             this.reconnectAttempts = 0;
         });
 
