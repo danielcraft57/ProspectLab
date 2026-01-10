@@ -1,0 +1,26 @@
+# Configuration des fins de ligne pour ProspectLab
+# Force LF dans le repo, Git convertira automatiquement selon l'OS
+
+# Tous les fichiers texte utilisent LF dans le repo
+* text=auto eol=lf
+
+# Fichiers spécifiques qui doivent rester avec leurs fins de ligne originales
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Fichiers binaires (pas de conversion)
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.exe binary
+*.dll binary
+*.so binary
+*.db binary
+*.sqlite binary
+*.sqlite3 binary
+
