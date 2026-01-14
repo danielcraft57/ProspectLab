@@ -200,10 +200,65 @@ def register_websocket_handlers(socketio, app):
                                                                     },
                                                                     room=session_id
                                                                 )
+
+                                                                # Propager l'avancement de l'analyse technique
+                                                                technical_message = meta_scraping.get('technical_message')
+                                                                technical_progress = meta_scraping.get('technical_progress')
+
+                                                                if technical_message or technical_progress is not None:
+                                                                    # Cas où la tâche de scraping envoie déjà des infos techniques dédiées
+                                                                    safe_emit(
+                                                                        socketio,
+                                                                        'technical_analysis_progress',
+                                                                        {
+                                                                            'message': technical_message or '',
+                                                                            'progress': technical_progress,
+                                                                            'entreprise': meta_scraping.get('entreprise'),
+                                                                            'url': meta_scraping.get('url'),
+                                                                            'current': meta_scraping.get('technical_current'),
+                                                                            'total': meta_scraping.get('technical_total'),
+                                                                            'summary': meta_scraping.get('technical_summary')
+                                                                        },
+                                                                        room=session_id
+                                                                    )
+                                                                else:
+                                                                    # Fallback : approximer l'avancement technique sur la base du nombre d'entreprises traitées
+                                                                    current_ent = meta_scraping.get('current')
+                                                                    total_ent = meta_scraping.get('total') or 0
+                                                                    if isinstance(current_ent, int) and total_ent:
+                                                                        try:
+                                                                            approx_progress = max(0, min(100, int((current_ent / total_ent) * 100)))
+                                                                        except Exception:
+                                                                            approx_progress = None
+
+                                                                        if approx_progress is not None:
+                                                                            safe_emit(
+                                                                                socketio,
+                                                                                'technical_analysis_progress',
+                                                                                {
+                                                                                    'message': 'Analyse technique en cours...',
+                                                                                    'progress': approx_progress,
+                                                                                    'entreprise': meta_scraping.get('entreprise'),
+                                                                                    'url': meta_scraping.get('url'),
+                                                                                    'current': current_ent,
+                                                                                    'total': total_ent
+                                                                                },
+                                                                                room=session_id
+                                                                            )
                                                                 last_meta_scraping = meta_scraping
                                                         elif scraping_result.state == 'SUCCESS':
                                                             res = scraping_result.result or {}
                                                             stats = res.get('stats', {})
+                                                            # Signaler la fin globale de l'analyse technique
+                                                            safe_emit(
+                                                                socketio,
+                                                                'technical_analysis_complete',
+                                                                {
+                                                                    'message': 'Analyses techniques terminées pour toutes les entreprises.',
+                                                                    'analysis_id': res.get('analysis_id')
+                                                                },
+                                                                room=session_id
+                                                            )
                                                             safe_emit(
                                                                 socketio,
                                                                 'scraping_complete',

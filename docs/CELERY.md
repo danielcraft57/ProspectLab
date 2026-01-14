@@ -173,22 +173,17 @@ Analyse technique d'un site web.
 - `url` : URL du site
 - `entreprise_id` : ID entreprise (optionnel)
 
-### technical_advanced_tasks.py
+### osint_analysis_task / pentest_analysis_task
+
+Ces taches se trouvent egalement dans `tasks/technical_analysis_tasks.py` :
 
 #### osint_analysis_task
-Analyse OSINT d'une personne.
-
-**Parametres :**
-- `url` : URL du site
-- `entreprise_id` : ID entreprise (optionnel)
-- `people_from_scrapers` : Liste de personnes (optionnel)
+- Analyse OSINT d'un site / organisation, avec enrichissement des personnes.
+- Parametres principaux : `url`, `entreprise_id`, `people_from_scrapers`.
 
 #### pentest_analysis_task
-Analyse Pentest d'un site web.
-
-**Parametres :**
-- `url` : URL du site
-- `entreprise_id` : ID entreprise (optionnel)
+- Analyse de securite (Pentest) d'un site web.
+- Parametres principaux : `url`, `entreprise_id`, `options` (scan_sql, scan_xss, etc.).
 
 ## Suivi de progression
 
@@ -252,7 +247,6 @@ Les logs par tache sont dans :
 - `logs/scraping_tasks.log`
 - `logs/email_tasks.log`
 - `logs/technical_analysis_tasks.log`
-- `logs/technical_advanced_tasks.log`
 
 ## Monitoring
 

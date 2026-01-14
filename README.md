@@ -167,16 +167,14 @@ prospectlab/
 │   ├── analysis_tasks.py  # Analyse d'entreprises depuis Excel
 │   ├── scraping_tasks.py  # Scraping complet (emails, personnes, phones, etc.)
 │   ├── email_tasks.py     # Envoi d'emails en masse
-│   ├── technical_analysis_tasks.py  # Analyse technique (frameworks, serveurs)
-│   └── technical_advanced_tasks.py  # Analyse avancée (OSINT, Pentest)
+│   └── technical_analysis_tasks.py  # Analyses techniques (standard + avancée)
 ├── services/              # Services métier (logique métier)
 │   ├── database.py        # Gestion base de données (ORM simplifié)
 │   ├── entreprise_analyzer.py  # Analyse d'entreprises
 │   ├── unified_scraper.py # Scraper unifié (emails, personnes, phones, social, tech, images)
 │   ├── email_sender.py    # Envoi d'emails SMTP
 │   ├── template_manager.py # Gestion des modèles d'emails
-│   ├── technical_analyzer.py  # Analyse technique de sites
-│   ├── technical_analyzer_advanced.py  # Analyse technique avancée
+│   ├── technical_analyzer.py  # Analyse technique de sites (standard + avancée)
 │   ├── osint_analyzer.py  # Analyse OSINT (recherche responsables)
 │   ├── pentest_analyzer.py  # Analyse Pentest (sécurité)
 │   └── logging_config.py  # Configuration centralisée des logs

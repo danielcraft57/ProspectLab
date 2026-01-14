@@ -211,26 +211,24 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 3, max_workers
     }
     
     def update_progress(message: str, current_index: int, entreprise_name: str, website: str,
-                        current_stats: Dict):
+                        current_stats: Dict, extra_meta: Dict = None):
         """Met à jour la progression globale pour l'UI."""
-        _safe_update_state(
-            self,
-            task_id,
-            state='PROGRESS',
-            meta={
-                'current': current_index,
-                'total': total,
-                'message': message,
-                'entreprise': entreprise_name,
-                'url': website,
-                'total_emails': current_stats['total_emails'],
-                'total_people': current_stats['total_people'],
-                'total_phones': current_stats['total_phones'],
-                'total_social_platforms': current_stats['total_social_platforms'],
-                'total_technologies': current_stats['total_technologies'],
-                'total_images': current_stats['total_images'],
-            }
-        )
+        meta = {
+            'current': current_index,
+            'total': total,
+            'message': message,
+            'entreprise': entreprise_name,
+            'url': website,
+            'total_emails': current_stats['total_emails'],
+            'total_people': current_stats['total_people'],
+            'total_phones': current_stats['total_phones'],
+            'total_social_platforms': current_stats['total_social_platforms'],
+            'total_technologies': current_stats['total_technologies'],
+            'total_images': current_stats['total_images'],
+        }
+        if extra_meta and isinstance(extra_meta, dict):
+            meta.update(extra_meta)
+        _safe_update_state(self, task_id, state='PROGRESS', meta=meta)
     
     for idx, (entreprise_id, nom, website) in enumerate(rows):
         current_index = idx + 1
@@ -421,6 +419,154 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 3, max_workers
                     logger.error(f'Erreur lors de la mise à jour de l\'entreprise {entreprise_id} (resume/logo/favicon/og_data): {e}', exc_info=True)
             except Exception as e:
                 logger.warning(f'Erreur lors de la sauvegarde du scraper (analyse {analysis_id}, entreprise {entreprise_id}): {e}')
+
+            # Analyse technique (dans la même tâche Celery, en parallèle "logique" du scraping)
+            # Objectif: avoir l'affichage sous le bloc scraping sur la preview Excel
+            try:
+                from services.technical_analyzer import TechnicalAnalyzer
+
+                logger.info(
+                    f'[Tech Analyse {analysis_id}] {current_index}/{total} - {entreprise_name} ({website_str}) - démarrage analyse technique'
+                )
+
+                update_progress(
+                    f'Analyse technique: initialisation',
+                    current_index,
+                    entreprise_name,
+                    website_str,
+                    global_stats,
+                    extra_meta={
+                        'technical_message': 'Initialisation de l\'analyse technique...',
+                        'technical_progress': 5,
+                        'technical_current': current_index,
+                        'technical_total': total
+                    }
+                )
+
+                analyzer = TechnicalAnalyzer()
+
+                logger.info(
+                    f'[Tech Analyse {analysis_id}] {current_index}/{total} - {entreprise_name} ({website_str}) - collecte des informations techniques'
+                )
+
+                update_progress(
+                    f'Analyse technique: collecte des infos serveur',
+                    current_index,
+                    entreprise_name,
+                    website_str,
+                    global_stats,
+                    extra_meta={
+                        'technical_message': 'Récupération des informations du serveur...',
+                        'technical_progress': 20,
+                        'technical_current': current_index,
+                        'technical_total': total
+                    }
+                )
+
+                tech_data = analyzer.analyze_technical_details(website_str, enable_nmap=False)
+
+                logger.info(
+                    f'[Tech Analyse {analysis_id}] {current_index}/{total} - {entreprise_name} ({website_str}) - analyse terminée, préparation du résumé'
+                )
+
+                # Résumé léger pour l'UI (lisible, sans noyer l'écran)
+                try:
+                    def _short(v):
+                        if v is None:
+                            return None
+                        s = str(v).strip()
+                        return s if s else None
+
+                    summary = {}
+                    summary['server'] = _short(tech_data.get('server_software'))
+                    summary['framework'] = _short(tech_data.get('framework'))
+                    summary['cms'] = _short(tech_data.get('cms'))
+                    summary['hosting'] = _short(tech_data.get('hosting_provider'))
+                    if tech_data.get('ssl_valid') is not None:
+                        summary['ssl'] = 'OK' if tech_data.get('ssl_valid') else 'KO'
+                    if tech_data.get('waf'):
+                        summary['waf'] = _short(tech_data.get('waf'))
+                    if tech_data.get('cdn'):
+                        summary['cdn'] = _short(tech_data.get('cdn'))
+
+                    analytics = tech_data.get('analytics') or []
+                    if isinstance(analytics, list) and analytics:
+                        summary['analytics'] = f'{len(analytics)} outil(s)'
+
+                    security_headers = tech_data.get('security_headers') or {}
+                    if isinstance(security_headers, dict) and security_headers:
+                        summary['headers'] = f'{len(security_headers)} header(s)'
+                except Exception:
+                    summary = None
+
+                if summary:
+                    logger.info(
+                        f'[Tech Analyse {analysis_id}] {current_index}/{total} - {entreprise_name} ({website_str}) - '
+                        f'résumé: serveur={summary.get("server")}, framework={summary.get("framework")}, '
+                        f'cms={summary.get("cms")}, ssl={summary.get("ssl")}, waf={summary.get("waf")}, '
+                        f'cdn={summary.get("cdn")}, analytics={summary.get("analytics")}, headers={summary.get("headers")}'
+                    )
+
+                    update_progress(
+                        f'Analyse technique: sauvegarde',
+                        current_index,
+                        entreprise_name,
+                        website_str,
+                        global_stats,
+                        extra_meta={
+                            'technical_message': 'Sauvegarde des résultats...',
+                            'technical_progress': 85,
+                            'technical_current': current_index,
+                            'technical_total': total,
+                            'technical_summary': summary
+                        }
+                    )
+
+                    try:
+                        db_tech = Database()
+                        tech_analysis_id = db_tech.save_technical_analysis(entreprise_id, website_str, tech_data)
+                        logger.info(
+                            f'[Tech Analyse {analysis_id}] Analyse technique sauvegardée (id={tech_analysis_id}) '
+                            f'pour entreprise {entreprise_id} ({entreprise_name}) - {website_str}'
+                        )
+                    except Exception as save_err:
+                        logger.warning(
+                            f'[Tech Analyse {analysis_id}] Erreur sauvegarde analyse technique '
+                            f'(entreprise {entreprise_id}, {website_str}): {save_err}'
+                        )
+
+                    update_progress(
+                        f'Analyse technique terminée pour {entreprise_name}',
+                        current_index,
+                        entreprise_name,
+                        website_str,
+                        global_stats,
+                        extra_meta={
+                            'technical_message': 'Analyse technique terminée',
+                            'technical_progress': 100,
+                            'technical_current': current_index,
+                            'technical_total': total,
+                            'technical_summary': summary
+                        }
+                    )
+            except Exception as tech_err:
+                logger.warning(
+                    f'[Tech Analyse {analysis_id}] Erreur analyse technique pour {entreprise_name} ({website_str}): {tech_err}',
+                    exc_info=True
+                )
+                update_progress(
+                    f'Analyse technique: erreur pour {entreprise_name}',
+                    current_index,
+                    entreprise_name,
+                    website_str,
+                    global_stats,
+                    extra_meta={
+                        'technical_message': f'Erreur analyse technique: {str(tech_err)}',
+                        'technical_progress': 100,
+                        'technical_current': current_index,
+                        'technical_total': total
+                    }
+                )
             
             # Mettre à jour les stats globales à partir des résultats finaux
             global_stats['total_emails'] += results.get('total_emails', 0)

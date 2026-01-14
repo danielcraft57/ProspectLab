@@ -133,16 +133,24 @@
         return `
             <div class="entreprise-card" data-id="${entreprise.id}">
                 <div class="card-header-with-logo">
-                ${mainImage ? `
+                    ${mainImage ? `
                     <div class="card-logo-container">
                         <img src="${mainImage}" alt="${entreprise.nom || 'Logo'}" class="card-logo" onerror="this.style.display='none'">
-                </div>
-                ` : ''}
-                <div class="card-header">
-                    <h3>${entreprise.nom || 'Sans nom'}</h3>
-                    <button class="btn-favori ${entreprise.favori ? 'active' : ''}" data-id="${entreprise.id}" title="Favori">
-                        ⭐
-                    </button>
+                    </div>
+                    ` : ''}
+                    <div class="card-header">
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem;">
+                            <h3>${entreprise.nom || 'Sans nom'}</h3>
+                            <button class="btn-favori ${entreprise.favori ? 'active' : ''}" data-id="${entreprise.id}" title="Favori">
+                                ⭐
+                            </button>
+                        </div>
+                        ${typeof entreprise.score_securite !== 'undefined' && entreprise.score_securite !== null ? `
+                        <div style="margin-top:0.35rem;">
+                            <span style="font-size:0.8rem; color:#6b7280; margin-right:0.35rem;">Sécurité:</span>
+                            ${getSecurityScoreBadge(entreprise.score_securite)}
+                        </div>
+                        ` : ''}
                     </div>
                 </div>
                 <div class="card-body">
@@ -178,6 +186,7 @@
                     <div class="row-info">
                         ${entreprise.secteur ? `<span>${entreprise.secteur}</span>` : ''}
                         ${entreprise.statut ? `<span class="badge badge-${getStatusClass(entreprise.statut)}">${entreprise.statut}</span>` : ''}
+                        ${typeof entreprise.score_securite !== 'undefined' && entreprise.score_securite !== null ? `<span>${getSecurityScoreBadge(entreprise.score_securite)}</span>` : ''}
                         ${entreprise.email_principal ? `<span>${entreprise.email_principal}</span>` : ''}
                     </div>
                 </div>
@@ -622,14 +631,14 @@
                             ${createInfoRow('Nombre d\'avis', entreprise.nb_avis_google)}
                         </div>
                         
-                        ${entreprise.hosting_provider || entreprise.framework ? `
+                        ${entreprise.hosting_provider || entreprise.framework || typeof entreprise.score_securite !== 'undefined' ? `
                         <div class="tech-info-section">
                             <h3>Informations techniques</h3>
                             <div class="info-grid">
                                 ${createInfoRow('Hébergeur', entreprise.hosting_provider)}
                                 ${createInfoRow('Framework', entreprise.framework)}
                                 ${createInfoRow('CMS', entreprise.cms)}
-                                ${createInfoRow('Score sécurité', entreprise.score_securite)}
+                                ${createInfoRow('Score sécurité', entreprise.score_securite, false, getSecurityScoreBadge(entreprise.score_securite, 'security-score-badge'))}
                             </div>
                         </div>
                         ` : ''}
@@ -939,6 +948,37 @@
                 <span class="info-value">${content}</span>
             </div>
         `;
+    }
+    
+    /**
+     * Calcule les infos de score de securite a partir d'un score numerique 0-100.
+     * @param {number|null|undefined} score
+     * @returns {{label: string, className: string}}
+     */
+    function getSecurityScoreInfo(score) {
+        if (score === null || score === undefined || Number.isNaN(Number(score))) {
+            return { label: 'Non analyse', className: 'secondary' };
+        }
+        const s = Math.max(0, Math.min(100, Number(score)));
+        if (s >= 80) {
+            return { label: `${s}/100 (Securise)`, className: 'success' };
+        }
+        if (s >= 50) {
+            return { label: `${s}/100 (Moyen)`, className: 'warning' };
+        }
+        return { label: `${s}/100 (Faible)`, className: 'danger' };
+    }
+    
+    /**
+     * Genere un badge HTML pour le score de securite.
+     * @param {number|null|undefined} score
+     * @param {string|null} id
+     * @returns {string}
+     */
+    function getSecurityScoreBadge(score, id = null) {
+        const info = getSecurityScoreInfo(score);
+        const idAttr = id ? ` id="${id}"` : '';
+        return `<span${idAttr} class="badge badge-${info.className}">${info.label}</span>`;
     }
     
     function getStatusBadge(statut) {
@@ -2412,6 +2452,49 @@
             hour: '2-digit',
             minute: '2-digit'
         });
+
+        // Petites variables pour un résumé rapide plus lisible
+        const serverLabel = analysis.server_software || 'Inconnu';
+        const frameworkLabel = analysis.framework ? `${analysis.framework}${analysis.framework_version ? ' ' + analysis.framework_version : ''}` : 'Aucun détecté';
+        const cmsLabel = analysis.cms ? `${analysis.cms}${analysis.cms_version ? ' ' + analysis.cms_version : ''}` : 'Aucun détecté';
+        const sslLabel = analysis.ssl_valid ? 'SSL valide' : 'SSL non valide';
+        const wafLabel = analysis.waf || 'Aucun détecté';
+        const cdnLabel = analysis.cdn || 'Aucun détecté';
+        const analyticsCount = analysis.analytics && Array.isArray(analysis.analytics) ? analysis.analytics.length : 0;
+        const analyticsLabel = analyticsCount > 0 ? `${analyticsCount} outil(s)` : 'Aucun outil détecté';
+        
+        // Calcul d'un score global de securite simple (0-100)
+        let securityScore = 0;
+        if (analysis.ssl_valid) {
+            securityScore += 40;
+        }
+        if (analysis.waf) {
+            securityScore += 25;
+        }
+        if (analysis.cdn) {
+            securityScore += 10;
+        }
+        if (analysis.security_headers && typeof analysis.security_headers === 'object' && !Array.isArray(analysis.security_headers)) {
+            const headers = analysis.security_headers;
+            const importantHeaders = [
+                'Content-Security-Policy',
+                'Strict-Transport-Security',
+                'X-Frame-Options',
+                'X-Content-Type-Options',
+                'Referrer-Policy'
+            ];
+            let count = 0;
+            importantHeaders.forEach(name => {
+                if (headers[name]) {
+                    count += 1;
+                }
+            });
+            securityScore += Math.min(count * 5, 25);
+        }
+        if (securityScore > 100) {
+            securityScore = 100;
+        }
+        const securityInfo = getSecurityScoreInfo(securityScore);
         
         let html = `
             <div class="analysis-details" style="display: flex; flex-direction: column; gap: 1.5rem;">
@@ -2423,6 +2506,36 @@
                         <div><strong>🌐 URL:</strong> <a href="${analysis.url}" target="_blank" style="color: #ffd700; text-decoration: underline;">${analysis.url}</a></div>
                         <div><strong>🏷️ Domaine:</strong> ${analysis.domain || 'N/A'}</div>
                         <div><strong>🔢 IP:</strong> ${analysis.ip_address || 'N/A'}</div>
+                    </div>
+                </div>
+                
+                <!-- Résumé rapide -->
+                <div class="detail-section" style="padding: 0; border-radius: 8px; overflow: hidden;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0; border: 1px solid #e5e7eb;">
+                        <div style="padding: 1rem; border-right: 1px solid #e5e7eb; background: #f9fafb;">
+                            <div style="font-size: 0.8rem; text-transform: uppercase; color: #6b7280; letter-spacing: 0.08em; margin-bottom: 0.35rem;">Stack</div>
+                            <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+                                <div><strong>Serveur:</strong> ${escapeHtml(serverLabel)}</div>
+                                <div><strong>Framework:</strong> ${escapeHtml(frameworkLabel)}</div>
+                                <div><strong>CMS:</strong> ${escapeHtml(cmsLabel)}</div>
+                            </div>
+                        </div>
+                        <div style="padding: 1rem; border-right: 1px solid #e5e7eb; background: #fdfdfb;">
+                            <div style="font-size: 0.8rem; text-transform: uppercase; color: #6b7280; letter-spacing: 0.08em; margin-bottom: 0.35rem;">Sécurité</div>
+                            <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+                                <div><strong>SSL:</strong> ${escapeHtml(sslLabel)}</div>
+                                <div><strong>WAF:</strong> ${escapeHtml(wafLabel)}</div>
+                                <div><strong>CDN:</strong> ${escapeHtml(cdnLabel)}</div>
+                                <div><strong>Score global:</strong> <span class="badge badge-${securityInfo.className}">${securityInfo.label}</span></div>
+                            </div>
+                        </div>
+                        <div style="padding: 1rem; background: #f9fafb;">
+                            <div style="font-size: 0.8rem; text-transform: uppercase; color: #6b7280; letter-spacing: 0.08em; margin-bottom: 0.35rem;">Suivi & analytics</div>
+                            <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+                                <div><strong>Outils d'analyse:</strong> ${escapeHtml(analyticsLabel)}</div>
+                                ${analysis.performance_grade ? `<div><strong>Score performance:</strong> ${escapeHtml(String(analysis.performance_grade))}</div>` : ''}
+                            </div>
+                        </div>
                     </div>
                 </div>
                 
@@ -2476,9 +2589,20 @@
                 <div class="detail-section">
                     <h3 style="margin: 0 0 1rem 0; color: #2c3e50; border-bottom: 2px solid #667eea; padding-bottom: 0.5rem;">🛡️ En-têtes de sécurité</h3>
                     <div class="info-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem;">
-                        ${Object.entries(analysis.security_headers).map(([key, value]) => 
-                            `<div class="info-row"><span class="info-label">${key}:</span><span class="info-value"><code style="background: #f5f5f5; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.85rem;">${value || 'N/A'}</code></span></div>`
-                        ).join('')}
+                        ${Object.entries(analysis.security_headers).map(([key, value]) => {
+                            let display = '';
+                            if (value && typeof value === 'object') {
+                                const v = value.value || value.header || '';
+                                const status = value.status || value.present;
+                                display = v ? v : '';
+                                if (status !== undefined && status !== null && status !== '') {
+                                    display = display ? `${display} (${status})` : String(status);
+                                }
+                            } else {
+                                display = value || 'N/A';
+                            }
+                            return `<div class="info-row"><span class="info-label">${escapeHtml(key)}:</span><span class="info-value"><code style="background: #f5f5f5; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.85rem;">${escapeHtml(display)}</code></span></div>`;
+                        }).join('')}
                     </div>
                 </div>
                 ` : ''}
@@ -2487,7 +2611,18 @@
                 <div class="detail-section">
                     <h3 style="margin: 0 0 1rem 0; color: #2c3e50; border-bottom: 2px solid #667eea; padding-bottom: 0.5rem;">📈 Outils d'analyse <span class="badge badge-info">${analysis.analytics.length}</span></h3>
                     <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
-                        ${analysis.analytics.map(tool => `<span class="badge badge-secondary">${tool}</span>`).join('')}
+                        ${analysis.analytics.map(tool => {
+                            let label = '';
+                            if (tool && typeof tool === 'object') {
+                                const name = tool.name || tool.tool || tool.id || tool.tracking_id || '';
+                                const extra = tool.id && tool.id !== name ? ` (${tool.id})` :
+                                              tool.tracking_id && tool.tracking_id !== name ? ` (${tool.tracking_id})` : '';
+                                label = (name || '[Inconnu]') + extra;
+                            } else {
+                                label = String(tool);
+                            }
+                            return `<span class="badge badge-secondary">${escapeHtml(label)}</span>`;
+                        }).join('')}
                     </div>
                 </div>
                 ` : ''}
@@ -2537,6 +2672,23 @@
         `;
         
         resultsContent.innerHTML = html;
+        
+        // Mettre a jour le score securite dans la fiche info si possible
+        try {
+            if (typeof securityScore !== 'undefined') {
+                if (window.currentModalEntrepriseData) {
+                    window.currentModalEntrepriseData.score_securite = securityScore;
+                }
+                const badge = document.getElementById('security-score-badge');
+                if (badge) {
+                    const info = getSecurityScoreInfo(securityScore);
+                    badge.className = `badge badge-${info.className}`;
+                    badge.textContent = info.label;
+                }
+            }
+        } catch (e) {
+            console.warn('Impossible de mettre a jour le badge de score securite:', e);
+        }
     }
     
     function displayOSINTAnalysis(analysis) {

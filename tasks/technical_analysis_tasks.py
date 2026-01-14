@@ -9,7 +9,6 @@ from celery_app import celery
 from services.technical_analyzer import TechnicalAnalyzer
 from services.osint_analyzer import OSINTAnalyzer
 from services.pentest_analyzer import PentestAnalyzer
-from services import technical_analyzer_advanced as taa
 from services.database import Database
 from services.logging_config import setup_logger
 import logging
@@ -50,7 +49,8 @@ def technical_analysis_task(self, url, entreprise_id=None):
             meta={'progress': 30, 'message': 'Analyse en cours...'}
         )
         
-        results = analyzer.analyze(url)
+        # Utiliser la méthode d'analyse technique détaillée
+        results = analyzer.analyze_technical_details(url, enable_nmap=False)
         
         self.update_state(
             state='PROGRESS',
@@ -318,10 +318,10 @@ def advanced_technical_analysis_task(self, url):
         self.update_state(state='PROGRESS', meta={'progress': 5, 'message': 'Analyse SSL...'})
         parsed = url if url.startswith(('http://', 'https://')) else f'https://{url}'
         domain = parsed.split('//', 1)[1].split('/')[0]
-        ssl_info = taa.analyze_ssl_certificate(domain)
+        ssl_info = analyze_ssl_certificate(domain)
 
         self.update_state(state='PROGRESS', meta={'progress': 40, 'message': 'Analyse robots.txt...'})
-        robots_info = taa.analyze_robots_txt(parsed)
+        robots_info = analyze_robots_txt(parsed)
 
         self.update_state(state='PROGRESS', meta={'progress': 70, 'message': 'Analyse services tiers...'})
         services_info = {}
@@ -331,7 +331,7 @@ def advanced_technical_analysis_task(self, url):
             resp = requests.get(parsed, timeout=10)
             if resp.status_code == 200:
                 soup = BeautifulSoup(resp.text, 'html.parser')
-                services_info = taa.detect_third_party_services(soup, resp.text)
+                services_info = detect_third_party_services(soup, resp.text)
         except Exception as e:
             services_info = {'error': str(e)}
 

@@ -237,7 +237,7 @@ socket.on('scraping_progress', function(data) {
 socket.on('scraping_complete', function(data) {
     console.log('Scraping termine !');
     console.log('Total emails:', data.total_emails);
-    // Redirection automatique vers /entreprises
+    // Redirection automatique vers /entreprises une fois le scraping + analyse technique termines
 });
 ```
 

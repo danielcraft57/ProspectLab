@@ -357,6 +357,9 @@ class Database:
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_tech_cms_plugins_analysis_id ON analysis_technique_cms_plugins(analysis_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_tech_security_headers_analysis_id ON analysis_technique_security_headers(analysis_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_tech_analytics_analysis_id ON analysis_technique_analytics(analysis_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tech_url ON analyses_techniques(url)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tech_domain ON analyses_techniques(domain)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tech_entreprise_date ON analyses_techniques(entreprise_id, date_analyse)')
         
         # Table des analyses OSINT
         cursor.execute('''
@@ -2117,35 +2120,141 @@ class Database:
     
     def update_technical_analysis(self, analysis_id, tech_data):
         """Met à jour une analyse technique avec normalisation"""
-        # Supprimer les anciennes données normalisées
         conn = self.get_connection()
         cursor = conn.cursor()
+
+        # Récupérer entreprise_id + url existants (on conserve le même id)
+        cursor.execute('SELECT entreprise_id, url FROM analyses_techniques WHERE id = ?', (analysis_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return analysis_id
+
+        entreprise_id = row['entreprise_id']
+        url = row['url'] or tech_data.get('url', '')
+
+        # Mettre à jour la ligne principale (évite de casser les références et garde un historique cohérent)
+        domain = url.replace('http://', '').replace('https://', '').split('/')[0].replace('www.', '')
+        cursor.execute('''
+            UPDATE analyses_techniques
+            SET url = ?,
+                domain = ?,
+                ip_address = ?,
+                server_software = ?,
+                framework = ?,
+                framework_version = ?,
+                cms = ?,
+                cms_version = ?,
+                hosting_provider = ?,
+                domain_creation_date = ?,
+                domain_updated_date = ?,
+                domain_registrar = ?,
+                ssl_valid = ?,
+                ssl_expiry_date = ?,
+                waf = ?,
+                cdn = ?,
+                seo_meta = ?,
+                performance_metrics = ?,
+                nmap_scan = ?,
+                technical_details = ?,
+                date_analyse = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ''', (
+            url,
+            domain,
+            tech_data.get('ip_address'),
+            tech_data.get('server_software'),
+            tech_data.get('framework'),
+            tech_data.get('framework_version'),
+            tech_data.get('cms'),
+            tech_data.get('cms_version'),
+            tech_data.get('hosting_provider'),
+            tech_data.get('domain_creation_date'),
+            tech_data.get('domain_updated_date'),
+            tech_data.get('domain_registrar'),
+            tech_data.get('ssl_valid'),
+            tech_data.get('ssl_expiry_date'),
+            tech_data.get('waf'),
+            tech_data.get('cdn'),
+            json.dumps(tech_data.get('seo_meta', {})) if tech_data.get('seo_meta') else None,
+            json.dumps(tech_data.get('performance_metrics', {})) if tech_data.get('performance_metrics') else None,
+            json.dumps(tech_data.get('nmap_scan', {})) if tech_data.get('nmap_scan') else None,
+            json.dumps(tech_data) if tech_data else None,
+            analysis_id
+        ))
+
+        # Supprimer puis réinsérer les données normalisées
         cursor.execute('DELETE FROM analysis_technique_cms_plugins WHERE analysis_id = ?', (analysis_id,))
         cursor.execute('DELETE FROM analysis_technique_security_headers WHERE analysis_id = ?', (analysis_id,))
         cursor.execute('DELETE FROM analysis_technique_analytics WHERE analysis_id = ?', (analysis_id,))
+
+        # Plugins CMS
+        cms_plugins = tech_data.get('cms_plugins', [])
+        if cms_plugins:
+            if isinstance(cms_plugins, str):
+                try:
+                    cms_plugins = json.loads(cms_plugins)
+                except:
+                    cms_plugins = []
+            if isinstance(cms_plugins, list):
+                for plugin in cms_plugins:
+                    if isinstance(plugin, dict):
+                        plugin_name = plugin.get('name') or plugin.get('plugin') or str(plugin)
+                        plugin_version = plugin.get('version')
+                    else:
+                        plugin_name = str(plugin)
+                        plugin_version = None
+                    if plugin_name:
+                        cursor.execute('''
+                            INSERT OR IGNORE INTO analysis_technique_cms_plugins (analysis_id, plugin_name, version)
+                            VALUES (?, ?, ?)
+                        ''', (analysis_id, plugin_name, plugin_version))
+
+        # Headers de sécurité
+        security_headers = tech_data.get('security_headers', {})
+        if security_headers:
+            if isinstance(security_headers, str):
+                try:
+                    security_headers = json.loads(security_headers)
+                except:
+                    security_headers = {}
+            if isinstance(security_headers, dict):
+                for header_name, header_data in security_headers.items():
+                    if isinstance(header_data, dict):
+                        header_value = header_data.get('value') or header_data.get('header')
+                        status = header_data.get('status') or header_data.get('present')
+                    else:
+                        header_value = str(header_data) if header_data else None
+                        status = 'present' if header_data else None
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO analysis_technique_security_headers (analysis_id, header_name, header_value, status)
+                        VALUES (?, ?, ?, ?)
+                    ''', (analysis_id, header_name, header_value, status))
+
+        # Analytics
+        analytics = tech_data.get('analytics', [])
+        if analytics:
+            if isinstance(analytics, str):
+                try:
+                    analytics = json.loads(analytics)
+                except:
+                    analytics = []
+            if isinstance(analytics, list):
+                for tool in analytics:
+                    if isinstance(tool, dict):
+                        tool_name = tool.get('name') or tool.get('tool') or str(tool)
+                        tool_id = tool.get('id') or tool.get('tracking_id')
+                    else:
+                        tool_name = str(tool)
+                        tool_id = None
+                    if tool_name:
+                        cursor.execute('''
+                            INSERT OR IGNORE INTO analysis_technique_analytics (analysis_id, tool_name, tool_id)
+                            VALUES (?, ?, ?)
+                        ''', (analysis_id, tool_name, tool_id))
+
         conn.commit()
         conn.close()
-        
-        # Réutiliser save_technical_analysis qui gère déjà la normalisation
-        # Mais d'abord récupérer l'entreprise_id et l'url
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute('SELECT entreprise_id, url FROM analyses_techniques WHERE id = ?', (analysis_id,))
-        row = cursor.fetchone()
-        conn.close()
-        
-        if row:
-            entreprise_id = row['entreprise_id']
-            url = row['url'] or tech_data.get('url', '')
-            # Supprimer l'ancienne analyse et en créer une nouvelle
-            conn = self.get_connection()
-            cursor = conn.cursor()
-            cursor.execute('DELETE FROM analyses_techniques WHERE id = ?', (analysis_id,))
-            conn.commit()
-            conn.close()
-            # Sauvegarder avec la nouvelle méthode normalisée
-            return self.save_technical_analysis(entreprise_id, url, tech_data)
-        
         return analysis_id
     
     def delete_osint_analysis(self, analysis_id):
@@ -2260,20 +2369,20 @@ class Database:
         # Sauvegarder les données normalisées dans les tables séparées (au lieu de JSON)
         # Utiliser la même connexion pour éviter les verrouillages
         try:
-        if emails:
-            self._save_scraper_emails_in_transaction(cursor, scraper_id, entreprise_id, emails)
-        if phones:
-            self._save_scraper_phones_in_transaction(cursor, scraper_id, entreprise_id, phones)
-        if social_profiles:
-            self._save_scraper_social_profiles_in_transaction(cursor, scraper_id, entreprise_id, social_profiles)
-        if technologies:
-            self._save_scraper_technologies_in_transaction(cursor, scraper_id, entreprise_id, technologies)
-        if people:
-            self._save_scraper_people_in_transaction(cursor, scraper_id, entreprise_id, people)
-        
-        # Sauvegarder les images dans la table séparée (optimisation BDD, liées à l'entreprise)
-        if images and isinstance(images, list) and len(images) > 0:
-            self._save_images_in_transaction(cursor, entreprise_id, scraper_id, images)
+            if emails:
+                self._save_scraper_emails_in_transaction(cursor, scraper_id, entreprise_id, emails)
+            if phones:
+                self._save_scraper_phones_in_transaction(cursor, scraper_id, entreprise_id, phones)
+            if social_profiles:
+                self._save_scraper_social_profiles_in_transaction(cursor, scraper_id, entreprise_id, social_profiles)
+            if technologies:
+                self._save_scraper_technologies_in_transaction(cursor, scraper_id, entreprise_id, technologies)
+            if people:
+                self._save_scraper_people_in_transaction(cursor, scraper_id, entreprise_id, people)
+            
+            # Sauvegarder les images dans la table séparée (optimisation BDD, liées à l'entreprise)
+            if images and isinstance(images, list) and len(images) > 0:
+                self._save_images_in_transaction(cursor, entreprise_id, scraper_id, images)
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)

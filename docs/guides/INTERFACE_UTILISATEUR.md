@@ -105,10 +105,14 @@ Bouton pour lancer un nouveau scraping si necessaire.
 
 #### Onglet Analyse technique
 
-Resultats de l'analyse technique avancee :
-- Frameworks detectes
-- Serveurs et hebergement
-- Score de securite
+Affiche une vue synthetique et detaillee de la fiche technique du site :
+- Serveur et hebergeur
+- Framework / CMS detectes
+- SSL (valide ou non, date d'expiration)
+- En-tetes de securite principaux
+- Outils d'analyse (Analytics, Tag managers, etc.)
+- Score de securite global (0-100) avec code couleur
+- Metriques de performance et details techniques complets (section deroulante)
 
 #### Onglet Analyse OSINT
 

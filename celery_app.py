@@ -48,7 +48,6 @@ celery.conf.update(
         'tasks.analysis_tasks',
         'tasks.scraping_tasks',
         'tasks.technical_analysis_tasks',
-        'tasks.technical_advanced_tasks',
         'tasks.email_tasks',
     ),
     # Configuration pour Windows : utiliser solo au lieu de prefork
