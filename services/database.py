@@ -360,6 +360,53 @@ class Database:
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_tech_url ON analyses_techniques(url)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_tech_domain ON analyses_techniques(domain)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_tech_entreprise_date ON analyses_techniques(entreprise_id, date_analyse)')
+
+        # Colonnes complémentaires pour les analyses techniques (multi-pages + scoring)
+        try:
+            cursor.execute('ALTER TABLE analyses_techniques ADD COLUMN pages_count INTEGER')
+        except sqlite3.OperationalError:
+            pass
+        try:
+            cursor.execute('ALTER TABLE analyses_techniques ADD COLUMN security_score INTEGER')
+        except sqlite3.OperationalError:
+            pass
+        try:
+            cursor.execute('ALTER TABLE analyses_techniques ADD COLUMN performance_score INTEGER')
+        except sqlite3.OperationalError:
+            pass
+        try:
+            cursor.execute('ALTER TABLE analyses_techniques ADD COLUMN trackers_count INTEGER')
+        except sqlite3.OperationalError:
+            pass
+        try:
+            cursor.execute('ALTER TABLE analyses_techniques ADD COLUMN pages_summary TEXT')
+        except sqlite3.OperationalError:
+            pass
+
+        # Table des pages analysées (analyse technique multi-pages)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS analysis_technique_pages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                analysis_id INTEGER NOT NULL,
+                page_url TEXT NOT NULL,
+                status_code INTEGER,
+                final_url TEXT,
+                content_type TEXT,
+                title TEXT,
+                response_time_ms INTEGER,
+                content_length INTEGER,
+                security_score INTEGER,
+                performance_score INTEGER,
+                trackers_count INTEGER,
+                security_headers TEXT,
+                analytics TEXT,
+                details TEXT,
+                date_found TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (analysis_id) REFERENCES analyses_techniques(id) ON DELETE CASCADE
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tech_pages_analysis_id ON analysis_technique_pages(analysis_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tech_pages_url ON analysis_technique_pages(page_url)')
         
         # Table des analyses OSINT
         cursor.execute('''
@@ -565,6 +612,7 @@ class Database:
                 total_technologies INTEGER,
                 total_metadata INTEGER,
                 total_images INTEGER DEFAULT 0,
+                total_forms INTEGER DEFAULT 0,
                 duration REAL,
                 date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 date_modification TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -597,6 +645,10 @@ class Database:
             pass
         try:
             cursor.execute('ALTER TABLE images ADD COLUMN scraper_id INTEGER')
+        except:
+            pass
+        try:
+            cursor.execute('ALTER TABLE scrapers ADD COLUMN total_forms INTEGER DEFAULT 0')
         except:
             pass
         
@@ -689,6 +741,70 @@ class Database:
             )
         ''')
         
+        # Migration: ajouter la contrainte UNIQUE si elle n'existe pas déjà
+        # Utiliser un index unique qui gère les NULL
+        try:
+            cursor.execute('DROP INDEX IF EXISTS idx_scraper_people_unique')
+        except Exception:
+            pass
+        try:
+            # Index unique qui gère les NULL dans name et email
+            cursor.execute('''
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_scraper_people_unique 
+                ON scraper_people(scraper_id, COALESCE(name, ''), COALESCE(email, ''))
+            ''')
+        except Exception:
+            # Fallback: index simple si COALESCE ne fonctionne pas
+            try:
+                cursor.execute('''
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_scraper_people_unique_simple 
+                    ON scraper_people(scraper_id, name, email)
+                ''')
+            except Exception:
+                pass
+        
+        # Table des formulaires trouvés lors du scraping (pour pentest)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS scraper_forms (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scraper_id INTEGER NOT NULL,
+                entreprise_id INTEGER NOT NULL,
+                page_url TEXT NOT NULL,
+                action_url TEXT,
+                method TEXT DEFAULT 'GET',
+                enctype TEXT,
+                has_csrf INTEGER DEFAULT 0,
+                has_file_upload INTEGER DEFAULT 0,
+                fields_count INTEGER DEFAULT 0,
+                fields_data TEXT,
+                date_found TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (scraper_id) REFERENCES scrapers(id) ON DELETE CASCADE,
+                FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE
+            )
+        ''')
+        
+        # Migration: ajouter la contrainte UNIQUE si elle n'existe pas déjà
+        # SQLite ne supporte pas COALESCE dans UNIQUE directement, on utilise un index unique
+        try:
+            cursor.execute('DROP INDEX IF EXISTS idx_scraper_forms_unique')
+        except Exception:
+            pass
+        try:
+            # Index unique qui gère les NULL dans action_url
+            cursor.execute('''
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_scraper_forms_unique 
+                ON scraper_forms(scraper_id, page_url, COALESCE(action_url, ''))
+            ''')
+        except Exception:
+            # Fallback: index simple si COALESCE ne fonctionne pas
+            try:
+                cursor.execute('''
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_scraper_forms_unique_simple 
+                    ON scraper_forms(scraper_id, page_url)
+                ''')
+            except Exception:
+                pass
+        
         # Index pour améliorer les performances
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_scraper_emails_scraper_id ON scraper_emails(scraper_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_scraper_emails_entreprise_id ON scraper_emails(entreprise_id)')
@@ -700,6 +816,9 @@ class Database:
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_scraper_tech_entreprise_id ON scraper_technologies(entreprise_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_scraper_people_scraper_id ON scraper_people(scraper_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_scraper_people_entreprise_id ON scraper_people(entreprise_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_scraper_forms_scraper_id ON scraper_forms(scraper_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_scraper_forms_entreprise_id ON scraper_forms(entreprise_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_scraper_forms_page_url ON scraper_forms(page_url)')
         
         # Migration: migrer les données JSON existantes vers les tables normalisées
         try:
@@ -1626,15 +1745,28 @@ class Database:
         # Extraire le domaine de l'URL
         domain = url.replace('http://', '').replace('https://', '').split('/')[0].replace('www.', '')
         
+        pages_summary = tech_data.get('pages_summary') or {}
+        pages = tech_data.get('pages') or []
+        security_score = tech_data.get('security_score')
+        performance_score = tech_data.get('performance_score')
+        trackers_count = tech_data.get('trackers_count')
+        pages_count = tech_data.get('pages_count') or (len(pages) if pages else None)
+
         # Sauvegarder l'analyse principale (sans les données JSON normalisées)
+        # Colonnes: entreprise_id, url, domain, ip_address, server_software, framework, framework_version,
+        # cms, cms_version, cms_plugins, hosting_provider, domain_creation_date, domain_updated_date,
+        # domain_registrar, ssl_valid, ssl_expiry_date, security_headers, waf, cdn, analytics,
+        # seo_meta, performance_metrics, nmap_scan, technical_details, pages_count, security_score,
+        # performance_score, trackers_count, pages_summary (29 colonnes au total)
         cursor.execute('''
             INSERT INTO analyses_techniques (
                 entreprise_id, url, domain, ip_address, server_software,
-                framework, framework_version, cms, cms_version, hosting_provider,
+                framework, framework_version, cms, cms_version, cms_plugins, hosting_provider,
                 domain_creation_date, domain_updated_date, domain_registrar,
-                ssl_valid, ssl_expiry_date, waf, cdn,
-                seo_meta, performance_metrics, nmap_scan, technical_details
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ssl_valid, ssl_expiry_date, security_headers, waf, cdn, analytics,
+                seo_meta, performance_metrics, nmap_scan, technical_details,
+                pages_count, security_score, performance_score, trackers_count, pages_summary
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             entreprise_id,
             url,
@@ -1645,18 +1777,26 @@ class Database:
             tech_data.get('framework_version'),
             tech_data.get('cms'),
             tech_data.get('cms_version'),
+            json.dumps(tech_data.get('cms_plugins', [])) if tech_data.get('cms_plugins') else None,
             tech_data.get('hosting_provider'),
             tech_data.get('domain_creation_date'),
             tech_data.get('domain_updated_date'),
             tech_data.get('domain_registrar'),
             tech_data.get('ssl_valid'),
             tech_data.get('ssl_expiry_date'),
+            json.dumps(tech_data.get('security_headers', {})) if tech_data.get('security_headers') else None,
             tech_data.get('waf'),
             tech_data.get('cdn'),
+            json.dumps(tech_data.get('analytics', {})) if tech_data.get('analytics') else None,
             json.dumps(tech_data.get('seo_meta', {})) if tech_data.get('seo_meta') else None,
             json.dumps(tech_data.get('performance_metrics', {})) if tech_data.get('performance_metrics') else None,
             json.dumps(tech_data.get('nmap_scan', {})) if tech_data.get('nmap_scan') else None,
-            json.dumps(tech_data) if tech_data else None
+            json.dumps(tech_data) if tech_data else None,
+            pages_count,
+            security_score,
+            performance_score,
+            trackers_count,
+            json.dumps(pages_summary) if pages_summary else None
         ))
         
         analysis_id = cursor.lastrowid
@@ -1725,6 +1865,56 @@ class Database:
                             INSERT OR IGNORE INTO analysis_technique_analytics (analysis_id, tool_name, tool_id)
                             VALUES (?, ?, ?)
                         ''', (analysis_id, tool_name, tool_id))
+
+        # Sauvegarder les pages analysées (multi-pages)
+        if pages:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f'Sauvegarde de {len(pages)} page(s) pour l\'analyse technique {analysis_id}')
+            for page in pages:
+                try:
+                    page_url = page.get('url') or page.get('page_url')
+                    if not page_url:
+                        logger.warning(f'Page sans URL ignorée: {page}')
+                        continue
+                    cursor.execute('''
+                        INSERT INTO analysis_technique_pages (
+                            analysis_id, page_url, status_code, final_url, content_type,
+                            title, response_time_ms, content_length, security_score,
+                            performance_score, trackers_count, security_headers, analytics, details
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        analysis_id,
+                        page_url,
+                        page.get('status_code'),
+                        page.get('final_url'),
+                        page.get('content_type'),
+                        page.get('title'),
+                        page.get('response_time_ms'),
+                        page.get('content_length'),
+                        page.get('security_score'),
+                        page.get('performance_score'),
+                        page.get('trackers_count'),
+                        json.dumps(page.get('security_headers')) if page.get('security_headers') else None,
+                        json.dumps(page.get('analytics')) if page.get('analytics') else None,
+                        json.dumps(page) if page else None
+                    ))
+                except Exception as e:
+                    logger.error(f'Erreur lors de la sauvegarde d\'une page pour l\'analyse {analysis_id}: {e}', exc_info=True)
+        else:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f'Aucune page à sauvegarder pour l\'analyse technique {analysis_id} (pages={pages})')
+
+        # Mettre à jour la fiche entreprise avec le score de sécurité global si présent
+        if entreprise_id and security_score is not None:
+            try:
+                cursor.execute(
+                    'UPDATE entreprises SET score_securite = ? WHERE id = ?',
+                    (security_score, entreprise_id)
+                )
+            except Exception:
+                pass
         
         conn.commit()
         conn.close()
@@ -1768,11 +1958,29 @@ class Database:
             if analytics_row['tool_id']:
                 tool['id'] = analytics_row['tool_id']
             analytics.append(tool)
+
+        # Charger les pages analysées (multi-pages)
+        cursor.execute('''
+            SELECT * FROM analysis_technique_pages
+            WHERE analysis_id = ?
+            ORDER BY id ASC
+        ''', (analysis_id,))
+        pages = []
+        for page_row in cursor.fetchall():
+            page_data = dict(page_row)
+            for json_field in ['security_headers', 'analytics', 'details']:
+                if page_data.get(json_field):
+                    try:
+                        page_data[json_field] = json.loads(page_data[json_field])
+                    except Exception:
+                        pass
+            pages.append(page_data)
         
         return {
             'cms_plugins': plugins,
             'security_headers': headers,
-            'analytics': analytics
+            'analytics': analytics,
+            'pages': pages
         }
     
     def get_technical_analysis(self, entreprise_id):
@@ -1798,7 +2006,7 @@ class Database:
             analysis.update(normalized)
             
             # Parser les autres champs JSON
-            for field in ['seo_meta', 'performance_metrics', 'nmap_scan', 'technical_details']:
+            for field in ['seo_meta', 'performance_metrics', 'nmap_scan', 'technical_details', 'pages_summary']:
                 if analysis.get(field):
                     try:
                         analysis[field] = json.loads(analysis[field])
@@ -2033,7 +2241,7 @@ class Database:
             analysis.update(normalized)
             
             # Parser les autres champs JSON
-            for field in ['seo_meta', 'performance_metrics', 'nmap_scan', 'technical_details']:
+            for field in ['seo_meta', 'performance_metrics', 'nmap_scan', 'technical_details', 'pages_summary']:
                 if analysis.get(field):
                     try:
                         analysis[field] = json.loads(analysis[field])
@@ -2067,7 +2275,7 @@ class Database:
             analysis.update(normalized)
             
             # Parser les autres champs JSON
-            for field in ['seo_meta', 'performance_metrics', 'nmap_scan', 'technical_details']:
+            for field in ['seo_meta', 'performance_metrics', 'nmap_scan', 'technical_details', 'pages_summary']:
                 if analysis.get(field):
                     try:
                         analysis[field] = json.loads(analysis[field])
@@ -2105,7 +2313,7 @@ class Database:
             analysis.update(normalized)
             
             # Parser les autres champs JSON
-            for field in ['seo_meta', 'performance_metrics', 'nmap_scan', 'technical_details']:
+            for field in ['seo_meta', 'performance_metrics', 'nmap_scan', 'technical_details', 'pages_summary']:
                 if analysis.get(field):
                     try:
                         analysis[field] = json.loads(analysis[field])
@@ -2122,6 +2330,13 @@ class Database:
         """Met à jour une analyse technique avec normalisation"""
         conn = self.get_connection()
         cursor = conn.cursor()
+
+        pages_summary = tech_data.get('pages_summary') or {}
+        pages = tech_data.get('pages') or []
+        security_score = tech_data.get('security_score')
+        performance_score = tech_data.get('performance_score')
+        trackers_count = tech_data.get('trackers_count')
+        pages_count = tech_data.get('pages_count') or (len(pages) if pages else None)
 
         # Récupérer entreprise_id + url existants (on conserve le même id)
         cursor.execute('SELECT entreprise_id, url FROM analyses_techniques WHERE id = ?', (analysis_id,))
@@ -2157,6 +2372,11 @@ class Database:
                 performance_metrics = ?,
                 nmap_scan = ?,
                 technical_details = ?,
+                pages_count = ?,
+                security_score = ?,
+                performance_score = ?,
+                trackers_count = ?,
+                pages_summary = ?,
                 date_analyse = CURRENT_TIMESTAMP
             WHERE id = ?
         ''', (
@@ -2180,6 +2400,11 @@ class Database:
             json.dumps(tech_data.get('performance_metrics', {})) if tech_data.get('performance_metrics') else None,
             json.dumps(tech_data.get('nmap_scan', {})) if tech_data.get('nmap_scan') else None,
             json.dumps(tech_data) if tech_data else None,
+            pages_count,
+            security_score,
+            performance_score,
+            trackers_count,
+            json.dumps(pages_summary) if pages_summary else None,
             analysis_id
         ))
 
@@ -2187,6 +2412,7 @@ class Database:
         cursor.execute('DELETE FROM analysis_technique_cms_plugins WHERE analysis_id = ?', (analysis_id,))
         cursor.execute('DELETE FROM analysis_technique_security_headers WHERE analysis_id = ?', (analysis_id,))
         cursor.execute('DELETE FROM analysis_technique_analytics WHERE analysis_id = ?', (analysis_id,))
+        cursor.execute('DELETE FROM analysis_technique_pages WHERE analysis_id = ?', (analysis_id,))
 
         # Plugins CMS
         cms_plugins = tech_data.get('cms_plugins', [])
@@ -2253,6 +2479,42 @@ class Database:
                             VALUES (?, ?, ?)
                         ''', (analysis_id, tool_name, tool_id))
 
+        # Pages multi-analysées
+        if pages:
+            for page in pages:
+                cursor.execute('''
+                    INSERT INTO analysis_technique_pages (
+                        analysis_id, page_url, status_code, final_url, content_type,
+                        title, response_time_ms, content_length, security_score,
+                        performance_score, trackers_count, security_headers, analytics, details
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    analysis_id,
+                    page.get('url') or page.get('page_url'),
+                    page.get('status_code'),
+                    page.get('final_url'),
+                    page.get('content_type'),
+                    page.get('title'),
+                    page.get('response_time_ms'),
+                    page.get('content_length'),
+                    page.get('security_score'),
+                    page.get('performance_score'),
+                    page.get('trackers_count'),
+                    json.dumps(page.get('security_headers')) if page.get('security_headers') else None,
+                    json.dumps(page.get('analytics')) if page.get('analytics') else None,
+                    json.dumps(page) if page else None
+                ))
+
+        # Mettre à jour la fiche entreprise avec le score global
+        if security_score is not None and entreprise_id:
+            try:
+                cursor.execute(
+                    'UPDATE entreprises SET score_securite = ? WHERE id = ?',
+                    (security_score, entreprise_id)
+                )
+            except Exception:
+                pass
+
         conn.commit()
         conn.close()
         return analysis_id
@@ -2270,9 +2532,9 @@ class Database:
         return deleted
     
     def save_scraper(self, entreprise_id, url, scraper_type, emails=None, people=None, phones=None, 
-                     social_profiles=None, technologies=None, metadata=None, images=None,
+                     social_profiles=None, technologies=None, metadata=None, images=None, forms=None,
                      visited_urls=0, total_emails=0, total_people=0, total_phones=0,
-                     total_social_profiles=0, total_technologies=0, total_metadata=0, total_images=0, duration=0):
+                     total_social_profiles=0, total_technologies=0, total_metadata=0, total_images=0, total_forms=0, duration=0):
         """
         Sauvegarde ou met à jour un scraper dans la base de données.
         Si un scraper existe déjà pour cette entreprise/URL/type, il est mis à jour.
@@ -2289,6 +2551,7 @@ class Database:
             technologies: Dictionnaire des technologies (JSON string ou dict)
             metadata: Dictionnaire des métadonnées (JSON string ou dict)
             images: Liste des images trouvées (list de dicts {url, alt, page_url, width, height})
+            forms: Liste des formulaires trouvés (list de dicts avec détails des formulaires)
             visited_urls: Nombre d'URLs visitées
             total_emails: Nombre total d'emails
             total_people: Nombre total de personnes
@@ -2297,6 +2560,7 @@ class Database:
             total_technologies: Nombre total de technologies
             total_metadata: Nombre total de métadonnées
             total_images: Nombre total d'images
+            total_forms: Nombre total de formulaires
             duration: Durée du scraping en secondes
         
         Returns:
@@ -2340,13 +2604,14 @@ class Database:
                     total_technologies = ?,
                     total_metadata = ?,
                     total_images = ?,
+                    total_forms = ?,
                     duration = ?,
                     date_modification = CURRENT_TIMESTAMP
                 WHERE id = ?
             ''', (
                 emails_json, people_json, phones_json, social_json, tech_json, metadata_json,
                 visited_urls, total_emails, total_people, total_phones,
-                total_social_profiles, total_technologies, total_metadata, total_images, duration,
+                total_social_profiles, total_technologies, total_metadata, total_images, total_forms, duration,
                 scraper_id
             ))
         else:
@@ -2355,14 +2620,14 @@ class Database:
                 INSERT INTO scrapers (
                     entreprise_id, url, scraper_type, emails, people, phones, social_profiles, 
                     technologies, metadata, visited_urls, total_emails, total_people, total_phones,
-                    total_social_profiles, total_technologies, total_metadata, total_images, duration,
+                    total_social_profiles, total_technologies, total_metadata, total_images, total_forms, duration,
                     date_creation, date_modification
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             ''', (
                 entreprise_id, url, scraper_type, emails_json, people_json, phones_json, 
                 social_json, tech_json, metadata_json, visited_urls, total_emails, total_people,
-                total_phones, total_social_profiles, total_technologies, total_metadata, total_images, duration
+                total_phones, total_social_profiles, total_technologies, total_metadata, total_images, total_forms, duration
             ))
             scraper_id = cursor.lastrowid
         
@@ -2383,6 +2648,17 @@ class Database:
             # Sauvegarder les images dans la table séparée (optimisation BDD, liées à l'entreprise)
             if images and isinstance(images, list) and len(images) > 0:
                 self._save_images_in_transaction(cursor, entreprise_id, scraper_id, images)
+            
+            # Sauvegarder les formulaires dans la table séparée (pour pentest)
+            if forms and isinstance(forms, list) and len(forms) > 0:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f'Sauvegarde de {len(forms)} formulaire(s) pour le scraper {scraper_id} (entreprise {entreprise_id})')
+                self._save_scraper_forms_in_transaction(cursor, scraper_id, entreprise_id, forms)
+            else:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f'Aucun formulaire à sauvegarder pour le scraper {scraper_id} (forms={forms})')
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
@@ -2606,7 +2882,7 @@ class Database:
             
             if name or email:
                 cursor.execute('''
-                    INSERT INTO scraper_people (scraper_id, entreprise_id, person_id, name, title, email, linkedin_url, page_url)
+                    INSERT OR IGNORE INTO scraper_people (scraper_id, entreprise_id, person_id, name, title, email, linkedin_url, page_url)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (scraper_id, entreprise_id, person_id, name, title, email, linkedin_url, page_url))
     
@@ -2661,6 +2937,107 @@ class Database:
         self._save_images_in_transaction(cursor, entreprise_id, scraper_id, images)
         conn.commit()
         conn.close()
+    
+    def _save_scraper_forms_in_transaction(self, cursor, scraper_id, entreprise_id, forms):
+        """Sauvegarde les formulaires dans la transaction en cours"""
+        if not forms:
+            return
+        
+        cursor.execute('DELETE FROM scraper_forms WHERE scraper_id = ?', (scraper_id,))
+        
+        if isinstance(forms, str):
+            try:
+                forms = json.loads(forms)
+            except:
+                return
+        
+        if not isinstance(forms, list):
+            return
+        
+        for form in forms:
+            if not isinstance(form, dict):
+                continue
+            
+            page_url = form.get('page_url')
+            if not page_url:
+                continue
+            
+            action_url = form.get('action_url') or form.get('action')
+            method = form.get('method', 'GET').upper()
+            enctype = form.get('enctype', 'application/x-www-form-urlencoded')
+            has_csrf = 1 if form.get('has_csrf', False) else 0
+            has_file_upload = 1 if form.get('has_file_upload', False) else 0
+            fields = form.get('fields', [])
+            fields_count = len(fields) if isinstance(fields, list) else 0
+            fields_data = json.dumps(fields) if fields else None
+            
+            cursor.execute('''
+                INSERT OR IGNORE INTO scraper_forms (
+                    scraper_id, entreprise_id, page_url, action_url, method, enctype,
+                    has_csrf, has_file_upload, fields_count, fields_data
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                scraper_id, entreprise_id, page_url, action_url, method, enctype,
+                has_csrf, has_file_upload, fields_count, fields_data
+            ))
+    
+    def save_scraper_forms(self, scraper_id, entreprise_id, forms):
+        """Sauvegarde les formulaires dans la table scraper_forms (normalisation BDD)"""
+        if not forms:
+            return
+        
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self._save_scraper_forms_in_transaction(cursor, scraper_id, entreprise_id, forms)
+        conn.commit()
+        conn.close()
+    
+    def get_scraper_forms(self, scraper_id):
+        """
+        Récupère les formulaires d'un scraper depuis la table normalisée
+        
+        Args:
+            scraper_id: ID du scraper
+        
+        Returns:
+            list: Liste des formulaires (dicts)
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT page_url, action_url, method, enctype, has_csrf, has_file_upload, 
+                   fields_count, fields_data
+            FROM scraper_forms WHERE scraper_id = ? ORDER BY date_found DESC
+        ''', (scraper_id,))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        forms = []
+        for row in rows:
+            form = {
+                'page_url': row['page_url'],
+                'action_url': row['action_url'],
+                'method': row['method'],
+                'enctype': row['enctype'],
+                'has_csrf': bool(row['has_csrf']),
+                'has_file_upload': bool(row['has_file_upload']),
+                'fields_count': row['fields_count']
+            }
+            
+            if row['fields_data']:
+                try:
+                    form['fields'] = json.loads(row['fields_data'])
+                except:
+                    form['fields'] = []
+            else:
+                form['fields'] = []
+            
+            forms.append(form)
+        
+        return forms
     
     def get_images_by_scraper(self, scraper_id):
         """
@@ -3802,6 +4179,105 @@ class Database:
             'note_moyenne': round(sum(c.get('note_google', 0) or 0 for c in concurrents) / len([c for c in concurrents if c.get('note_google')]), 2) if concurrents else 0,
             'nb_avis_total': sum(c.get('nb_avis_google', 0) or 0 for c in concurrents)
         }
+        
+        return stats
+    
+    def clean_duplicate_scraper_data(self):
+        """
+        Nettoie les doublons dans les tables scraper_* en gardant le plus récent.
+        Cette fonction peut être appelée périodiquement pour maintenir l'intégrité des données.
+        
+        Returns:
+            dict: Statistiques du nettoyage (nombre de doublons supprimés par table)
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        stats = {}
+        
+        try:
+            # Nettoyer scraper_emails
+            cursor.execute('''
+                DELETE FROM scraper_emails
+                WHERE id NOT IN (
+                    SELECT MIN(id)
+                    FROM scraper_emails
+                    GROUP BY scraper_id, email
+                )
+            ''')
+            stats['scraper_emails'] = cursor.rowcount
+            
+            # Nettoyer scraper_phones
+            cursor.execute('''
+                DELETE FROM scraper_phones
+                WHERE id NOT IN (
+                    SELECT MIN(id)
+                    FROM scraper_phones
+                    GROUP BY scraper_id, phone
+                )
+            ''')
+            stats['scraper_phones'] = cursor.rowcount
+            
+            # Nettoyer scraper_social_profiles
+            cursor.execute('''
+                DELETE FROM scraper_social_profiles
+                WHERE id NOT IN (
+                    SELECT MIN(id)
+                    FROM scraper_social_profiles
+                    GROUP BY scraper_id, platform, url
+                )
+            ''')
+            stats['scraper_social_profiles'] = cursor.rowcount
+            
+            # Nettoyer scraper_technologies
+            cursor.execute('''
+                DELETE FROM scraper_technologies
+                WHERE id NOT IN (
+                    SELECT MIN(id)
+                    FROM scraper_technologies
+                    GROUP BY scraper_id, category, name
+                )
+            ''')
+            stats['scraper_technologies'] = cursor.rowcount
+            
+            # Nettoyer scraper_people (garder le plus récent par scraper_id, name, email)
+            cursor.execute('''
+                DELETE FROM scraper_people
+                WHERE id NOT IN (
+                    SELECT MIN(id)
+                    FROM scraper_people
+                    GROUP BY scraper_id, COALESCE(name, ''), COALESCE(email, '')
+                )
+            ''')
+            stats['scraper_people'] = cursor.rowcount
+            
+            # Nettoyer scraper_forms (garder le plus récent par scraper_id, page_url, action_url)
+            cursor.execute('''
+                DELETE FROM scraper_forms
+                WHERE id NOT IN (
+                    SELECT MIN(id)
+                    FROM scraper_forms
+                    GROUP BY scraper_id, page_url, COALESCE(action_url, '')
+                )
+            ''')
+            stats['scraper_forms'] = cursor.rowcount
+            
+            conn.commit()
+            
+            import logging
+            logger = logging.getLogger(__name__)
+            total_removed = sum(stats.values())
+            if total_removed > 0:
+                logger.info(f'Nettoyage des doublons terminé: {total_removed} entrée(s) supprimée(s) - {stats}')
+            else:
+                logger.info('Aucun doublon trouvé dans les tables scraper_*')
+            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f'Erreur lors du nettoyage des doublons: {e}', exc_info=True)
+            conn.rollback()
+        finally:
+            conn.close()
         
         return stats
 

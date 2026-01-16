@@ -5,9 +5,10 @@ Script de test pour vérifier la connexion Redis et Celery
 
 import sys
 import os
+from pathlib import Path
 
-# Ajouter le répertoire au path
-sys.path.insert(0, os.path.dirname(__file__))
+# Ajouter le répertoire parent au path pour les imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 try:
     from config import CELERY_BROKER_URL, CELERY_RESULT_BACKEND

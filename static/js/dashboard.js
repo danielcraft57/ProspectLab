@@ -105,93 +105,15 @@
         }
     }
     
-    // Gestion du bouton pour vider la base de données
-    function setupClearDatabase() {
-        const btnClear = document.getElementById('btn-clear-db');
-        if (btnClear) {
-            btnClear.addEventListener('click', async () => {
-                if (!confirm('⚠️ ATTENTION : Cette action va supprimer TOUTES les données de la base de données !\n\nCela inclut :\n- Toutes les analyses\n- Toutes les entreprises\n- Toutes les analyses techniques\n- Tous les emails envoyés\n\nCette action est IRRÉVERSIBLE !\n\nÊtes-vous absolument sûr de vouloir continuer ?')) {
-                    return;
-                }
-                
-                // Double confirmation
-                if (!confirm('Dernière confirmation : Voulez-vous vraiment TOUT supprimer ?')) {
-                    return;
-                }
-                
-                btnClear.disabled = true;
-                btnClear.textContent = 'Suppression en cours...';
-                
-                try {
-                    const response = await fetch('/api/database/clear', {
-                        method: 'POST'
-                    });
-                    
-                    const data = await response.json();
-                    
-                    if (response.ok && data.success) {
-                        showNotification('Base de données vidée avec succès ! Rechargement...', 'success');
-                        
-                        // Recharger les données sans recharger toute la page
-                        setTimeout(async () => {
-                            await loadStatistics();
-                            await loadRecentAnalyses();
-                            btnClear.disabled = false;
-                            btnClear.textContent = '🗑️ Vider la BDD';
-                            showNotification('Données mises à jour', 'success');
-                        }, 500);
-                    } else {
-                        showNotification('Erreur : ' + (data.error || 'Erreur inconnue'), 'error');
-                        btnClear.disabled = false;
-                        btnClear.textContent = '🗑️ Vider la BDD';
-                    }
-                } catch (error) {
-                    console.error('Erreur lors de la suppression:', error);
-                    showNotification('Erreur lors de la suppression de la base de données', 'error');
-                    btnClear.disabled = false;
-                    btnClear.textContent = '🗑️ Vider la BDD';
-                }
-            });
-        }
-    }
-    
-    // Fonction utilitaire pour afficher des notifications
-    function showNotification(message, type = 'info') {
-        const notification = document.createElement('div');
-        notification.className = `notification notification-${type}`;
-        notification.textContent = message;
-        notification.style.cssText = `
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            padding: 15px 20px;
-            background: ${type === 'success' ? '#d4edda' : type === 'error' ? '#f8d7da' : '#d1ecf1'};
-            color: ${type === 'success' ? '#155724' : type === 'error' ? '#721c24' : '#0c5460'};
-            border-radius: 4px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-            z-index: 10000;
-            animation: slideIn 0.3s ease;
-        `;
-        
-        document.body.appendChild(notification);
-        
-        setTimeout(() => {
-            notification.style.animation = 'slideOut 0.3s ease';
-            setTimeout(() => notification.remove(), 300);
-        }, 3000);
-    }
-    
     // Initialisation
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
             loadStatistics();
             loadRecentAnalyses();
-            setupClearDatabase();
         });
     } else {
         loadStatistics();
         loadRecentAnalyses();
-        setupClearDatabase();
     }
 })();
 

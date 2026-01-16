@@ -55,30 +55,24 @@ if ($DbPath) {
 $pythonExe = "python"
 $useConda = $false
 $condaEnv = "prospectlab"
-$condaPythonPath = $null
 
 try {
     $condaCheck = conda env list 2>$null
     if ($condaCheck -match $condaEnv) {
         Write-Host "Utilisation de l'environnement Conda: $condaEnv" -ForegroundColor Cyan
+        $useConda = $true
         
-        # Essayer de trouver le chemin Python dans l'environnement conda
+        # Trouver le chemin Python dans l'environnement conda
         $condaInfo = conda info --envs 2>$null
         $envLine = $condaInfo | Select-String $condaEnv
         if ($envLine) {
             $envPath = ($envLine -split '\s+')[1]
             if ($envPath) {
-                $condaPythonPath = Join-Path $envPath "python.exe"
-                if (Test-Path $condaPythonPath) {
-                    $useConda = $true
-                    $pythonExe = $condaPythonPath
+                $condaPython = Join-Path $envPath "python.exe"
+                if (Test-Path $condaPython) {
+                    $pythonExe = $condaPython
                 }
             }
-        }
-        
-        # Si on n'a pas trouvé le chemin direct, utiliser conda run
-        if (-not $useConda) {
-            $useConda = $true
         }
     }
 } catch {
@@ -90,36 +84,13 @@ Write-Host "Exécution du script de nettoyage de la base de données..." -Foregr
 Write-Host ""
 
 try {
-    $exitCode = 0
+    # Utiliser python directement (déjà configuré avec le bon chemin si conda)
+    $allArgs = @($pythonScript) + $pythonArgs
+    & $pythonExe $allArgs
     
-    if ($useConda -and $condaPythonPath) {
-        # Utiliser directement Python depuis l'environnement conda
-        $allArgs = @($pythonScript) + $pythonArgs
-        & $pythonExe $allArgs
-        $exitCode = $LASTEXITCODE
-    } elseif ($useConda) {
-        # Utiliser conda run si on n'a pas trouvé le chemin direct
-        $allArgs = @("run", "-n", $condaEnv, "--no-capture-output", "python", $pythonScript)
-        $allArgs += $pythonArgs
-        
-        # Exécuter conda avec tous les arguments dans le terminal actuel
-        & conda $allArgs
-        $exitCode = $LASTEXITCODE
-    } else {
-        # Utiliser python directement avec le chemin complet
-        $allArgs = @($pythonScript) + $pythonArgs
-        & $pythonExe $allArgs
-        $exitCode = $LASTEXITCODE
-    }
-    
-    # Si exitCode est null, considérer que c'est un succès
-    if ($exitCode -eq $null) {
-        $exitCode = 0
-    }
-    
-    if ($exitCode -ne 0) {
-        Write-Host "`nErreur lors de l'exécution du script Python (code: $exitCode)" -ForegroundColor Red
-        exit $exitCode
+    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $null) {
+        Write-Host "`nErreur lors de l'exécution du script Python (code: $LASTEXITCODE)" -ForegroundColor Red
+        exit $LASTEXITCODE
     }
 } catch {
     Write-Host "Erreur: $_" -ForegroundColor Red

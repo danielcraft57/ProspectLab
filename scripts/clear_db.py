@@ -245,33 +245,21 @@ Exemples d'utilisation:
     
     args = parser.parse_args()
     
-    try:
-        # Si aucune option n'est spécifiée, afficher les stats
-        if not args.clear and not args.stats:
-            show_stats(db_path=args.db_path)
-        elif args.stats:
-            show_stats(db_path=args.db_path)
-        elif args.clear:
-            if args.tables:
-                clear_specific_tables(
-                    db_path=args.db_path,
-                    table_names=args.tables,
-                    confirm=not args.no_confirm
-                )
-            else:
-                clear_all_tables(
-                    db_path=args.db_path,
-                    confirm=not args.no_confirm
-                )
-    except KeyboardInterrupt:
-        print('\n\nOpération annulée par l\'utilisateur.')
-        sys.exit(1)
-    except Exception as e:
-        print(f'\n\nErreur: {e}')
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-    
-    # Sortie explicite pour s'assurer que le script se termine
-    sys.exit(0)
+    # Si aucune option n'est spécifiée, afficher les stats
+    if not args.clear and not args.stats:
+        show_stats(db_path=args.db_path)
+    elif args.stats:
+        show_stats(db_path=args.db_path)
+    elif args.clear:
+        if args.tables:
+            clear_specific_tables(
+                db_path=args.db_path,
+                table_names=args.tables,
+                confirm=not args.no_confirm
+            )
+        else:
+            clear_all_tables(
+                db_path=args.db_path,
+                confirm=not args.no_confirm
+            )
 

@@ -5,9 +5,10 @@ Script pour tester que les tâches Celery sont bien enregistrées
 
 import sys
 import os
+from pathlib import Path
 
-# Ajouter le répertoire au path
-sys.path.insert(0, os.path.dirname(__file__))
+# Ajouter le répertoire parent au path pour les imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 try:
     from celery_app import celery

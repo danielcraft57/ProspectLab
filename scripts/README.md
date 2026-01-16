@@ -103,18 +103,10 @@ Affiche les informations de configuration Redis, teste la connexion et vérifie 
 #### `clear_db.py` - Nettoie la base de données
 Vide toutes les tables de la base de données ou uniquement certaines tables spécifiques.
 
-**Fonctionnalités :**
-- Affiche les statistiques de la base de données (nombre d'enregistrements par table)
-- Vide toutes les tables avec confirmation de sécurité
-- Vide uniquement certaines tables spécifiques
-- Réinitialise les séquences AUTOINCREMENT après nettoyage
-- Gestion des erreurs et des interruptions utilisateur
-
 **Utilisation :**
 ```bash
-# Afficher les statistiques (par défaut)
+# Afficher les statistiques
 python scripts/clear_db.py
-python scripts/clear_db.py --stats
 
 # Vider toutes les tables (avec confirmation)
 python scripts/clear_db.py --clear
@@ -124,31 +116,7 @@ python scripts/clear_db.py --clear --no-confirm
 
 # Vider uniquement certaines tables
 python scripts/clear_db.py --clear --tables entreprises analyses
-
-# Spécifier un chemin de base de données personnalisé
-python scripts/clear_db.py --db-path /chemin/vers/database.db
 ```
-
-**Avec PowerShell (Windows) :**
-```powershell
-# Afficher les statistiques
-.\scripts\windows\clear-db.ps1 --stats
-
-# Vider toutes les tables (avec confirmation)
-.\scripts\windows\clear-db.ps1 --clear
-
-# Vider toutes les tables (sans confirmation)
-.\scripts\windows\clear-db.ps1 --clear --no-confirm
-
-# Vider uniquement certaines tables
-.\scripts\windows\clear-db.ps1 --clear --tables entreprises analyses
-```
-
-**Sécurité :**
-- Par défaut, demande une confirmation avant de supprimer les données
-- Utilise `--no-confirm` uniquement pour les scripts automatisés
-- Ferme correctement toutes les connexions à la base de données
-- Gère les contraintes de clés étrangères pendant le nettoyage
 
 #### `clear_redis.py` - Nettoie Redis
 Vide toutes les données Celery dans Redis (broker et backend).

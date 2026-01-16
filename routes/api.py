@@ -257,17 +257,3 @@ def secteurs():
         return jsonify({'error': str(e)}), 500
 
 
-@api_bp.route('/database/clear', methods=['POST'])
-def clear_database():
-    """
-    API: Vide toute la base de données
-    
-    Returns:
-        JSON: Confirmation de suppression ou erreur
-    """
-    try:
-        database.clear_all_data()
-        return jsonify({'success': True, 'message': 'Base de données vidée avec succès'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
