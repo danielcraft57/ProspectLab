@@ -166,9 +166,9 @@ if (Test-Path "run_celery.py") {
     
     try {
         if ($useConda) {
-            & conda run -n $condaEnv celery -A celery_app worker --loglevel=info --pool=solo --beat
+            & conda run -n $condaEnv celery -A celery_app worker --loglevel=info --pool=threads --concurrency=4 --beat
         } else {
-            & celery -A celery_app worker --loglevel=info --pool=solo --beat
+            & celery -A celery_app worker --loglevel=info --pool=threads --concurrency=4 --beat
         }
     } catch {
         Write-Host "`nCelery arrêté." -ForegroundColor Yellow

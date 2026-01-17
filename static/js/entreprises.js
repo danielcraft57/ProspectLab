@@ -2770,7 +2770,7 @@
                 }
             }
         } catch (e) {
-            console.warn('Impossible de mettre a jour le badge de score securite:', e);
+            // Erreur silencieuse lors de la mise à jour du badge de score sécurité
         }
     }
     

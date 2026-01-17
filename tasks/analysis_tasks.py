@@ -219,44 +219,44 @@ def analyze_entreprise_task(self, filepath, output_path, max_workers=3, delay=2.
                                         else:
                                             stats['inserted'] = stats.get('inserted', 0) + 1
                                             existing_ids_before.add(entreprise_id)
-                            else:
+                                
                                 # Sauvegarder aussi les données du scraper global (emails, people, etc.)
                                 scraper_data = result.get('scraper_data')
-                            if scraper_data and entreprise_id:
-                                try:
-                                    social_profiles = scraper_data.get('social_media') or scraper_data.get('social_links')
-                                    visited_urls = scraper_data.get('visited_urls', 0)
-                                    if isinstance(visited_urls, list):
-                                        visited_urls_count = len(visited_urls)
-                                    else:
-                                        visited_urls_count = visited_urls or 0
-                                    
-                                    metadata_value = scraper_data.get('metadata', {})
-                                    metadata_total = len(metadata_value) if isinstance(metadata_value, dict) else 0
-                                    
-                                    database.save_scraper(
-                                        entreprise_id=entreprise_id,
-                                        url=row_dict.get('website') or scraper_data.get('url'),
-                                        scraper_type='unified_scraper',
-                                        emails=scraper_data.get('emails'),
-                                        people=scraper_data.get('people'),
-                                        phones=scraper_data.get('phones'),
-                                        social_profiles=social_profiles,
-                                        technologies=scraper_data.get('technologies'),
-                                        metadata=metadata_value,
-                                        images=scraper_data.get('images'),
-                                        visited_urls=visited_urls_count,
-                                        total_emails=scraper_data.get('total_emails', 0),
-                                        total_people=scraper_data.get('total_people', 0),
-                                        total_phones=scraper_data.get('total_phones', 0),
-                                        total_social_profiles=scraper_data.get('total_social_platforms', 0),
-                                        total_technologies=scraper_data.get('total_technologies', 0),
-                                        total_metadata=metadata_total,
-                                        total_images=scraper_data.get('total_images', 0),
-                                        duration=scraper_data.get('duration', 0)
-                                    )
-                                except Exception as e:
-                                    logger.warning(f'Erreur lors de la sauvegarde du scraper pour {row.get("name", "inconnu")}: {e}')
+                                if scraper_data:
+                                    try:
+                                        social_profiles = scraper_data.get('social_media') or scraper_data.get('social_links')
+                                        visited_urls = scraper_data.get('visited_urls', 0)
+                                        if isinstance(visited_urls, list):
+                                            visited_urls_count = len(visited_urls)
+                                        else:
+                                            visited_urls_count = visited_urls or 0
+                                        
+                                        metadata_value = scraper_data.get('metadata', {})
+                                        metadata_total = len(metadata_value) if isinstance(metadata_value, dict) else 0
+                                        
+                                        database.save_scraper(
+                                            entreprise_id=entreprise_id,
+                                            url=row_dict.get('website') or scraper_data.get('url'),
+                                            scraper_type='unified_scraper',
+                                            emails=scraper_data.get('emails'),
+                                            people=scraper_data.get('people'),
+                                            phones=scraper_data.get('phones'),
+                                            social_profiles=social_profiles,
+                                            technologies=scraper_data.get('technologies'),
+                                            metadata=metadata_value,
+                                            images=scraper_data.get('images'),
+                                            visited_urls=visited_urls_count,
+                                            total_emails=scraper_data.get('total_emails', 0),
+                                            total_people=scraper_data.get('total_people', 0),
+                                            total_phones=scraper_data.get('total_phones', 0),
+                                            total_social_profiles=scraper_data.get('total_social_platforms', 0),
+                                            total_technologies=scraper_data.get('total_technologies', 0),
+                                            total_metadata=metadata_total,
+                                            total_images=scraper_data.get('total_images', 0),
+                                            duration=scraper_data.get('duration', 0)
+                                        )
+                                    except Exception as e:
+                                        logger.warning(f'Erreur lors de la sauvegarde du scraper pour {row.get("name", "inconnu")}: {e}')
                     except Exception as e:
                         logger.warning(f'Erreur lors de la sauvegarde de l\'entreprise {row.get("name", "inconnu")}: {e}')
                 else:

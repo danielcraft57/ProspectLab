@@ -97,9 +97,10 @@ def run_celery_worker():
         
         # Sur Windows, --beat ne fonctionne pas, donc on lance juste le worker
         # Le beat sera lancé dans un processus séparé
+        # Utiliser --pool=threads avec --concurrency=4 pour permettre l'exécution de 4 tâches en parallèle
         celery_process = subprocess.Popen(
             [sys.executable, '-m', 'celery', '-A', 'celery_app', 'worker',
-             '--loglevel=info', '--pool=solo', f'--hostname={worker_name}'],
+             '--loglevel=info', '--pool=threads', '--concurrency=4', f'--hostname={worker_name}'],
             stdout=sys.stdout,
             stderr=sys.stderr
         )

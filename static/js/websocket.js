@@ -15,7 +15,6 @@ class ProspectLabWebSocket {
     connect() {
         // Détecter si Socket.IO est disponible
         if (typeof io === 'undefined') {
-            console.warn('Socket.IO non chargé, chargement du script...');
             this.loadSocketIO();
             return;
         }

@@ -84,7 +84,7 @@ if __name__ == '__main__':
         python app_new.py
         
     Pour démarrer Celery (dans un terminal séparé) :
-        celery -A celery_app worker --loglevel=info --pool=solo
+        celery -A celery_app worker --loglevel=info --pool=threads --concurrency=4
     """
     import signal
     import sys

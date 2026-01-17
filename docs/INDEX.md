@@ -37,6 +37,8 @@ Bienvenue dans la documentation de ProspectLab. Cette documentation est organis�
 ## Développement
 
 - [Améliorations](developpement/AMELIORATIONS.md) - Liste des améliorations possibles
+- [Améliorations Temps Réel](developpement/AMELIORATIONS_TEMPS_REEL.md) - Améliorations du système de scraping et d'analyse technique en temps réel
+- [Séparation des Scripts](developpement/SEPARATION_SCRIPTS.md) - Refactorisation des scripts JavaScript inline vers des fichiers externes
 - [Architecture distribuée Raspberry Pi](developpement/ARCHITECTURE_DISTRIBUEE_RASPBERRY.md) - Notes de travail sur l'utilisation des Raspberry Pi comme workers Celery
 
 ## Structure de la base de donnees

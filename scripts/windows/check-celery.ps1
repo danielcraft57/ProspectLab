@@ -16,12 +16,12 @@ if ($celeryProcesses) {
     Write-Host ""
     Write-Host "Pour démarrer Celery:" -ForegroundColor Yellow
     Write-Host "  1. Active l'environnement conda: conda activate prospectlab" -ForegroundColor Cyan
-    Write-Host "  2. Lance Celery: celery -A celery_app worker --loglevel=info --pool=solo" -ForegroundColor Cyan
+    Write-Host "  2. Lance Celery: celery -A celery_app worker --loglevel=info --pool=threads --concurrency=4" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Ou utilise le script:" -ForegroundColor Yellow
     Write-Host "  .\scripts\windows\start-celery.ps1" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "Note: Sur Windows, utilise --pool=solo (prefork n'est pas supporté)" -ForegroundColor Yellow
+    Write-Host "Note: Sur Windows, utilise --pool=threads pour permettre la concurrence (prefork n'est pas supporté)" -ForegroundColor Yellow
 }
 
 Write-Host ""

@@ -219,6 +219,31 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
         'total_technologies': 0,
         'total_images': 0
     }
+    tech_tasks = []  # Stocker les tâches d'analyse technique lancées
+    
+    # Lancer TOUTES les analyses techniques en parallèle AVANT de commencer le scraping
+    from tasks.technical_analysis_tasks import technical_analysis_task
+    logger.info(f'[Scraping Analyse {analysis_id}] Lancement de toutes les analyses techniques en parallèle...')
+    for entreprise_id, nom, website in rows:
+        website_str = str(website or '').strip()
+        entreprise_name = nom or 'Entreprise inconnue'
+        if website_str:
+            try:
+                tech_task = technical_analysis_task.delay(url=website_str, entreprise_id=entreprise_id)
+                tech_tasks.append({
+                    'task': tech_task,
+                    'entreprise_id': entreprise_id,
+                    'url': website_str,
+                    'nom': entreprise_name
+                })
+                logger.info(f'[Scraping Analyse {analysis_id}] Analyse technique lancée pour {entreprise_name} ({website_str}) - task_id={tech_task.id}')
+            except Exception as e:
+                logger.warning(f'[Scraping Analyse {analysis_id}] Erreur lors du lancement de l\'analyse technique pour {entreprise_name}: {e}')
+    
+    logger.info(f'[Scraping Analyse {analysis_id}] {len(tech_tasks)} analyses techniques lancées en parallèle, démarrage du scraping...')
+    
+    # Inclure les IDs des tâches techniques dans le meta pour le monitoring en temps réel
+    tech_tasks_launched_ids = [{'task_id': t['task'].id, 'entreprise_id': t['entreprise_id'], 'url': t['url'], 'nom': t['nom']} for t in tech_tasks]
     
     def update_progress(message: str, current_index: int, entreprise_name: str, website: str,
                         current_stats: Dict, extra_meta: Dict = None):
@@ -235,6 +260,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
             'total_social_platforms': current_stats['total_social_platforms'],
             'total_technologies': current_stats['total_technologies'],
             'total_images': current_stats['total_images'],
+            'tech_tasks_launched_ids': tech_tasks_launched_ids  # Inclure les IDs pour le monitoring
         }
         if extra_meta and isinstance(extra_meta, dict):
             meta.update(extra_meta)
@@ -471,6 +497,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
         'analysis_id': analysis_id,
         'scraped_count': scraped_count,
         'total_entreprises': total,
-        'stats': global_stats
+        'stats': global_stats,
+        'tech_tasks': [{'task_id': t['task'].id, 'entreprise_id': t['entreprise_id'], 'url': t['url'], 'nom': t['nom']} for t in tech_tasks]
     }
 

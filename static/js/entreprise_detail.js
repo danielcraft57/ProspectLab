@@ -37,7 +37,7 @@
                     entrepriseData.scrapers = [];
                 }
             } catch (e) {
-                console.warn('Erreur lors du chargement des scrapers:', e);
+                // Erreur silencieuse lors du chargement des scrapers
                 entrepriseData.scrapers = [];
             }
             

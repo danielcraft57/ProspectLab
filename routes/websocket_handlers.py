@@ -199,262 +199,47 @@ def register_websocket_handlers(socketio, app):
                                             room=session_id
                                         )
 
-                                        # Récupérer toutes les entreprises avec site web pour lancer l'analyse technique immédiatement
+                                        # L'analyse technique est maintenant lancée en parallèle dans la tâche de scraping
+                                        # On va suivre les tâches techniques via le monitoring du scraping
+                                        logger.info(f'[WebSocket] L\'analyse technique sera lancée en parallèle du scraping pour chaque entreprise')
+                                        
+                                        # Émettre l'événement de démarrage de l'analyse technique immédiatement
+                                        # On utilisera le même nombre que les entreprises scrapées
                                         db = Database()
                                         conn = db.get_connection()
                                         cursor = conn.cursor()
                                         cursor.execute(
                                             '''
-                                            SELECT id, nom, website
-                                            FROM entreprises
+                                            SELECT COUNT(*) FROM entreprises
                                             WHERE analyse_id = ?
                                               AND website IS NOT NULL
                                               AND TRIM(website) <> ''
                                             ''',
                                             (analysis_id,)
                                         )
-                                        all_entreprises = cursor.fetchall()
+                                        total_entreprises_avec_site = cursor.fetchone()[0]
                                         conn.close()
                                         
-                                        # Lancer l'analyse technique pour toutes les entreprises immédiatement
-                                        from tasks.technical_analysis_tasks import technical_analysis_task
-                                        tech_tasks_launched = []
-                                        tech_analysis_started_for = set()
-                                        
-                                        logger.info(f'[WebSocket] Récupération de {len(all_entreprises)} entreprises avec site web pour analyse technique (analysis_id: {analysis_id})')
-                                        
-                                        for entreprise_id, nom, website in all_entreprises:
-                                            url = str(website).strip()
-                                            if url and url not in tech_analysis_started_for:
-                                                tech_analysis_started_for.add(url)
-                                                tech_task_key = f'{session_id}_tech_{entreprise_id}'
-                                                
-                                                logger.info(f'[WebSocket] Préparation du lancement de l\'analyse technique pour entreprise_id={entreprise_id}, nom={nom}, url={url}')
-                                                
-                                                # Vérifier qu'une analyse technique n'est pas déjà en cours
-                                                with tasks_lock:
-                                                    tech_already_started = tech_task_key in active_tasks
-                                                
-                                                if not tech_already_started:
-                                                    try:
-                                                        logger.info(f'[WebSocket] Lancement de la tâche Celery pour {nom} (entreprise_id={entreprise_id}, url={url})')
-                                                        technical_task = technical_analysis_task.delay(url=url, entreprise_id=entreprise_id)
-                                                        logger.info(f'[WebSocket] Tâche Celery lancée avec succès - task_id={technical_task.id} pour {nom}')
-                                                        
-                                                        tech_tasks_launched.append({
-                                                            'task': technical_task,
-                                                            'entreprise_id': entreprise_id,
-                                                            'url': url,
-                                                            'nom': nom,
-                                                            'task_key': tech_task_key
-                                                        })
-                                                        
-                                                        with tasks_lock:
-                                                            active_tasks[tech_task_key] = {
-                                                                'task_id': technical_task.id,
-                                                                'type': 'technical',
-                                                                'url': url,
-                                                                'entreprise_id': entreprise_id
-                                                            }
-                                                        
-                                                        logger.info(f'[WebSocket] Analyse technique lancée immédiatement pour {nom} ({url}) - task_id={technical_task.id}, entreprise_id={entreprise_id}')
-                                                    except Exception as e:
-                                                        logger.error(f'[WebSocket] Erreur lors du lancement de l\'analyse technique pour {nom} ({url}): {e}', exc_info=True)
-                                                else:
-                                                    logger.warning(f'[WebSocket] Analyse technique déjà en cours pour {nom} ({url}) - task_key={tech_task_key}')
-                                            else:
-                                                if not url:
-                                                    logger.warning(f'[WebSocket] URL vide pour entreprise_id={entreprise_id}, nom={nom}')
-                                                else:
-                                                    logger.info(f'[WebSocket] URL {url} déjà traitée, ignorée pour entreprise_id={entreprise_id}')
-                                        
-                                        logger.info(f'[WebSocket] Total de {len(tech_tasks_launched)} analyses techniques lancées')
-                                        
-                                        # Émettre l'événement pour démarrer l'affichage de l'analyse technique
-                                        if tech_tasks_launched:
-                                            logger.info(f'[WebSocket] Émission de technical_analysis_started pour {len(tech_tasks_launched)} entreprises (session_id={session_id})')
+                                        if total_entreprises_avec_site > 0:
                                             safe_emit(
                                                 socketio,
                                                 'technical_analysis_started',
                                                 {
-                                                    'message': f'Analyse technique démarrée pour {len(tech_tasks_launched)} entreprises...',
-                                                    'total': len(tech_tasks_launched),
-                                                    'current': 0,  # Commencer à 0, pas à 100%
-                                                    'immediate_100': False  # Ne pas afficher à 100% immédiatement
+                                                    'message': f'Analyse technique démarrée pour {total_entreprises_avec_site} entreprises...',
+                                                    'total': total_entreprises_avec_site,
+                                                    'current': 0,
+                                                    'immediate_100': False
                                                 },
                                                 room=session_id
                                             )
-                                            logger.info(f'[WebSocket] Événement technical_analysis_started émis avec succès')
-                                            
-                                            # Surveiller toutes les tâches techniques lancées
-                                            def monitor_all_technical_tasks():
-                                                try:
-                                                    tech_completed_count = 0
-                                                    total_tech = len(tech_tasks_launched)
-                                                    last_progress_emitted = {}  # Pour éviter les doublons
-                                                    
-                                                    logger.info(f'[Monitoring Tech] ===== DÉMARRAGE DU MONITORING =====')
-                                                    logger.info(f'[Monitoring Tech] Nombre total d\'analyses techniques à suivre: {total_tech}')
-                                                    logger.info(f'[Monitoring Tech] Session ID: {session_id}')
-                                                    for idx, tech_info in enumerate(tech_tasks_launched, 1):
-                                                        logger.info(f'[Monitoring Tech]   [{idx}] {tech_info["nom"]} ({tech_info["url"]}) - task_id: {tech_info["task"].id}, entreprise_id: {tech_info["entreprise_id"]}')
-                                                    
-                                                    while tech_completed_count < total_tech:
-                                                        logger.debug(f'[Monitoring Tech] Boucle de monitoring - Complétées: {tech_completed_count}/{total_tech}')
-                                                        found_new_completion = False
-                                                        
-                                                        # Parcourir toutes les tâches pour détecter les nouvelles complétions
-                                                        for tech_info in tech_tasks_launched:
-                                                            if tech_info.get('completed', False):
-                                                                continue  # Skip les tâches déjà terminées
-                                                            
-                                                            try:
-                                                                tech_result = celery.AsyncResult(tech_info['task'].id)
-                                                                current_state = tech_result.state
-                                                                
-                                                                # Suivre aussi les états PROGRESS pour avoir une progression plus fluide
-                                                                if current_state == 'PROGRESS':
-                                                                    meta = tech_result.info or {}
-                                                                    progress_value = meta.get('progress', 0)
-                                                                    message = meta.get('message', 'Analyse en cours...')
-                                                                    
-                                                                    # Émettre un événement de progression si on a de nouvelles infos
-                                                                    progress_key = f"{tech_info['task'].id}_progress"
-                                                                    if progress_key not in last_progress_emitted or last_progress_emitted[progress_key] != progress_value:
-                                                                        last_progress_emitted[progress_key] = progress_value
-                                                                        
-                                                                        logger.debug(f'[Monitoring Tech] État PROGRESS pour {tech_info["nom"]}: {progress_value}% - {message}')
-                                                                        
-                                                                        # Calculer le pourcentage global basé sur le nombre de tâches terminées + progression moyenne
-                                                                        # Pour l'instant, on ne compte que les tâches terminées
-                                                                        # Mais on peut afficher le message de progression
-                                                                        safe_emit(
-                                                                            socketio,
-                                                                            'technical_analysis_progress',
-                                                                            {
-                                                                                'current': tech_completed_count,
-                                                                                'total': total_tech,
-                                                                                'progress': int((tech_completed_count / total_tech) * 100) if total_tech > 0 else 0,
-                                                                                'message': f'{message} - {tech_info["nom"]}',
-                                                                                'url': tech_info['url'],
-                                                                                'entreprise': tech_info['nom']
-                                                                            },
-                                                                            room=session_id
-                                                                        )
-                                                                
-                                                                elif current_state == 'SUCCESS':
-                                                                    tech_info['completed'] = True
-                                                                    tech_completed_count += 1
-                                                                    found_new_completion = True
-                                                                    
-                                                                    result_tech = tech_result.result or {}
-                                                                    analysis_id = result_tech.get('analysis_id')
-                                                                    entreprise_id = tech_info.get('entreprise_id')
-                                                                    
-                                                                    logger.info(f'[Monitoring Tech] ✓ Analyse technique SUCCESS pour {tech_info["nom"]} ({tech_info["url"]})')
-                                                                    logger.info(f'[Monitoring Tech]   - Progression: {tech_completed_count}/{total_tech}')
-                                                                    logger.info(f'[Monitoring Tech]   - analysis_id: {analysis_id}')
-                                                                    logger.info(f'[Monitoring Tech]   - entreprise_id: {entreprise_id}')
-                                                                    logger.info(f'[Monitoring Tech]   - task_id: {tech_info["task"].id}')
-                                                                    
-                                                                    # Émettre un événement de progression pour mettre à jour la barre
-                                                                    progress_percent = int((tech_completed_count / total_tech) * 100) if total_tech > 0 else 0
-                                                                    logger.info(f'[Monitoring Tech] Émission de technical_analysis_progress: {progress_percent}% ({tech_completed_count}/{total_tech})')
-                                                                    safe_emit(
-                                                                        socketio,
-                                                                        'technical_analysis_progress',
-                                                                        {
-                                                                            'current': tech_completed_count,
-                                                                            'total': total_tech,
-                                                                            'progress': progress_percent,
-                                                                            'message': f'Analyse technique terminée pour {tech_info["nom"]}',
-                                                                            'url': tech_info['url'],
-                                                                            'entreprise': tech_info['nom']
-                                                                        },
-                                                                        room=session_id
-                                                                    )
-                                                                    logger.info(f'[Monitoring Tech] Événement technical_analysis_progress émis avec succès')
-                                                                    
-                                                                    logger.info(f'[Monitoring Tech] Émission de technical_analysis_complete pour {tech_info["nom"]}')
-                                                                    safe_emit(
-                                                                        socketio,
-                                                                        'technical_analysis_complete',
-                                                                        {
-                                                                            'success': True,
-                                                                            'analysis_id': analysis_id,
-                                                                            'url': tech_info['url'],
-                                                                            'entreprise_id': entreprise_id,
-                                                                            'current': tech_completed_count,
-                                                                            'total': total_tech,
-                                                                            'results': result_tech.get('results', {})
-                                                                        },
-                                                                        room=session_id
-                                                                    )
-                                                                    logger.info(f'[Monitoring Tech] Événement technical_analysis_complete émis avec succès')
-                                                                    
-                                                                    with tasks_lock:
-                                                                        if tech_info['task_key'] in active_tasks:
-                                                                            del active_tasks[tech_info['task_key']]
-                                                                    
-                                                                    logger.info(f'[Monitoring Tech] ✓ Analyse technique complètement terminée pour {tech_info["nom"]} ({tech_info["url"]}) - {tech_completed_count}/{total_tech}')
-                                                                elif tech_result.state == 'FAILURE':
-                                                                    if tech_info.get('completed', False) == False:
-                                                                        tech_info['completed'] = True
-                                                                        tech_completed_count += 1
-                                                                        
-                                                                        # Émettre un événement de progression même en cas d'erreur
-                                                                        progress_percent = int((tech_completed_count / total_tech) * 100) if total_tech > 0 else 0
-                                                                        safe_emit(
-                                                                            socketio,
-                                                                            'technical_analysis_progress',
-                                                                            {
-                                                                                'current': tech_completed_count,
-                                                                                'total': total_tech,
-                                                                                'progress': progress_percent,
-                                                                                'message': f'Erreur lors de l\'analyse technique pour {tech_info["nom"]}',
-                                                                                'url': tech_info['url'],
-                                                                                'entreprise': tech_info['nom']
-                                                                            },
-                                                                            room=session_id
-                                                                        )
-                                                                        
-                                                                        safe_emit(
-                                                                            socketio,
-                                                                            'technical_analysis_error',
-                                                                            {
-                                                                                'error': str(tech_result.info),
-                                                                                'url': tech_info['url'],
-                                                                                'entreprise_id': tech_info['entreprise_id'],
-                                                                                'current': tech_completed_count,
-                                                                                'total': total_tech
-                                                                            },
-                                                                            room=session_id
-                                                                        )
-                                                                        
-                                                                        with tasks_lock:
-                                                                            if tech_info['task_key'] in active_tasks:
-                                                                                del active_tasks[tech_info['task_key']]
-                                                                        
-                                                                        logger.warning(f'[Monitoring] Analyse technique échouée pour {tech_info["nom"]} ({tech_info["url"]})')
-                                                            except Exception as e:
-                                                                logger.warning(f'Erreur lors du monitoring de l\'analyse technique pour {tech_info.get("url", "unknown")}: {e}')
-                                                        
-                                                        # Si on a trouvé une nouvelle complétion, continuer immédiatement pour détecter les autres
-                                                        # Sinon attendre un peu avant de revérifier
-                                                        if not found_new_completion and tech_completed_count < total_tech:
-                                                            threading.Event().wait(0.5)  # Vérifier plus souvent
-                                                    
-                                                    logger.info(f'[Monitoring Tech] ===== TOUTES LES ANALYSES TECHNIQUES TERMINÉES =====')
-                                                    logger.info(f'[Monitoring Tech] Total complété: {tech_completed_count}/{total_tech}')
-                                                    logger.info(f'[Monitoring Tech] Session ID: {session_id}')
-                                                except Exception as e:
-                                                    logger.error(f'Erreur dans monitor_all_technical_tasks: {e}', exc_info=True)
-                                            
-                                            # Lancer le monitoring dans un thread séparé
-                                            threading.Thread(target=monitor_all_technical_tasks, daemon=True).start()
+                                            logger.info(f'[WebSocket] Événement technical_analysis_started émis pour {total_entreprises_avec_site} entreprises')
+                                        
+                                        tech_tasks_to_monitor = []  # Sera rempli dès qu'on reçoit les IDs dans le meta
+                                        tech_tasks_monitoring_started = False  # Flag pour démarrer le monitoring une seule fois
                                         
                                         # Surveiller la tâche de scraping
                                         def monitor_scraping():
+                                            nonlocal tech_tasks_to_monitor, tech_tasks_monitoring_started
                                             try:
                                                 last_meta_scraping = None
                                                 while True:
@@ -482,6 +267,135 @@ def register_websocket_handlers(socketio, app):
                                                                     room=session_id
                                                                 )
                                                                 
+                                                                # Récupérer les IDs des tâches techniques depuis le meta
+                                                                tech_tasks_ids = meta_scraping.get('tech_tasks_launched_ids', [])
+                                                                if tech_tasks_ids and not tech_tasks_monitoring_started:
+                                                                    tech_tasks_to_monitor = tech_tasks_ids
+                                                                    tech_tasks_monitoring_started = True
+                                                                    logger.info(f'[WebSocket] Démarrant le monitoring de {len(tech_tasks_to_monitor)} analyses techniques en temps réel')
+                                                                    
+                                                                    # Démarrer le monitoring des analyses techniques en temps réel
+                                                                    def monitor_tech_tasks_realtime():
+                                                                        tech_completed = 0
+                                                                        total_tech = len(tech_tasks_to_monitor)
+                                                                        tech_tasks_status = {t['task_id']: {'completed': False, 'last_progress': None, 'current_progress': 0} for t in tech_tasks_to_monitor}
+                                                                        
+                                                                        while tech_completed < total_tech:
+                                                                            total_progress_sum = 0
+                                                                            for tech_info in tech_tasks_to_monitor:
+                                                                                task_id = tech_info['task_id']
+                                                                                if tech_tasks_status[task_id]['completed']:
+                                                                                    total_progress_sum += 100  # Tâche terminée = 100%
+                                                                                    continue
+                                                                                
+                                                                                try:
+                                                                                    tech_result = celery.AsyncResult(task_id)
+                                                                                    current_state = tech_result.state
+                                                                                    
+                                                                                    if current_state == 'PROGRESS':
+                                                                                        # Mettre à jour la progression en temps réel
+                                                                                        meta_tech = tech_result.info or {}
+                                                                                        progress_tech = meta_tech.get('progress', 0)
+                                                                                        message_tech = meta_tech.get('message', '')
+                                                                                        
+                                                                                        # Mettre à jour la progression de cette tâche
+                                                                                        tech_tasks_status[task_id]['current_progress'] = progress_tech
+                                                                                        total_progress_sum += progress_tech
+                                                                                        
+                                                                                        # Émettre seulement si la progression a changé
+                                                                                        if tech_tasks_status[task_id]['last_progress'] != progress_tech:
+                                                                                            # Calculer la progression globale moyenne
+                                                                                            global_progress = int((total_progress_sum / total_tech) if total_tech > 0 else 0)
+                                                                                            
+                                                                                            safe_emit(
+                                                                                                socketio,
+                                                                                                'technical_analysis_progress',
+                                                                                                {
+                                                                                                    'current': tech_completed,
+                                                                                                    'total': total_tech,
+                                                                                                    'progress': global_progress,
+                                                                                                    'message': f'{message_tech} - {tech_info.get("nom", "N/A")}',
+                                                                                                    'url': tech_info.get('url', ''),
+                                                                                                    'entreprise': tech_info.get('nom', 'N/A'),
+                                                                                                    'task_progress': progress_tech
+                                                                                                },
+                                                                                                room=session_id
+                                                                                            )
+                                                                                            tech_tasks_status[task_id]['last_progress'] = progress_tech
+                                                                                    elif current_state == 'PENDING':
+                                                                                        # Tâche en attente, progression à 0
+                                                                                        total_progress_sum += 0
+                                                                                    
+                                                                                    elif current_state == 'SUCCESS':
+                                                                                        if not tech_tasks_status[task_id]['completed']:
+                                                                                            tech_tasks_status[task_id]['completed'] = True
+                                                                                            tech_completed += 1
+                                                                                            total_progress_sum += 100
+                                                                                            
+                                                                                            # Calculer la progression globale moyenne
+                                                                                            global_progress = int((total_progress_sum / total_tech) if total_tech > 0 else 0)
+                                                                                            
+                                                                                            safe_emit(
+                                                                                                socketio,
+                                                                                                'technical_analysis_progress',
+                                                                                                {
+                                                                                                    'current': tech_completed,
+                                                                                                    'total': total_tech,
+                                                                                                    'progress': global_progress,
+                                                                                                    'message': f'Analyse technique terminée pour {tech_info.get("nom", "N/A")}',
+                                                                                                    'url': tech_info.get('url', ''),
+                                                                                                    'entreprise': tech_info.get('nom', 'N/A')
+                                                                                                },
+                                                                                                room=session_id
+                                                                                            )
+                                                                                        else:
+                                                                                            total_progress_sum += 100
+                                                                                    
+                                                                                    elif current_state == 'FAILURE':
+                                                                                        if not tech_tasks_status[task_id]['completed']:
+                                                                                            tech_tasks_status[task_id]['completed'] = True
+                                                                                            tech_completed += 1
+                                                                                            total_progress_sum += 100
+                                                                                            
+                                                                                            # Calculer la progression globale moyenne
+                                                                                            global_progress = int((total_progress_sum / total_tech) if total_tech > 0 else 0)
+                                                                                            
+                                                                                            safe_emit(
+                                                                                                socketio,
+                                                                                                'technical_analysis_progress',
+                                                                                                {
+                                                                                                    'current': tech_completed,
+                                                                                                    'total': total_tech,
+                                                                                                    'progress': global_progress,
+                                                                                                    'message': f'Erreur lors de l\'analyse technique pour {tech_info.get("nom", "N/A")}',
+                                                                                                    'url': tech_info.get('url', ''),
+                                                                                                    'entreprise': tech_info.get('nom', 'N/A')
+                                                                                                },
+                                                                                                room=session_id
+                                                                                            )
+                                                                                        else:
+                                                                                            total_progress_sum += 100
+                                                                                
+                                                                                except Exception as e:
+                                                                                    logger.warning(f'Erreur monitoring tâche technique {task_id}: {e}')
+                                                                            
+                                                                            threading.Event().wait(0.5)
+                                                                        
+                                                                        # Toutes les analyses techniques sont terminées
+                                                                        safe_emit(
+                                                                            socketio,
+                                                                            'technical_analysis_complete',
+                                                                            {
+                                                                                'message': f'Analyses techniques terminées pour {tech_completed}/{total_tech} entreprises.',
+                                                                                'analysis_id': analysis_id,
+                                                                                'current': tech_completed,
+                                                                                'total': total_tech
+                                                                            },
+                                                                            room=session_id
+                                                                        )
+                                                                    
+                                                                    threading.Thread(target=monitor_tech_tasks_realtime, daemon=True).start()
+                                                                
                                                                 last_meta_scraping = meta_scraping
                                                         elif scraping_result.state == 'SUCCESS':
                                                             res = scraping_result.result or {}
@@ -489,11 +403,9 @@ def register_websocket_handlers(socketio, app):
                                                             scraped_count = res.get('scraped_count', 0)
                                                             total_entreprises = res.get('total_entreprises', 0)
                                                             
-                                                            # Vérifier que toutes les analyses techniques sont terminées
-                                                            # L'analyse technique se fait dans la boucle de scraping,
-                                                            # donc si scraping est terminé, les analyses techniques le sont aussi
-                                                            # Mais on attend que le dernier message technique indique 100%
-                                                            # On envoie scraping_complete d'abord, puis technical_analysis_complete
+                                                            # Le monitoring des analyses techniques se fait déjà en temps réel
+                                                            # Pas besoin de le relancer ici
+                                                            
                                                             safe_emit(
                                                                 socketio,
                                                                 'scraping_complete',
@@ -508,20 +420,6 @@ def register_websocket_handlers(socketio, app):
                                                                     'total_social_platforms': stats.get('total_social_platforms', 0),
                                                                     'total_technologies': stats.get('total_technologies', 0),
                                                                     'total_images': stats.get('total_images', 0)
-                                                                },
-                                                                room=session_id
-                                                            )
-                                                            
-                                                            # Envoyer technical_analysis_complete seulement après scraping_complete
-                                                            # pour s'assurer que toutes les analyses techniques sont terminées
-                                                            safe_emit(
-                                                                socketio,
-                                                                'technical_analysis_complete',
-                                                                {
-                                                                    'message': f'Analyses techniques terminées pour {scraped_count}/{total_entreprises} entreprises.',
-                                                                    'analysis_id': res.get('analysis_id'),
-                                                                    'current': scraped_count,
-                                                                    'total': total_entreprises
                                                                 },
                                                                 room=session_id
                                                             )
