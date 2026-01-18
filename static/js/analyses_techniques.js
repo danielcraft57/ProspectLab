@@ -437,6 +437,9 @@
                 setTimeout(() => {
                     openAnalysisModal(data.analysis_id);
                 }, 500);
+            } else if (data.results) {
+                // Si pas d'analysis_id mais qu'on a les résultats, créer une analyse temporaire pour l'affichage
+                showNotification('Analyse terminée mais non sauvegardée. Vérifiez les logs.', 'warning');
             }
         }, 1000);
     }
@@ -623,332 +626,347 @@
         document.getElementById('btn-reanalyze-modal').addEventListener('click', handleReanalyzeFromModal);
     }
     
+    // Fonctions utilitaires pour les scores
+    function getSecurityScoreInfo(score) {
+        if (score === null || score === undefined || Number.isNaN(Number(score))) {
+            return { label: 'Non analysé', className: 'secondary' };
+        }
+        const s = Math.max(0, Math.min(100, Number(score)));
+        if (s >= 80) {
+            return { label: `${s}/100 (Sécurisé)`, className: 'success' };
+        }
+        if (s >= 50) {
+            return { label: `${s}/100 (Moyen)`, className: 'warning' };
+        }
+        return { label: `${s}/100 (Faible)`, className: 'danger' };
+    }
+    
+    function getSecurityScoreBadge(score, id = null) {
+        const info = getSecurityScoreInfo(score);
+        const idAttr = id ? ` id="${id}"` : '';
+        return `<span${idAttr} class="badge badge-${info.className}">${info.label}</span>`;
+    }
+
+    function getPerformanceScoreInfo(score) {
+        if (score === null || score === undefined || Number.isNaN(Number(score))) {
+            return { label: 'Non analysé', className: 'secondary' };
+        }
+        const s = Math.max(0, Math.min(100, Number(score)));
+        if (s >= 80) return { label: `${s}/100 (Rapide)`, className: 'success' };
+        if (s >= 50) return { label: `${s}/100 (Moyen)`, className: 'warning' };
+        return { label: `${s}/100 (Lent)`, className: 'danger' };
+    }
+
+    function getPerformanceScoreBadge(score) {
+        const info = getPerformanceScoreInfo(score);
+        return `<span class="badge badge-${info.className}">${info.label}</span>`;
+    }
+
+    function formatMs(ms) {
+        if (!ms && ms !== 0) return 'N/A';
+        return `${ms} ms`;
+    }
+
+    function formatBytesShort(bytes) {
+        if (!bytes && bytes !== 0) return 'N/A';
+        const kb = bytes / 1024;
+        if (kb < 1024) return `${kb.toFixed(1)} Ko`;
+        return `${(kb / 1024).toFixed(2)} Mo`;
+    }
+    
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
     function createDetailHTML(date) {
         const techDetails = currentAnalysisData.technical_details || {};
         
+        // Calculer le score de sécurité
+        let securityScore = typeof currentAnalysisData.security_score === 'number'
+            ? currentAnalysisData.security_score
+            : (currentAnalysisData.pages_summary?.security_score !== undefined ? currentAnalysisData.pages_summary.security_score : null);
+
+        if (securityScore === null || securityScore === undefined) {
+            securityScore = 0;
+            if (currentAnalysisData.ssl_valid) {
+                securityScore += 40;
+            }
+            if (currentAnalysisData.waf) {
+                securityScore += 25;
+            }
+            if (currentAnalysisData.cdn) {
+                securityScore += 10;
+            }
+            if (currentAnalysisData.security_headers && typeof currentAnalysisData.security_headers === 'object' && !Array.isArray(currentAnalysisData.security_headers)) {
+                const headers = currentAnalysisData.security_headers;
+                const importantHeaders = [
+                    'Content-Security-Policy',
+                    'Strict-Transport-Security',
+                    'X-Frame-Options',
+                    'X-Content-Type-Options',
+                    'Referrer-Policy'
+                ];
+                let count = 0;
+                importantHeaders.forEach(name => {
+                    if (headers[name]) {
+                        count += 1;
+                    }
+                });
+                securityScore += Math.min(count * 5, 25);
+            }
+            if (securityScore > 100) {
+                securityScore = 100;
+            }
+        }
+        const securityInfo = getSecurityScoreInfo(securityScore);
+        
+        const pagesSummary = currentAnalysisData.pages_summary || {};
+        const pagesList = Array.isArray(currentAnalysisData.pages) ? currentAnalysisData.pages : [];
+        const perfScore = typeof currentAnalysisData.performance_score === 'number'
+            ? currentAnalysisData.performance_score
+            : (pagesSummary.performance_score !== undefined ? pagesSummary.performance_score : null);
+        
+        const serverLabel = currentAnalysisData.server_software || 'Inconnu';
+        const frameworkLabel = currentAnalysisData.framework ? `${currentAnalysisData.framework}${currentAnalysisData.framework_version ? ' ' + currentAnalysisData.framework_version : ''}` : 'Aucun détecté';
+        const cmsLabel = currentAnalysisData.cms ? `${currentAnalysisData.cms}${currentAnalysisData.cms_version ? ' ' + currentAnalysisData.cms_version : ''}` : 'Aucun détecté';
+        const sslLabel = currentAnalysisData.ssl_valid ? 'SSL valide' : 'SSL non valide';
+        const wafLabel = currentAnalysisData.waf || 'Aucun détecté';
+        const cdnLabel = currentAnalysisData.cdn || 'Aucun détecté';
+        const analyticsCount = currentAnalysisData.analytics && Array.isArray(currentAnalysisData.analytics) ? currentAnalysisData.analytics.length : 0;
+        const analyticsLabel = analyticsCount > 0 ? `${analyticsCount} outil(s)` : 'Aucun outil détecté';
+        
         return `
-            <div class="detail-grid">
-                <div class="detail-section">
-                    <h3>Informations générales</h3>
-                    <div class="info-grid">
-                        ${createInfoRow('URL', currentAnalysisData.url, true)}
-                        ${createInfoRow('Domaine', currentAnalysisData.domain)}
-                        ${createInfoRow('Adresse IP', currentAnalysisData.ip_address)}
-                        ${createInfoRow('Date d\'analyse', date)}
+            <div class="analysis-details" style="display: flex; flex-direction: column; gap: 1.5rem;">
+                <!-- En-tête avec informations générales -->
+                <div class="detail-section" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1.5rem; border-radius: 8px;">
+                    <h3 style="margin: 0 0 1rem 0; color: white;">📊 Informations générales</h3>
+                    <div class="info-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; color: white;">
+                        <div><strong>📅 Date:</strong> ${date}</div>
+                        <div><strong>🌐 URL:</strong> <a href="${currentAnalysisData.url}" target="_blank" style="color: #ffd700; text-decoration: underline;">${currentAnalysisData.url}</a></div>
+                        <div><strong>🏷️ Domaine:</strong> ${currentAnalysisData.domain || 'N/A'}</div>
+                        <div><strong>🔢 IP:</strong> ${currentAnalysisData.ip_address || 'N/A'}</div>
                     </div>
                 </div>
                 
-                ${currentAnalysisData.server_software ? `
+                <!-- Résumé rapide -->
+                <div class="detail-section" style="padding: 0; border-radius: 8px; overflow: hidden;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0; border: 1px solid #e5e7eb;">
+                        <div style="padding: 1rem; border-right: 1px solid #e5e7eb; background: #f9fafb;">
+                            <div style="font-size: 0.8rem; text-transform: uppercase; color: #6b7280; letter-spacing: 0.08em; margin-bottom: 0.35rem;">Stack</div>
+                            <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+                                <div><strong>Serveur:</strong> ${escapeHtml(serverLabel)}</div>
+                                <div><strong>Framework:</strong> ${escapeHtml(frameworkLabel)}</div>
+                                <div><strong>CMS:</strong> ${escapeHtml(cmsLabel)}</div>
+                    </div>
+                </div>
+                        <div style="padding: 1rem; border-right: 1px solid #e5e7eb; background: #fdfdfb;">
+                            <div style="font-size: 0.8rem; text-transform: uppercase; color: #6b7280; letter-spacing: 0.08em; margin-bottom: 0.35rem;">Sécurité</div>
+                            <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+                                <div><strong>SSL:</strong> ${escapeHtml(sslLabel)}</div>
+                                <div><strong>WAF:</strong> ${escapeHtml(wafLabel)}</div>
+                                <div><strong>CDN:</strong> ${escapeHtml(cdnLabel)}</div>
+                                <div><strong>Score global:</strong> ${getSecurityScoreBadge(securityScore)}</div>
+                    </div>
+                </div>
+                        <div style="padding: 1rem; background: #f9fafb;">
+                            <div style="font-size: 0.8rem; text-transform: uppercase; color: #6b7280; letter-spacing: 0.08em; margin-bottom: 0.35rem;">Suivi & analytics</div>
+                            <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+                                <div><strong>Outils d'analyse:</strong> ${escapeHtml(analyticsLabel)}</div>
+                                ${perfScore !== null ? `<div><strong>Score performance:</strong> ${getPerformanceScoreBadge(perfScore)}</div>` : ''}
+                    </div>
+                </div>
+                    </div>
+                </div>
+                
+                ${(() => {
+                    const pagesCount = pagesSummary.pages_count || pagesSummary.pages_scanned || pagesList.length || 0;
+                    if (!pagesCount) return '';
+                    const pagesOk = pagesSummary.pages_ok || 0;
+                    const pagesError = pagesSummary.pages_error || 0;
+                    const trackersCount = pagesSummary.trackers_count || currentAnalysisData.trackers_count || 0;
+                    const avgResp = pagesSummary.avg_response_time_ms ? formatMs(pagesSummary.avg_response_time_ms) : 'N/A';
+                    const avgWeight = pagesSummary.avg_weight_bytes ? formatBytesShort(pagesSummary.avg_weight_bytes) : 'N/A';
+                    const perfBadge = getPerformanceScoreBadge(perfScore);
+
+                    const rows = pagesList.slice(0, 20).map(page => {
+                        const pageSecBadge = getSecurityScoreBadge(page.security_score);
+                        const pagePerfBadge = getPerformanceScoreBadge(page.performance_score);
+                        const statusLabel = page.status_code ? page.status_code : 'N/A';
+                        return `
+                            <tr>
+                                <td style="max-width: 220px; overflow: hidden; text-overflow: ellipsis;">
+                                    <a href="${page.final_url || page.url}" target="_blank" rel="noopener">${page.url || 'Page'}</a>
+                                </td>
+                                <td>${statusLabel}</td>
+                                <td>${pageSecBadge}</td>
+                                <td>${pagePerfBadge}</td>
+                                <td>${page.trackers_count || 0}</td>
+                            </tr>
+                        `;
+                    }).join('');
+
+                    return `
+                        <div class="detail-section" style="padding: 1rem; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 8px;">
+                            <h3 style="margin: 0 0 0.75rem 0; color: #1f2937;">🛰️ Analyse multi-pages (${pagesCount} page${pagesCount > 1 ? 's' : ''})</h3>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; margin-bottom: 0.75rem;">
+                                <div><strong>Score sécurité:</strong> ${getSecurityScoreBadge(securityScore)}</div>
+                                <div><strong>Score perf:</strong> ${perfBadge}</div>
+                                <div><strong>Pages OK/Erreur:</strong> <span class="badge badge-success">${pagesOk}</span> / <span class="badge badge-danger">${pagesError}</span></div>
+                                <div><strong>Trackers trouvés:</strong> <span class="badge badge-info">${trackersCount}</span></div>
+                                <div><strong>Temps moyen:</strong> ${avgResp}</div>
+                                <div><strong>Poids moyen:</strong> ${avgWeight}</div>
+                    </div>
+                            ${rows ? `
+                            <div style="overflow-x: auto;">
+                                <table class="table" style="width: 100%; border-collapse: collapse;">
+                                    <thead>
+                                        <tr style="text-align: left; border-bottom: 1px solid #e5e7eb;">
+                                            <th style="padding: 0.5rem 0.25rem;">Page</th>
+                                            <th style="padding: 0.5rem 0.25rem;">Statut</th>
+                                            <th style="padding: 0.5rem 0.25rem;">Sécurité</th>
+                                            <th style="padding: 0.5rem 0.25rem;">Perf</th>
+                                            <th style="padding: 0.5rem 0.25rem;">Trackers</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${rows}
+                                    </tbody>
+                                </table>
+                            </div>` : ''}
+                </div>
+                    `;
+                })()}
+                
+                <!-- Serveur et infrastructure -->
                 <div class="detail-section">
-                    <h3>Serveur</h3>
-                    <div class="info-grid">
-                        ${createInfoRow('Logiciel serveur', currentAnalysisData.server_software)}
-                        ${createInfoRow('Powered By', techDetails.powered_by)}
-                        ${createInfoRow('Version PHP', techDetails.php_version)}
-                        ${createInfoRow('Version ASP.NET', techDetails.aspnet_version)}
+                    <h3 style="margin: 0 0 1rem 0; color: #2c3e50; border-bottom: 2px solid #667eea; padding-bottom: 0.5rem;">🖥️ Serveur et infrastructure</h3>
+                    <div class="info-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem;">
+                        ${currentAnalysisData.server_software ? `<div class="info-row"><span class="info-label">Logiciel serveur:</span><span class="info-value"><span class="badge badge-info">${currentAnalysisData.server_software}</span></span></div>` : ''}
+                        ${currentAnalysisData.framework ? `<div class="info-row"><span class="info-label">Framework:</span><span class="info-value"><span class="badge badge-primary">${currentAnalysisData.framework}${currentAnalysisData.framework_version ? ' ' + currentAnalysisData.framework_version : ''}</span></span></div>` : ''}
+                        ${currentAnalysisData.cms ? `<div class="info-row"><span class="info-label">CMS:</span><span class="info-value"><span class="badge badge-success">${currentAnalysisData.cms}${currentAnalysisData.cms_version ? ' ' + currentAnalysisData.cms_version : ''}</span></span></div>` : ''}
+                        ${currentAnalysisData.hosting_provider ? `<div class="info-row"><span class="info-label">Hébergeur:</span><span class="info-value">${currentAnalysisData.hosting_provider}</span></div>` : ''}
+                        ${currentAnalysisData.cdn ? `<div class="info-row"><span class="info-label">CDN:</span><span class="info-value"><span class="badge badge-secondary">${currentAnalysisData.cdn}</span></span></div>` : ''}
+                        ${currentAnalysisData.waf ? `<div class="info-row"><span class="info-label">WAF:</span><span class="info-value"><span class="badge badge-warning">${currentAnalysisData.waf}</span></span></div>` : ''}
+                    </div>
+                </div>
+                
+                ${currentAnalysisData.cms_plugins && Array.isArray(currentAnalysisData.cms_plugins) && currentAnalysisData.cms_plugins.length > 0 ? `
+                <div class="detail-section">
+                    <h3 style="margin: 0 0 1rem 0; color: #2c3e50; border-bottom: 2px solid #667eea; padding-bottom: 0.5rem;">🔌 Plugins CMS <span class="badge badge-info">${currentAnalysisData.cms_plugins.length}</span></h3>
+                    <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                        ${currentAnalysisData.cms_plugins.map(plugin => `<span class="badge badge-outline">${escapeHtml(plugin)}</span>`).join('')}
                     </div>
                 </div>
                 ` : ''}
                 
-                ${currentAnalysisData.framework || currentAnalysisData.cms ? `
+                <!-- Domaine et DNS -->
                 <div class="detail-section">
-                    <h3>Framework & CMS</h3>
-                    <div class="info-grid">
-                        ${createInfoRow('Framework', currentAnalysisData.framework)}
-                        ${createInfoRow('Version framework', currentAnalysisData.framework_version)}
-                        ${createInfoRow('CMS', currentAnalysisData.cms)}
-                        ${createInfoRow('Version CMS', currentAnalysisData.cms_version)}
-                        ${currentAnalysisData.cms_plugins && currentAnalysisData.cms_plugins.length > 0 ? `
+                    <h3 style="margin: 0 0 1rem 0; color: #2c3e50; border-bottom: 2px solid #667eea; padding-bottom: 0.5rem;">🌍 Domaine et DNS</h3>
+                    <div class="info-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem;">
+                        ${currentAnalysisData.domain_creation_date ? `<div class="info-row"><span class="info-label">Date de création:</span><span class="info-value">${currentAnalysisData.domain_creation_date}</span></div>` : ''}
+                        ${currentAnalysisData.domain_updated_date ? `<div class="info-row"><span class="info-label">Dernière mise à jour:</span><span class="info-value">${currentAnalysisData.domain_updated_date}</span></div>` : ''}
+                        ${currentAnalysisData.domain_registrar ? `<div class="info-row"><span class="info-label">Registrar:</span><span class="info-value">${currentAnalysisData.domain_registrar}</span></div>` : ''}
+                    </div>
+                </div>
+                
+                <!-- SSL/TLS -->
+                <div class="detail-section">
+                    <h3 style="margin: 0 0 1rem 0; color: #2c3e50; border-bottom: 2px solid #667eea; padding-bottom: 0.5rem;">🔒 SSL/TLS</h3>
+                    <div class="info-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem;">
                             <div class="info-row">
-                                <span class="info-label">Plugins CMS:</span>
+                            <span class="info-label">SSL valide:</span>
                                 <span class="info-value">
-                                    ${Array.isArray(currentAnalysisData.cms_plugins) 
-                                        ? currentAnalysisData.cms_plugins.map(p => `<span class="tag">${p}</span>`).join('')
-                                        : currentAnalysisData.cms_plugins}
+                                <span class="badge ${currentAnalysisData.ssl_valid ? 'badge-success' : 'badge-danger'}">${currentAnalysisData.ssl_valid ? '✓ Oui' : '✗ Non'}</span>
                                 </span>
                             </div>
-                        ` : ''}
+                        ${currentAnalysisData.ssl_expiry_date ? `<div class="info-row"><span class="info-label">Date d'expiration:</span><span class="info-value">${currentAnalysisData.ssl_expiry_date}</span></div>` : ''}
+                            </div>
                     </div>
-                </div>
-                ` : ''}
                 
-                ${currentAnalysisData.hosting_provider ? `
+                ${currentAnalysisData.security_headers && typeof currentAnalysisData.security_headers === 'object' && !Array.isArray(currentAnalysisData.security_headers) && Object.keys(currentAnalysisData.security_headers).length > 0 ? `
                 <div class="detail-section">
-                    <h3>Hébergement</h3>
-                    <div class="info-grid">
-                        ${createInfoRow('Hébergeur', currentAnalysisData.hosting_provider)}
-                        ${createInfoRow('Date création domaine', currentAnalysisData.domain_creation_date)}
-                        ${createInfoRow('Date mise à jour', currentAnalysisData.domain_updated_date)}
-                        ${createInfoRow('Registrar', currentAnalysisData.domain_registrar)}
+                    <h3 style="margin: 0 0 1rem 0; color: #2c3e50; border-bottom: 2px solid #667eea; padding-bottom: 0.5rem;">🛡️ En-têtes de sécurité</h3>
+                    <div class="info-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem;">
+                        ${Object.entries(currentAnalysisData.security_headers).map(([key, value]) => {
+                            let display = '';
+                            if (value && typeof value === 'object') {
+                                const v = value.value || value.header || '';
+                                const status = value.status || value.present;
+                                display = v ? v : '';
+                                if (status !== undefined && status !== null && status !== '') {
+                                    display = display ? `${display} (${status})` : String(status);
+                                }
+                            } else {
+                                display = value || 'N/A';
+                            }
+                            return `<div class="info-row"><span class="info-label">${escapeHtml(key)}:</span><span class="info-value"><code style="background: #f5f5f5; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.85rem;">${escapeHtml(display)}</code></span></div>`;
+                        }).join('')}
                     </div>
                 </div>
                 ` : ''}
                 
-                ${currentAnalysisData.ssl_valid !== null ? `
+                ${currentAnalysisData.analytics && Array.isArray(currentAnalysisData.analytics) && currentAnalysisData.analytics.length > 0 ? `
                 <div class="detail-section">
-                    <h3>Sécurité SSL/TLS</h3>
-                    <div class="info-grid">
-                        ${createInfoRow('Certificat valide', currentAnalysisData.ssl_valid ? 'Oui ✓' : 'Non ✗', false, 
-                            currentAnalysisData.ssl_valid ? '<span class="badge badge-success">Valide</span>' : '<span class="badge badge-error">Invalide</span>')}
-                        ${createInfoRow('Date d\'expiration', currentAnalysisData.ssl_expiry_date)}
-                        ${createInfoRow('Version SSL', techDetails.ssl_version)}
-                        ${createInfoRow('Cipher', techDetails.ssl_cipher)}
+                    <h3 style="margin: 0 0 1rem 0; color: #2c3e50; border-bottom: 2px solid #667eea; padding-bottom: 0.5rem;">📈 Outils d'analyse <span class="badge badge-info">${currentAnalysisData.analytics.length}</span></h3>
+                    <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                        ${currentAnalysisData.analytics.map(tool => {
+                            let label = '';
+                            if (tool && typeof tool === 'object') {
+                                const name = tool.name || tool.tool || tool.id || tool.tracking_id || '';
+                                const extra = tool.id && tool.id !== name ? ` (${tool.id})` :
+                                              tool.tracking_id && tool.tracking_id !== name ? ` (${tool.tracking_id})` : '';
+                                label = (name || '[Inconnu]') + extra;
+                            } else {
+                                label = String(tool);
+                            }
+                            return `<span class="badge badge-secondary">${escapeHtml(label)}</span>`;
+                        }).join('')}
                     </div>
                 </div>
                 ` : ''}
                 
-                ${currentAnalysisData.security_headers ? `
+                ${currentAnalysisData.seo_meta && typeof currentAnalysisData.seo_meta === 'object' && !Array.isArray(currentAnalysisData.seo_meta) ? `
                 <div class="detail-section">
-                    <h3>En-têtes de sécurité</h3>
-                    <div class="info-grid">
-                        ${Object.entries(currentAnalysisData.security_headers).map(([key, value]) => 
-                            createInfoRow(key.replace(/_/g, ' '), value ? '✓ Présent' : '✗ Absent', false,
-                                value ? '<span class="badge badge-success">Oui</span>' : '<span class="badge badge-error">Non</span>')
-                        ).join('')}
+                    <h3 style="margin: 0 0 1rem 0; color: #2c3e50; border-bottom: 2px solid #667eea; padding-bottom: 0.5rem;">🔍 SEO et métadonnées</h3>
+                    <div class="info-grid" style="display: grid; grid-template-columns: 1fr; gap: 1rem;">
+                        ${currentAnalysisData.seo_meta.meta_title ? `<div class="info-row"><span class="info-label">Titre:</span><span class="info-value">${escapeHtml(currentAnalysisData.seo_meta.meta_title)}</span></div>` : ''}
+                        ${currentAnalysisData.seo_meta.meta_description ? `<div class="info-row"><span class="info-label">Description:</span><span class="info-value">${escapeHtml(currentAnalysisData.seo_meta.meta_description)}</span></div>` : ''}
+                        ${currentAnalysisData.seo_meta.canonical_url ? `<div class="info-row"><span class="info-label">URL canonique:</span><span class="info-value"><a href="${currentAnalysisData.seo_meta.canonical_url}" target="_blank" style="color: #667eea;">${escapeHtml(currentAnalysisData.seo_meta.canonical_url)}</a></span></div>` : ''}
                     </div>
                 </div>
                 ` : ''}
                 
-                ${currentAnalysisData.waf ? `
+                ${currentAnalysisData.performance_metrics && typeof currentAnalysisData.performance_metrics === 'object' && !Array.isArray(currentAnalysisData.performance_metrics) && Object.keys(currentAnalysisData.performance_metrics).length > 0 ? `
                 <div class="detail-section">
-                    <h3>WAF (Web Application Firewall)</h3>
-                    <div class="info-grid">
-                        ${createInfoRow('WAF détecté', currentAnalysisData.waf)}
-                    </div>
-                </div>
-                ` : ''}
-                
-                ${currentAnalysisData.cdn ? `
-                <div class="detail-section">
-                    <h3>CDN</h3>
-                    <div class="info-grid">
-                        ${createInfoRow('CDN', currentAnalysisData.cdn)}
-                    </div>
-                </div>
-                ` : ''}
-                
-                ${currentAnalysisData.analytics && currentAnalysisData.analytics.length > 0 ? `
-                <div class="detail-section">
-                    <h3>Analytics & Tracking</h3>
-                    <div class="info-grid">
-                        ${currentAnalysisData.analytics.map(a => createInfoRow('Service', a)).join('')}
-                    </div>
-                </div>
-                ` : ''}
-                
-                ${currentAnalysisData.seo_meta ? `
-                <div class="detail-section full-width">
-                    <h3>SEO</h3>
-                    <div class="info-grid">
-                        ${Object.entries(currentAnalysisData.seo_meta).slice(0, 10).map(([key, value]) => 
-                            createInfoRow(key.replace(/_/g, ' '), value)
-                        ).join('')}
-                    </div>
-                </div>
-                ` : ''}
-                
-                ${currentAnalysisData.performance_metrics ? `
-                <div class="detail-section full-width">
-                    <h3>Performance</h3>
-                    <div class="info-grid">
+                    <h3 style="margin: 0 0 1rem 0; color: #2c3e50; border-bottom: 2px solid #667eea; padding-bottom: 0.5rem;">⚡ Métriques de performance</h3>
+                    <div class="info-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem;">
                         ${Object.entries(currentAnalysisData.performance_metrics).map(([key, value]) => 
-                            createInfoRow(key.replace(/_/g, ' '), value)
-                        ).join('')}
+                            `<div class="info-row"><span class="info-label">${escapeHtml(key)}:</span><span class="info-value"><strong>${escapeHtml(String(value || 'N/A'))}</strong></span></div>`
+                                    ).join('')}
                     </div>
                 </div>
                 ` : ''}
                 
                 ${currentAnalysisData.nmap_scan ? `
-                <div class="detail-section full-width">
-                    <h3>Scan Nmap</h3>
-                    <div class="info-grid">
-                        ${typeof currentAnalysisData.nmap_scan === 'object' 
-                            ? Object.entries(currentAnalysisData.nmap_scan).map(([key, value]) => 
-                                createInfoRow(key.replace(/_/g, ' '), value)
-                            ).join('')
-                            : createInfoRow('Résultat', currentAnalysisData.nmap_scan)}
-                    </div>
-                </div>
-                ` : ''}
-                
-                ${hasData(techDetails, ['response_time_ms', 'page_size_kb', 'images_count', 'scripts_count']) ? `
                 <div class="detail-section">
-                    <h3>Performance avancée</h3>
-                    <div class="info-grid">
-                        ${createInfoRow('Temps de réponse', techDetails.response_time_ms ? `${techDetails.response_time_ms} ms` : null)}
-                        ${createInfoRow('Taille de la page', techDetails.page_size_kb ? `${techDetails.page_size_kb} KB` : null)}
-                        ${createInfoRow('Nombre d\'images', techDetails.images_count)}
-                        ${createInfoRow('Images sans alt', techDetails.images_missing_alt ? `${techDetails.images_missing_alt} images` : null)}
-                        ${createInfoRow('Nombre de scripts', techDetails.scripts_count)}
-                        ${createInfoRow('Scripts externes', techDetails.external_scripts_count)}
-                        ${createInfoRow('Feuilles de style', techDetails.stylesheets_count)}
-                        ${createInfoRow('Polices', techDetails.fonts_count)}
-                        ${createInfoRow('Liens', techDetails.links_count)}
-                    </div>
-                </div>
-                ` : ''}
-                
-                ${hasData(techDetails, ['nextjs', 'nuxtjs', 'svelte', 'gatsby', 'remix', 'astro', 'webpack', 'vite']) ? `
-                <div class="detail-section">
-                    <h3>Frameworks modernes</h3>
-                    <div class="info-grid">
-                        ${createInfoRow('Next.js', techDetails.nextjs ? '✓ Détecté' + (techDetails.nextjs_version ? ` (v${techDetails.nextjs_version})` : '') : null)}
-                        ${createInfoRow('Nuxt.js', techDetails.nuxtjs ? '✓ Détecté' : null)}
-                        ${createInfoRow('Svelte', techDetails.svelte ? '✓ Détecté' : null)}
-                        ${createInfoRow('Gatsby', techDetails.gatsby ? '✓ Détecté' : null)}
-                        ${createInfoRow('Remix', techDetails.remix ? '✓ Détecté' : null)}
-                        ${createInfoRow('Astro', techDetails.astro ? '✓ Détecté' : null)}
-                        ${createInfoRow('SvelteKit', techDetails.sveltekit ? '✓ Détecté' : null)}
-                        ${createInfoRow('Webpack', techDetails.webpack ? '✓ Détecté' : null)}
-                        ${createInfoRow('Vite', techDetails.vite ? '✓ Détecté' : null)}
-                        ${createInfoRow('Parcel', techDetails.parcel ? '✓ Détecté' : null)}
-                    </div>
-                </div>
-                ` : ''}
-                
-                ${hasData(techDetails, ['html_language', 'charset', 'semantic_html_tags', 'headings_structure']) ? `
-                <div class="detail-section">
-                    <h3>Structure du contenu</h3>
-                    <div class="info-grid">
-                        ${createInfoRow('Langue HTML', techDetails.html_language)}
-                        ${createInfoRow('Encodage', techDetails.charset)}
-                        ${techDetails.semantic_html_tags ? `
-                            <div class="info-row">
-                                <span class="info-label">Tags sémantiques:</span>
-                                <span class="info-value">
-                                    ${Object.entries(techDetails.semantic_html_tags).map(([tag, count]) => 
-                                        `<span class="tag">${tag}: ${count}</span>`
-                                    ).join('')}
-                                </span>
+                    <h3 style="margin: 0 0 1rem 0; color: #2c3e50; border-bottom: 2px solid #667eea; padding-bottom: 0.5rem;">🔍 Scan Nmap</h3>
+                    <details style="cursor: pointer;">
+                        <summary style="padding: 0.5rem; background: #f8f9fa; border-radius: 4px; margin-bottom: 0.5rem;">Voir les détails du scan</summary>
+                        <pre style="background: #f5f5f5; padding: 1rem; border-radius: 4px; overflow-x: auto; margin-top: 0.5rem; font-size: 0.85rem; max-height: 400px; overflow-y: auto;">${escapeHtml(JSON.stringify(currentAnalysisData.nmap_scan, null, 2))}</pre>
+                    </details>
                             </div>
                         ` : ''}
-                        ${techDetails.headings_structure ? `
-                            <div class="info-row">
-                                <span class="info-label">Structure des titres:</span>
-                                <span class="info-value">
-                                    ${Object.entries(techDetails.headings_structure).map(([tag, count]) => 
-                                        `<span class="tag">${tag}: ${count}</span>`
-                                    ).join('')}
-                                </span>
-                            </div>
-                        ` : ''}
-                        ${createInfoRow('Liens externes', techDetails.external_links_count)}
-                        ${createInfoRow('Liens internes', techDetails.internal_links_count)}
-                        ${createInfoRow('Formulaires', techDetails.forms_count)}
-                        ${createInfoRow('Iframes', techDetails.iframes_count)}
-                    </div>
-                </div>
-                ` : ''}
                 
-                ${hasData(techDetails, ['mx_records', 'spf_record', 'dmarc_record', 'dkim_record', 'ipv6_support']) ? `
+                ${currentAnalysisData.technical_details ? `
                 <div class="detail-section">
-                    <h3>DNS avancé</h3>
-                    <div class="info-grid">
-                        ${createInfoRow('Enregistrements MX', techDetails.mx_records ? '✓ Présents' : null)}
-                        ${createInfoRow('SPF', techDetails.spf_record ? '✓ Configuré' : '✗ Non configuré')}
-                        ${createInfoRow('DMARC', techDetails.dmarc_record ? '✓ Configuré' : '✗ Non configuré')}
-                        ${createInfoRow('DKIM', techDetails.dkim_record ? '✓ Configuré' : '✗ Non configuré')}
-                        ${createInfoRow('Support IPv6', techDetails.ipv6_support ? '✓ Oui' : '✗ Non')}
-                        ${techDetails.ipv6_addresses ? `
-                            <div class="info-row">
-                                <span class="info-label">Adresses IPv6:</span>
-                                <span class="info-value">
-                                    ${techDetails.ipv6_addresses.map(ip => `<span class="tag">${ip}</span>`).join('')}
-                                </span>
-                            </div>
-                        ` : ''}
-                    </div>
-                </div>
-                ` : ''}
-                
-                ${hasData(techDetails, ['mixed_content_detected', 'scripts_without_sri', 'scripts_with_sri', 'cors_enabled']) ? `
-                <div class="detail-section">
-                    <h3>Sécurité avancée</h3>
-                    <div class="info-grid">
-                        ${createInfoRow('Contenu mixte', techDetails.mixed_content_detected ? 
-                            `<span class="badge badge-error">${techDetails.mixed_content_detected}</span>` : 
-                            '<span class="badge badge-success">Aucun</span>')}
-                        ${createInfoRow('Scripts sans SRI', techDetails.scripts_without_sri ? 
-                            `<span class="badge badge-warning">${techDetails.scripts_without_sri} scripts</span>` : 
-                            '<span class="badge badge-success">Tous protégés</span>')}
-                        ${createInfoRow('Scripts avec SRI', techDetails.scripts_with_sri ? `${techDetails.scripts_with_sri} scripts` : null)}
-                        ${createInfoRow('CORS activé', techDetails.cors_enabled ? techDetails.cors_enabled : null)}
-                    </div>
-                </div>
-                ` : ''}
-                
-                ${hasData(techDetails, ['viewport_meta', 'mobile_friendly', 'apple_touch_icon', 'images_missing_alt_count']) ? `
-                <div class="detail-section">
-                    <h3>Mobilité & Accessibilité</h3>
-                    <div class="info-grid">
-                        ${createInfoRow('Viewport meta', techDetails.viewport_meta ? 
-                            (techDetails.viewport_meta === 'Manquant' ? 
-                                '<span class="badge badge-error">Manquant</span>' : 
-                                techDetails.viewport_meta) : null)}
-                        ${createInfoRow('Mobile-friendly', techDetails.mobile_friendly ? 
-                            '<span class="badge badge-success">Oui</span>' : 
-                            '<span class="badge badge-error">Non</span>')}
-                        ${createInfoRow('Apple Touch Icon', techDetails.apple_touch_icon ? '✓ Présent' : '✗ Absent')}
-                        ${createInfoRow('Theme color', techDetails.theme_color)}
-                        ${createInfoRow('Images sans alt', techDetails.images_missing_alt_count ? 
-                            `<span class="badge badge-warning">${techDetails.images_missing_alt_count} images</span>` : 
-                            '<span class="badge badge-success">Toutes ont un alt</span>')}
-                        ${createInfoRow('ARIA labels', techDetails.aria_labels_count ? `${techDetails.aria_labels_count} éléments` : null)}
-                        ${createInfoRow('Skip links', techDetails.skip_links ? '✓ Présents' : '✗ Absents')}
-                    </div>
-                </div>
-                ` : ''}
-                
-                ${hasData(techDetails, ['graphql_detected', 'api_endpoints_detected', 'websocket_detected', 'json_ld_count']) ? `
-                <div class="detail-section">
-                    <h3>API & Endpoints</h3>
-                    <div class="info-grid">
-                        ${createInfoRow('GraphQL', techDetails.graphql_detected ? '✓ Détecté' : null)}
-                        ${createInfoRow('Endpoints API', techDetails.api_endpoints_detected)}
-                        ${createInfoRow('WebSocket', techDetails.websocket_detected ? '✓ Détecté' : null)}
-                        ${createInfoRow('JSON-LD', techDetails.json_ld_count ? `${techDetails.json_ld_count} schémas` : null)}
-                        ${techDetails.structured_data_types ? `
-                            <div class="info-row">
-                                <span class="info-label">Types de données structurées:</span>
-                                <span class="info-value">
-                                    ${techDetails.structured_data_types.split(', ').map(type => 
-                                        `<span class="tag">${type}</span>`
-                                    ).join('')}
-                                </span>
-                            </div>
-                        ` : ''}
-                    </div>
-                </div>
-                ` : ''}
-                
-                ${hasData(techDetails, ['crm_service', 'video_service', 'map_service', 'font_service', 'comment_system']) ? `
-                <div class="detail-section">
-                    <h3>Services tiers supplémentaires</h3>
-                    <div class="info-grid">
-                        ${createInfoRow('CRM', techDetails.crm_service)}
-                        ${techDetails.video_service ? `
-                            <div class="info-row">
-                                <span class="info-label">Services vidéo:</span>
-                                <span class="info-value">
-                                    ${Array.isArray(techDetails.video_service) 
-                                        ? techDetails.video_service.map(s => `<span class="tag">${s}</span>`).join('')
-                                        : `<span class="tag">${techDetails.video_service}</span>`}
-                                </span>
-                            </div>
-                        ` : ''}
-                        ${createInfoRow('Service de cartes', techDetails.map_service)}
-                        ${techDetails.font_service ? `
-                            <div class="info-row">
-                                <span class="info-label">Services de polices:</span>
-                                <span class="info-value">
-                                    ${Array.isArray(techDetails.font_service) 
-                                        ? techDetails.font_service.map(s => `<span class="tag">${s}</span>`).join('')
-                                        : `<span class="tag">${techDetails.font_service}</span>`}
-                                </span>
-                            </div>
-                        ` : ''}
-                        ${createInfoRow('Système de commentaires', techDetails.comment_system)}
-                    </div>
+                    <h3 style="margin: 0 0 1rem 0; color: #2c3e50; border-bottom: 2px solid #667eea; padding-bottom: 0.5rem;">🔧 Détails techniques</h3>
+                    <details style="cursor: pointer;">
+                        <summary style="padding: 0.5rem; background: #f8f9fa; border-radius: 4px; margin-bottom: 0.5rem;">Voir tous les détails</summary>
+                        <pre style="background: #f5f5f5; padding: 1rem; border-radius: 4px; overflow-x: auto; margin-top: 0.5rem; font-size: 0.85rem; max-height: 400px; overflow-y: auto;">${escapeHtml(JSON.stringify(currentAnalysisData.technical_details, null, 2))}</pre>
+                    </details>
                 </div>
                 ` : ''}
             </div>

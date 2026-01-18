@@ -19,7 +19,7 @@ logger = setup_logger(__name__, 'technical_analysis_tasks.log', level=logging.DE
 
 
 @celery.task(bind=True)
-def technical_analysis_task(self, url, entreprise_id=None):
+def technical_analysis_task(self, url, entreprise_id=None, enable_nmap=False):
     """
     Tâche Celery pour effectuer une analyse technique complète d'un site web
     
@@ -27,6 +27,7 @@ def technical_analysis_task(self, url, entreprise_id=None):
         self: Instance de la tâche Celery (bind=True)
         url (str): URL du site à analyser
         entreprise_id (int, optional): ID de l'entreprise associée
+        enable_nmap (bool, optional): Activer le scan Nmap (plus long)
         
     Returns:
         dict: Résultats de l'analyse technique avec analysis_id
@@ -35,7 +36,7 @@ def technical_analysis_task(self, url, entreprise_id=None):
         >>> result = technical_analysis_task.delay('https://example.com', entreprise_id=1)
     """
     try:
-        logger.info(f'[Technical Analysis] Démarrage pour {url} (entreprise_id={entreprise_id})')
+        logger.info(f'[Technical Analysis] Démarrage pour {url} (entreprise_id={entreprise_id}, enable_nmap={enable_nmap})')
         
         self.update_state(
             state='PROGRESS',
@@ -49,27 +50,27 @@ def technical_analysis_task(self, url, entreprise_id=None):
             meta={'progress': 30, 'message': 'Analyse en cours...'}
         )
         
-        # Analyse technique complète (multi-pages, sans nmap par défaut)
-        results = analyzer.analyze_site_overview(url, max_pages=10, max_depth=1, enable_nmap=False)
+        # Analyse technique complète (réduire à 5 pages pour accélérer, max_depth=1)
+        results = analyzer.analyze_site_overview(url, max_pages=5, max_depth=1, enable_nmap=enable_nmap)
         
         self.update_state(
             state='PROGRESS',
             meta={'progress': 80, 'message': 'Sauvegarde des résultats...'}
         )
         
-        # Sauvegarder dans la base de données
+        # Sauvegarder dans la base de données (même sans entreprise_id)
         database = Database()
         analysis_id = None
         
-        if entreprise_id:
-            try:
-                analysis_id = database.save_technical_analysis(entreprise_id, url, results)
-                logger.info(f'[Technical Analysis] Analyse sauvegardée (id={analysis_id}) pour {url}')
-            except Exception as e:
-                logger.error(f'[Technical Analysis] Erreur lors de la sauvegarde pour {url}: {str(e)}', exc_info=True)
-                raise
-        else:
-            logger.warning(f'[Technical Analysis] entreprise_id est None pour {url} - analyse non sauvegardée')
+        try:
+            analysis_id = database.save_technical_analysis(entreprise_id, url, results)
+            if entreprise_id:
+                logger.info(f'[Technical Analysis] Analyse sauvegardée (id={analysis_id}) pour {url} (entreprise_id={entreprise_id})')
+            else:
+                logger.info(f'[Technical Analysis] Analyse sauvegardée (id={analysis_id}) pour {url} (sans entreprise)')
+        except Exception as e:
+            logger.error(f'[Technical Analysis] Erreur lors de la sauvegarde pour {url}: {str(e)}', exc_info=True)
+            raise
         
         self.update_state(
             state='PROGRESS',

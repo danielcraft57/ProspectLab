@@ -897,6 +897,7 @@ def register_websocket_handlers(socketio, app):
         try:
             url = data.get('url')
             entreprise_id = data.get('entreprise_id')
+            enable_nmap = data.get('enable_nmap', False)
             session_id = request.sid
 
             if not url:
@@ -914,7 +915,7 @@ def register_websocket_handlers(socketio, app):
 
             # Lancer la tâche Celery
             try:
-                task = technical_analysis_task.delay(url=url, entreprise_id=entreprise_id)
+                task = technical_analysis_task.delay(url=url, entreprise_id=entreprise_id, enable_nmap=enable_nmap)
             except Exception as e:
                 safe_emit(socketio, 'technical_analysis_error', {
                     'error': f'Erreur lors du démarrage de la tâche: {str(e)}'

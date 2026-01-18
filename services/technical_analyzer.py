@@ -70,13 +70,34 @@ class TechnicalAnalyzer:
         }
         
         self.cdn_providers = {
-            'Cloudflare': ['cloudflare', 'cf-'],
-            'Amazon CloudFront': ['cloudfront', 'amazonaws'],
-            'Fastly': ['fastly'],
-            'KeyCDN': ['keycdn'],
-            'MaxCDN': ['maxcdn'],
-            'BunnyCDN': ['bunnycdn'],
-            'StackPath': ['stackpath']
+            'Cloudflare': ['cloudflare', 'cf-ray', 'cf-request-id', 'cf-cache-status', 'cf-connecting-ip'],
+            'Amazon CloudFront': ['cloudfront', 'amazonaws', 'x-amz-cf-id', 'x-amz-cf-pop'],
+            'Fastly': ['fastly', 'x-fastly-request-id', 'x-served-by'],
+            'KeyCDN': ['keycdn', 'x-keycdn'],
+            'MaxCDN': ['maxcdn', 'x-cache'],
+            'BunnyCDN': ['bunnycdn', 'x-bunnycdn'],
+            'StackPath': ['stackpath', 'x-stackpath'],
+            'Akamai': ['akamai', 'x-akamai-transformed', 'x-akamai-request-id'],
+            'Azure CDN': ['azure', 'x-azure-ref', 'x-azure-origin'],
+            'Google Cloud CDN': ['google', 'x-goog-', 'x-gfe-'],
+            'Cloudflare Workers': ['cf-ray', 'cf-worker'],
+            'Incapsula': ['incapsula', 'x-iinfo', 'x-cdn'],
+            'Sucuri': ['sucuri', 'x-sucuri-id', 'x-sucuri-cache'],
+            'OVH CDN': ['ovh', 'x-ovh-'],
+            'CDN77': ['cdn77', 'x-cdn77'],
+            'CDNify': ['cdnify', 'x-cdnify'],
+            'Limelight': ['limelight', 'x-llid'],
+            'EdgeCast': ['edgecast', 'x-ec'],
+            'Highwinds': ['highwinds', 'x-hw'],
+            'CacheFly': ['cachefly', 'x-cachefly'],
+            'jsDelivr': ['jsdelivr', 'cdn.jsdelivr.net'],
+            'unpkg': ['unpkg', 'unpkg.com'],
+            'jsCDN': ['jscdn', 'cdnjs.cloudflare.com'],
+            'Netlify': ['netlify', 'x-nf-request-id', 'netlify.com'],
+            'Vercel': ['vercel', 'x-vercel-id', 'vercel.app'],
+            'GitHub Pages': ['github', 'github.io'],
+            'WordPress.com CDN': ['wp.com', 'wordpress.com'],
+            'Shopify CDN': ['shopify', 'shopifycdn', 'cdn.shopify.com']
         }
         
         self.analytics_services = {
@@ -542,13 +563,28 @@ class TechnicalAnalyzer:
         """Détecte le CDN utilisé"""
         cdn_detected = None
         
-        # Headers CDN
+        # Headers CDN (vérifier les noms de headers directement)
+        headers_lower = {k.lower(): v.lower() for k, v in headers.items()}
         headers_str = ' '.join([f"{k}: {v}" for k, v in headers.items()]).lower()
         html_lower = html_content.lower() if html_content else ''
         
+        # Vérifier chaque CDN
         for cdn, keywords in self.cdn_providers.items():
-            if any(keyword.lower() in headers_str or keyword.lower() in html_lower for keyword in keywords):
-                cdn_detected = cdn
+            for keyword in keywords:
+                keyword_lower = keyword.lower()
+                # Vérifier dans les noms de headers
+                if any(keyword_lower in header_name for header_name in headers_lower.keys()):
+                    cdn_detected = cdn
+                    break
+                # Vérifier dans les valeurs de headers
+                if keyword_lower in headers_str:
+                    cdn_detected = cdn
+                    break
+                # Vérifier dans le contenu HTML
+                if keyword_lower in html_lower:
+                    cdn_detected = cdn
+                    break
+            if cdn_detected:
                 break
         
         return cdn_detected
@@ -745,12 +781,21 @@ class TechnicalAnalyzer:
         Calcule un score global de sécurité (0-100) en combinant SSL/WAF/CDN + headers rencontrés.
         """
         score = 0
-        if base_data.get('ssl_valid'):
+        
+        # SSL (40 points) - le plus important
+        ssl_valid = base_data.get('ssl_valid', False)
+        if ssl_valid:
             score += 40
+        
+        # WAF (25 points)
         if base_data.get('waf'):
             score += 25
+        
+        # CDN (10 points)
         if base_data.get('cdn'):
             score += 10
+        
+        # Headers de sécurité (jusqu'à 25 points)
         important = {
             'content-security-policy',
             'strict-transport-security',
@@ -759,10 +804,15 @@ class TechnicalAnalyzer:
             'referrer-policy'
         }
         headers_found = 0
+        # Normaliser headers_presence pour la comparaison (minuscules avec tirets)
+        headers_presence_normalized = {h.lower().replace('_', '-') for h in headers_presence}
         for header in important:
-            if header in headers_presence:
+            # Vérifier avec et sans tirets/underscores
+            if (header in headers_presence_normalized or 
+                header.replace('-', '_') in headers_presence_normalized):
                 headers_found += 1
         score += min(headers_found * 5, 25)
+        
         return max(0, min(100, score))
 
     def analyze_site_multipage(self, url, max_pages=20, max_depth=2, request_timeout=10):
@@ -1028,7 +1078,9 @@ class TechnicalAnalyzer:
                 
                 # WAF
                 try:
-                    waf = detect_waf(headers, html_content)
+                    # Utiliser les headers de la réponse réelle pour une meilleure détection
+                    response_headers = response.headers if response else headers
+                    waf = detect_waf(response_headers, html_content, url, response)
                     if waf:
                         results['waf'] = waf
                 except Exception:
@@ -1102,11 +1154,22 @@ class TechnicalAnalyzer:
                 pass  # Continuer même si le HTML ne peut pas être récupéré
             
             # SSL/TLS
-            try:
-                ssl_info = analyze_ssl_certificate(domain_clean)
-                results.update(ssl_info)
-            except Exception:
-                pass
+            # Vérifier d'abord si l'URL utilise HTTPS
+            parsed_ssl = urlparse(url)
+            if parsed_ssl.scheme == 'https':
+                try:
+                    ssl_info = analyze_ssl_certificate(domain_clean)
+                    results.update(ssl_info)
+                    # Si ssl_valid n'est pas défini mais qu'on a réussi à se connecter, c'est valide
+                    if 'ssl_valid' not in results or results.get('ssl_valid') is None:
+                        results['ssl_valid'] = True
+                except Exception:
+                    # Si l'analyse SSL échoue mais que l'URL est en HTTPS, on considère SSL comme valide
+                    # (le site peut être accessible en HTTPS même si l'analyse échoue)
+                    results['ssl_valid'] = True
+            else:
+                # Si l'URL est en HTTP, SSL n'est pas valide
+                results['ssl_valid'] = False
             
             # Robots.txt
             try:
@@ -1142,6 +1205,7 @@ def analyze_ssl_certificate(domain):
         with socket.create_connection((domain, 443), timeout=5) as sock:
             with context.wrap_socket(sock, server_hostname=domain) as ssock:
                 cert = ssock.getpeercert()
+                ssl_info['ssl_valid'] = True  # Certificat valide si on arrive ici
                 ssl_info['ssl_issuer'] = dict(x[0] for x in cert.get('issuer', []))
                 ssl_info['ssl_subject'] = dict(x[0] for x in cert.get('subject', []))
                 ssl_info['ssl_version'] = ssock.version()
@@ -1154,10 +1218,14 @@ def analyze_ssl_certificate(domain):
                         valid_until = parsedate_to_datetime(cert['notAfter'])
                         days_left = (valid_until - datetime.now()).days
                         ssl_info['ssl_days_until_expiry'] = days_left
+                        # Vérifier si le certificat est expiré
+                        if days_left < 0:
+                            ssl_info['ssl_valid'] = False
                     except Exception:
                         pass
                 ssl_info['ssl_cipher'] = ssock.cipher()
     except Exception as e:
+        ssl_info['ssl_valid'] = False
         ssl_info['ssl_error'] = str(e)[:100]
     return ssl_info
 
@@ -1274,28 +1342,126 @@ def analyze_sitemap(base_url):
     return sitemap_info
 
 
-def detect_waf(headers, html_content):
-    """Détecte un WAF éventuel."""
+def detect_waf(headers, html_content, url=None, response=None):
+    """
+    Détecte un WAF éventuel.
+    
+    Args:
+        headers: Dictionnaire des headers HTTP
+        html_content: Contenu HTML de la page
+        url: URL de la page (optionnel, pour tester des requêtes suspectes)
+        response: Objet response requests (optionnel, pour vérifier les codes de statut)
+    
+    Returns:
+        str: Nom du WAF détecté ou None
+    """
     waf_detected = None
+    
+    # Liste étendue de WAF commerciaux avec leurs indicateurs
     waf_headers = {
-        'Cloudflare': ['cf-ray', 'cf-request-id', 'server: cloudflare'],
-        'Sucuri': ['x-sucuri-id', 'x-sucuri-cache'],
-        'Incapsula': ['x-iinfo', 'x-cdn'],
-        'Akamai': ['x-akamai-transformed'],
-        'AWS WAF': ['x-amzn-requestid'],
-        'ModSecurity': ['x-modsec'],
-        'Wordfence': ['x-wf-']
+        'Cloudflare': ['cf-ray', 'cf-request-id', 'cf-connecting-ip', 'server: cloudflare', 'cf-visitor'],
+        'Sucuri': ['x-sucuri-id', 'x-sucuri-cache', 'x-sucuri-blocked'],
+        'Incapsula': ['x-iinfo', 'x-cdn', 'incap_ses', 'incap_ses_'],
+        'Akamai': ['x-akamai-transformed', 'akamai-', 'x-akamai-request-id'],
+        'AWS WAF': ['x-amzn-requestid', 'x-amzn-trace-id'],
+        'ModSecurity': ['x-modsec', 'mod_security'],
+        'Wordfence': ['x-wf-', 'wordfence'],
+        'Barracuda': ['barracuda', 'x-barracuda'],
+        'FortiWeb': ['fortinet', 'fortiweb'],
+        'F5 BIG-IP': ['f5', 'bigip', 'x-f5-'],
+        'Imperva': ['imperva', 'x-imperva'],
+        'Radware': ['radware', 'x-radware'],
+        'Citrix NetScaler': ['netscaler', 'ns-cache'],
+        'Palo Alto': ['palo-alto', 'pan-'],
+        'SonicWall': ['sonicwall', 'x-sonicwall'],
+        'Sophos': ['sophos', 'x-sophos'],
+        'Juniper': ['juniper', 'x-juniper']
     }
+    
+    # Vérifier les headers
     headers_str = ' '.join([f"{k}: {v}" for k, v in headers.items()]).lower()
     for waf, indicators in waf_headers.items():
         if any(ind.lower() in headers_str for ind in indicators):
             waf_detected = waf
             break
-    html_lower = html_content.lower()
-    if 'cloudflare' in html_lower and 'checking your browser' in html_lower:
-        waf_detected = 'Cloudflare'
-    elif 'sucuri' in html_lower:
-        waf_detected = 'Sucuri'
+    
+    # Vérifier le contenu HTML pour des patterns de WAF
+    if html_content:
+        html_lower = html_content.lower()
+        
+        # Patterns spécifiques dans le HTML
+        html_patterns = {
+            'Cloudflare': ['cloudflare', 'checking your browser', 'cf-browser-verification'],
+            'Sucuri': ['sucuri', 'access denied', 'sucuri website firewall'],
+            'Wordfence': ['wordfence', 'blocked by wordfence'],
+            'ModSecurity': ['mod_security', 'modsecurity', 'this error was generated by mod_security'],
+            'Barracuda': ['barracuda', 'barracuda web application firewall'],
+            'FortiWeb': ['fortinet', 'fortiweb'],
+            'Incapsula': ['incapsula', 'incapsula incident id']
+        }
+        
+        for waf, patterns in html_patterns.items():
+            if any(pattern in html_lower for pattern in patterns):
+                waf_detected = waf
+                break
+    
+    # Vérifier les codes de statut HTTP suspects (peuvent indiquer un WAF/firewall)
+    if response is not None:
+        status_code = response.status_code
+        # Codes qui peuvent indiquer un blocage par WAF/firewall
+        if status_code in [403, 406, 444, 495, 496, 497, 499]:
+            # Vérifier si c'est un blocage WAF ou autre chose
+            if not waf_detected:
+                # Tester une requête suspecte pour confirmer
+                if url:
+                    try:
+                        test_url = f"{url.rstrip('/')}/../../../etc/passwd"
+                        test_response = requests.get(
+                            test_url,
+                            headers={'User-Agent': 'Mozilla/5.0'},
+                            timeout=5,
+                            allow_redirects=False
+                        )
+                        # Si la requête suspecte est bloquée différemment, c'est probablement un WAF
+                        if test_response.status_code in [403, 406, 444]:
+                            waf_detected = 'Firewall/WAF (détecté par blocage)'
+                    except Exception:
+                        pass
+    
+    # Détection de firewalls basés sur ufw/iptables/routeur
+    # Ces firewalls ne laissent généralement pas de traces dans les headers,
+    # mais on peut détecter des patterns de blocage ou des latences suspectes
+    if url and not waf_detected:
+        try:
+            # Tester une requête avec un User-Agent suspect
+            suspicious_headers = {
+                'User-Agent': 'sqlmap/1.0',
+                'X-Forwarded-For': '127.0.0.1'
+            }
+            test_response = requests.get(
+                url,
+                headers=suspicious_headers,
+                timeout=5,
+                allow_redirects=True
+            )
+            
+            # Si la requête est bloquée ou retourne un code différent, c'est probablement un firewall
+            if test_response.status_code in [403, 406, 444, 503]:
+                # Vérifier si le contenu indique un blocage
+                if 'blocked' in test_response.text.lower() or 'forbidden' in test_response.text.lower():
+                    waf_detected = 'Firewall/WAF (ufw/routeur possible)'
+        except requests.exceptions.RequestException:
+            # Si la requête échoue complètement, c'est peut-être un firewall
+            pass
+    
+    # Détection basée sur les headers de sécurité multiples
+    # Un site avec beaucoup de headers de sécurité peut avoir un WAF
+    security_headers_count = sum(1 for h in headers.keys() if h.lower().startswith(('x-', 'strict-', 'content-security', 'x-frame', 'x-content-type')))
+    if security_headers_count >= 5 and not waf_detected:
+        # Beaucoup de headers de sécurité peuvent indiquer un WAF
+        # Mais on ne le marque que si on a d'autres indices
+        pass
+    
     return waf_detected
 
 
@@ -1429,8 +1595,10 @@ def analyze_security_headers(headers):
         'Permissions-Policy': 'Permissions policy'
     }
     for header in security_headers.keys():
-        if header in headers:
-            security[header.lower().replace('-', '_')] = headers[header]
+        # Vérifier avec la casse originale et en minuscules
+        if header in headers or header.lower() in headers:
+            header_value = headers.get(header) or headers.get(header.lower())
+            security[header.lower().replace('-', '_')] = header_value
     score = 0
     if 'strict-transport-security' in security:
         score += 2
