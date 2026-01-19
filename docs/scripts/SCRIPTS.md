@@ -5,8 +5,8 @@ Cette documentation détaille l'utilisation et la maintenance des scripts utilit
 ## Vue d'ensemble
 
 Les scripts sont organisés par plateforme dans le dossier `scripts/` :
-- **Windows** : Scripts PowerShell (.ps1) pour la gestion de Redis et les tests
-- **Linux** : Scripts Bash (.sh) pour l'installation des outils OSINT et Pentest
+- **Windows** : Scripts PowerShell (.ps1) pour la gestion de Redis/Celery et les tests
+- **Linux** : Scripts Bash (.sh) pour l'installation (OSINT/Pentest) et la gestion Redis/Celery/maintenance
 
 ## Scripts Windows
 
@@ -75,7 +75,8 @@ Affiche un rapport détaillé des outils disponibles et non disponibles, organis
 
 ### Installation des outils OSINT
 
-Le script `install_osint_tools.sh` installe tous les outils OSINT nécessaires pour ProspectLab.
+- `scripts/linux/install_osint_tools_kali.sh` : installation OSINT sous Kali (WSL ou natif)
+- `scripts/linux/install_osint_tools_bookworm.sh` : installation OSINT sous Debian Bookworm / RPi
 
 **Outils installés :**
 - **dnsrecon** : Reconnaissance DNS
@@ -87,18 +88,21 @@ Le script `install_osint_tools.sh` installe tous les outils OSINT nécessaires p
 - **sherlock** : Recherche de comptes sociaux
 - **maigret** : Recherche OSINT avancée
 
-**Utilisation :**
+**Utilisation (Kali WSL) :**
 ```bash
-# Dans WSL kali-linux
 wsl -d kali-linux
-sudo bash scripts/linux/install_osint_tools.sh
+sudo bash scripts/linux/install_osint_tools_kali.sh
 ```
 
-**Durée :** Environ 10-15 minutes selon la connexion internet.
+**Utilisation (Debian/RPi) :**
+```bash
+bash scripts/linux/install_osint_tools_bookworm.sh
+```
 
 ### Installation des outils de Pentest
 
-Le script `install_pentest_tools.sh` installe tous les outils de Pentest nécessaires.
+- `scripts/linux/install_pentest_tools_kali.sh` : installation Pentest sous Kali (WSL ou natif)
+- `scripts/linux/install_pentest_tools_bookworm.sh` : installation Pentest sous Debian Bookworm / RPi
 
 **Outils installés :**
 - **sqlmap** : Détection d'injections SQL
@@ -111,14 +115,34 @@ Le script `install_pentest_tools.sh` installe tous les outils de Pentest nécess
 **Avertissement légal :**
 Ces outils sont destinés uniquement à des tests autorisés. Utilisez-les uniquement sur des systèmes pour lesquels vous avez une autorisation écrite explicite.
 
-**Utilisation :**
+**Utilisation (Kali WSL) :**
 ```bash
-# Dans WSL kali-linux
 wsl -d kali-linux
-sudo bash scripts/linux/install_pentest_tools.sh
+sudo bash scripts/linux/install_pentest_tools_kali.sh
 ```
 
-**Durée :** Environ 15-20 minutes selon la connexion internet.
+**Utilisation (Debian/RPi) :**
+```bash
+bash scripts/linux/install_pentest_tools_bookworm.sh
+```
+
+**Durée indicative :** 10-20 minutes selon la connexion et la machine.
+
+### Gestion Redis/Celery (Linux)
+
+- `scripts/linux/start-redis.sh` / `stop-redis.sh` : via systemd
+- `scripts/linux/start-redis-wsl.sh` / `stop-redis-wsl.sh` : fallback daemonize (si pas de systemd)
+- `scripts/linux/start-celery.sh` : worker + beat via `run_celery.py`
+- `scripts/linux/start-celery-beat.sh` : beat seul
+- `scripts/linux/stop-celery.sh` : stoppe worker/beat (pkill)
+- `scripts/linux/check-celery.sh` : `celery -A celery_app status`
+
+### Nettoyage (Linux)
+
+- `scripts/linux/clear-logs.sh` : supprime `logs/*.log`
+- `scripts/linux/clear-db.sh` : supprime `prospectlab.db`
+- `scripts/linux/clear-redis.sh` : `redis-cli FLUSHALL`
+- `scripts/linux/clear-all.sh` : enchaîne logs + DB + Redis
 
 ### Scripts de nettoyage
 

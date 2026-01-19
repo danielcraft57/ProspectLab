@@ -14,11 +14,17 @@ Le script d'installation automatique installe tous les outils nécessaires :
 
 ```bash
 # Depuis Windows PowerShell ou CMD
-wsl -d kali-linux bash scripts/install_osint_tools_kali.sh
+wsl -d kali-linux bash scripts/linux/install_osint_tools_kali.sh
 
 # Ou depuis WSL Kali Linux directement
 cd /mnt/c/Users/loicDaniel/Documents/DanielCraft/prospectlab
-bash scripts/install_osint_tools_kali.sh
+bash scripts/linux/install_osint_tools_kali.sh
+```
+
+## Debian Bookworm / RPi
+
+```bash
+bash scripts/linux/install_osint_tools_bookworm.sh
 ```
 
 ## Installation manuelle

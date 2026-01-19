@@ -178,57 +178,44 @@ python scripts/clear_redis.py
 
 ## Scripts Linux/WSL (Bash)
 
-### Installation d'outils
+### Installation d'outils (Linux)
 
-#### `install_osint_tools.sh` - Installe les outils OSINT
-Installe tous les outils OSINT nécessaires pour ProspectLab dans Kali Linux.
+- `scripts/linux/install_osint_tools_kali.sh` : OSINT pour Kali (WSL ou natif)
+- `scripts/linux/install_osint_tools_bookworm.sh` : OSINT pour Debian Bookworm / RPi
+- `scripts/linux/install_pentest_tools_kali.sh` : Pentest pour Kali (WSL ou natif)
+- `scripts/linux/install_pentest_tools_bookworm.sh` : Pentest pour Debian Bookworm / RPi
 
-**Prérequis :**
-- Kali Linux (WSL ou natif)
-- Droits sudo
-
-**Utilisation :**
+**Exemple (Kali WSL) :**
 ```bash
-# Dans WSL kali-linux
 wsl -d kali-linux
-sudo bash scripts/linux/install_osint_tools.sh
+sudo bash scripts/linux/install_osint_tools_kali.sh
+sudo bash scripts/linux/install_pentest_tools_kali.sh
 ```
 
-**Outils installés :**
-- dnsrecon
-- theHarvester
-- sublist3r
-- amass
-- whatweb
-- sslscan
-- sherlock
-- maigret
-
-#### `install_pentest_tools.sh` - Installe les outils de Pentest
-Installe tous les outils de Pentest nécessaires pour ProspectLab dans Kali Linux.
-
-**Prérequis :**
-- Kali Linux (WSL ou natif)
-- Droits sudo
-- **Autorisation écrite** pour les tests de sécurité
-
-**Utilisation :**
+**Exemple (Debian/RPi) :**
 ```bash
-# Dans WSL kali-linux
-wsl -d kali-linux
-sudo bash scripts/linux/install_pentest_tools.sh
+bash scripts/linux/install_osint_tools_bookworm.sh
+bash scripts/linux/install_pentest_tools_bookworm.sh
 ```
-
-**Outils installés :**
-- sqlmap
-- wpscan
-- nikto
-- wapiti
-- nmap
-- sslscan
 
 **Avertissement :**
-Ces outils sont destinés uniquement à des tests autorisés. Utilisez-les uniquement sur des systèmes pour lesquels vous avez une autorisation écrite.
+Les outils Pentest sont à utiliser uniquement sur des cibles autorisées (autorisation écrite).
+
+### Services (Linux)
+
+- `scripts/linux/start-redis.sh` / `stop-redis.sh` (systemd)
+- `scripts/linux/start-redis-wsl.sh` / `stop-redis-wsl.sh` (fallback daemonize si pas de systemd)
+- `scripts/linux/start-celery.sh` (worker + beat via `run_celery.py`)
+- `scripts/linux/start-celery-beat.sh` (beat seul)
+- `scripts/linux/stop-celery.sh` (pkill des process celery/run_celery.py)
+- `scripts/linux/check-celery.sh` (statut des workers)
+
+### Nettoyage (Linux)
+
+- `scripts/linux/clear-logs.sh` : supprime `logs/*.log`
+- `scripts/linux/clear-db.sh` : supprime `prospectlab.db`
+- `scripts/linux/clear-redis.sh` : `redis-cli FLUSHALL`
+- `scripts/linux/clear-all.sh` : enchaîne logs + DB + Redis
 
 ## Notes importantes
 
