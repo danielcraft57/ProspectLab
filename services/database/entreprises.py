@@ -505,36 +505,46 @@ class EntrepriseManager(DatabaseBase):
             filters: Dictionnaire de filtres (secteur, statut, opportunite, favori, search)
         
         Returns:
-            Liste des entreprises avec leurs données OG
+            Liste des entreprises avec leurs données OG et score pentest (dernier score disponible)
         """
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        query = 'SELECT * FROM entreprises WHERE 1=1'
+        # Récupérer le dernier score pentest pour chaque entreprise via une sous-requête
+        query = '''
+            SELECT e.*, 
+                   (SELECT risk_score 
+                    FROM analyses_pentest 
+                    WHERE entreprise_id = e.id 
+                    ORDER BY date_analyse DESC 
+                    LIMIT 1) as score_pentest
+            FROM entreprises e
+            WHERE 1=1
+        '''
         params = []
         
         if analyse_id:
-            query += ' AND analyse_id = ?'
+            query += ' AND e.analyse_id = ?'
             params.append(analyse_id)
         
         if filters:
             if filters.get('secteur'):
-                query += ' AND secteur = ?'
+                query += ' AND e.secteur = ?'
                 params.append(filters['secteur'])
             if filters.get('statut'):
-                query += ' AND statut = ?'
+                query += ' AND e.statut = ?'
                 params.append(filters['statut'])
             if filters.get('opportunite'):
-                query += ' AND opportunite = ?'
+                query += ' AND e.opportunite = ?'
                 params.append(filters['opportunite'])
             if filters.get('favori'):
-                query += ' AND favori = 1'
+                query += ' AND e.favori = 1'
             if filters.get('search'):
                 search_term = f"%{filters['search']}%"
-                query += ' AND (nom LIKE ? OR secteur LIKE ? OR email_principal LIKE ? OR responsable LIKE ?)'
+                query += ' AND (e.nom LIKE ? OR e.secteur LIKE ? OR e.email_principal LIKE ? OR e.responsable LIKE ?)'
                 params.extend([search_term, search_term, search_term, search_term])
         
-        query += ' ORDER BY favori DESC, date_analyse DESC'
+        query += ' ORDER BY e.favori DESC, e.date_analyse DESC'
         
         cursor.execute(query, params)
         rows = cursor.fetchall()

@@ -222,6 +222,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
     }
     tech_tasks = []  # Stocker les tâches d'analyse technique lancées
     osint_tasks = []  # Stocker les tâches d'analyse OSINT lancées
+    pentest_tasks = []  # Stocker les tâches d'analyse Pentest lancées
     
     # Lancer TOUTES les analyses techniques en parallèle AVANT de commencer le scraping
     from tasks.technical_analysis_tasks import technical_analysis_task
@@ -266,7 +267,8 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
             'total_technologies': current_stats['total_technologies'],
             'total_images': current_stats['total_images'],
             'tech_tasks_launched_ids': tech_tasks_launched_ids,  # Inclure les IDs pour le monitoring
-            'osint_tasks_launched_ids': osint_tasks_launched_ids  # Inclure les IDs OSINT pour le monitoring (recalculé à chaque fois)
+            'osint_tasks_launched_ids': osint_tasks_launched_ids,  # Inclure les IDs OSINT pour le monitoring (recalculé à chaque fois)
+            'pentest_tasks_launched_ids': [{'task_id': t['task_id'], 'entreprise_id': t['entreprise_id'], 'url': t['url'], 'nom': t['nom']} for t in pentest_tasks]  # Inclure les IDs Pentest
         }
         if extra_meta and isinstance(extra_meta, dict):
             meta.update(extra_meta)
@@ -581,6 +583,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                 # Lancer l'analyse OSINT après le scraper (utilise les données du scraper)
                 try:
                     from tasks.osint_tasks import osint_analysis_task
+                    from tasks.pentest_tasks import pentest_analysis_task
                     
                     # Préparer les données du scraper pour l'OSINT
                     people_from_scrapers = results.get('people', [])
@@ -597,9 +600,9 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                     phones_from_scrapers = results.get('phones', [])
                     
                     logger.info(
-                        f'[Scraping Analyse {analysis_id}] Lancement de l\'analyse OSINT pour {entreprise_name} '
+                        f'[Scraping Analyse {analysis_id}] Lancement de l analyse OSINT pour {entreprise_name} '
                         f'avec {len(people_from_scrapers)} personne(s), {len(emails_from_scrapers)} email(s), '
-                        f'{len(social_profiles_from_scrapers)} réseau(x) social/social, {len(phones_from_scrapers)} téléphone(s) du scraper'
+                        f'{len(social_profiles_from_scrapers)} reseau(x) social/social, {len(phones_from_scrapers)} telephone(s) du scraper'
                     )
                     
                     # Lancer la tâche OSINT en arrière-plan (ne pas attendre)
@@ -622,12 +625,42 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                     })
                     
                     logger.info(
-                        f'[Scraping Analyse {analysis_id}] ✓ Analyse OSINT lancée pour {entreprise_name} '
+                        f'[Scraping Analyse {analysis_id}] ✓ Analyse OSINT lancee pour {entreprise_name} '
                         f'(task_id={osint_task.id})'
                     )
                 except Exception as osint_error:
                     logger.warning(
-                        f'[Scraping Analyse {analysis_id}] ⚠ Erreur lors du lancement de l\'analyse OSINT pour {entreprise_name}: {osint_error}',
+                        f'[Scraping Analyse {analysis_id}] ⚠ Erreur lors du lancement de l analyse OSINT pour {entreprise_name}: {osint_error}',
+                        exc_info=True
+                    )
+
+                # Lancer l'analyse Pentest après le scraper (tâche dédiée)
+                try:
+                    logger.info(
+                        f'[Scraping Analyse {analysis_id}] Lancement de l analyse Pentest pour {entreprise_name} ({website_str})'
+                    )
+
+                    pentest_task = pentest_analysis_task.delay(
+                        url=website_str,
+                        entreprise_id=entreprise_id,
+                        options={},
+                        forms_from_scrapers=results.get('forms')
+                    )
+
+                    pentest_tasks.append({
+                        'task': pentest_task,
+                        'task_id': pentest_task.id,
+                        'entreprise_id': entreprise_id,
+                        'url': website_str,
+                        'nom': entreprise_name
+                    })
+
+                    logger.info(
+                        f'[Scraping Analyse {analysis_id}] ✓ Analyse Pentest lancee pour {entreprise_name} (task_id={pentest_task.id})'
+                    )
+                except Exception as pentest_error:
+                    logger.warning(
+                        f'[Scraping Analyse {analysis_id}] ⚠ Erreur lors du lancement de l analyse Pentest pour {entreprise_name}: {pentest_error}',
                         exc_info=True
                     )
                 
@@ -747,6 +780,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
         'total_entreprises': total,
         'stats': global_stats,
         'tech_tasks': [{'task_id': t['task'].id, 'entreprise_id': t['entreprise_id'], 'url': t['url'], 'nom': t['nom']} for t in tech_tasks],
-        'osint_tasks': [{'task_id': t['task_id'], 'entreprise_id': t['entreprise_id'], 'url': t['url'], 'nom': t['nom']} for t in osint_tasks]
+        'osint_tasks': [{'task_id': t['task_id'], 'entreprise_id': t['entreprise_id'], 'url': t['url'], 'nom': t['nom']} for t in osint_tasks],
+        'pentest_tasks': [{'task_id': t['task_id'], 'entreprise_id': t['entreprise_id'], 'url': t['url'], 'nom': t['nom']} for t in pentest_tasks]                                                                                            
     }
 

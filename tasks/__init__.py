@@ -9,6 +9,7 @@ from . import analysis_tasks
 from . import scraping_tasks
 from . import technical_analysis_tasks
 from . import osint_tasks
+from . import pentest_tasks
 from . import email_tasks
 
 __all__ = [
@@ -16,5 +17,6 @@ __all__ = [
     'scraping_tasks',
     'technical_analysis_tasks',
     'osint_tasks',
+    'pentest_tasks',
     'email_tasks',
 ]

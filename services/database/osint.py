@@ -151,7 +151,7 @@ class OSINTManager(DatabaseBase):
                                 VALUES (?, ?, ?)
                             ''', (analysis_id, platform, url_social_str))
         
-        # Sauvegarder les technologies
+        # Sauvegarder les technologies (filtrer les raw_output et erreurs)
         technologies = osint_data.get('technologies', {})
         if technologies:
             if isinstance(technologies, str):
@@ -160,12 +160,19 @@ class OSINTManager(DatabaseBase):
                 except:
                     technologies = {}
             if isinstance(technologies, dict):
+                # Clés à exclure
+                excluded_keys = {'raw_output', 'error', 'non disponible'}
                 for category, techs in technologies.items():
+                    # Ignorer les catégories d'erreur
+                    category_lower = category.lower()
+                    if any(excluded in category_lower for excluded in excluded_keys):
+                        continue
                     if not isinstance(techs, list):
                         techs = [techs]
                     for tech in techs:
                         tech_name = str(tech).strip()
-                        if tech_name:
+                        # Filtrer les valeurs d'erreur
+                        if tech_name and not any(excluded in tech_name.lower() for excluded in excluded_keys):
                             cursor.execute('''
                                 INSERT OR IGNORE INTO analysis_osint_technologies (analysis_id, category, name)
                                 VALUES (?, ?, ?)

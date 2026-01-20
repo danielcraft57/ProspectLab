@@ -1075,6 +1075,7 @@ class UnifiedScraper:
             page_forms = []
             try:
                 forms = soup.find_all('form')
+                seen_forms = set()  # Pour dédupliquer les formulaires
                 for form in forms:
                     action = form.get('action', '')
                     method = form.get('method', 'get').upper()
@@ -1088,6 +1089,12 @@ class UnifiedScraper:
                             action_url = action
                     else:
                         action_url = url
+                    
+                    # Créer une clé unique pour dédupliquer (action + method)
+                    form_key = f"{action_url}|{method}"
+                    if form_key in seen_forms:
+                        continue  # Ignorer les doublons
+                    seen_forms.add(form_key)
                     
                     inputs = form.find_all(['input', 'textarea', 'select', 'button'])
                     fields = []

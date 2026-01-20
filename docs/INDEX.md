@@ -33,7 +33,6 @@ Bienvenue dans la documentation de ProspectLab. Cette documentation est organis�
 - [WebSocket](techniques/WEBSOCKET.md) - Documentation sur la communication WebSocket
 - [Outils OSINT](techniques/OSINT_TOOLS.md) - Guide des outils OSINT disponibles
 - [Outils Pentest](techniques/PENTEST_TOOLS.md) - Guide des outils de test de pénétration
-- [Tâches Pentest](PENTEST_TASKS.md) - Documentation complète du module Pentest et des tâches Celery associées
 
 ## Développement
 
