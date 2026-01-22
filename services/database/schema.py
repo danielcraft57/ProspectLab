@@ -261,6 +261,49 @@ class DatabaseSchema(DatabaseBase):
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)')
         
+        # Table des tokens API
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS api_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                token TEXT UNIQUE NOT NULL,
+                name TEXT NOT NULL,
+                app_url TEXT,
+                user_id INTEGER,
+                is_active INTEGER DEFAULT 1,
+                can_read_entreprises INTEGER DEFAULT 1,
+                can_read_emails INTEGER DEFAULT 1,
+                can_read_statistics INTEGER DEFAULT 1,
+                can_read_campagnes INTEGER DEFAULT 1,
+                date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_used TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_tokens_token ON api_tokens(token)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id)')
+        
+        # Migration : ajouter les nouvelles colonnes si elles n'existent pas
+        try:
+            cursor.execute('ALTER TABLE api_tokens ADD COLUMN app_url TEXT')
+        except sqlite3.OperationalError:
+            pass
+        try:
+            cursor.execute('ALTER TABLE api_tokens ADD COLUMN can_read_entreprises INTEGER DEFAULT 1')
+        except sqlite3.OperationalError:
+            pass
+        try:
+            cursor.execute('ALTER TABLE api_tokens ADD COLUMN can_read_emails INTEGER DEFAULT 1')
+        except sqlite3.OperationalError:
+            pass
+        try:
+            cursor.execute('ALTER TABLE api_tokens ADD COLUMN can_read_statistics INTEGER DEFAULT 1')
+        except sqlite3.OperationalError:
+            pass
+        try:
+            cursor.execute('ALTER TABLE api_tokens ADD COLUMN can_read_campagnes INTEGER DEFAULT 1')
+        except sqlite3.OperationalError:
+            pass
+        
         # Table des événements de tracking email
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS email_tracking_events (

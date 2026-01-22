@@ -497,13 +497,15 @@ class EntrepriseManager(DatabaseBase):
         conn.close()
         return all_og_data
     
-    def get_entreprises(self, analyse_id=None, filters=None):
+    def get_entreprises(self, analyse_id=None, filters=None, limit=None, offset=None):
         """
         Récupère les entreprises avec filtres optionnels
         
         Args:
             analyse_id: ID de l'analyse (optionnel)
             filters: Dictionnaire de filtres (secteur, statut, opportunite, favori, search)
+            limit: Nombre maximum de résultats (optionnel)
+            offset: Offset pour la pagination (optionnel)
         
         Returns:
             Liste des entreprises avec leurs données OG et score pentest (dernier score disponible)
@@ -547,6 +549,13 @@ class EntrepriseManager(DatabaseBase):
         
         query += ' ORDER BY e.favori DESC, e.date_analyse DESC'
         
+        if limit:
+            query += ' LIMIT ?'
+            params.append(limit)
+        if offset:
+            query += ' OFFSET ?'
+            params.append(offset)
+        
         cursor.execute(query, params)
         rows = cursor.fetchall()
         conn.close()
@@ -569,6 +578,54 @@ class EntrepriseManager(DatabaseBase):
             entreprises.append(entreprise)
         
         return entreprises
+    
+    def get_entreprise(self, entreprise_id):
+        """
+        Récupère une entreprise par son ID avec ses données complètes.
+        
+        Args:
+            entreprise_id (int): ID de l'entreprise
+            
+        Returns:
+            dict|None: Dictionnaire avec les données de l'entreprise, None si non trouvée
+        """
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT e.*, 
+                   (SELECT risk_score 
+                    FROM analyses_pentest 
+                    WHERE entreprise_id = e.id 
+                    ORDER BY date_analyse DESC 
+                    LIMIT 1) as score_pentest
+            FROM entreprises e
+            WHERE e.id = ?
+        ''', (entreprise_id,))
+        
+        row = cursor.fetchone()
+        
+        if not row:
+            conn.close()
+            return None
+        
+        entreprise = dict(row)
+        
+        # Parser les tags
+        if entreprise.get('tags'):
+            try:
+                entreprise['tags'] = json.loads(entreprise['tags']) if isinstance(entreprise['tags'], str) else entreprise['tags']
+            except:
+                entreprise['tags'] = []
+        else:
+            entreprise['tags'] = []
+        
+        # Charger les données OpenGraph
+        entreprise['og_data'] = self.get_og_data(entreprise_id)
+        
+        conn.close()
+        return entreprise
     
     def update_entreprise_tags(self, entreprise_id, tags):
         """

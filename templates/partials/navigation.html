@@ -29,6 +29,12 @@
                     <li><a href="{{ url_for('other.manage_templates') }}">Modèles</a></li>
                 </ul>
             </li>
+            <li class="nav-dropdown">
+                <a href="#" class="dropdown-toggle">API <span class="dropdown-arrow">▼</span></a>
+                <ul class="dropdown-menu">
+                    <li><a href="{{ url_for('other.api_tokens_page') }}">Tokens API</a></li>
+                </ul>
+            </li>
             <li class="nav-user">
                 <a href="{{ url_for('auth.logout') }}" class="logout-btn">
                     <i class="fas fa-sign-out-alt"></i> Déconnexion

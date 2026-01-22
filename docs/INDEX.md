@@ -24,6 +24,7 @@ Bienvenue dans la documentation de ProspectLab. Cette documentation est organis�
 
 - [Interface utilisateur](guides/INTERFACE_UTILISATEUR.md) - Guide complet de l'interface utilisateur
 - [Authentification](guides/AUTHENTIFICATION.md) - Guide du système d'authentification et de sécurité
+- [API Publique](guides/API_PUBLIQUE.md) - Guide de l'API publique pour intégration avec d'autres logiciels
 - [Campagnes Email](guides/CAMPAGNES_EMAIL.md) - Guide complet du système de campagnes email avec tracking
 - [Critères de recherche Google Maps](guides/CRITERES_RECHERCHE_GOOGLE_MAPS.md) - Guide pour les recherches Google Maps
 - [Recommandations AJAX](guides/RECOMMANDATIONS_AJAX.md) - Bonnes pratiques pour l'utilisation d'AJAX
@@ -76,6 +77,7 @@ Bienvenue dans la documentation de ProspectLab. Cette documentation est organis�
 - **emails_envoyes** : Details des emails envoyes avec tracking_token
 - **email_tracking_events** : Evenements de tracking (ouvertures, clics)
 - **users** : Utilisateurs avec authentification (username, email, password_hash, is_admin)
+- **api_tokens** : Tokens API pour l'acces a l'API publique (token, name, user_id, is_active)
 
 Toutes les relations utilisent `ON DELETE CASCADE` pour maintenir l'integrite referentielle.
 

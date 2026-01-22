@@ -10,7 +10,7 @@ from services.email_sender import EmailSender
 from services.template_manager import TemplateManager
 from config import EXPORT_FOLDER
 from utils.template_helpers import render_page
-from services.auth import login_required
+from services.auth import login_required, admin_required
 
 other_bp = Blueprint('other', __name__)
 
@@ -515,16 +515,31 @@ def api_get_email_tracking(email_id):
 @login_required
 def api_get_campagne_tracking(campagne_id):
     """
-    API: Stats de tracking agrégées d'une campagne.
-
+    API: Statistiques de tracking d'une campagne
+    
     Args:
         campagne_id (int): ID de la campagne
-
+        
     Returns:
-        JSON: Statistiques agrégées
+        JSON: Statistiques de tracking
     """
     from services.database.campagnes import CampagneManager
+    
     campagne_manager = CampagneManager()
     stats = campagne_manager.get_campagne_tracking_stats(campagne_id)
+    
     return jsonify(stats)
+
+
+@other_bp.route('/tokens')
+@login_required
+@admin_required
+def api_tokens_page():
+    """
+    Page de gestion des tokens API (admin uniquement)
+    
+    Returns:
+        str: Template HTML de la page de gestion des tokens
+    """
+    return render_page('api_tokens.html')
 
