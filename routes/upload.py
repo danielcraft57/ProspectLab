@@ -11,11 +11,13 @@ from services.entreprise_analyzer import EntrepriseAnalyzer
 from utils.helpers import allowed_file, get_file_path
 from config import UPLOAD_FOLDER
 from utils.template_helpers import render_page
+from services.auth import login_required
 
 upload_bp = Blueprint('upload', __name__)
 
 
 @upload_bp.route('/upload', methods=['GET', 'POST'])
+@login_required
 def upload_file():
     """
     Upload et prévisualisation d'un fichier Excel (route classique pour compatibilité)
@@ -73,6 +75,7 @@ def upload_file():
 
 
 @upload_bp.route('/preview/<filename>')
+@login_required
 def preview_file(filename):
     """
     Page de prévisualisation du fichier Excel avant analyse
@@ -141,6 +144,7 @@ def preview_file(filename):
 
 
 @upload_bp.route('/api/upload', methods=['POST'])
+@login_required
 def api_upload_file():
     """
     API: Upload de fichier Excel avec retour JSON
@@ -220,6 +224,7 @@ def api_upload_file():
 
 
 @upload_bp.route('/analyze/<filename>', methods=['POST'])
+@login_required
 def analyze_entreprises(filename):
     """
     API: Démarre l'analyse d'un fichier (retourne immédiatement, utilise WebSocket pour les mises à jour)

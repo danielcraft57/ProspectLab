@@ -6,22 +6,25 @@ Contient toutes les routes qui affichent des pages HTML.
 
 from flask import Blueprint, redirect, url_for
 from utils.template_helpers import render_page
+from services.auth import login_required
 
 main_bp = Blueprint('main', __name__)
 
 
-@main_bp.route('/')
-def index():
+@main_bp.route('/home')
+@login_required
+def home():
     """
-    Redirection vers le dashboard (nouvelle page d'accueil)
+    Page d'accueil après connexion
     
     Returns:
-        Response: Redirection vers le dashboard
+        str: Template HTML de la page d'accueil
     """
-    return redirect(url_for('main.dashboard'))
+    return render_page('home.html')
 
 
 @main_bp.route('/dashboard')
+@login_required
 def dashboard():
     """
     Dashboard avec statistiques
@@ -33,6 +36,7 @@ def dashboard():
 
 
 @main_bp.route('/entreprises')
+@login_required
 def liste_entreprises():
     """
     Page de liste des entreprises avec filtres
@@ -44,6 +48,7 @@ def liste_entreprises():
 
 
 @main_bp.route('/entreprise/<int:entreprise_id>')
+@login_required
 def entreprise_detail(entreprise_id):
     """
     Page de détail d'une entreprise
@@ -58,6 +63,7 @@ def entreprise_detail(entreprise_id):
 
 
 @main_bp.route('/analyses-techniques')
+@login_required
 def liste_analyses_techniques():
     """
     Page de liste des analyses techniques
@@ -69,6 +75,7 @@ def liste_analyses_techniques():
 
 
 @main_bp.route('/analyses-osint')
+@login_required
 def liste_analyses_osint():
     """
     Page de liste des analyses OSINT
@@ -80,6 +87,7 @@ def liste_analyses_osint():
 
 
 @main_bp.route('/analyses-pentest')
+@login_required
 def liste_analyses_pentest():
     """
     Page de liste des analyses Pentest
@@ -91,6 +99,7 @@ def liste_analyses_pentest():
 
 
 @main_bp.route('/carte-entreprises')
+@login_required
 def carte_entreprises():
     """
     Page de visualisation cartographique des entreprises
@@ -102,6 +111,7 @@ def carte_entreprises():
 
 
 @main_bp.route('/analyse-technique/<int:analysis_id>')
+@login_required
 def analyse_technique_detail(analysis_id):
     """
     Page de détail d'une analyse technique

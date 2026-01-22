@@ -55,7 +55,9 @@ from routes.api import api_bp
 from routes.api_extended import api_extended_bp
 from routes.upload import upload_bp
 from routes.other import other_bp
+from routes.auth import auth_bp
 
+app.register_blueprint(auth_bp)  # Auth en premier pour gérer la redirection /
 app.register_blueprint(main_bp)
 app.register_blueprint(api_bp)
 app.register_blueprint(api_extended_bp)

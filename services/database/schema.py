@@ -245,6 +245,22 @@ class DatabaseSchema(DatabaseBase):
         except sqlite3.OperationalError:
             pass  # La colonne existe déjà
         
+        # Table des utilisateurs (authentification)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                is_active INTEGER DEFAULT 1,
+                is_admin INTEGER DEFAULT 0,
+                date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                derniere_connexion TIMESTAMP
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)')
+        
         # Table des événements de tracking email
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS email_tracking_events (

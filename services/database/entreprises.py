@@ -770,6 +770,81 @@ class EntrepriseManager(DatabaseBase):
         
         return stats
 
+    def get_statistics(self):
+        """
+        Récupère les statistiques globales de l'application.
+        
+        Returns:
+            dict: Dictionnaire avec les statistiques
+        """
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        stats = {}
+        
+        # Total analyses
+        try:
+            cursor.execute('SELECT COUNT(*) as count FROM analyses')
+            stats['total_analyses'] = cursor.fetchone()['count']
+        except sqlite3.OperationalError:
+            stats['total_analyses'] = 0
+        
+        # Total entreprises
+        try:
+            cursor.execute('SELECT COUNT(*) as count FROM entreprises')
+            stats['total_entreprises'] = cursor.fetchone()['count']
+        except sqlite3.OperationalError:
+            stats['total_entreprises'] = 0
+        
+        # Favoris
+        try:
+            cursor.execute('SELECT COUNT(*) as count FROM entreprises WHERE favori = 1')
+            stats['favoris'] = cursor.fetchone()['count']
+        except sqlite3.OperationalError:
+            stats['favoris'] = 0
+        
+        # Par statut
+        try:
+            cursor.execute('''
+                SELECT statut, COUNT(*) as count 
+                FROM entreprises 
+                WHERE statut IS NOT NULL AND statut != ''
+                GROUP BY statut
+            ''')
+            stats['par_statut'] = {row['statut']: row['count'] for row in cursor.fetchall()}
+        except sqlite3.OperationalError:
+            stats['par_statut'] = {}
+        
+        # Par secteur
+        try:
+            cursor.execute('''
+                SELECT secteur, COUNT(*) as count 
+                FROM entreprises 
+                WHERE secteur IS NOT NULL AND secteur != ''
+                GROUP BY secteur
+                ORDER BY count DESC
+            ''')
+            stats['par_secteur'] = {row['secteur']: row['count'] for row in cursor.fetchall()}
+        except sqlite3.OperationalError:
+            stats['par_secteur'] = {}
+        
+        # Par opportunité
+        try:
+            cursor.execute('''
+                SELECT opportunite, COUNT(*) as count 
+                FROM entreprises 
+                WHERE opportunite IS NOT NULL AND opportunite != ''
+                GROUP BY opportunite
+                ORDER BY count DESC
+            ''')
+            stats['par_opportunite'] = {row['opportunite']: row['count'] for row in cursor.fetchall()}
+        except sqlite3.OperationalError:
+            stats['par_opportunite'] = {}
+        
+        conn.close()
+        return stats
+    
     def get_entreprises_with_emails(self):
         """
         Récupère toutes les entreprises avec leurs emails disponibles pour les campagnes.

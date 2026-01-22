@@ -7,6 +7,7 @@ Contient les routes API supplémentaires pour les analyses, scrapers, exports, e
 from flask import Blueprint, request, jsonify
 from services.database import Database
 from services.export_manager import ExportManager
+from services.auth import login_required
 import json
 import pandas as pd
 
@@ -18,6 +19,7 @@ export_manager = ExportManager()
 
 
 @api_extended_bp.route('/analyses-techniques')
+@login_required
 def analyses_techniques():
     """
     API: Liste des analyses techniques
@@ -37,6 +39,7 @@ def analyses_techniques():
 
 
 @api_extended_bp.route('/analyse-technique/<int:analysis_id>')
+@login_required
 def analyse_technique_detail(analysis_id):
     """
     API: Détails d'une analyse technique
@@ -78,6 +81,7 @@ def analyse_technique_detail(analysis_id):
 
 
 @api_extended_bp.route('/analyse-technique/<int:analysis_id>', methods=['DELETE'])
+@login_required
 def delete_technical_analysis(analysis_id):
     """
     API: Supprime une analyse technique
@@ -99,6 +103,7 @@ def delete_technical_analysis(analysis_id):
 
 
 @api_extended_bp.route('/analyses-osint')
+@login_required
 def analyses_osint():
     """
     API: Liste toutes les analyses OSINT
@@ -114,6 +119,7 @@ def analyses_osint():
 
 
 @api_extended_bp.route('/analyse-osint/<int:analysis_id>', methods=['GET', 'DELETE'])
+@login_required
 def analyse_osint_detail(analysis_id):
     """
     API: Détails ou suppression d'une analyse OSINT
@@ -149,6 +155,7 @@ def analyse_osint_detail(analysis_id):
 
 
 @api_extended_bp.route('/analyses-pentest')
+@login_required
 def analyses_pentest():
     """
     API: Liste toutes les analyses Pentest
@@ -164,6 +171,7 @@ def analyses_pentest():
 
 
 @api_extended_bp.route('/analyse-pentest/<int:analysis_id>', methods=['GET', 'DELETE'])
+@login_required
 def analyse_pentest_detail(analysis_id):
     """
     API: Détails ou suppression d'une analyse Pentest
@@ -199,6 +207,7 @@ def analyse_pentest_detail(analysis_id):
 
 
 @api_extended_bp.route('/entreprise/<int:entreprise_id>/analyse-technique')
+@login_required
 def entreprise_technical_analysis(entreprise_id):
     """
     API: Analyse technique d'une entreprise
@@ -220,6 +229,7 @@ def entreprise_technical_analysis(entreprise_id):
 
 
 @api_extended_bp.route('/entreprise/<int:entreprise_id>/analyse-osint')
+@login_required
 def entreprise_osint_analysis(entreprise_id):
     """
     API: Analyse OSINT d'une entreprise
@@ -241,6 +251,7 @@ def entreprise_osint_analysis(entreprise_id):
 
 
 @api_extended_bp.route('/entreprise/<int:entreprise_id>/analyse-pentest')
+@login_required
 def entreprise_pentest_analysis(entreprise_id):
     """
     API: Analyse Pentest d'une entreprise
@@ -262,6 +273,7 @@ def entreprise_pentest_analysis(entreprise_id):
 
 
 @api_extended_bp.route('/entreprise/<int:entreprise_id>/scrapers')
+@login_required
 def get_scrapers(entreprise_id):
     """
     API: Récupère tous les scrapers d'une entreprise
@@ -288,6 +300,7 @@ def get_scrapers(entreprise_id):
 
 
 @api_extended_bp.route('/entreprise/<int:entreprise_id>/images')
+@login_required
 def get_images(entreprise_id):
     """
     API: Récupère toutes les images d'une entreprise
@@ -306,6 +319,7 @@ def get_images(entreprise_id):
 
 
 @api_extended_bp.route('/scraper/<int:scraper_id>/images')
+@login_required
 def get_scraper_images(scraper_id):
     """
     API: Récupère toutes les images d'un scraper
@@ -324,6 +338,7 @@ def get_scraper_images(scraper_id):
 
 
 @api_extended_bp.route('/scraper', methods=['POST'])
+@login_required
 def save_scraper():
     """
     API: Sauvegarde un scraper
@@ -364,6 +379,7 @@ def save_scraper():
 
 
 @api_extended_bp.route('/entreprise/<int:entreprise_id>/personnes')
+@login_required
 def entreprise_personnes(entreprise_id):
     """
     API: Liste des personnes d'une entreprise
@@ -382,6 +398,7 @@ def entreprise_personnes(entreprise_id):
 
 
 @api_extended_bp.route('/entreprise/<int:entreprise_id>/organigramme')
+@login_required
 def entreprise_organigramme(entreprise_id):
     """
     API: Organigramme d'une entreprise
@@ -400,6 +417,7 @@ def entreprise_organigramme(entreprise_id):
 
 
 @api_extended_bp.route('/entreprises/nearby')
+@login_required
 def nearby_entreprises():
     """
     API: Trouve les entreprises proches d'un point géographique
@@ -440,6 +458,7 @@ def nearby_entreprises():
 
 
 @api_extended_bp.route('/entreprise/<int:entreprise_id>/competition')
+@login_required
 def competition_analysis(entreprise_id):
     """
     API: Analyse de la concurrence locale pour une entreprise
@@ -470,6 +489,7 @@ def competition_analysis(entreprise_id):
 
 
 @api_extended_bp.route('/export/<format>')
+@login_required
 def export_data(format):
     """
     API: Export des données dans différents formats

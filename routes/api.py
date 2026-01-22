@@ -6,6 +6,7 @@ Contient toutes les routes API REST pour les entreprises, analyses, etc.
 
 from flask import Blueprint, request, jsonify
 from services.database import Database
+from services.auth import login_required
 import json
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
@@ -15,6 +16,7 @@ database = Database()
 
 
 @api_bp.route('/statistics')
+@login_required
 def statistics():
     """
     API: Statistiques globales
@@ -30,6 +32,7 @@ def statistics():
 
 
 @api_bp.route('/analyses')
+@login_required
 def analyses():
     """
     API: Liste des analyses
@@ -49,6 +52,7 @@ def analyses():
 
 
 @api_bp.route('/entreprises')
+@login_required
 def entreprises():
     """
     API: Liste des entreprises avec filtres
@@ -85,6 +89,7 @@ def entreprises():
 
 
 @api_bp.route('/entreprise/<int:entreprise_id>', methods=['GET', 'DELETE'])
+@login_required
 def entreprise_detail(entreprise_id):
     """
     API: Détails d'une entreprise ou suppression
@@ -165,6 +170,7 @@ def entreprise_detail(entreprise_id):
 
 
 @api_bp.route('/entreprise/<int:entreprise_id>/tags', methods=['POST', 'PUT', 'DELETE'])
+@login_required
 def entreprise_tags(entreprise_id):
     """
     API: Gestion des tags d'une entreprise
@@ -193,6 +199,7 @@ def entreprise_tags(entreprise_id):
 
 
 @api_bp.route('/entreprise/<int:entreprise_id>/notes', methods=['POST', 'PUT'])
+@login_required
 def entreprise_notes(entreprise_id):
     """
     API: Gestion des notes d'une entreprise
@@ -213,6 +220,7 @@ def entreprise_notes(entreprise_id):
 
 
 @api_bp.route('/entreprise/<int:entreprise_id>/favori', methods=['POST'])
+@login_required
 def entreprise_favori(entreprise_id):
     """
     API: Basculer le statut favori d'une entreprise
@@ -231,6 +239,7 @@ def entreprise_favori(entreprise_id):
 
 
 @api_bp.route('/secteurs')
+@login_required
 def secteurs():
     """
     API: Liste des secteurs disponibles

@@ -10,6 +10,7 @@ from services.email_sender import EmailSender
 from services.template_manager import TemplateManager
 from config import EXPORT_FOLDER
 from utils.template_helpers import render_page
+from services.auth import login_required
 
 other_bp = Blueprint('other', __name__)
 
@@ -18,6 +19,7 @@ template_manager = TemplateManager()
 
 
 @other_bp.route('/analyse/scraping')
+@login_required
 def analyse_scraping_page():
     """
     Page d'analyse/scraping unifiée
@@ -29,6 +31,7 @@ def analyse_scraping_page():
 
 
 @other_bp.route('/scrape-emails', methods=['GET', 'POST'])
+@login_required
 def scrape_emails():
     """
     Scrape les emails d'un site web (route HTTP pour compatibilité)
@@ -50,6 +53,7 @@ def scrape_emails():
 
 
 @other_bp.route('/send-emails', methods=['GET', 'POST'])
+@login_required
 def send_emails():
     """
     Envoi d'emails de prospection
@@ -146,6 +150,7 @@ def send_emails():
 
 
 @other_bp.route('/templates', methods=['GET', 'POST'])
+@login_required
 def manage_templates():
     """
     Gestion des modèles de messages
@@ -189,6 +194,7 @@ def manage_templates():
 
 
 @other_bp.route('/download/<filename>')
+@login_required
 def download_file(filename):
     """
     Télécharger un fichier exporté
@@ -215,6 +221,7 @@ def download_file(filename):
 
 
 @other_bp.route('/api/templates')
+@login_required
 def api_templates():
     """
     API: Liste des templates
@@ -227,6 +234,7 @@ def api_templates():
 
 
 @other_bp.route('/api/templates/<template_id>')
+@login_required
 def api_template_detail(template_id):
     """
     API: Détails d'un template
@@ -246,6 +254,7 @@ def api_template_detail(template_id):
 # ==================== ROUTES POUR LES CAMPAGNES EMAIL ====================
 
 @other_bp.route('/campagnes', methods=['GET'])
+@login_required
 def list_campagnes():
     """
     Liste toutes les campagnes email.
@@ -260,6 +269,7 @@ def list_campagnes():
 
 
 @other_bp.route('/api/campagnes', methods=['GET'])
+@login_required
 def api_list_campagnes():
     """
     API: Liste des campagnes.
@@ -275,6 +285,7 @@ def api_list_campagnes():
 
 
 @other_bp.route('/api/campagnes', methods=['POST'])
+@login_required
 def api_create_campagne():
     """
     API: Crée une nouvelle campagne et lance l'envoi via Celery.
@@ -334,6 +345,7 @@ def api_create_campagne():
 
 
 @other_bp.route('/api/campagnes/<int:campagne_id>', methods=['GET'])
+@login_required
 def api_get_campagne(campagne_id):
     """
     API: Détails d'une campagne.
@@ -355,6 +367,7 @@ def api_get_campagne(campagne_id):
 
 
 @other_bp.route('/api/campagnes/<int:campagne_id>', methods=['DELETE'])
+@login_required
 def api_delete_campagne(campagne_id):
     """
     API: Supprime une campagne.
@@ -383,6 +396,7 @@ def api_delete_campagne(campagne_id):
 
 
 @other_bp.route('/api/entreprises/emails', methods=['GET'])
+@login_required
 def api_get_entreprises_with_emails():
     """
     API: Liste des entreprises avec leurs emails disponibles.
@@ -480,6 +494,7 @@ def track_click(tracking_token):
 
 
 @other_bp.route('/api/tracking/email/<int:email_id>', methods=['GET'])
+@login_required
 def api_get_email_tracking(email_id):
     """
     API: Stats de tracking pour un email.
@@ -497,6 +512,7 @@ def api_get_email_tracking(email_id):
 
 
 @other_bp.route('/api/tracking/campagne/<int:campagne_id>', methods=['GET'])
+@login_required
 def api_get_campagne_tracking(campagne_id):
     """
     API: Stats de tracking agrégées d'une campagne.
