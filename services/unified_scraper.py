@@ -965,7 +965,22 @@ class UnifiedScraper:
         if self.should_stop:
             logger.info(f'[UnifiedScraper] Page {url}: Scraping arrêté, ignorée')
             return
-        
+
+        # Valider l'URL
+        if not url or not isinstance(url, str):
+            logger.error(f'[UnifiedScraper] URL invalide: {url} (type: {type(url)})')
+            return
+
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            if not parsed.scheme or not parsed.netloc:
+                logger.error(f'[UnifiedScraper] URL invalide (pas de scheme ou netloc): {url}')
+                return
+        except Exception as e:
+            logger.error(f'[UnifiedScraper] Erreur lors de la validation de l\'URL {url}: {e}')
+            return
+
         # Vérifier la limite du nombre de pages avant de commencer
         with self.lock:
             if len(self.visited_urls) >= self.max_pages:

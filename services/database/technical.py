@@ -45,48 +45,92 @@ class TechnicalManager(DatabaseBase):
         pages_count = tech_data.get('pages_count') or (len(pages) if pages else None)
         
         # Sauvegarder l'analyse principale
-        cursor.execute('''
-            INSERT INTO analyses_techniques (
-                entreprise_id, url, domain, ip_address, server_software,
-                framework, framework_version, cms, cms_version, cms_plugins, hosting_provider,
-                domain_creation_date, domain_updated_date, domain_registrar,
-                ssl_valid, ssl_expiry_date, security_headers, waf, cdn, analytics,
-                seo_meta, performance_metrics, nmap_scan, technical_details,
-                pages_count, security_score, performance_score, trackers_count, pages_summary
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            entreprise_id,
-            url,
-            domain,
-            tech_data.get('ip_address'),
-            tech_data.get('server_software'),
-            tech_data.get('framework'),
-            tech_data.get('framework_version'),
-            tech_data.get('cms'),
-            tech_data.get('cms_version'),
-            json.dumps(tech_data.get('cms_plugins', [])) if tech_data.get('cms_plugins') else None,
-            tech_data.get('hosting_provider'),
-            tech_data.get('domain_creation_date'),
-            tech_data.get('domain_updated_date'),
-            tech_data.get('domain_registrar'),
-            tech_data.get('ssl_valid'),
-            tech_data.get('ssl_expiry_date'),
-            json.dumps(tech_data.get('security_headers', {})) if tech_data.get('security_headers') else None,
-            tech_data.get('waf'),
-            tech_data.get('cdn'),
-            json.dumps(tech_data.get('analytics', {})) if tech_data.get('analytics') else None,
-            json.dumps(tech_data.get('seo_meta', {})) if tech_data.get('seo_meta') else None,
-            json.dumps(tech_data.get('performance_metrics', {})) if tech_data.get('performance_metrics') else None,
-            json.dumps(tech_data.get('nmap_scan', {})) if tech_data.get('nmap_scan') else None,
-            json.dumps(tech_data) if tech_data else None,
-            pages_count,
-            security_score,
-            performance_score,
-            trackers_count,
-            json.dumps(pages_summary) if pages_summary else None
-        ))
-        
-        analysis_id = cursor.lastrowid
+        if self.is_postgresql():
+            self.execute_sql(cursor,'''
+                INSERT INTO analyses_techniques (
+                    entreprise_id, url, domain, ip_address, server_software,
+                    framework, framework_version, cms, cms_version, cms_plugins, hosting_provider,
+                    domain_creation_date, domain_updated_date, domain_registrar,
+                    ssl_valid, ssl_expiry_date, security_headers, waf, cdn, analytics,
+                    seo_meta, performance_metrics, nmap_scan, technical_details,
+                    pages_count, security_score, performance_score, trackers_count, pages_summary
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            ''', (
+                entreprise_id,
+                url,
+                domain,
+                tech_data.get('ip_address'),
+                tech_data.get('server_software'),
+                tech_data.get('framework'),
+                tech_data.get('framework_version'),
+                tech_data.get('cms'),
+                tech_data.get('cms_version'),
+                json.dumps(tech_data.get('cms_plugins', [])) if tech_data.get('cms_plugins') else None,
+                tech_data.get('hosting_provider'),
+                tech_data.get('domain_creation_date'),
+                tech_data.get('domain_updated_date'),
+                tech_data.get('domain_registrar'),
+                tech_data.get('ssl_valid'),
+                tech_data.get('ssl_expiry_date'),
+                json.dumps(tech_data.get('security_headers', {})) if tech_data.get('security_headers') else None,
+                tech_data.get('waf'),
+                tech_data.get('cdn'),
+                json.dumps(tech_data.get('analytics', {})) if tech_data.get('analytics') else None,
+                json.dumps(tech_data.get('seo_meta', {})) if tech_data.get('seo_meta') else None,
+                json.dumps(tech_data.get('performance_metrics', {})) if tech_data.get('performance_metrics') else None,
+                json.dumps(tech_data.get('nmap_scan', {})) if tech_data.get('nmap_scan') else None,
+                json.dumps(tech_data) if tech_data else None,
+                pages_count,
+                security_score,
+                performance_score,
+                trackers_count,
+                json.dumps(pages_summary) if pages_summary else None
+            ))
+            result = cursor.fetchone()
+            analysis_id = result['id'] if result else None
+        else:
+            self.execute_sql(cursor,'''
+                INSERT INTO analyses_techniques (
+                    entreprise_id, url, domain, ip_address, server_software,
+                    framework, framework_version, cms, cms_version, cms_plugins, hosting_provider,
+                    domain_creation_date, domain_updated_date, domain_registrar,
+                    ssl_valid, ssl_expiry_date, security_headers, waf, cdn, analytics,
+                    seo_meta, performance_metrics, nmap_scan, technical_details,
+                    pages_count, security_score, performance_score, trackers_count, pages_summary
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                entreprise_id,
+                url,
+                domain,
+                tech_data.get('ip_address'),
+                tech_data.get('server_software'),
+                tech_data.get('framework'),
+                tech_data.get('framework_version'),
+                tech_data.get('cms'),
+                tech_data.get('cms_version'),
+                json.dumps(tech_data.get('cms_plugins', [])) if tech_data.get('cms_plugins') else None,
+                tech_data.get('hosting_provider'),
+                tech_data.get('domain_creation_date'),
+                tech_data.get('domain_updated_date'),
+                tech_data.get('domain_registrar'),
+                tech_data.get('ssl_valid'),
+                tech_data.get('ssl_expiry_date'),
+                json.dumps(tech_data.get('security_headers', {})) if tech_data.get('security_headers') else None,
+                tech_data.get('waf'),
+                tech_data.get('cdn'),
+                json.dumps(tech_data.get('analytics', {})) if tech_data.get('analytics') else None,
+                json.dumps(tech_data.get('seo_meta', {})) if tech_data.get('seo_meta') else None,
+                json.dumps(tech_data.get('performance_metrics', {})) if tech_data.get('performance_metrics') else None,
+                json.dumps(tech_data.get('nmap_scan', {})) if tech_data.get('nmap_scan') else None,
+                json.dumps(tech_data) if tech_data else None,
+                pages_count,
+                security_score,
+                performance_score,
+                trackers_count,
+                json.dumps(pages_summary) if pages_summary else None
+            ))
+            analysis_id = cursor.lastrowid
         
         # Sauvegarder les plugins CMS dans la table normalisée
         cms_plugins = tech_data.get('cms_plugins', [])
@@ -105,10 +149,17 @@ class TechnicalManager(DatabaseBase):
                         plugin_name = str(plugin)
                         plugin_version = None
                     if plugin_name:
-                        cursor.execute('''
-                            INSERT OR IGNORE INTO analysis_technique_cms_plugins (analysis_id, plugin_name, version)
-                            VALUES (?, ?, ?)
-                        ''', (analysis_id, plugin_name, plugin_version))
+                        if self.is_postgresql():
+                            self.execute_sql(cursor,'''
+                                INSERT INTO analysis_technique_cms_plugins (analysis_id, plugin_name, version)
+                                VALUES (%s, %s, %s)
+                                ON CONFLICT (analysis_id, plugin_name) DO NOTHING
+                            ''', (analysis_id, plugin_name, plugin_version))
+                        else:
+                            self.execute_sql(cursor,'''
+                                INSERT OR IGNORE INTO analysis_technique_cms_plugins (analysis_id, plugin_name, version)
+                                VALUES (?, ?, ?)
+                            ''', (analysis_id, plugin_name, plugin_version))
         
         # Sauvegarder les headers de sécurité dans la table normalisée
         security_headers = tech_data.get('security_headers', {})
@@ -126,10 +177,36 @@ class TechnicalManager(DatabaseBase):
                     else:
                         header_value = str(header_data) if header_data else None
                         status = 'present' if header_data else None
-                    cursor.execute('''
-                        INSERT OR REPLACE INTO analysis_technique_security_headers (analysis_id, header_name, header_value, status)
-                        VALUES (?, ?, ?, ?)
-                    ''', (analysis_id, header_name, header_value, status))
+                    if self.is_postgresql():
+                        self.execute_sql(cursor,'''
+                            INSERT INTO analysis_technique_security_headers (analysis_id, header_name, header_value, status)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (analysis_id, header_name) DO UPDATE SET
+                                header_value = EXCLUDED.header_value,
+                                status = EXCLUDED.status
+                        ''', (analysis_id, header_name, header_value, status))
+                    else:
+                        self.execute_sql(cursor,'''
+                            INSERT OR REPLACE INTO analysis_technique_security_headers (analysis_id, header_name, header_value, status)
+                            VALUES (?, ?, ?, ?)
+                        ''', (analysis_id, header_name, header_value, status))
+                else:
+                    # Cas de secours : utiliser la syntaxe compatible
+                    try:
+                        # Essayer d'abord INSERT ... ON CONFLICT (PostgreSQL)
+                        self.execute_sql(cursor,'''
+                            INSERT INTO analysis_technique_security_headers (analysis_id, header_name, header_value, status)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (analysis_id, header_name) DO UPDATE SET
+                                header_value = EXCLUDED.header_value,
+                                status = EXCLUDED.status
+                        ''', (analysis_id, header_name, header_value, status))
+                    except:
+                        # Fallback vers INSERT OR REPLACE (SQLite)
+                        self.execute_sql(cursor,'''
+                            INSERT OR REPLACE INTO analysis_technique_security_headers (analysis_id, header_name, header_value, status)
+                            VALUES (?, ?, ?, ?)
+                        ''', (analysis_id, header_name, header_value, status))
         
         # Sauvegarder les outils d'analytics dans la table normalisée
         analytics = tech_data.get('analytics', [])
@@ -148,10 +225,17 @@ class TechnicalManager(DatabaseBase):
                         tool_name = str(tool)
                         tool_id = None
                     if tool_name:
-                        cursor.execute('''
-                            INSERT OR IGNORE INTO analysis_technique_analytics (analysis_id, tool_name, tool_id)
-                            VALUES (?, ?, ?)
-                        ''', (analysis_id, tool_name, tool_id))
+                        if self.is_postgresql():
+                            self.execute_sql(cursor,'''
+                                INSERT INTO analysis_technique_analytics (analysis_id, tool_name, tool_id)
+                                VALUES (%s, %s, %s)
+                                ON CONFLICT (analysis_id, tool_name) DO NOTHING
+                            ''', (analysis_id, tool_name, tool_id))
+                        else:
+                            self.execute_sql(cursor,'''
+                                INSERT OR IGNORE INTO analysis_technique_analytics (analysis_id, tool_name, tool_id)
+                                VALUES (?, ?, ?)
+                            ''', (analysis_id, tool_name, tool_id))
         
         # Sauvegarder les pages analysées (multi-pages)
         if pages:
@@ -162,7 +246,7 @@ class TechnicalManager(DatabaseBase):
                     if not page_url:
                         logger.warning(f'Page sans URL ignorée: {page}')
                         continue
-                    cursor.execute('''
+                    self.execute_sql(cursor,'''
                         INSERT INTO analysis_technique_pages (
                             analysis_id, page_url, status_code, final_url, content_type,
                             title, response_time_ms, content_length, security_score,
@@ -192,7 +276,7 @@ class TechnicalManager(DatabaseBase):
         # Mettre à jour la fiche entreprise avec le score de sécurité global si présent
         if entreprise_id and security_score is not None:
             try:
-                cursor.execute(
+                self.execute_sql(cursor,
                     'UPDATE entreprises SET score_securite = ? WHERE id = ?',
                     (security_score, entreprise_id)
                 )
@@ -216,7 +300,7 @@ class TechnicalManager(DatabaseBase):
             dict: Dictionnaire avec toutes les données normalisées
         """
         # Charger les plugins CMS
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT plugin_name, version FROM analysis_technique_cms_plugins
             WHERE analysis_id = ?
         ''', (analysis_id,))
@@ -228,7 +312,7 @@ class TechnicalManager(DatabaseBase):
             plugins.append(plugin)
         
         # Charger les headers de sécurité
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT header_name, header_value, status FROM analysis_technique_security_headers
             WHERE analysis_id = ?
         ''', (analysis_id,))
@@ -240,7 +324,7 @@ class TechnicalManager(DatabaseBase):
             }
         
         # Charger les outils d'analytics
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT tool_name, tool_id FROM analysis_technique_analytics
             WHERE analysis_id = ?
         ''', (analysis_id,))
@@ -252,7 +336,7 @@ class TechnicalManager(DatabaseBase):
             analytics.append(tool)
         
         # Charger les pages analysées (multi-pages)
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT * FROM analysis_technique_pages
             WHERE analysis_id = ?
             ORDER BY id ASC
@@ -288,7 +372,7 @@ class TechnicalManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT * FROM analyses_techniques
             WHERE entreprise_id = ?
             ORDER BY date_analyse DESC
@@ -332,7 +416,7 @@ class TechnicalManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT at.*, e.nom as entreprise_nom, e.id as entreprise_id
             FROM analyses_techniques at
             LEFT JOIN entreprises e ON at.entreprise_id = e.id
@@ -376,7 +460,7 @@ class TechnicalManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT at.*, e.nom as entreprise_nom, e.id as entreprise_id
             FROM analyses_techniques at
             LEFT JOIN entreprises e ON at.entreprise_id = e.id
@@ -431,7 +515,7 @@ class TechnicalManager(DatabaseBase):
         pages_count = tech_data.get('pages_count') or (len(pages) if pages else None)
         
         # Récupérer entreprise_id + url existants
-        cursor.execute('SELECT entreprise_id, url FROM analyses_techniques WHERE id = ?', (analysis_id,))
+        self.execute_sql(cursor,'SELECT entreprise_id, url FROM analyses_techniques WHERE id = ?', (analysis_id,))
         row = cursor.fetchone()
         if not row:
             conn.close()
@@ -442,7 +526,7 @@ class TechnicalManager(DatabaseBase):
         
         # Mettre à jour la ligne principale
         domain = url.replace('http://', '').replace('https://', '').split('/')[0].replace('www.', '')
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             UPDATE analyses_techniques
             SET url = ?,
                 domain = ?,
@@ -501,10 +585,10 @@ class TechnicalManager(DatabaseBase):
         ))
         
         # Supprimer puis réinsérer les données normalisées
-        cursor.execute('DELETE FROM analysis_technique_cms_plugins WHERE analysis_id = ?', (analysis_id,))
-        cursor.execute('DELETE FROM analysis_technique_security_headers WHERE analysis_id = ?', (analysis_id,))
-        cursor.execute('DELETE FROM analysis_technique_analytics WHERE analysis_id = ?', (analysis_id,))
-        cursor.execute('DELETE FROM analysis_technique_pages WHERE analysis_id = ?', (analysis_id,))
+        self.execute_sql(cursor,'DELETE FROM analysis_technique_cms_plugins WHERE analysis_id = ?', (analysis_id,))
+        self.execute_sql(cursor,'DELETE FROM analysis_technique_security_headers WHERE analysis_id = ?', (analysis_id,))
+        self.execute_sql(cursor,'DELETE FROM analysis_technique_analytics WHERE analysis_id = ?', (analysis_id,))
+        self.execute_sql(cursor,'DELETE FROM analysis_technique_pages WHERE analysis_id = ?', (analysis_id,))
         
         # Plugins CMS
         cms_plugins = tech_data.get('cms_plugins', [])
@@ -523,10 +607,17 @@ class TechnicalManager(DatabaseBase):
                         plugin_name = str(plugin)
                         plugin_version = None
                     if plugin_name:
-                        cursor.execute('''
-                            INSERT OR IGNORE INTO analysis_technique_cms_plugins (analysis_id, plugin_name, version)
-                            VALUES (?, ?, ?)
-                        ''', (analysis_id, plugin_name, plugin_version))
+                        if self.is_postgresql():
+                            self.execute_sql(cursor,'''
+                                INSERT INTO analysis_technique_cms_plugins (analysis_id, plugin_name, version)
+                                VALUES (%s, %s, %s)
+                                ON CONFLICT (analysis_id, plugin_name) DO NOTHING
+                            ''', (analysis_id, plugin_name, plugin_version))
+                        else:
+                            self.execute_sql(cursor,'''
+                                INSERT OR IGNORE INTO analysis_technique_cms_plugins (analysis_id, plugin_name, version)
+                                VALUES (?, ?, ?)
+                            ''', (analysis_id, plugin_name, plugin_version))
         
         # Headers de sécurité
         security_headers = tech_data.get('security_headers', {})
@@ -544,10 +635,36 @@ class TechnicalManager(DatabaseBase):
                     else:
                         header_value = str(header_data) if header_data else None
                         status = 'present' if header_data else None
-                    cursor.execute('''
-                        INSERT OR REPLACE INTO analysis_technique_security_headers (analysis_id, header_name, header_value, status)
-                        VALUES (?, ?, ?, ?)
-                    ''', (analysis_id, header_name, header_value, status))
+                    if self.is_postgresql():
+                        self.execute_sql(cursor,'''
+                            INSERT INTO analysis_technique_security_headers (analysis_id, header_name, header_value, status)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (analysis_id, header_name) DO UPDATE SET
+                                header_value = EXCLUDED.header_value,
+                                status = EXCLUDED.status
+                        ''', (analysis_id, header_name, header_value, status))
+                    else:
+                        self.execute_sql(cursor,'''
+                            INSERT OR REPLACE INTO analysis_technique_security_headers (analysis_id, header_name, header_value, status)
+                            VALUES (?, ?, ?, ?)
+                        ''', (analysis_id, header_name, header_value, status))
+                else:
+                    # Cas de secours : utiliser la syntaxe compatible
+                    try:
+                        # Essayer d'abord INSERT ... ON CONFLICT (PostgreSQL)
+                        self.execute_sql(cursor,'''
+                            INSERT INTO analysis_technique_security_headers (analysis_id, header_name, header_value, status)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (analysis_id, header_name) DO UPDATE SET
+                                header_value = EXCLUDED.header_value,
+                                status = EXCLUDED.status
+                        ''', (analysis_id, header_name, header_value, status))
+                    except:
+                        # Fallback vers INSERT OR REPLACE (SQLite)
+                        self.execute_sql(cursor,'''
+                            INSERT OR REPLACE INTO analysis_technique_security_headers (analysis_id, header_name, header_value, status)
+                            VALUES (?, ?, ?, ?)
+                        ''', (analysis_id, header_name, header_value, status))
         
         # Analytics
         analytics = tech_data.get('analytics', [])
@@ -566,15 +683,22 @@ class TechnicalManager(DatabaseBase):
                         tool_name = str(tool)
                         tool_id = None
                     if tool_name:
-                        cursor.execute('''
-                            INSERT OR IGNORE INTO analysis_technique_analytics (analysis_id, tool_name, tool_id)
-                            VALUES (?, ?, ?)
-                        ''', (analysis_id, tool_name, tool_id))
+                        if self.is_postgresql():
+                            self.execute_sql(cursor,'''
+                                INSERT INTO analysis_technique_analytics (analysis_id, tool_name, tool_id)
+                                VALUES (%s, %s, %s)
+                                ON CONFLICT (analysis_id, tool_name) DO NOTHING
+                            ''', (analysis_id, tool_name, tool_id))
+                        else:
+                            self.execute_sql(cursor,'''
+                                INSERT OR IGNORE INTO analysis_technique_analytics (analysis_id, tool_name, tool_id)
+                                VALUES (?, ?, ?)
+                            ''', (analysis_id, tool_name, tool_id))
         
         # Pages multi-analysées
         if pages:
             for page in pages:
-                cursor.execute('''
+                self.execute_sql(cursor,'''
                     INSERT INTO analysis_technique_pages (
                         analysis_id, page_url, status_code, final_url, content_type,
                         title, response_time_ms, content_length, security_score,
@@ -600,7 +724,7 @@ class TechnicalManager(DatabaseBase):
         # Mettre à jour la fiche entreprise avec le score global
         if security_score is not None and entreprise_id:
             try:
-                cursor.execute(
+                self.execute_sql(cursor,
                     'UPDATE entreprises SET score_securite = ? WHERE id = ?',
                     (security_score, entreprise_id)
                 )
@@ -624,7 +748,7 @@ class TechnicalManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT at.*, e.nom as entreprise_nom, e.id as entreprise_id
             FROM analyses_techniques at
             LEFT JOIN entreprises e ON at.entreprise_id = e.id
@@ -668,7 +792,7 @@ class TechnicalManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('DELETE FROM analyses_techniques WHERE id = ?', (analysis_id,))
+        self.execute_sql(cursor,'DELETE FROM analyses_techniques WHERE id = ?', (analysis_id,))
         
         deleted = cursor.rowcount > 0
         

@@ -55,14 +55,14 @@ class PersonneManager(DatabaseBase):
             # Chercher si la personne existe déjà (par email ou nom+prenom)
             personne_id = None
             if email:
-                cursor.execute('SELECT id FROM personnes WHERE entreprise_id = ? AND email = ?', 
+                self.execute_sql(cursor,'SELECT id FROM personnes WHERE entreprise_id = ? AND email = ?', 
                              (entreprise_id, email))
                 row = cursor.fetchone()
                 if row:
                     personne_id = row['id']
             
             if not personne_id and nom and prenom:
-                cursor.execute('SELECT id FROM personnes WHERE entreprise_id = ? AND nom = ? AND prenom = ?',
+                self.execute_sql(cursor,'SELECT id FROM personnes WHERE entreprise_id = ? AND nom = ? AND prenom = ?',
                              (entreprise_id, nom, prenom))
                 row = cursor.fetchone()
                 if row:
@@ -75,7 +75,7 @@ class PersonneManager(DatabaseBase):
             
             if personne_id:
                 # Mettre à jour
-                cursor.execute('''
+                self.execute_sql(cursor,'''
                     UPDATE personnes SET
                         titre = COALESCE(?, titre),
                         role = COALESCE(?, role),
@@ -93,7 +93,7 @@ class PersonneManager(DatabaseBase):
                       social_profiles_json, osint_data_json, niveau_hierarchique, manager_id, source, personne_id))
             else:
                 # Créer
-                cursor.execute('''
+                self.execute_sql(cursor,'''
                     INSERT INTO personnes (
                         entreprise_id, nom, prenom, titre, role, email, telephone,
                         linkedin_url, linkedin_profile_data, social_profiles, osint_data,
@@ -128,7 +128,7 @@ class PersonneManager(DatabaseBase):
         cursor.row_factory = lambda c, r: dict(zip([col[0] for col in c.description], r))
         
         try:
-            cursor.execute('''
+            self.execute_sql(cursor,'''
                 SELECT id, entreprise_id, nom, prenom, titre, role, email, telephone,
                        linkedin_url, linkedin_profile_data, social_profiles, osint_data,
                        niveau_hierarchique, manager_id, source, date_created, date_updated
@@ -177,49 +177,100 @@ class PersonneManager(DatabaseBase):
         
         try:
             # Sauvegarder les détails OSINT principaux
-            cursor.execute('''
-                INSERT OR REPLACE INTO personnes_osint_details (
-                    personne_id, location, location_city, location_country, location_address,
-                    location_latitude, location_longitude, age_range, birth_date,
-                    hobbies, interests, education, professional_history, family_members,
-                    data_breaches, photos_urls, bio, languages, skills, certifications
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                personne_id,
-                enriched_data.get('location'),
-                enriched_data.get('location_city'),
-                enriched_data.get('location_country'),
-                enriched_data.get('location_address'),
-                enriched_data.get('location_latitude'),
-                enriched_data.get('location_longitude'),
-                enriched_data.get('age_range'),
-                enriched_data.get('birth_date'),
-                json.dumps(enriched_data.get('hobbies', [])) if enriched_data.get('hobbies') else None,
-                json.dumps(enriched_data.get('interests', [])) if enriched_data.get('interests') else None,
-                enriched_data.get('education'),
-                json.dumps(enriched_data.get('professional_history', [])) if enriched_data.get('professional_history') else None,
-                json.dumps(enriched_data.get('family_members', [])) if enriched_data.get('family_members') else None,
-                json.dumps(enriched_data.get('data_breaches', [])) if enriched_data.get('data_breaches') else None,
-                json.dumps(enriched_data.get('photos', [])) if enriched_data.get('photos') else None,
-                enriched_data.get('bio'),
-                json.dumps(enriched_data.get('languages', [])) if enriched_data.get('languages') else None,
-                json.dumps(enriched_data.get('skills', [])) if enriched_data.get('skills') else None,
-                json.dumps(enriched_data.get('certifications', [])) if enriched_data.get('certifications') else None
-            ))
+            if self.is_postgresql():
+                self.execute_sql(cursor,'''
+                    INSERT INTO personnes_osint_details (
+                        personne_id, location, location_city, location_country, location_address,
+                        location_latitude, location_longitude, age_range, birth_date,
+                        hobbies, interests, education, professional_history, family_members,
+                        data_breaches, photos_urls, bio, languages, skills, certifications
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (personne_id) DO UPDATE SET
+                        location = EXCLUDED.location,
+                        location_city = EXCLUDED.location_city,
+                        location_country = EXCLUDED.location_country,
+                        location_address = EXCLUDED.location_address,
+                        location_latitude = EXCLUDED.location_latitude,
+                        location_longitude = EXCLUDED.location_longitude,
+                        age_range = EXCLUDED.age_range,
+                        birth_date = EXCLUDED.birth_date,
+                        hobbies = EXCLUDED.hobbies,
+                        interests = EXCLUDED.interests,
+                        education = EXCLUDED.education,
+                        professional_history = EXCLUDED.professional_history,
+                        family_members = EXCLUDED.family_members,
+                        data_breaches = EXCLUDED.data_breaches,
+                        photos_urls = EXCLUDED.photos_urls,
+                        bio = EXCLUDED.bio,
+                        languages = EXCLUDED.languages,
+                        skills = EXCLUDED.skills,
+                        certifications = EXCLUDED.certifications
+                ''', (
+                    personne_id,
+                    enriched_data.get('location'),
+                    enriched_data.get('location_city'),
+                    enriched_data.get('location_country'),
+                    enriched_data.get('location_address'),
+                    enriched_data.get('location_latitude'),
+                    enriched_data.get('location_longitude'),
+                    enriched_data.get('age_range'),
+                    enriched_data.get('birth_date'),
+                    json.dumps(enriched_data.get('hobbies', [])) if enriched_data.get('hobbies') else None,
+                    json.dumps(enriched_data.get('interests', [])) if enriched_data.get('interests') else None,
+                    enriched_data.get('education'),
+                    json.dumps(enriched_data.get('professional_history', [])) if enriched_data.get('professional_history') else None,
+                    json.dumps(enriched_data.get('family_members', [])) if enriched_data.get('family_members') else None,
+                    json.dumps(enriched_data.get('data_breaches', [])) if enriched_data.get('data_breaches') else None,
+                    json.dumps(enriched_data.get('photos', [])) if enriched_data.get('photos') else None,
+                    enriched_data.get('bio'),
+                    json.dumps(enriched_data.get('languages', [])) if enriched_data.get('languages') else None,
+                    json.dumps(enriched_data.get('skills', [])) if enriched_data.get('skills') else None,
+                    json.dumps(enriched_data.get('certifications', [])) if enriched_data.get('certifications') else None
+                ))
+            else:
+                self.execute_sql(cursor,'''
+                    INSERT OR REPLACE INTO personnes_osint_details (
+                        personne_id, location, location_city, location_country, location_address,
+                        location_latitude, location_longitude, age_range, birth_date,
+                        hobbies, interests, education, professional_history, family_members,
+                        data_breaches, photos_urls, bio, languages, skills, certifications
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    personne_id,
+                    enriched_data.get('location'),
+                    enriched_data.get('location_city'),
+                    enriched_data.get('location_country'),
+                    enriched_data.get('location_address'),
+                    enriched_data.get('location_latitude'),
+                    enriched_data.get('location_longitude'),
+                    enriched_data.get('age_range'),
+                    enriched_data.get('birth_date'),
+                    json.dumps(enriched_data.get('hobbies', [])) if enriched_data.get('hobbies') else None,
+                    json.dumps(enriched_data.get('interests', [])) if enriched_data.get('interests') else None,
+                    enriched_data.get('education'),
+                    json.dumps(enriched_data.get('professional_history', [])) if enriched_data.get('professional_history') else None,
+                    json.dumps(enriched_data.get('family_members', [])) if enriched_data.get('family_members') else None,
+                    json.dumps(enriched_data.get('data_breaches', [])) if enriched_data.get('data_breaches') else None,
+                    json.dumps(enriched_data.get('photos', [])) if enriched_data.get('photos') else None,
+                    enriched_data.get('bio'),
+                    json.dumps(enriched_data.get('languages', [])) if enriched_data.get('languages') else None,
+                    json.dumps(enriched_data.get('skills', [])) if enriched_data.get('skills') else None,
+                    json.dumps(enriched_data.get('certifications', [])) if enriched_data.get('certifications') else None
+                ))
             
             # Sauvegarder les photos dans la table normalisée
             photos = enriched_data.get('photos', [])
             if photos:
                 for photo_url in photos:
                     if photo_url:
-                        cursor.execute('''
+                        self.execute_sql(cursor,'''
                             INSERT OR IGNORE INTO personnes_photos (personne_id, photo_url, source)
                             VALUES (?, ?, ?)
                         ''', (personne_id, photo_url, 'osint'))
             
             # Sauvegarder les lieux
             if enriched_data.get('location_city') or enriched_data.get('location_address'):
-                cursor.execute('''
+                self.execute_sql(cursor,'''
                     INSERT INTO personnes_locations (
                         personne_id, location_type, address, city, country,
                         latitude, longitude, source
@@ -240,7 +291,7 @@ class PersonneManager(DatabaseBase):
             if hobbies:
                 for hobby in hobbies:
                     if hobby:
-                        cursor.execute('''
+                        self.execute_sql(cursor,'''
                             INSERT OR IGNORE INTO personnes_hobbies (personne_id, hobby_name, source)
                             VALUES (?, ?, ?)
                         ''', (personne_id, hobby, 'osint'))
@@ -250,7 +301,7 @@ class PersonneManager(DatabaseBase):
             if professional_history:
                 for job in professional_history:
                     if isinstance(job, dict):
-                        cursor.execute('''
+                        self.execute_sql(cursor,'''
                             INSERT INTO personnes_professional_history (
                                 personne_id, company_name, position, start_date, end_date, description, source
                             ) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -269,7 +320,7 @@ class PersonneManager(DatabaseBase):
             if family_members:
                 for member in family_members:
                     if isinstance(member, dict):
-                        cursor.execute('''
+                        self.execute_sql(cursor,'''
                             INSERT INTO personnes_family (
                                 personne_id, family_member_name, relationship, age, location, source
                             ) VALUES (?, ?, ?, ?, ?, ?)
@@ -287,7 +338,7 @@ class PersonneManager(DatabaseBase):
             if data_breaches:
                 for breach in data_breaches:
                     if isinstance(breach, dict):
-                        cursor.execute('''
+                        self.execute_sql(cursor,'''
                             INSERT INTO personnes_data_breaches (
                                 personne_id, breach_name, breach_date, data_leaked, source
                             ) VALUES (?, ?, ?, ?, ?)

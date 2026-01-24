@@ -68,7 +68,7 @@ class ScraperManager(DatabaseBase):
         metadata_json = json.dumps(metadata) if metadata and not isinstance(metadata, str) else (metadata or None)
         
         # Vérifier si un scraper existe déjà pour cette entreprise/URL/type
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT id FROM scrapers 
             WHERE entreprise_id = ? AND url = ? AND scraper_type = ?
         ''', (entreprise_id, url, scraper_type))
@@ -77,8 +77,11 @@ class ScraperManager(DatabaseBase):
         
         if existing:
             # UPDATE: mettre à jour le scraper existant
-            scraper_id = existing['id']
-            cursor.execute('''
+            if isinstance(existing, dict):
+                scraper_id = existing.get('id')
+            else:
+                scraper_id = existing[0] if existing else None
+            self.execute_sql(cursor,'''
                 UPDATE scrapers SET
                     emails = ?,
                     people = ?,
@@ -106,7 +109,7 @@ class ScraperManager(DatabaseBase):
             ))
         else:
             # INSERT: créer un nouveau scraper
-            cursor.execute('''
+            self.execute_sql(cursor,'''
                 INSERT INTO scrapers (
                     entreprise_id, url, scraper_type, emails, people, phones, social_profiles, 
                     technologies, metadata, visited_urls, total_emails, total_people, total_phones,
@@ -167,7 +170,7 @@ class ScraperManager(DatabaseBase):
             return
         
         # Supprimer les anciens emails de ce scraper
-        cursor.execute('DELETE FROM scraper_emails WHERE scraper_id = ?', (scraper_id,))
+        self.execute_sql(cursor,'DELETE FROM scraper_emails WHERE scraper_id = ?', (scraper_id,))
         
         # Désérialiser si nécessaire
         if isinstance(emails, str):
@@ -204,27 +207,58 @@ class ScraperManager(DatabaseBase):
                 
                 if analysis:
                     # Sauvegarder avec les données d'analyse
-                    cursor.execute('''
-                        INSERT OR REPLACE INTO scraper_emails 
-                        (scraper_id, entreprise_id, email, page_url, 
-                         provider, type, format_valid, mx_valid, 
-                         risk_score, domain, name_info, is_person, analyzed_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (
-                        scraper_id, entreprise_id, email_str, page_url,
-                        analysis.get('provider'),
-                        analysis.get('type'),
-                        1 if analysis.get('format_valid') else 0,
-                        1 if analysis.get('mx_valid') is True else (0 if analysis.get('mx_valid') is False else None),
-                        analysis.get('risk_score'),
-                        analysis.get('domain'),
-                        json.dumps(analysis.get('name_info')) if analysis.get('name_info') else None,
-                        1 if analysis.get('is_person') else 0,
-                        analysis.get('analyzed_at')
-                    ))
+                    if self.is_postgresql():
+                        self.execute_sql(cursor,'''
+                            INSERT INTO scraper_emails
+                            (scraper_id, entreprise_id, email, page_url,
+                             provider, type, format_valid, mx_valid,
+                             risk_score, domain, name_info, is_person, analyzed_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (scraper_id, email) DO UPDATE SET
+                                page_url = EXCLUDED.page_url,
+                                provider = EXCLUDED.provider,
+                                type = EXCLUDED.type,
+                                format_valid = EXCLUDED.format_valid,
+                                mx_valid = EXCLUDED.mx_valid,
+                                risk_score = EXCLUDED.risk_score,
+                                domain = EXCLUDED.domain,
+                                name_info = EXCLUDED.name_info,
+                                is_person = EXCLUDED.is_person,
+                                analyzed_at = EXCLUDED.analyzed_at
+                        ''', (
+                            scraper_id, entreprise_id, email_str, page_url,
+                            analysis.get('provider'),
+                            analysis.get('type'),
+                            1 if analysis.get('format_valid') else 0,
+                            1 if analysis.get('mx_valid') is True else (0 if analysis.get('mx_valid') is False else None),
+                            analysis.get('risk_score'),
+                            analysis.get('domain'),
+                            json.dumps(analysis.get('name_info')) if analysis.get('name_info') else None,
+                            1 if analysis.get('is_person') else 0,
+                            analysis.get('analyzed_at')
+                        ))
+                    else:
+                        self.execute_sql(cursor,'''
+                            INSERT OR REPLACE INTO scraper_emails
+                            (scraper_id, entreprise_id, email, page_url,
+                             provider, type, format_valid, mx_valid,
+                             risk_score, domain, name_info, is_person, analyzed_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            scraper_id, entreprise_id, email_str, page_url,
+                            analysis.get('provider'),
+                            analysis.get('type'),
+                            1 if analysis.get('format_valid') else 0,
+                            1 if analysis.get('mx_valid') is True else (0 if analysis.get('mx_valid') is False else None),
+                            analysis.get('risk_score'),
+                            analysis.get('domain'),
+                            json.dumps(analysis.get('name_info')) if analysis.get('name_info') else None,
+                            1 if analysis.get('is_person') else 0,
+                            analysis.get('analyzed_at')
+                        ))
                 else:
                     # Sauvegarder sans analyse
-                    cursor.execute('''
+                    self.execute_sql(cursor,'''
                         INSERT OR IGNORE INTO scraper_emails (scraper_id, entreprise_id, email, page_url)
                         VALUES (?, ?, ?, ?)
                     ''', (scraper_id, entreprise_id, email_str, page_url))
@@ -252,7 +286,7 @@ class ScraperManager(DatabaseBase):
         if not phones:
             return
         
-        cursor.execute('DELETE FROM scraper_phones WHERE scraper_id = ?', (scraper_id,))
+        self.execute_sql(cursor,'DELETE FROM scraper_phones WHERE scraper_id = ?', (scraper_id,))
         
         if isinstance(phones, str):
             try:
@@ -272,7 +306,7 @@ class ScraperManager(DatabaseBase):
                 page_url = None
             
             if phone_str:
-                cursor.execute('''
+                self.execute_sql(cursor,'''
                     INSERT OR IGNORE INTO scraper_phones (scraper_id, entreprise_id, phone, page_url)
                     VALUES (?, ?, ?, ?)
                 ''', (scraper_id, entreprise_id, phone_str, page_url))
@@ -293,7 +327,7 @@ class ScraperManager(DatabaseBase):
         if not social_profiles:
             return
         
-        cursor.execute('DELETE FROM scraper_social_profiles WHERE scraper_id = ?', (scraper_id,))
+        self.execute_sql(cursor,'DELETE FROM scraper_social_profiles WHERE scraper_id = ?', (scraper_id,))
         
         if isinstance(social_profiles, str):
             try:
@@ -320,7 +354,7 @@ class ScraperManager(DatabaseBase):
                     page_url = None
                 
                 if url_str:
-                    cursor.execute('''
+                    self.execute_sql(cursor,'''
                         INSERT OR IGNORE INTO scraper_social_profiles (scraper_id, entreprise_id, platform, url, page_url)
                         VALUES (?, ?, ?, ?, ?)
                     ''', (scraper_id, entreprise_id, platform, url_str, page_url))
@@ -341,7 +375,7 @@ class ScraperManager(DatabaseBase):
         if not technologies:
             return
         
-        cursor.execute('DELETE FROM scraper_technologies WHERE scraper_id = ?', (scraper_id,))
+        self.execute_sql(cursor,'DELETE FROM scraper_technologies WHERE scraper_id = ?', (scraper_id,))
         
         if isinstance(technologies, str):
             try:
@@ -362,7 +396,7 @@ class ScraperManager(DatabaseBase):
             for tech in techs:
                 tech_name = str(tech)
                 if tech_name:
-                    cursor.execute('''
+                    self.execute_sql(cursor,'''
                         INSERT OR IGNORE INTO scraper_technologies (scraper_id, entreprise_id, category, name)
                         VALUES (?, ?, ?, ?)
                     ''', (scraper_id, entreprise_id, category, tech_name))
@@ -383,7 +417,7 @@ class ScraperManager(DatabaseBase):
         if not people:
             return
         
-        cursor.execute('DELETE FROM scraper_people WHERE scraper_id = ?', (scraper_id,))
+        self.execute_sql(cursor,'DELETE FROM scraper_people WHERE scraper_id = ?', (scraper_id,))
         
         if isinstance(people, str):
             try:
@@ -406,7 +440,7 @@ class ScraperManager(DatabaseBase):
             person_id = person.get('person_id')
             
             if name or email:
-                cursor.execute('''
+                self.execute_sql(cursor,'''
                     INSERT OR IGNORE INTO scraper_people (scraper_id, entreprise_id, person_id, name, title, email, linkedin_url, page_url)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (scraper_id, entreprise_id, person_id, name, title, email, linkedin_url, page_url))
@@ -432,7 +466,7 @@ class ScraperManager(DatabaseBase):
             if not url:
                 continue
             
-            cursor.execute('''
+            self.execute_sql(cursor,'''
                 INSERT OR IGNORE INTO images (entreprise_id, scraper_id, url, alt_text, page_url, width, height)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (
@@ -468,7 +502,7 @@ class ScraperManager(DatabaseBase):
         if not forms:
             return
         
-        cursor.execute('DELETE FROM scraper_forms WHERE scraper_id = ?', (scraper_id,))
+        self.execute_sql(cursor,'DELETE FROM scraper_forms WHERE scraper_id = ?', (scraper_id,))
         
         if isinstance(forms, str):
             try:
@@ -496,7 +530,7 @@ class ScraperManager(DatabaseBase):
             fields_count = len(fields) if isinstance(fields, list) else 0
             fields_data = json.dumps(fields) if fields else None
             
-            cursor.execute('''
+            self.execute_sql(cursor,'''
                 INSERT OR IGNORE INTO scraper_forms (
                     scraper_id, entreprise_id, page_url, action_url, method, enctype,
                     has_csrf, has_file_upload, fields_count, fields_data
@@ -531,7 +565,7 @@ class ScraperManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT page_url, action_url, method, enctype, has_csrf, has_file_upload, 
                    fields_count, fields_data
             FROM scraper_forms WHERE scraper_id = ? ORDER BY date_found DESC
@@ -577,7 +611,7 @@ class ScraperManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT id, entreprise_id, scraper_id, url, alt_text, page_url, width, height, date_found
             FROM images
             WHERE scraper_id = ?
@@ -602,7 +636,7 @@ class ScraperManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT email, page_url, provider, type, format_valid, 
                    mx_valid, risk_score, domain, name_info, analyzed_at
             FROM scraper_emails WHERE scraper_id = ? ORDER BY date_found DESC
@@ -648,7 +682,7 @@ class ScraperManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT phone, page_url FROM scraper_phones WHERE scraper_id = ? ORDER BY date_found DESC
         ''', (scraper_id,))
         
@@ -670,7 +704,7 @@ class ScraperManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT platform, url FROM scraper_social_profiles WHERE scraper_id = ? ORDER BY date_found DESC
         ''', (scraper_id,))
         
@@ -700,7 +734,7 @@ class ScraperManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT category, name FROM scraper_technologies WHERE scraper_id = ? ORDER BY date_found DESC
         ''', (scraper_id,))
         
@@ -730,7 +764,7 @@ class ScraperManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT person_id, name, title, email, linkedin_url, page_url 
             FROM scraper_people WHERE scraper_id = ? ORDER BY date_found DESC
         ''', (scraper_id,))
@@ -753,7 +787,7 @@ class ScraperManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT id, entreprise_id, scraper_id, url, alt_text, page_url, width, height, date_found
             FROM images
             WHERE entreprise_id = ?
@@ -778,7 +812,7 @@ class ScraperManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT * FROM scrapers WHERE entreprise_id = ? 
             ORDER BY COALESCE(date_modification, date_creation) DESC
         ''', (entreprise_id,))
@@ -826,7 +860,7 @@ class ScraperManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT * FROM scrapers WHERE url = ? AND scraper_type = ? 
             ORDER BY COALESCE(date_modification, date_creation) DESC LIMIT 1
         ''', (url, scraper_type))
@@ -901,7 +935,7 @@ class ScraperManager(DatabaseBase):
         
         if updates:
             values.append(scraper_id)
-            cursor.execute(f'''
+            self.execute_sql(cursor,f'''
                 UPDATE scrapers SET {', '.join(updates)} WHERE id = ?
             ''', values)
             
@@ -919,7 +953,7 @@ class ScraperManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('DELETE FROM scrapers WHERE id = ?', (scraper_id,))
+        self.execute_sql(cursor,'DELETE FROM scrapers WHERE id = ?', (scraper_id,))
         
         conn.commit()
         conn.close()
@@ -938,7 +972,7 @@ class ScraperManager(DatabaseBase):
         
         try:
             # Nettoyer scraper_emails
-            cursor.execute('''
+            self.execute_sql(cursor,'''
                 DELETE FROM scraper_emails
                 WHERE id NOT IN (
                     SELECT MIN(id)
@@ -949,7 +983,7 @@ class ScraperManager(DatabaseBase):
             stats['scraper_emails'] = cursor.rowcount
             
             # Nettoyer scraper_phones
-            cursor.execute('''
+            self.execute_sql(cursor,'''
                 DELETE FROM scraper_phones
                 WHERE id NOT IN (
                     SELECT MIN(id)
@@ -960,7 +994,7 @@ class ScraperManager(DatabaseBase):
             stats['scraper_phones'] = cursor.rowcount
             
             # Nettoyer scraper_social_profiles
-            cursor.execute('''
+            self.execute_sql(cursor,'''
                 DELETE FROM scraper_social_profiles
                 WHERE id NOT IN (
                     SELECT MIN(id)
@@ -971,7 +1005,7 @@ class ScraperManager(DatabaseBase):
             stats['scraper_social_profiles'] = cursor.rowcount
             
             # Nettoyer scraper_technologies
-            cursor.execute('''
+            self.execute_sql(cursor,'''
                 DELETE FROM scraper_technologies
                 WHERE id NOT IN (
                     SELECT MIN(id)
@@ -982,7 +1016,7 @@ class ScraperManager(DatabaseBase):
             stats['scraper_technologies'] = cursor.rowcount
             
             # Nettoyer scraper_people (garder le plus récent par scraper_id, name, email)
-            cursor.execute('''
+            self.execute_sql(cursor,'''
                 DELETE FROM scraper_people
                 WHERE id NOT IN (
                     SELECT MIN(id)
@@ -993,7 +1027,7 @@ class ScraperManager(DatabaseBase):
             stats['scraper_people'] = cursor.rowcount
             
             # Nettoyer scraper_forms (garder le plus récent par scraper_id, page_url, action_url)
-            cursor.execute('''
+            self.execute_sql(cursor,'''
                 DELETE FROM scraper_forms
                 WHERE id NOT IN (
                     SELECT MIN(id)

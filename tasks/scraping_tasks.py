@@ -178,10 +178,9 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
         logger.debug('task_id introuvable au demarrage de scrape_analysis_task')
     db = Database()
     conn = db.get_connection()
-    conn.row_factory = None  # tuples simples
     cursor = conn.cursor()
     
-    cursor.execute(
+    db.execute_sql(cursor,
         '''
         SELECT id, nom, website
         FROM entreprises
@@ -227,9 +226,37 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
     # Lancer TOUTES les analyses techniques en parallèle AVANT de commencer le scraping
     from tasks.technical_analysis_tasks import technical_analysis_task
     logger.info(f'[Scraping Analyse {analysis_id}] Lancement de toutes les analyses techniques en parallèle...')
-    for entreprise_id, nom, website in rows:
+    for row in rows:
+        # Gérer les dictionnaires PostgreSQL et les tuples SQLite
+        if isinstance(row, dict):
+            entreprise_id = row.get('id')
+            nom = row.get('nom')
+            website = row.get('website')
+        else:
+            entreprise_id, nom, website = row
         website_str = str(website or '').strip()
         entreprise_name = nom or 'Entreprise inconnue'
+
+        # Valider l'URL de base
+        if website_str and website_str != 'website':
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(website_str)
+                if parsed.scheme and parsed.netloc:
+                    # URL valide
+                    pass
+                else:
+                    # Essayer d'ajouter http:// si c'est juste un domaine
+                    if '.' in website_str and ' ' not in website_str:
+                        website_str = f'https://{website_str}'
+                        logger.info(f'[Scraping Analyse {analysis_id}] URL corrigée: {website_str}')
+                    else:
+                        logger.warning(f'[Scraping Analyse {analysis_id}] URL invalide ignorée: {website_str}')
+                        website_str = None
+            except Exception as e:
+                logger.warning(f'[Scraping Analyse {analysis_id}] Erreur validation URL {website_str}: {e}')
+                website_str = None
+
         if website_str:
             try:
                 tech_task = technical_analysis_task.delay(url=website_str, entreprise_id=entreprise_id)
@@ -274,7 +301,15 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
             meta.update(extra_meta)
         _safe_update_state(self, task_id, state='PROGRESS', meta=meta)
     
-    for idx, (entreprise_id, nom, website) in enumerate(rows):
+    for idx, row in enumerate(rows):
+        # Gérer les dictionnaires PostgreSQL et les tuples SQLite
+        if isinstance(row, dict):
+            entreprise_id = row.get('id')
+            nom = row.get('nom')
+            website = row.get('website')
+        else:
+            entreprise_id, nom, website = row
+        
         current_index = idx + 1
         entreprise_name = nom or 'Entreprise inconnue'
         website_str = str(website or '').strip()
@@ -635,16 +670,20 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                     )
 
                 # Lancer l'analyse Pentest après le scraper (tâche dédiée)
+                # On lance l'analyse Pentest même si le scraping n'a pas trouvé de formulaires
                 try:
                     logger.info(
                         f'[Scraping Analyse {analysis_id}] Lancement de l analyse Pentest pour {entreprise_name} ({website_str})'
                     )
 
+                    # Récupérer les formulaires du scraper si disponibles, sinon liste vide
+                    forms_from_scrapers = results.get('forms') if results else None
+
                     pentest_task = pentest_analysis_task.delay(
                         url=website_str,
                         entreprise_id=entreprise_id,
                         options={},
-                        forms_from_scrapers=results.get('forms')
+                        forms_from_scrapers=forms_from_scrapers
                     )
 
                     pentest_tasks.append({
@@ -704,7 +743,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                     # Mettre à jour la table entreprises (resume, logo, favicon, og_image)
                     conn_update = db.get_connection()
                     cursor_update = conn_update.cursor()
-                    cursor_update.execute('''
+                    db.execute_sql(cursor_update, '''
                         UPDATE entreprises 
                         SET resume = ?, logo = ?, favicon = ?, og_image = ?
                         WHERE id = ?
@@ -760,6 +799,40 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
         
         except Exception as e:
             logger.error(f'Erreur lors du scraping de {website_str}: {e}', exc_info=True)
+            
+            # Même si le scraping échoue, on lance quand même l'analyse Pentest
+            # car elle peut fonctionner avec juste l'URL
+            try:
+                logger.info(
+                    f'[Scraping Analyse {analysis_id}] Lancement de l analyse Pentest pour {entreprise_name} ({website_str}) '
+                    f'(scraping échoué, mais on lance quand même Pentest)'
+                )
+                
+                pentest_task = pentest_analysis_task.delay(
+                    url=website_str,
+                    entreprise_id=entreprise_id,
+                    options={},
+                    forms_from_scrapers=None  # Pas de formulaires car scraping échoué
+                )
+                
+                pentest_tasks.append({
+                    'task': pentest_task,
+                    'task_id': pentest_task.id,
+                    'entreprise_id': entreprise_id,
+                    'url': website_str,
+                    'nom': entreprise_name
+                })
+                
+                logger.info(
+                    f'[Scraping Analyse {analysis_id}] ✓ Analyse Pentest lancee pour {entreprise_name} '
+                    f'(task_id={pentest_task.id}) malgré l\'erreur de scraping'
+                )
+            except Exception as pentest_error:
+                logger.warning(
+                    f'[Scraping Analyse {analysis_id}] ⚠ Erreur lors du lancement de l analyse Pentest pour {entreprise_name}: {pentest_error}',
+                    exc_info=True
+                )
+            
             update_progress(
                 f'Erreur lors du scraping de {entreprise_name}: {e}',
                 current_index,
