@@ -531,3 +531,4 @@ ping node15.lan
 4. **Sauvegardes** : Mettre en place des sauvegardes régulières de PostgreSQL
 5. **Monitoring** : Surveiller les logs et l'espace disque régulièrement
 
+
