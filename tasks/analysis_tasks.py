@@ -203,8 +203,14 @@ def analyze_entreprise_task(self, filepath, output_path, max_workers=4, delay=0.
                             row_dict.update(result)
                             
                             # Sauvegarder l'entreprise avec skip_duplicates pour éviter les doublons
+                            analysis_id_to_use = getattr(self, 'analysis_id', None)
+                            # Vérifier que analysis_id est valide (pas 0 ou None)
+                            if not analysis_id_to_use or analysis_id_to_use == 0:
+                                logger.error(f'ERREUR: analysis_id invalide ({analysis_id_to_use}) pour entreprise {row.get("name", "inconnu")}')
+                                analysis_id_to_use = None
+                            
                             entreprise_id = database.save_entreprise(
-                                getattr(self, 'analysis_id', None),
+                                analysis_id_to_use,
                                 row_dict,
                                 skip_duplicates=True
                             )
@@ -304,8 +310,10 @@ def analyze_entreprise_task(self, filepath, output_path, max_workers=4, delay=0.
         # Récupérer les IDs existants pour détecter les doublons
         conn = database.get_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT id FROM entreprises')
-        analyzer.existing_ids_before = {row[0] for row in cursor.fetchall()}
+        database.execute_sql(cursor, 'SELECT id FROM entreprises')
+        rows = cursor.fetchall()
+        # Gérer les dictionnaires PostgreSQL et les tuples SQLite
+        analyzer.existing_ids_before = {row['id'] if isinstance(row, dict) else row[0] for row in rows}
         conn.close()
         logger.info(f'{len(analyzer.existing_ids_before)} entreprises déjà présentes avant analyse')
         
@@ -322,7 +330,7 @@ def analyze_entreprise_task(self, filepath, output_path, max_workers=4, delay=0.
         conn_update = database.get_connection()
         cursor_update = conn_update.cursor()
         # Mettre à jour la durée et le total (colonne: total_entreprises)
-        cursor_update.execute(
+        database.execute_sql(cursor_update,
             'UPDATE analyses SET duree_secondes = ?, total_entreprises = ? WHERE id = ?',
             (duration, len(result), analysis_id)
         )

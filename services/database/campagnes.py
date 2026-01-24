@@ -4,7 +4,6 @@ Contient toutes les méthodes liées aux campagnes email
 """
 
 import json
-import sqlite3
 from .base import DatabaseBase
 
 
@@ -34,7 +33,7 @@ class CampagneManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
 
-        cursor.execute(
+        self.execute_sql(cursor,
             '''
             INSERT INTO campagnes_email (nom, template_id, sujet, total_destinataires, total_envoyes, total_reussis, statut)
             VALUES (?, ?, ?, ?, 0, 0, ?)
@@ -109,7 +108,7 @@ class CampagneManager(DatabaseBase):
         values.append(campagne_id)
         query = f'UPDATE campagnes_email SET {", ".join(updates)} WHERE id = ?'
 
-        cursor.execute(query, values)
+        self.execute_sql(cursor,query, values)
         conn.commit()
         updated = cursor.rowcount > 0
         conn.close()
@@ -126,10 +125,10 @@ class CampagneManager(DatabaseBase):
             dict|None: Données de la campagne ou None
         """
         conn = self.get_connection()
-        conn.row_factory = sqlite3.Row
+        # row_factory est déjà configuré dans get_connection() (SQLite) ou via RealDictCursor (PostgreSQL)
         cursor = conn.cursor()
 
-        cursor.execute('SELECT * FROM campagnes_email WHERE id = ?', (campagne_id,))
+        self.execute_sql(cursor,'SELECT * FROM campagnes_email WHERE id = ?', (campagne_id,))
         row = cursor.fetchone()
         conn.close()
 
@@ -150,11 +149,11 @@ class CampagneManager(DatabaseBase):
             list[dict]: Liste des campagnes
         """
         conn = self.get_connection()
-        conn.row_factory = sqlite3.Row
+        # row_factory est déjà configuré dans get_connection() (SQLite) ou via RealDictCursor (PostgreSQL)
         cursor = conn.cursor()
 
         if statut:
-            cursor.execute(
+            self.execute_sql(cursor,
                 '''
                 SELECT * FROM campagnes_email
                 WHERE statut = ?
@@ -164,7 +163,7 @@ class CampagneManager(DatabaseBase):
                 (statut, limit, offset)
             )
         else:
-            cursor.execute(
+            self.execute_sql(cursor,
                 '''
                 SELECT * FROM campagnes_email
                 ORDER BY date_creation DESC
@@ -210,11 +209,11 @@ class CampagneManager(DatabaseBase):
         cursor = conn.cursor()
 
         # On s'adapte au schéma existant (certains environnements n'ont pas encore tracking_token)
-        cursor.execute("PRAGMA table_info(emails_envoyes)")
+        self.execute_sql(cursor,"PRAGMA table_info(emails_envoyes)")
         cols = {row[1] for row in cursor.fetchall()}
 
         if 'tracking_token' in cols:
-            cursor.execute(
+            self.execute_sql(cursor,
                 '''
                 INSERT INTO emails_envoyes
                 (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur, tracking_token)
@@ -223,7 +222,7 @@ class CampagneManager(DatabaseBase):
                 (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur, tracking_token)
             )
         else:
-            cursor.execute(
+            self.execute_sql(cursor,
                 '''
                 INSERT INTO emails_envoyes
                 (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur)
@@ -252,13 +251,13 @@ class CampagneManager(DatabaseBase):
         cursor = conn.cursor()
 
         # Si la colonne n'existe pas encore, on ne fait rien (schéma pas migré)
-        cursor.execute("PRAGMA table_info(emails_envoyes)")
+        self.execute_sql(cursor,"PRAGMA table_info(emails_envoyes)")
         cols = {row[1] for row in cursor.fetchall()}
         if 'tracking_token' not in cols:
             conn.close()
             return False
 
-        cursor.execute('UPDATE emails_envoyes SET tracking_token = ? WHERE id = ?', (tracking_token, email_id))
+        self.execute_sql(cursor,'UPDATE emails_envoyes SET tracking_token = ? WHERE id = ?', (tracking_token, email_id))
         conn.commit()
         updated = cursor.rowcount > 0
         conn.close()
@@ -275,10 +274,10 @@ class CampagneManager(DatabaseBase):
             list[dict]: Liste des emails envoyés
         """
         conn = self.get_connection()
-        conn.row_factory = sqlite3.Row
+        # row_factory est déjà configuré dans get_connection() (SQLite) ou via RealDictCursor (PostgreSQL)
         cursor = conn.cursor()
 
-        cursor.execute(
+        self.execute_sql(cursor,
             '''
             SELECT
                 e.*,
@@ -314,14 +313,14 @@ class CampagneManager(DatabaseBase):
 
         # Table pas encore créée -> tracking désactivé
         try:
-            cursor.execute("SELECT 1 FROM email_tracking_events LIMIT 1")
-        except sqlite3.OperationalError:
+            self.execute_sql(cursor,"SELECT 1 FROM email_tracking_events LIMIT 1")
+        except Exception:
             import logging
             logging.getLogger(__name__).warning('Table email_tracking_events n\'existe pas encore')
             conn.close()
             return None
 
-        cursor.execute('SELECT id FROM emails_envoyes WHERE tracking_token = ?', (tracking_token,))
+        self.execute_sql(cursor,'SELECT id FROM emails_envoyes WHERE tracking_token = ?', (tracking_token,))
         row = cursor.fetchone()
         if not row:
             import logging
@@ -334,7 +333,7 @@ class CampagneManager(DatabaseBase):
         if isinstance(event_data, dict):
             event_data = json.dumps(event_data)
 
-        cursor.execute(
+        self.execute_sql(cursor,
             '''
             INSERT INTO email_tracking_events
             (email_id, tracking_token, event_type, event_data, ip_address, user_agent)
@@ -359,13 +358,13 @@ class CampagneManager(DatabaseBase):
             dict: Statistiques de tracking
         """
         conn = self.get_connection()
-        conn.row_factory = sqlite3.Row
+        # row_factory est déjà configuré dans get_connection() (SQLite) ou via RealDictCursor (PostgreSQL)
         cursor = conn.cursor()
 
         # Si la table n'existe pas, on renvoie un résultat vide
         try:
-            cursor.execute("SELECT 1 FROM email_tracking_events LIMIT 1")
-        except sqlite3.OperationalError:
+            self.execute_sql(cursor,"SELECT 1 FROM email_tracking_events LIMIT 1")
+        except Exception:
             conn.close()
             return {
                 'email_id': email_id,
@@ -378,7 +377,7 @@ class CampagneManager(DatabaseBase):
                 'events': []
             }
 
-        cursor.execute(
+        self.execute_sql(cursor,
             '''
             SELECT event_type, COUNT(*) as count, MIN(date_event) as first_event, MAX(date_event) as last_event
             FROM email_tracking_events
@@ -396,7 +395,7 @@ class CampagneManager(DatabaseBase):
                 'last_event': row['last_event']
             }
 
-        cursor.execute(
+        self.execute_sql(cursor,
             '''
             SELECT AVG(CAST(json_extract(event_data, '$.read_time') AS REAL)) as avg_read_time
             FROM email_tracking_events
@@ -407,7 +406,7 @@ class CampagneManager(DatabaseBase):
         avg_read_time_row = cursor.fetchone()
         avg_read_time = avg_read_time_row['avg_read_time'] if avg_read_time_row and avg_read_time_row['avg_read_time'] else None
 
-        cursor.execute(
+        self.execute_sql(cursor,
             '''
             SELECT * FROM email_tracking_events
             WHERE email_id = ?
@@ -440,10 +439,10 @@ class CampagneManager(DatabaseBase):
             dict: Stats agrégées + détails par email
         """
         conn = self.get_connection()
-        conn.row_factory = sqlite3.Row
+        # row_factory est déjà configuré dans get_connection() (SQLite) ou via RealDictCursor (PostgreSQL)
         cursor = conn.cursor()
 
-        cursor.execute(
+        self.execute_sql(cursor,
             '''
             SELECT
                 e.id,
@@ -483,8 +482,8 @@ class CampagneManager(DatabaseBase):
 
         # Si la table n'existe pas, on renvoie juste la liste
         try:
-            cursor.execute("SELECT 1 FROM email_tracking_events LIMIT 1")
-        except sqlite3.OperationalError:
+            self.execute_sql(cursor,"SELECT 1 FROM email_tracking_events LIMIT 1")
+        except Exception:
             conn.close()
             return {
                 'campagne_id': campagne_id,
@@ -499,7 +498,7 @@ class CampagneManager(DatabaseBase):
 
         placeholders = ','.join(['?'] * len(email_ids))
 
-        cursor.execute(
+        self.execute_sql(cursor,
             f'''
             SELECT
                 email_id,
@@ -525,7 +524,7 @@ class CampagneManager(DatabaseBase):
                 'last_event': row['last_event']
             }
 
-        cursor.execute(
+        self.execute_sql(cursor,
             f'''
             SELECT
                 event_type,
@@ -545,7 +544,7 @@ class CampagneManager(DatabaseBase):
                 'total_events': row['total_events']
             }
 
-        cursor.execute(
+        self.execute_sql(cursor,
             f'''
             SELECT AVG(CAST(json_extract(event_data, '$.read_time') AS REAL)) as avg_read_time
             FROM email_tracking_events

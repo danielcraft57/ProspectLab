@@ -40,24 +40,44 @@ class OSINTManager(DatabaseBase):
         domain_clean = domain.replace('www.', '') if domain else ''
         
         # Sauvegarder l'analyse principale
-        cursor.execute('''
-            INSERT INTO analyses_osint (
-                entreprise_id, url, domain, whois_data,
-                ssl_info, ip_info, shodan_data, censys_data, osint_details
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            entreprise_id,
-            url,
-            domain_clean,
-            json.dumps(osint_data.get('whois_info', {})) if osint_data.get('whois_info') else None,
-            json.dumps(osint_data.get('ssl_info', {})) if osint_data.get('ssl_info') else None,
-            json.dumps(osint_data.get('ip_info', {})) if osint_data.get('ip_info') else None,
-            json.dumps(osint_data.get('shodan_data', {})) if osint_data.get('shodan_data') else None,
-            json.dumps(osint_data.get('censys_data', {})) if osint_data.get('censys_data') else None,
-            json.dumps(osint_data) if osint_data else None
-        ))
-        
-        analysis_id = cursor.lastrowid
+        if self.is_postgresql():
+            self.execute_sql(cursor,'''
+                INSERT INTO analyses_osint (
+                    entreprise_id, url, domain, whois_data,
+                    ssl_info, ip_info, shodan_data, censys_data, osint_details
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            ''', (
+                entreprise_id,
+                url,
+                domain_clean,
+                json.dumps(osint_data.get('whois_info', {})) if osint_data.get('whois_info') else None,
+                json.dumps(osint_data.get('ssl_info', {})) if osint_data.get('ssl_info') else None,
+                json.dumps(osint_data.get('ip_info', {})) if osint_data.get('ip_info') else None,
+                json.dumps(osint_data.get('shodan_data', {})) if osint_data.get('shodan_data') else None,
+                json.dumps(osint_data.get('censys_data', {})) if osint_data.get('censys_data') else None,
+                json.dumps(osint_data) if osint_data else None
+            ))
+            result = cursor.fetchone()
+            analysis_id = result['id'] if result else None
+        else:
+            self.execute_sql(cursor,'''
+                INSERT INTO analyses_osint (
+                    entreprise_id, url, domain, whois_data,
+                    ssl_info, ip_info, shodan_data, censys_data, osint_details
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                entreprise_id,
+                url,
+                domain_clean,
+                json.dumps(osint_data.get('whois_info', {})) if osint_data.get('whois_info') else None,
+                json.dumps(osint_data.get('ssl_info', {})) if osint_data.get('ssl_info') else None,
+                json.dumps(osint_data.get('ip_info', {})) if osint_data.get('ip_info') else None,
+                json.dumps(osint_data.get('shodan_data', {})) if osint_data.get('shodan_data') else None,
+                json.dumps(osint_data.get('censys_data', {})) if osint_data.get('censys_data') else None,
+                json.dumps(osint_data) if osint_data else None
+            ))
+            analysis_id = cursor.lastrowid
         
         # Sauvegarder les sous-domaines
         subdomains = osint_data.get('subdomains', [])
@@ -71,10 +91,17 @@ class OSINTManager(DatabaseBase):
                 for subdomain in subdomains:
                     subdomain_str = str(subdomain).strip()
                     if subdomain_str:
-                        cursor.execute('''
-                            INSERT OR IGNORE INTO analysis_osint_subdomains (analysis_id, subdomain)
-                            VALUES (?, ?)
-                        ''', (analysis_id, subdomain_str))
+                        if self.is_postgresql():
+                            self.execute_sql(cursor,'''
+                                INSERT INTO analysis_osint_subdomains (analysis_id, subdomain)
+                                VALUES (%s, %s)
+                                ON CONFLICT (analysis_id, subdomain) DO NOTHING
+                            ''', (analysis_id, subdomain_str))
+                        else:
+                            self.execute_sql(cursor,'''
+                                INSERT OR IGNORE INTO analysis_osint_subdomains (analysis_id, subdomain)
+                                VALUES (?, ?)
+                            ''', (analysis_id, subdomain_str))
         
         # Sauvegarder les enregistrements DNS
         dns_records = osint_data.get('dns_records', {})
@@ -91,7 +118,7 @@ class OSINTManager(DatabaseBase):
                     for record_value in records:
                         record_value_str = str(record_value).strip()
                         if record_value_str:
-                            cursor.execute('''
+                            self.execute_sql(cursor,'''
                                 INSERT INTO analysis_osint_dns_records (analysis_id, record_type, record_value)
                                 VALUES (?, ?, ?)
                             ''', (analysis_id, record_type, record_value_str))
@@ -113,10 +140,17 @@ class OSINTManager(DatabaseBase):
                         email_str = str(email).strip()
                         source = None
                     if email_str:
-                        cursor.execute('''
-                            INSERT OR IGNORE INTO analysis_osint_emails (analysis_id, email, source)
-                            VALUES (?, ?, ?)
-                        ''', (analysis_id, email_str, source))
+                        if self.is_postgresql():
+                            self.execute_sql(cursor,'''
+                                INSERT INTO analysis_osint_emails (analysis_id, email, source)
+                                VALUES (%s, %s, %s)
+                                ON CONFLICT (analysis_id, email) DO NOTHING
+                            ''', (analysis_id, email_str, source))
+                        else:
+                            self.execute_sql(cursor,'''
+                                INSERT OR IGNORE INTO analysis_osint_emails (analysis_id, email, source)
+                                VALUES (?, ?, ?)
+                            ''', (analysis_id, email_str, source))
         
         # Sauvegarder les réseaux sociaux
         social_media = osint_data.get('social_media', {})
@@ -146,10 +180,17 @@ class OSINTManager(DatabaseBase):
                     for url_social in urls:
                         url_social_str = str(url_social).strip()
                         if url_social_str:
-                            cursor.execute('''
-                                INSERT OR IGNORE INTO analysis_osint_social_media (analysis_id, platform, url)
-                                VALUES (?, ?, ?)
-                            ''', (analysis_id, platform, url_social_str))
+                            if self.is_postgresql():
+                                self.execute_sql(cursor,'''
+                                    INSERT INTO analysis_osint_social_media (analysis_id, platform, url)
+                                    VALUES (%s, %s, %s)
+                                    ON CONFLICT (analysis_id, platform, url) DO NOTHING
+                                ''', (analysis_id, platform, url_social_str))
+                            else:
+                                self.execute_sql(cursor,'''
+                                    INSERT OR IGNORE INTO analysis_osint_social_media (analysis_id, platform, url)
+                                    VALUES (?, ?, ?)
+                                ''', (analysis_id, platform, url_social_str))
         
         # Sauvegarder les technologies (filtrer les raw_output et erreurs)
         technologies = osint_data.get('technologies', {})
@@ -173,10 +214,17 @@ class OSINTManager(DatabaseBase):
                         tech_name = str(tech).strip()
                         # Filtrer les valeurs d'erreur
                         if tech_name and not any(excluded in tech_name.lower() for excluded in excluded_keys):
-                            cursor.execute('''
-                                INSERT OR IGNORE INTO analysis_osint_technologies (analysis_id, category, name)
-                                VALUES (?, ?, ?)
-                            ''', (analysis_id, category, tech_name))
+                            if self.is_postgresql():
+                                self.execute_sql(cursor,'''
+                                    INSERT INTO analysis_osint_technologies (analysis_id, category, name)
+                                    VALUES (%s, %s, %s)
+                                    ON CONFLICT (analysis_id, category, name) DO NOTHING
+                                ''', (analysis_id, category, tech_name))
+                            else:
+                                self.execute_sql(cursor,'''
+                                    INSERT OR IGNORE INTO analysis_osint_technologies (analysis_id, category, name)
+                                    VALUES (?, ?, ?)
+                                ''', (analysis_id, category, tech_name))
         
         # Sauvegarder les métadonnées de documents
         document_metadata = osint_data.get('document_metadata', [])
@@ -189,7 +237,7 @@ class OSINTManager(DatabaseBase):
             if isinstance(document_metadata, list):
                 for doc in document_metadata:
                     if isinstance(doc, dict):
-                        cursor.execute('''
+                        self.execute_sql(cursor,'''
                             INSERT INTO analysis_osint_document_metadata (
                                 analysis_id, file_url, file_type, author, creator, producer,
                                 creation_date, modification_date, software, company, metadata_json
@@ -219,7 +267,7 @@ class OSINTManager(DatabaseBase):
             if isinstance(image_metadata, list):
                 for img in image_metadata:
                     if isinstance(img, dict):
-                        cursor.execute('''
+                        self.execute_sql(cursor,'''
                             INSERT INTO analysis_osint_image_metadata (
                                 analysis_id, image_url, camera_make, camera_model, date_taken,
                                 gps_latitude, gps_longitude, gps_altitude, location_description,
@@ -250,8 +298,31 @@ class OSINTManager(DatabaseBase):
             if isinstance(ssl_details, list):
                 for ssl in ssl_details:
                     if isinstance(ssl, dict):
-                        cursor.execute('''
-                            INSERT OR IGNORE INTO analysis_osint_ssl_details (
+                        if self.is_postgresql():
+                            self.execute_sql(cursor,'''
+                                INSERT INTO analysis_osint_ssl_details (
+                                analysis_id, host, port, certificate_valid, certificate_issuer,
+                                certificate_subject, certificate_expiry, protocol_version,
+                                cipher_suites, vulnerabilities, grade, details_json
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (analysis_id, host, port) DO NOTHING
+                        ''', (
+                            analysis_id,
+                            ssl.get('host', ''),
+                            ssl.get('port', 443),
+                            ssl.get('certificate_valid'),
+                            ssl.get('certificate_issuer'),
+                            ssl.get('certificate_subject'),
+                            ssl.get('certificate_expiry'),
+                            ssl.get('protocol_version'),
+                            ssl.get('cipher_suites'),
+                            ssl.get('vulnerabilities'),
+                            ssl.get('grade'),
+                            json.dumps(ssl) if ssl else None
+                        ))
+                        else:
+                            self.execute_sql(cursor,'''
+                                INSERT OR IGNORE INTO analysis_osint_ssl_details (
                                 analysis_id, host, port, certificate_valid, certificate_issuer,
                                 certificate_subject, certificate_expiry, protocol_version,
                                 cipher_suites, vulnerabilities, grade, details_json
@@ -282,11 +353,28 @@ class OSINTManager(DatabaseBase):
             if isinstance(waf_detections, list):
                 for waf in waf_detections:
                     if isinstance(waf, dict):
-                        cursor.execute('''
-                            INSERT OR IGNORE INTO analysis_osint_waf_detection (
-                                analysis_id, url, waf_name, waf_vendor, detected,
-                                detection_method, details_json
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        if self.is_postgresql():
+                            self.execute_sql(cursor,'''
+                                INSERT INTO analysis_osint_waf_detection (
+                                    analysis_id, url, waf_name, waf_vendor, detected,
+                                    detection_method, details_json
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                ON CONFLICT (analysis_id, url) DO NOTHING
+                        ''', (
+                            analysis_id,
+                            waf.get('url', ''),
+                            waf.get('waf_name'),
+                            waf.get('waf_vendor'),
+                            waf.get('detected', False),
+                            waf.get('detection_method'),
+                            json.dumps(waf) if waf else None
+                        ))
+                        else:
+                            self.execute_sql(cursor,'''
+                                INSERT OR IGNORE INTO analysis_osint_waf_detection (
+                                    analysis_id, url, waf_name, waf_vendor, detected,
+                                    detection_method, details_json
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                         ''', (
                             analysis_id,
                             waf.get('url', ''),
@@ -308,11 +396,28 @@ class OSINTManager(DatabaseBase):
             if isinstance(directories, list):
                 for dir_item in directories:
                     if isinstance(dir_item, dict):
-                        cursor.execute('''
-                            INSERT OR IGNORE INTO analysis_osint_directories (
-                                analysis_id, path, status_code, content_length,
-                                content_type, redirect_url, tool_used
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        if self.is_postgresql():
+                            self.execute_sql(cursor,'''
+                                INSERT INTO analysis_osint_directories (
+                                    analysis_id, path, status_code, content_length,
+                                    content_type, redirect_url, tool_used
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                ON CONFLICT (analysis_id, path) DO NOTHING
+                        ''', (
+                            analysis_id,
+                            dir_item.get('path', ''),
+                            dir_item.get('status_code'),
+                            dir_item.get('content_length'),
+                            dir_item.get('content_type'),
+                            dir_item.get('redirect_url'),
+                            dir_item.get('tool_used')
+                        ))
+                        else:
+                            self.execute_sql(cursor,'''
+                                INSERT OR IGNORE INTO analysis_osint_directories (
+                                    analysis_id, path, status_code, content_length,
+                                    content_type, redirect_url, tool_used
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                         ''', (
                             analysis_id,
                             dir_item.get('path', ''),
@@ -334,11 +439,29 @@ class OSINTManager(DatabaseBase):
             if isinstance(open_ports, list):
                 for port_info in open_ports:
                     if isinstance(port_info, dict):
-                        cursor.execute('''
-                            INSERT OR IGNORE INTO analysis_osint_open_ports (
-                                analysis_id, host, port, protocol, service,
-                                version, banner, source
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        if self.is_postgresql():
+                            self.execute_sql(cursor,'''
+                                INSERT INTO analysis_osint_open_ports (
+                                    analysis_id, host, port, protocol, service,
+                                    version, banner, source
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                                ON CONFLICT (analysis_id, host, port) DO NOTHING
+                        ''', (
+                            analysis_id,
+                            port_info.get('host', ''),
+                            port_info.get('port'),
+                            port_info.get('protocol', 'tcp'),
+                            port_info.get('service'),
+                            port_info.get('version'),
+                            port_info.get('banner'),
+                            port_info.get('source')
+                        ))
+                        else:
+                            self.execute_sql(cursor,'''
+                                INSERT OR IGNORE INTO analysis_osint_open_ports (
+                                    analysis_id, host, port, protocol, service,
+                                    version, banner, source
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (
                             analysis_id,
                             port_info.get('host', ''),
@@ -361,7 +484,7 @@ class OSINTManager(DatabaseBase):
             if isinstance(services, list):
                 for service in services:
                     if isinstance(service, dict):
-                        cursor.execute('''
+                        self.execute_sql(cursor,'''
                             INSERT INTO analysis_osint_services (
                                 analysis_id, host, service_name, service_type,
                                 port, product, version, details_json, source
@@ -389,7 +512,7 @@ class OSINTManager(DatabaseBase):
             if isinstance(certificates, list):
                 for cert in certificates:
                     if isinstance(cert, dict):
-                        cursor.execute('''
+                        self.execute_sql(cursor,'''
                             INSERT INTO analysis_osint_certificates (
                                 analysis_id, host, port, issuer, subject,
                                 serial_number, valid_from, valid_to, fingerprint, details_json
@@ -430,11 +553,11 @@ class OSINTManager(DatabaseBase):
             dict: Dictionnaire avec toutes les données normalisées
         """
         # Charger les sous-domaines
-        cursor.execute('SELECT subdomain FROM analysis_osint_subdomains WHERE analysis_id = ?', (analysis_id,))
+        self.execute_sql(cursor,'SELECT subdomain FROM analysis_osint_subdomains WHERE analysis_id = ?', (analysis_id,))
         subdomains = [row['subdomain'] for row in cursor.fetchall()]
         
         # Charger les enregistrements DNS
-        cursor.execute('SELECT record_type, record_value FROM analysis_osint_dns_records WHERE analysis_id = ?', (analysis_id,))
+        self.execute_sql(cursor,'SELECT record_type, record_value FROM analysis_osint_dns_records WHERE analysis_id = ?', (analysis_id,))
         dns_records = {}
         for row in cursor.fetchall():
             record_type = row['record_type']
@@ -443,7 +566,7 @@ class OSINTManager(DatabaseBase):
             dns_records[record_type].append(row['record_value'])
         
         # Charger les emails
-        cursor.execute('SELECT email, source FROM analysis_osint_emails WHERE analysis_id = ?', (analysis_id,))
+        self.execute_sql(cursor,'SELECT email, source FROM analysis_osint_emails WHERE analysis_id = ?', (analysis_id,))
         emails = []
         for row in cursor.fetchall():
             email = {'email': row['email']}
@@ -452,7 +575,7 @@ class OSINTManager(DatabaseBase):
             emails.append(email)
         
         # Charger les réseaux sociaux
-        cursor.execute('SELECT platform, url FROM analysis_osint_social_media WHERE analysis_id = ?', (analysis_id,))
+        self.execute_sql(cursor,'SELECT platform, url FROM analysis_osint_social_media WHERE analysis_id = ?', (analysis_id,))
         social_media = {}
         for row in cursor.fetchall():
             platform = row['platform']
@@ -461,7 +584,7 @@ class OSINTManager(DatabaseBase):
             social_media[platform].append(row['url'])
         
         # Charger les technologies
-        cursor.execute('SELECT category, name FROM analysis_osint_technologies WHERE analysis_id = ?', (analysis_id,))
+        self.execute_sql(cursor,'SELECT category, name FROM analysis_osint_technologies WHERE analysis_id = ?', (analysis_id,))
         technologies = {}
         for row in cursor.fetchall():
             category = row['category']
@@ -470,7 +593,7 @@ class OSINTManager(DatabaseBase):
             technologies[category].append(row['name'])
         
         # Charger les métadonnées de documents
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT file_url, file_type, author, creator, producer, creation_date,
                    modification_date, software, company, metadata_json
             FROM analysis_osint_document_metadata WHERE analysis_id = ?
@@ -486,7 +609,7 @@ class OSINTManager(DatabaseBase):
             document_metadata.append(doc)
         
         # Charger les métadonnées d'images
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT image_url, camera_make, camera_model, date_taken, gps_latitude,
                    gps_longitude, gps_altitude, location_description, software, metadata_json
             FROM analysis_osint_image_metadata WHERE analysis_id = ?
@@ -502,7 +625,7 @@ class OSINTManager(DatabaseBase):
             image_metadata.append(img)
         
         # Charger les détails SSL/TLS
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT host, port, certificate_valid, certificate_issuer, certificate_subject,
                    certificate_expiry, protocol_version, cipher_suites, vulnerabilities, grade, details_json
             FROM analysis_osint_ssl_details WHERE analysis_id = ?
@@ -518,7 +641,7 @@ class OSINTManager(DatabaseBase):
             ssl_details.append(ssl)
         
         # Charger les détections WAF
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT url, waf_name, waf_vendor, detected, detection_method, details_json
             FROM analysis_osint_waf_detection WHERE analysis_id = ?
         ''', (analysis_id,))
@@ -533,21 +656,21 @@ class OSINTManager(DatabaseBase):
             waf_detections.append(waf)
         
         # Charger les répertoires trouvés
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT path, status_code, content_length, content_type, redirect_url, tool_used
             FROM analysis_osint_directories WHERE analysis_id = ?
         ''', (analysis_id,))
         directories = [dict(row) for row in cursor.fetchall()]
         
         # Charger les ports ouverts
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT host, port, protocol, service, version, banner, source
             FROM analysis_osint_open_ports WHERE analysis_id = ?
         ''', (analysis_id,))
         open_ports = [dict(row) for row in cursor.fetchall()]
         
         # Charger les services détectés
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT host, service_name, service_type, port, product, version, details_json, source
             FROM analysis_osint_services WHERE analysis_id = ?
         ''', (analysis_id,))
@@ -562,7 +685,7 @@ class OSINTManager(DatabaseBase):
             services.append(service)
         
         # Charger les certificats SSL
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT host, port, issuer, subject, serial_number, valid_from, valid_to, fingerprint, details_json
             FROM analysis_osint_certificates WHERE analysis_id = ?
         ''', (analysis_id,))
@@ -607,7 +730,7 @@ class OSINTManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT * FROM analyses_osint
             WHERE entreprise_id = ?
             ORDER BY date_analyse DESC
@@ -657,26 +780,26 @@ class OSINTManager(DatabaseBase):
         # Supprimer les anciennes données normalisées
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('DELETE FROM analysis_osint_subdomains WHERE analysis_id = ?', (analysis_id,))
-        cursor.execute('DELETE FROM analysis_osint_dns_records WHERE analysis_id = ?', (analysis_id,))
-        cursor.execute('DELETE FROM analysis_osint_emails WHERE analysis_id = ?', (analysis_id,))
-        cursor.execute('DELETE FROM analysis_osint_social_media WHERE analysis_id = ?', (analysis_id,))
-        cursor.execute('DELETE FROM analysis_osint_technologies WHERE analysis_id = ?', (analysis_id,))
-        cursor.execute('DELETE FROM analysis_osint_document_metadata WHERE analysis_id = ?', (analysis_id,))
-        cursor.execute('DELETE FROM analysis_osint_image_metadata WHERE analysis_id = ?', (analysis_id,))
-        cursor.execute('DELETE FROM analysis_osint_ssl_details WHERE analysis_id = ?', (analysis_id,))
-        cursor.execute('DELETE FROM analysis_osint_waf_detection WHERE analysis_id = ?', (analysis_id,))
-        cursor.execute('DELETE FROM analysis_osint_directories WHERE analysis_id = ?', (analysis_id,))
-        cursor.execute('DELETE FROM analysis_osint_open_ports WHERE analysis_id = ?', (analysis_id,))
-        cursor.execute('DELETE FROM analysis_osint_services WHERE analysis_id = ?', (analysis_id,))
-        cursor.execute('DELETE FROM analysis_osint_certificates WHERE analysis_id = ?', (analysis_id,))
+        self.execute_sql(cursor,'DELETE FROM analysis_osint_subdomains WHERE analysis_id = ?', (analysis_id,))
+        self.execute_sql(cursor,'DELETE FROM analysis_osint_dns_records WHERE analysis_id = ?', (analysis_id,))
+        self.execute_sql(cursor,'DELETE FROM analysis_osint_emails WHERE analysis_id = ?', (analysis_id,))
+        self.execute_sql(cursor,'DELETE FROM analysis_osint_social_media WHERE analysis_id = ?', (analysis_id,))
+        self.execute_sql(cursor,'DELETE FROM analysis_osint_technologies WHERE analysis_id = ?', (analysis_id,))
+        self.execute_sql(cursor,'DELETE FROM analysis_osint_document_metadata WHERE analysis_id = ?', (analysis_id,))
+        self.execute_sql(cursor,'DELETE FROM analysis_osint_image_metadata WHERE analysis_id = ?', (analysis_id,))
+        self.execute_sql(cursor,'DELETE FROM analysis_osint_ssl_details WHERE analysis_id = ?', (analysis_id,))
+        self.execute_sql(cursor,'DELETE FROM analysis_osint_waf_detection WHERE analysis_id = ?', (analysis_id,))
+        self.execute_sql(cursor,'DELETE FROM analysis_osint_directories WHERE analysis_id = ?', (analysis_id,))
+        self.execute_sql(cursor,'DELETE FROM analysis_osint_open_ports WHERE analysis_id = ?', (analysis_id,))
+        self.execute_sql(cursor,'DELETE FROM analysis_osint_services WHERE analysis_id = ?', (analysis_id,))
+        self.execute_sql(cursor,'DELETE FROM analysis_osint_certificates WHERE analysis_id = ?', (analysis_id,))
         conn.commit()
         conn.close()
         
         # Réutiliser save_osint_analysis qui gère déjà la normalisation
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT entreprise_id, url FROM analyses_osint WHERE id = ?', (analysis_id,))
+        self.execute_sql(cursor,'SELECT entreprise_id, url FROM analyses_osint WHERE id = ?', (analysis_id,))
         row = cursor.fetchone()
         conn.close()
         
@@ -686,7 +809,7 @@ class OSINTManager(DatabaseBase):
             # Supprimer l'ancienne analyse et en créer une nouvelle
             conn = self.get_connection()
             cursor = conn.cursor()
-            cursor.execute('DELETE FROM analyses_osint WHERE id = ?', (analysis_id,))
+            self.execute_sql(cursor,'DELETE FROM analyses_osint WHERE id = ?', (analysis_id,))
             conn.commit()
             conn.close()
             # Sauvegarder avec la nouvelle méthode normalisée
@@ -707,7 +830,7 @@ class OSINTManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT ao.*, e.nom as entreprise_nom, e.id as entreprise_id
             FROM analyses_osint ao
             LEFT JOIN entreprises e ON ao.entreprise_id = e.id
@@ -758,7 +881,7 @@ class OSINTManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT ao.*, e.nom as entreprise_nom, e.id as entreprise_id
             FROM analyses_osint ao
             LEFT JOIN entreprises e ON ao.entreprise_id = e.id
@@ -803,7 +926,7 @@ class OSINTManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT ao.*, e.nom as entreprise_nom
             FROM analyses_osint ao
             LEFT JOIN entreprises e ON ao.entreprise_id = e.id
@@ -843,7 +966,7 @@ class OSINTManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('DELETE FROM analyses_osint WHERE id = ?', (analysis_id,))
+        self.execute_sql(cursor,'DELETE FROM analyses_osint WHERE id = ?', (analysis_id,))
         deleted = cursor.rowcount > 0
         
         conn.commit()

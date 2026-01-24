@@ -81,6 +81,8 @@ CELERY_ENABLE_UTC = True
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes max par tâche
 CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # 25 minutes avant arrêt doux
+# Nombre de workers Celery (4 en dev, 6 en prod par défaut)
+CELERY_WORKERS = int(os.environ.get('CELERY_WORKERS', '4'))
 
 # URL de base pour le tracking des emails (doit être accessible publiquement)
 # Exemple: https://votre-domaine.com ou http://votre-ip:5000

@@ -3,7 +3,7 @@
 {% block title %}Prévisualisation - ProspectLab{% endblock %}
 
 {% block content %}
-<div class="page-header" data-filename="{{ filename }}" data-download-file-url="{{ url_for('other.download_file', filename='') }}">
+<div class="page-header" data-filename="{{ filename }}" data-download-file-url="{{ url_for('other.download_file', filename='') }}" data-celery-workers="{{ celery_workers|default(4) }}">
     <h1>Prévisualisation du fichier</h1>
     <p>Fichier : <strong>{{ filename }}</strong> ({{ total_rows }} lignes)</p>
 </div>
@@ -53,7 +53,7 @@
     <form id="analyze-form" class="analyze-form">
         <div class="form-group" style="margin-bottom: 1rem;">
             <p style="color: #666; font-size: 0.9rem; margin: 0;">
-                L'analyse utilise Celery avec 4 workers en parallèle pour une performance optimale.
+                L'analyse utilise Celery avec {{ celery_workers|default(4) }} workers en parallèle pour une performance optimale.
             </p>
         </div>
         

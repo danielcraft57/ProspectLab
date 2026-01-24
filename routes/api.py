@@ -110,7 +110,7 @@ def entreprise_detail(entreprise_id):
             cursor = conn.cursor()
             
             # Récupérer le nom de l'entreprise avant suppression
-            cursor.execute('SELECT nom FROM entreprises WHERE id = ?', (entreprise_id,))
+            database.execute_sql(cursor, 'SELECT nom FROM entreprises WHERE id = ?', (entreprise_id,))
             row = cursor.fetchone()
             
             if not row:
@@ -118,7 +118,7 @@ def entreprise_detail(entreprise_id):
                 return jsonify({'error': 'Entreprise introuvable'}), 404
             
             # Supprimer l'entreprise
-            cursor.execute('DELETE FROM entreprises WHERE id = ?', (entreprise_id,))
+            database.execute_sql(cursor, 'DELETE FROM entreprises WHERE id = ?', (entreprise_id,))
             conn.commit()
             conn.close()
             
@@ -134,7 +134,7 @@ def entreprise_detail(entreprise_id):
         conn = database.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('SELECT * FROM entreprises WHERE id = ?', (entreprise_id,))
+        database.execute_sql(cursor, 'SELECT * FROM entreprises WHERE id = ?', (entreprise_id,))
         row = cursor.fetchone()
         
         if row:
@@ -251,18 +251,31 @@ def secteurs():
         conn = database.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        database.execute_sql(cursor, '''
             SELECT DISTINCT secteur
             FROM entreprises
             WHERE secteur IS NOT NULL AND secteur != ''
             ORDER BY secteur
         ''')
         
-        secteurs_list = [row[0] for row in cursor.fetchall()]
+        rows = cursor.fetchall()
+        # Gérer les dictionnaires PostgreSQL et les tuples SQLite
+        secteurs_list = []
+        for row in rows:
+            if isinstance(row, dict):
+                secteur = row.get('secteur')
+            else:
+                secteur = row[0] if row else None
+            if secteur:
+                secteurs_list.append(secteur)
+        
         conn.close()
         
         return jsonify(secteurs_list)
     except Exception as e:
+        import logging
+        import traceback
+        logging.getLogger(__name__).error(f'Erreur dans secteurs: {e}\n{traceback.format_exc()}')
         return jsonify({'error': str(e)}), 500
 
 

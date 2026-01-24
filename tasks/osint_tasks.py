@@ -52,7 +52,7 @@ def osint_analysis_task(self, url, entreprise_id=None, people_from_scrapers=None
             if entreprise_id and existing.get('entreprise_id') != entreprise_id:
                 conn = database.get_connection()
                 cursor = conn.cursor()
-                cursor.execute('UPDATE analyses_osint SET entreprise_id = ? WHERE id = ?', (entreprise_id, existing['id']))
+                database.execute_sql(cursor, 'UPDATE analyses_osint SET entreprise_id = ? WHERE id = ?', (entreprise_id, existing['id']))
                 conn.commit()
                 conn.close()
                 logger.debug(f'Analyse OSINT mise à jour avec entreprise_id={entreprise_id}')

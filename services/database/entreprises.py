@@ -5,9 +5,11 @@ Contient les méthodes pour la gestion des entreprises et leurs données OpenGra
 
 import json
 import math
-import sqlite3
+import logging
 from urllib.parse import urljoin
 from .base import DatabaseBase
+
+logger = logging.getLogger(__name__)
 
 
 class EntrepriseManager(DatabaseBase):
@@ -56,7 +58,7 @@ class EntrepriseManager(DatabaseBase):
         
         # Critère 1: Nom + website identiques
         if nom_norm and website_norm:
-            cursor.execute('''
+            self.execute_sql(cursor,'''
                 SELECT id FROM entreprises 
                 WHERE LOWER(TRIM(nom)) = ? 
                 AND LOWER(TRIM(website)) = ?
@@ -69,7 +71,7 @@ class EntrepriseManager(DatabaseBase):
         
         # Critère 2: Nom + address_1 + address_2 identiques (si pas de website ou website différent)
         if nom_norm and address_1_norm and address_2_norm:
-            cursor.execute('''
+            self.execute_sql(cursor,'''
                 SELECT id FROM entreprises 
                 WHERE LOWER(TRIM(nom)) = ? 
                 AND LOWER(TRIM(address_1)) = ?
@@ -120,6 +122,13 @@ class EntrepriseManager(DatabaseBase):
         if skip_duplicates and nom:
             duplicate_id = self.find_duplicate_entreprise(nom, website, address_1, address_2)
             if duplicate_id:
+                # Mettre à jour analyse_id même pour les doublons pour que le scraping puisse les trouver
+                if analyse_id:
+                    try:
+                        self.execute_sql(cursor, 'UPDATE entreprises SET analyse_id = ? WHERE id = ?', (analyse_id, duplicate_id))
+                        conn.commit()
+                    except Exception as e:
+                        logger.warning(f'Erreur lors de la mise à jour de analyse_id pour entreprise {duplicate_id}: {e}')
                 conn.close()
                 return duplicate_id
         
@@ -190,7 +199,7 @@ class EntrepriseManager(DatabaseBase):
             if logo and not logo.startswith(('http://', 'https://')):
                 logo = urljoin(website, logo)
         
-        cursor.execute('''
+        self.execute_sql(cursor, '''
             INSERT INTO entreprises (
                 analyse_id, nom, website, secteur, statut, opportunite,
                 email_principal, responsable, taille_estimee, hosting_provider,
@@ -259,12 +268,12 @@ class EntrepriseManager(DatabaseBase):
         
         # Supprimer les OG existants
         if page_url:
-            cursor.execute('DELETE FROM entreprise_og_data WHERE entreprise_id = ? AND page_url = ?', (entreprise_id, page_url))
+            self.execute_sql(cursor, 'DELETE FROM entreprise_og_data WHERE entreprise_id = ? AND page_url = ?', (entreprise_id, page_url))
         else:
-            cursor.execute('DELETE FROM entreprise_og_data WHERE entreprise_id = ? AND page_url IS NULL', (entreprise_id,))
+            self.execute_sql(cursor, 'DELETE FROM entreprise_og_data WHERE entreprise_id = ? AND page_url IS NULL', (entreprise_id,))
         
         # Insérer les données principales
-        cursor.execute('''
+        self.execute_sql(cursor, '''
             INSERT INTO entreprise_og_data (
                 entreprise_id, page_url, og_title, og_type, og_url, og_description,
                 og_determiner, og_locale, og_site_name, og_audio, og_video
@@ -299,7 +308,7 @@ class EntrepriseManager(DatabaseBase):
             if isinstance(img_data, dict):
                 image_url = img_data.get('og:image:url') or img_data.get('url') or img_data.get('og:image')
                 if image_url:
-                    cursor.execute('''
+                    self.execute_sql(cursor,'''
                         INSERT INTO entreprise_og_images (
                             entreprise_id, og_data_id, image_url, secure_url,
                             image_type, width, height, alt_text
@@ -338,7 +347,7 @@ class EntrepriseManager(DatabaseBase):
             if isinstance(vid_data, dict):
                 video_url = vid_data.get('og:video:url') or vid_data.get('url') or vid_data.get('og:video')
                 if video_url:
-                    cursor.execute('''
+                    self.execute_sql(cursor,'''
                         INSERT INTO entreprise_og_videos (
                             entreprise_id, og_data_id, video_url, secure_url,
                             video_type, width, height
@@ -376,7 +385,7 @@ class EntrepriseManager(DatabaseBase):
             if isinstance(aud_data, dict):
                 audio_url = aud_data.get('og:audio:url') or aud_data.get('url') or aud_data.get('og:audio')
                 if audio_url:
-                    cursor.execute('''
+                    self.execute_sql(cursor,'''
                         INSERT INTO entreprise_og_audios (
                             entreprise_id, og_data_id, audio_url, secure_url, audio_type
                         ) VALUES (?, ?, ?, ?, ?)
@@ -394,7 +403,7 @@ class EntrepriseManager(DatabaseBase):
             locales = [locales]
         for locale in locales:
             if locale:
-                cursor.execute('''
+                self.execute_sql(cursor,'''
                     INSERT OR IGNORE INTO entreprise_og_locales (entreprise_id, og_data_id, locale)
                     VALUES (?, ?, ?)
                 ''', (entreprise_id, og_data_id, locale))
@@ -414,7 +423,7 @@ class EntrepriseManager(DatabaseBase):
         logger.info(f'[Database] Sauvegarde de {len(og_data_by_page)} page(s) avec OG pour entreprise {entreprise_id}')
         
         # Supprimer tous les OG existants pour cette entreprise avant d'insérer les nouveaux
-        cursor.execute('DELETE FROM entreprise_og_data WHERE entreprise_id = ?', (entreprise_id,))
+        self.execute_sql(cursor,'DELETE FROM entreprise_og_data WHERE entreprise_id = ?', (entreprise_id,))
         deleted_count = cursor.rowcount
         
         # Sauvegarder chaque OG
@@ -442,7 +451,7 @@ class EntrepriseManager(DatabaseBase):
         cursor = conn.cursor()
         
         # Récupérer toutes les données principales (une par page)
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT * FROM entreprise_og_data WHERE entreprise_id = ?
             ORDER BY page_url IS NULL DESC, page_url ASC, date_creation ASC
         ''', (entreprise_id,))
@@ -458,16 +467,16 @@ class EntrepriseManager(DatabaseBase):
             og_data_id = og_data['id']
             
             # Récupérer les images, vidéos, audios, locales pour cet OG
-            cursor.execute('SELECT * FROM entreprise_og_images WHERE og_data_id = ? ORDER BY id', (og_data_id,))
+            self.execute_sql(cursor,'SELECT * FROM entreprise_og_images WHERE og_data_id = ? ORDER BY id', (og_data_id,))
             og_data['images'] = [dict(row) for row in cursor.fetchall()]
             
-            cursor.execute('SELECT * FROM entreprise_og_videos WHERE og_data_id = ? ORDER BY id', (og_data_id,))
+            self.execute_sql(cursor,'SELECT * FROM entreprise_og_videos WHERE og_data_id = ? ORDER BY id', (og_data_id,))
             og_data['videos'] = [dict(row) for row in cursor.fetchall()]
             
-            cursor.execute('SELECT * FROM entreprise_og_audios WHERE og_data_id = ? ORDER BY id', (og_data_id,))
+            self.execute_sql(cursor,'SELECT * FROM entreprise_og_audios WHERE og_data_id = ? ORDER BY id', (og_data_id,))
             og_data['audios'] = [dict(row) for row in cursor.fetchall()]
             
-            cursor.execute('SELECT locale FROM entreprise_og_locales WHERE og_data_id = ? ORDER BY locale', (og_data_id,))
+            self.execute_sql(cursor,'SELECT locale FROM entreprise_og_locales WHERE og_data_id = ? ORDER BY locale', (og_data_id,))
             og_data['locales_alternate'] = [row[0] for row in cursor.fetchall()]
             
             conn.close()
@@ -480,16 +489,16 @@ class EntrepriseManager(DatabaseBase):
             og_data_id = og_data['id']
             
             # Récupérer les images, vidéos, audios, locales pour cet OG
-            cursor.execute('SELECT * FROM entreprise_og_images WHERE og_data_id = ? ORDER BY id', (og_data_id,))
+            self.execute_sql(cursor,'SELECT * FROM entreprise_og_images WHERE og_data_id = ? ORDER BY id', (og_data_id,))
             og_data['images'] = [dict(row) for row in cursor.fetchall()]
             
-            cursor.execute('SELECT * FROM entreprise_og_videos WHERE og_data_id = ? ORDER BY id', (og_data_id,))
+            self.execute_sql(cursor,'SELECT * FROM entreprise_og_videos WHERE og_data_id = ? ORDER BY id', (og_data_id,))
             og_data['videos'] = [dict(row) for row in cursor.fetchall()]
             
-            cursor.execute('SELECT * FROM entreprise_og_audios WHERE og_data_id = ? ORDER BY id', (og_data_id,))
+            self.execute_sql(cursor,'SELECT * FROM entreprise_og_audios WHERE og_data_id = ? ORDER BY id', (og_data_id,))
             og_data['audios'] = [dict(row) for row in cursor.fetchall()]
             
-            cursor.execute('SELECT locale FROM entreprise_og_locales WHERE og_data_id = ? ORDER BY locale', (og_data_id,))
+            self.execute_sql(cursor,'SELECT locale FROM entreprise_og_locales WHERE og_data_id = ? ORDER BY locale', (og_data_id,))
             og_data['locales_alternate'] = [row[0] for row in cursor.fetchall()]
             
             all_og_data.append(og_data)
@@ -556,7 +565,7 @@ class EntrepriseManager(DatabaseBase):
             query += ' OFFSET ?'
             params.append(offset)
         
-        cursor.execute(query, params)
+        self.execute_sql(cursor,query, params)
         rows = cursor.fetchall()
         conn.close()
         
@@ -590,10 +599,10 @@ class EntrepriseManager(DatabaseBase):
             dict|None: Dictionnaire avec les données de l'entreprise, None si non trouvée
         """
         conn = self.get_connection()
-        conn.row_factory = sqlite3.Row
+        # row_factory est déjà configuré dans get_connection() (SQLite) ou via RealDictCursor (PostgreSQL)
         cursor = conn.cursor()
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT e.*, 
                    (SELECT risk_score 
                     FROM analyses_pentest 
@@ -638,7 +647,7 @@ class EntrepriseManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             UPDATE entreprises SET tags = ? WHERE id = ?
         ''', (json.dumps(tags) if isinstance(tags, list) else tags, entreprise_id))
         
@@ -656,7 +665,7 @@ class EntrepriseManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             UPDATE entreprises SET notes = ? WHERE id = ?
         ''', (notes, entreprise_id))
         
@@ -676,11 +685,11 @@ class EntrepriseManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('SELECT favori FROM entreprises WHERE id = ?', (entreprise_id,))
+        self.execute_sql(cursor,'SELECT favori FROM entreprises WHERE id = ?', (entreprise_id,))
         current = cursor.fetchone()[0]
         new_value = 0 if current else 1
         
-        cursor.execute('UPDATE entreprises SET favori = ? WHERE id = ?', (new_value, entreprise_id))
+        self.execute_sql(cursor,'UPDATE entreprises SET favori = ? WHERE id = ?', (new_value, entreprise_id))
         conn.commit()
         conn.close()
         
@@ -740,7 +749,7 @@ class EntrepriseManager(DatabaseBase):
         haversine_query += ' ORDER BY distance_km ASC LIMIT ?'
         params.append(limit)
         
-        cursor.execute(haversine_query, params)
+        self.execute_sql(cursor,haversine_query, params)
         
         rows = cursor.fetchall()
         conn.close()
@@ -788,7 +797,7 @@ class EntrepriseManager(DatabaseBase):
         cursor = conn.cursor()
         
         # Récupérer l'entreprise de référence
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT secteur, longitude, latitude FROM entreprises WHERE id = ?
         ''', (entreprise_id,))
         
@@ -835,47 +844,47 @@ class EntrepriseManager(DatabaseBase):
             dict: Dictionnaire avec les statistiques
         """
         conn = self.get_connection()
-        conn.row_factory = sqlite3.Row
+        # row_factory est déjà configuré dans get_connection() (SQLite) ou via RealDictCursor (PostgreSQL)
         cursor = conn.cursor()
         
         stats = {}
         
         # Total analyses
         try:
-            cursor.execute('SELECT COUNT(*) as count FROM analyses')
+            self.execute_sql(cursor,'SELECT COUNT(*) as count FROM analyses')
             stats['total_analyses'] = cursor.fetchone()['count']
-        except sqlite3.OperationalError:
+        except Exception:
             stats['total_analyses'] = 0
         
         # Total entreprises
         try:
-            cursor.execute('SELECT COUNT(*) as count FROM entreprises')
+            self.execute_sql(cursor,'SELECT COUNT(*) as count FROM entreprises')
             stats['total_entreprises'] = cursor.fetchone()['count']
-        except sqlite3.OperationalError:
+        except Exception:
             stats['total_entreprises'] = 0
         
         # Favoris
         try:
-            cursor.execute('SELECT COUNT(*) as count FROM entreprises WHERE favori = 1')
+            self.execute_sql(cursor,'SELECT COUNT(*) as count FROM entreprises WHERE favori = 1')
             stats['favoris'] = cursor.fetchone()['count']
-        except sqlite3.OperationalError:
+        except Exception:
             stats['favoris'] = 0
         
         # Par statut
         try:
-            cursor.execute('''
+            self.execute_sql(cursor,'''
                 SELECT statut, COUNT(*) as count 
                 FROM entreprises 
                 WHERE statut IS NOT NULL AND statut != ''
                 GROUP BY statut
             ''')
             stats['par_statut'] = {row['statut']: row['count'] for row in cursor.fetchall()}
-        except sqlite3.OperationalError:
+        except Exception:
             stats['par_statut'] = {}
         
         # Par secteur
         try:
-            cursor.execute('''
+            self.execute_sql(cursor,'''
                 SELECT secteur, COUNT(*) as count 
                 FROM entreprises 
                 WHERE secteur IS NOT NULL AND secteur != ''
@@ -883,12 +892,12 @@ class EntrepriseManager(DatabaseBase):
                 ORDER BY count DESC
             ''')
             stats['par_secteur'] = {row['secteur']: row['count'] for row in cursor.fetchall()}
-        except sqlite3.OperationalError:
+        except Exception:
             stats['par_secteur'] = {}
         
         # Par opportunité
         try:
-            cursor.execute('''
+            self.execute_sql(cursor,'''
                 SELECT opportunite, COUNT(*) as count 
                 FROM entreprises 
                 WHERE opportunite IS NOT NULL AND opportunite != ''
@@ -896,7 +905,7 @@ class EntrepriseManager(DatabaseBase):
                 ORDER BY count DESC
             ''')
             stats['par_opportunite'] = {row['opportunite']: row['count'] for row in cursor.fetchall()}
-        except sqlite3.OperationalError:
+        except Exception:
             stats['par_opportunite'] = {}
         
         conn.close()
@@ -910,11 +919,11 @@ class EntrepriseManager(DatabaseBase):
             list[dict]: Liste des entreprises avec leurs emails (depuis scraper_emails)
         """
         conn = self.get_connection()
-        conn.row_factory = sqlite3.Row
+        # row_factory est déjà configuré dans get_connection() (SQLite) ou via RealDictCursor (PostgreSQL)
         cursor = conn.cursor()
 
         # Récupérer les entreprises avec leurs emails depuis scraper_emails
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             SELECT DISTINCT
                 e.id,
                 e.nom,

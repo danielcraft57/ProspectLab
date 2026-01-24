@@ -9,7 +9,7 @@ import os
 import pandas as pd
 from services.entreprise_analyzer import EntrepriseAnalyzer
 from utils.helpers import allowed_file, get_file_path
-from config import UPLOAD_FOLDER
+from config import UPLOAD_FOLDER, CELERY_WORKERS
 from utils.template_helpers import render_page
 from services.auth import login_required
 
@@ -61,12 +61,18 @@ def upload_file():
                 preview = df.head(10).to_dict('records')
                 columns = list(df.columns)
                 
+                # Debug: logger la valeur de CELERY_WORKERS
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f'Rendu preview.html avec celery_workers={CELERY_WORKERS}')
+                
                 return render_page('preview.html', 
                                      filename=filename,
                                      preview=preview,
                                      columns=columns,
                                      total_rows=len(df),
-                                     validation_warnings=validation_warnings[:10])
+                                     validation_warnings=validation_warnings[:10],
+                                     celery_workers=CELERY_WORKERS)
             except Exception as e:
                 flash(f'Erreur lors de la lecture du fichier: {str(e)}', 'error')
                 return redirect(request.url)
@@ -117,11 +123,17 @@ def preview_file(filename):
         preview = df.head(10).to_dict('records')
         columns = list(df.columns)
         
+        # Debug: logger la valeur de CELERY_WORKERS
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f'Rendu preview.html avec celery_workers={CELERY_WORKERS}')
+        
         return render_page('preview.html', 
                              filename=filename,
                              preview=preview,
                              columns=columns,
                              total_rows=len(df),
+                             celery_workers=CELERY_WORKERS,
                              validation_warnings=validation_warnings[:10])
     except pd.errors.EmptyDataError:
         return render_template('error.html',

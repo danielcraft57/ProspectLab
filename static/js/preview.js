@@ -233,9 +233,20 @@
     form.addEventListener('submit', function(e) {
         e.preventDefault();
         
-        // Valeurs optimisées pour Celery avec --pool=threads --concurrency=4
+        // Récupérer le nombre de workers depuis l'attribut data du page-header
+        const pageHeader = document.querySelector('.page-header');
+        const celeryWorkersAttr = pageHeader ? pageHeader.getAttribute('data-celery-workers') : null;
+        const celeryWorkers = celeryWorkersAttr ? parseInt(celeryWorkersAttr, 10) : 4;
+        
+        // Debug: afficher la valeur récupérée
+        console.log('Celery workers récupérés:', celeryWorkers, 'depuis data-celery-workers:', celeryWorkersAttr);
+        
+        // S'assurer que la valeur est valide (au moins 1)
+        const validCeleryWorkers = isNaN(celeryWorkers) || celeryWorkers < 1 ? 4 : celeryWorkers;
+        
+        // Valeurs optimisées pour Celery avec --pool=threads --concurrency dynamique
         // Celery gère déjà la concurrence, pas besoin de délai artificiel
-        const maxWorkers = 4;  // Optimisé pour Celery avec concurrency=4
+        const maxWorkers = validCeleryWorkers;  // Utilise la valeur depuis la config
         const delay = 0.1;     // Délai minimal, Celery gère la concurrence
         
         // Afficher le statut
@@ -270,7 +281,7 @@
             
             // Connexion établie, lancer l'analyse
             statusDiv.className = 'status-message status-info';
-            statusDiv.innerHTML = 'Connexion établie. Démarrage de l\'analyse avec Celery (4 workers)...';
+            statusDiv.innerHTML = `Connexion établie. Démarrage de l'analyse avec Celery (${validCeleryWorkers} workers)...`;
             progressText.textContent = 'Initialisation...';
             
             window.wsManager.startAnalysis(filename, {

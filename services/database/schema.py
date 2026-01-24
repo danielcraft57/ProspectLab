@@ -3,7 +3,6 @@ Module de schéma de base de données
 Contient la création de toutes les tables et migrations
 """
 
-import sqlite3
 from .base import DatabaseBase
 
 
@@ -25,8 +24,12 @@ class DatabaseSchema(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
+        # Pour PostgreSQL, activer le mode autocommit pour éviter les problèmes de transaction
+        if self.is_postgresql():
+            conn.autocommit = True
+        
         # Table des analyses
-        cursor.execute('''
+        self.execute_sql(cursor, '''
             CREATE TABLE IF NOT EXISTS analyses (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 filename TEXT NOT NULL,
@@ -40,7 +43,7 @@ class DatabaseSchema(DatabaseBase):
         ''')
         
         # Table des entreprises analysées
-        cursor.execute('''
+        self.execute_sql(cursor, '''
             CREATE TABLE IF NOT EXISTS entreprises (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 analyse_id INTEGER,
@@ -71,6 +74,10 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
+        # Commit pour PostgreSQL après création de la table
+        if self.is_postgresql():
+            conn.commit()
+        
         # Ajouter les nouvelles colonnes si elles n'existent pas (migration)
         new_columns = [
             ('telephone', 'TEXT'),
@@ -84,16 +91,10 @@ class DatabaseSchema(DatabaseBase):
         ]
         
         for col_name, col_type in new_columns:
-            try:
-                cursor.execute(f'ALTER TABLE entreprises ADD COLUMN {col_name} {col_type}')
-            except sqlite3.OperationalError:
-                pass  # La colonne existe déjà
+            self.safe_execute_sql(cursor, f'ALTER TABLE entreprises ADD COLUMN {col_name} {col_type}')
         
         # Ajouter la colonne resume si elle n'existe pas
-        try:
-            cursor.execute('ALTER TABLE entreprises ADD COLUMN resume TEXT')
-        except sqlite3.OperationalError:
-            pass  # La colonne existe déjà
+        self.safe_execute_sql(cursor, 'ALTER TABLE entreprises ADD COLUMN resume TEXT')
         
         # Ajouter les colonnes pour les images et icônes
         icon_columns = [
@@ -102,13 +103,10 @@ class DatabaseSchema(DatabaseBase):
             ('logo', 'TEXT')
         ]
         for col_name, col_type in icon_columns:
-            try:
-                cursor.execute(f'ALTER TABLE entreprises ADD COLUMN {col_name} {col_type}')
-            except sqlite3.OperationalError:
-                pass  # La colonne existe déjà
+            self.safe_execute_sql(cursor, f'ALTER TABLE entreprises ADD COLUMN {col_name} {col_type}')
         
         # Table des données OpenGraph (normalisée selon ogp.me)
-        cursor.execute('''
+        self.execute_sql(cursor, '''
             CREATE TABLE IF NOT EXISTS entreprise_og_data (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 entreprise_id INTEGER NOT NULL,
@@ -129,13 +127,10 @@ class DatabaseSchema(DatabaseBase):
         ''')
         
         # Migration : ajouter la colonne page_url si elle n'existe pas
-        try:
-            cursor.execute('ALTER TABLE entreprise_og_data ADD COLUMN page_url TEXT')
-        except sqlite3.OperationalError:
-            pass
+        self.safe_execute_sql(cursor, 'ALTER TABLE entreprise_og_data ADD COLUMN page_url TEXT')
         
         # Table des images OpenGraph
-        cursor.execute('''
+        self.execute_sql(cursor, '''
             CREATE TABLE IF NOT EXISTS entreprise_og_images (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 entreprise_id INTEGER NOT NULL,
@@ -153,7 +148,7 @@ class DatabaseSchema(DatabaseBase):
         ''')
         
         # Table des vidéos OpenGraph
-        cursor.execute('''
+        self.execute_sql(cursor, '''
             CREATE TABLE IF NOT EXISTS entreprise_og_videos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 entreprise_id INTEGER NOT NULL,
@@ -170,7 +165,7 @@ class DatabaseSchema(DatabaseBase):
         ''')
         
         # Table des audios OpenGraph
-        cursor.execute('''
+        self.execute_sql(cursor, '''
             CREATE TABLE IF NOT EXISTS entreprise_og_audios (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 entreprise_id INTEGER NOT NULL,
@@ -185,7 +180,7 @@ class DatabaseSchema(DatabaseBase):
         ''')
         
         # Table des locales alternatives OpenGraph
-        cursor.execute('''
+        self.execute_sql(cursor, '''
             CREATE TABLE IF NOT EXISTS entreprise_og_locales (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 entreprise_id INTEGER NOT NULL,
@@ -199,14 +194,14 @@ class DatabaseSchema(DatabaseBase):
         ''')
         
         # Index pour les recherches
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_og_data_entreprise_id ON entreprise_og_data(entreprise_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_og_images_entreprise_id ON entreprise_og_images(entreprise_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_og_videos_entreprise_id ON entreprise_og_videos(entreprise_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_og_audios_entreprise_id ON entreprise_og_audios(entreprise_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_og_locales_entreprise_id ON entreprise_og_locales(entreprise_id)')
+        self.execute_sql(cursor, 'CREATE INDEX IF NOT EXISTS idx_og_data_entreprise_id ON entreprise_og_data(entreprise_id)')
+        self.execute_sql(cursor, 'CREATE INDEX IF NOT EXISTS idx_og_images_entreprise_id ON entreprise_og_images(entreprise_id)')
+        self.execute_sql(cursor, 'CREATE INDEX IF NOT EXISTS idx_og_videos_entreprise_id ON entreprise_og_videos(entreprise_id)')
+        self.execute_sql(cursor, 'CREATE INDEX IF NOT EXISTS idx_og_audios_entreprise_id ON entreprise_og_audios(entreprise_id)')
+        self.execute_sql(cursor, 'CREATE INDEX IF NOT EXISTS idx_og_locales_entreprise_id ON entreprise_og_locales(entreprise_id)')
         
         # Table des campagnes email
-        cursor.execute('''
+        self.execute_sql(cursor, '''
             CREATE TABLE IF NOT EXISTS campagnes_email (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 nom TEXT NOT NULL,
@@ -221,7 +216,7 @@ class DatabaseSchema(DatabaseBase):
         ''')
         
         # Table des emails envoyés
-        cursor.execute('''
+        self.execute_sql(cursor, '''
             CREATE TABLE IF NOT EXISTS emails_envoyes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 campagne_id INTEGER,
@@ -240,13 +235,10 @@ class DatabaseSchema(DatabaseBase):
         ''')
         
         # Migration : ajouter la colonne tracking_token si elle n'existe pas
-        try:
-            cursor.execute('ALTER TABLE emails_envoyes ADD COLUMN tracking_token TEXT')
-        except sqlite3.OperationalError:
-            pass  # La colonne existe déjà
+        self.safe_execute_sql(cursor, 'ALTER TABLE emails_envoyes ADD COLUMN tracking_token TEXT')
         
         # Table des utilisateurs (authentification)
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
@@ -258,11 +250,11 @@ class DatabaseSchema(DatabaseBase):
                 derniere_connexion TIMESTAMP
             )
         ''')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)')
         
         # Table des tokens API
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS api_tokens (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 token TEXT UNIQUE NOT NULL,
@@ -279,33 +271,18 @@ class DatabaseSchema(DatabaseBase):
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
             )
         ''')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_tokens_token ON api_tokens(token)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_api_tokens_token ON api_tokens(token)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id)')
         
         # Migration : ajouter les nouvelles colonnes si elles n'existent pas
-        try:
-            cursor.execute('ALTER TABLE api_tokens ADD COLUMN app_url TEXT')
-        except sqlite3.OperationalError:
-            pass
-        try:
-            cursor.execute('ALTER TABLE api_tokens ADD COLUMN can_read_entreprises INTEGER DEFAULT 1')
-        except sqlite3.OperationalError:
-            pass
-        try:
-            cursor.execute('ALTER TABLE api_tokens ADD COLUMN can_read_emails INTEGER DEFAULT 1')
-        except sqlite3.OperationalError:
-            pass
-        try:
-            cursor.execute('ALTER TABLE api_tokens ADD COLUMN can_read_statistics INTEGER DEFAULT 1')
-        except sqlite3.OperationalError:
-            pass
-        try:
-            cursor.execute('ALTER TABLE api_tokens ADD COLUMN can_read_campagnes INTEGER DEFAULT 1')
-        except sqlite3.OperationalError:
-            pass
+        self.safe_execute_sql(cursor, 'ALTER TABLE api_tokens ADD COLUMN app_url TEXT')
+        self.safe_execute_sql(cursor, 'ALTER TABLE api_tokens ADD COLUMN can_read_entreprises INTEGER DEFAULT 1')
+        self.safe_execute_sql(cursor, 'ALTER TABLE api_tokens ADD COLUMN can_read_emails INTEGER DEFAULT 1')
+        self.safe_execute_sql(cursor, 'ALTER TABLE api_tokens ADD COLUMN can_read_statistics INTEGER DEFAULT 1')
+        self.safe_execute_sql(cursor, 'ALTER TABLE api_tokens ADD COLUMN can_read_campagnes INTEGER DEFAULT 1')
         
         # Table des événements de tracking email
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS email_tracking_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 email_id INTEGER NOT NULL,
@@ -320,12 +297,12 @@ class DatabaseSchema(DatabaseBase):
         ''')
         
         # Index pour le tracking
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tracking_email_id ON email_tracking_events(email_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tracking_token ON email_tracking_events(tracking_token)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tracking_event_type ON email_tracking_events(event_type)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_tracking_email_id ON email_tracking_events(email_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_tracking_token ON email_tracking_events(tracking_token)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_tracking_event_type ON email_tracking_events(event_type)')
         
         # Table des analyses techniques
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analyses_techniques (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 entreprise_id INTEGER,
@@ -358,13 +335,10 @@ class DatabaseSchema(DatabaseBase):
         ''')
         
         # Ajouter la colonne cms_version si elle n'existe pas (migration)
-        try:
-            cursor.execute('ALTER TABLE analyses_techniques ADD COLUMN cms_version TEXT')
-        except sqlite3.OperationalError:
-            pass
+        self.safe_execute_sql(cursor, 'ALTER TABLE analyses_techniques ADD COLUMN cms_version TEXT')
         
         # Tables normalisées pour les analyses techniques
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analysis_technique_cms_plugins (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 analysis_id INTEGER NOT NULL,
@@ -376,7 +350,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analysis_technique_security_headers (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 analysis_id INTEGER NOT NULL,
@@ -389,7 +363,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analysis_technique_analytics (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 analysis_id INTEGER NOT NULL,
@@ -402,12 +376,12 @@ class DatabaseSchema(DatabaseBase):
         ''')
         
         # Index pour les analyses techniques
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tech_cms_plugins_analysis_id ON analysis_technique_cms_plugins(analysis_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tech_security_headers_analysis_id ON analysis_technique_security_headers(analysis_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tech_analytics_analysis_id ON analysis_technique_analytics(analysis_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tech_url ON analyses_techniques(url)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tech_domain ON analyses_techniques(domain)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tech_entreprise_date ON analyses_techniques(entreprise_id, date_analyse)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_tech_cms_plugins_analysis_id ON analysis_technique_cms_plugins(analysis_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_tech_security_headers_analysis_id ON analysis_technique_security_headers(analysis_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_tech_analytics_analysis_id ON analysis_technique_analytics(analysis_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_tech_url ON analyses_techniques(url)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_tech_domain ON analyses_techniques(domain)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_tech_entreprise_date ON analyses_techniques(entreprise_id, date_analyse)')
 
         # Colonnes complémentaires pour les analyses techniques
         for col_name, col_type in [
@@ -417,13 +391,10 @@ class DatabaseSchema(DatabaseBase):
             ('trackers_count', 'INTEGER'),
             ('pages_summary', 'TEXT')
         ]:
-            try:
-                cursor.execute(f'ALTER TABLE analyses_techniques ADD COLUMN {col_name} {col_type}')
-            except sqlite3.OperationalError:
-                pass
+            self.safe_execute_sql(cursor, f'ALTER TABLE analyses_techniques ADD COLUMN {col_name} {col_type}')
 
         # Table des pages analysées
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analysis_technique_pages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 analysis_id INTEGER NOT NULL,
@@ -444,11 +415,11 @@ class DatabaseSchema(DatabaseBase):
                 FOREIGN KEY (analysis_id) REFERENCES analyses_techniques(id) ON DELETE CASCADE
             )
         ''')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tech_pages_analysis_id ON analysis_technique_pages(analysis_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tech_pages_url ON analysis_technique_pages(page_url)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_tech_pages_analysis_id ON analysis_technique_pages(analysis_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_tech_pages_url ON analysis_technique_pages(page_url)')
         
         # Table des analyses OSINT
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analyses_osint (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 entreprise_id INTEGER,
@@ -471,7 +442,7 @@ class DatabaseSchema(DatabaseBase):
         ''')
         
         # Tables normalisées pour les analyses OSINT
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analysis_osint_subdomains (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 analysis_id INTEGER NOT NULL,
@@ -482,7 +453,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analysis_osint_dns_records (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 analysis_id INTEGER NOT NULL,
@@ -493,7 +464,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analysis_osint_emails (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 analysis_id INTEGER NOT NULL,
@@ -505,7 +476,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analysis_osint_social_media (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 analysis_id INTEGER NOT NULL,
@@ -517,7 +488,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analysis_osint_technologies (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 analysis_id INTEGER NOT NULL,
@@ -530,7 +501,7 @@ class DatabaseSchema(DatabaseBase):
         ''')
         
         # Tables pour les nouveaux outils OSINT
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analysis_osint_document_metadata (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 analysis_id INTEGER NOT NULL,
@@ -549,7 +520,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analysis_osint_image_metadata (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 analysis_id INTEGER NOT NULL,
@@ -568,7 +539,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analysis_osint_ssl_details (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 analysis_id INTEGER NOT NULL,
@@ -589,7 +560,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analysis_osint_waf_detection (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 analysis_id INTEGER NOT NULL,
@@ -605,7 +576,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analysis_osint_directories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 analysis_id INTEGER NOT NULL,
@@ -621,7 +592,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analysis_osint_open_ports (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 analysis_id INTEGER NOT NULL,
@@ -638,7 +609,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analysis_osint_services (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 analysis_id INTEGER NOT NULL,
@@ -655,7 +626,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analysis_osint_certificates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 analysis_id INTEGER NOT NULL,
@@ -674,22 +645,22 @@ class DatabaseSchema(DatabaseBase):
         ''')
         
         # Index pour les analyses OSINT
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_osint_subdomains_analysis_id ON analysis_osint_subdomains(analysis_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_osint_dns_analysis_id ON analysis_osint_dns_records(analysis_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_osint_emails_analysis_id ON analysis_osint_emails(analysis_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_osint_social_analysis_id ON analysis_osint_social_media(analysis_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_osint_tech_analysis_id ON analysis_osint_technologies(analysis_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_osint_doc_metadata_analysis_id ON analysis_osint_document_metadata(analysis_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_osint_image_metadata_analysis_id ON analysis_osint_image_metadata(analysis_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_osint_ssl_details_analysis_id ON analysis_osint_ssl_details(analysis_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_osint_waf_analysis_id ON analysis_osint_waf_detection(analysis_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_osint_directories_analysis_id ON analysis_osint_directories(analysis_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_osint_open_ports_analysis_id ON analysis_osint_open_ports(analysis_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_osint_services_analysis_id ON analysis_osint_services(analysis_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_osint_certificates_analysis_id ON analysis_osint_certificates(analysis_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_osint_subdomains_analysis_id ON analysis_osint_subdomains(analysis_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_osint_dns_analysis_id ON analysis_osint_dns_records(analysis_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_osint_emails_analysis_id ON analysis_osint_emails(analysis_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_osint_social_analysis_id ON analysis_osint_social_media(analysis_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_osint_tech_analysis_id ON analysis_osint_technologies(analysis_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_osint_doc_metadata_analysis_id ON analysis_osint_document_metadata(analysis_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_osint_image_metadata_analysis_id ON analysis_osint_image_metadata(analysis_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_osint_ssl_details_analysis_id ON analysis_osint_ssl_details(analysis_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_osint_waf_analysis_id ON analysis_osint_waf_detection(analysis_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_osint_directories_analysis_id ON analysis_osint_directories(analysis_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_osint_open_ports_analysis_id ON analysis_osint_open_ports(analysis_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_osint_services_analysis_id ON analysis_osint_services(analysis_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_osint_certificates_analysis_id ON analysis_osint_certificates(analysis_id)')
         
         # Table des analyses Pentest
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analyses_pentest (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 entreprise_id INTEGER,
@@ -716,7 +687,7 @@ class DatabaseSchema(DatabaseBase):
         ''')
         
         # Tables normalisées pour les analyses Pentest
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analysis_pentest_vulnerabilities (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 analysis_id INTEGER NOT NULL,
@@ -729,7 +700,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analysis_pentest_security_headers (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 analysis_id INTEGER NOT NULL,
@@ -741,7 +712,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analysis_pentest_cms_vulnerabilities (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 analysis_id INTEGER NOT NULL,
@@ -753,7 +724,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analysis_pentest_open_ports (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 analysis_id INTEGER NOT NULL,
@@ -766,13 +737,13 @@ class DatabaseSchema(DatabaseBase):
         ''')
         
         # Index pour les analyses Pentest
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_pentest_vuln_analysis_id ON analysis_pentest_vulnerabilities(analysis_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_pentest_security_headers_analysis_id ON analysis_pentest_security_headers(analysis_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_pentest_cms_vuln_analysis_id ON analysis_pentest_cms_vulnerabilities(analysis_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_pentest_ports_analysis_id ON analysis_pentest_open_ports(analysis_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_pentest_vuln_analysis_id ON analysis_pentest_vulnerabilities(analysis_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_pentest_security_headers_analysis_id ON analysis_pentest_security_headers(analysis_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_pentest_cms_vuln_analysis_id ON analysis_pentest_cms_vulnerabilities(analysis_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_pentest_ports_analysis_id ON analysis_pentest_open_ports(analysis_id)')
         
         # Table des scrapers
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS scrapers (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 entreprise_id INTEGER,
@@ -802,7 +773,7 @@ class DatabaseSchema(DatabaseBase):
         ''')
         
         # Table des images
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS images (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 entreprise_id INTEGER,
@@ -824,22 +795,23 @@ class DatabaseSchema(DatabaseBase):
             ('scraper_id', 'INTEGER'),
             ('total_forms', 'INTEGER DEFAULT 0')
         ]:
-            try:
                 if col_name == 'total_forms':
-                    cursor.execute(f'ALTER TABLE scrapers ADD COLUMN {col_name} {col_type}')
+                    self.safe_execute_sql(cursor, f'ALTER TABLE scrapers ADD COLUMN {col_name} {col_type}')
                 else:
-                    cursor.execute(f'ALTER TABLE images ADD COLUMN {col_name} {col_type}')
-            except sqlite3.OperationalError:
-                pass
+                    self.safe_execute_sql(cursor, f'ALTER TABLE images ADD COLUMN {col_name} {col_type}')
         
         # Index pour les images
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_images_entreprise_id ON images(entreprise_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_images_scraper_id ON images(scraper_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_images_url ON images(url)')
-        cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_images_entreprise_url ON images(entreprise_id, url)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_images_entreprise_id ON images(entreprise_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_images_scraper_id ON images(scraper_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_images_url ON images(url)')
+        
+        # Commit final pour PostgreSQL
+        if self.is_postgresql():
+            conn.commit()
+        self.execute_sql(cursor,'CREATE UNIQUE INDEX IF NOT EXISTS idx_images_entreprise_url ON images(entreprise_id, url)')
         
         # Tables normalisées pour les scrapers
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS scraper_emails (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 scraper_id INTEGER NOT NULL,
@@ -862,7 +834,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS scraper_phones (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 scraper_id INTEGER NOT NULL,
@@ -876,7 +848,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS scraper_social_profiles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 scraper_id INTEGER NOT NULL,
@@ -891,7 +863,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS scraper_technologies (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 scraper_id INTEGER NOT NULL,
@@ -906,25 +878,9 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS scraper_people (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                scraper_id INTEGER NOT NULL,
-                entreprise_id INTEGER NOT NULL,
-                person_id INTEGER,
-                name TEXT,
-                title TEXT,
-                email TEXT,
-                linkedin_url TEXT,
-                page_url TEXT,
-                date_found TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (scraper_id) REFERENCES scrapers(id) ON DELETE CASCADE,
-                FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE,
-                FOREIGN KEY (person_id) REFERENCES personnes(id) ON DELETE SET NULL
-            )
-        ''')
+        # Note: scraper_people sera créée APRÈS personnes (voir plus bas)
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS scraper_forms (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 scraper_id INTEGER NOT NULL,
@@ -944,22 +900,25 @@ class DatabaseSchema(DatabaseBase):
         ''')
         
         # Index pour les scrapers
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_scraper_emails_scraper_id ON scraper_emails(scraper_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_scraper_emails_entreprise_id ON scraper_emails(entreprise_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_scraper_phones_scraper_id ON scraper_phones(scraper_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_scraper_phones_entreprise_id ON scraper_phones(entreprise_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_scraper_social_scraper_id ON scraper_social_profiles(scraper_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_scraper_social_entreprise_id ON scraper_social_profiles(entreprise_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_scraper_tech_scraper_id ON scraper_technologies(scraper_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_scraper_tech_entreprise_id ON scraper_technologies(entreprise_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_scraper_people_scraper_id ON scraper_people(scraper_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_scraper_people_entreprise_id ON scraper_people(entreprise_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_scraper_forms_scraper_id ON scraper_forms(scraper_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_scraper_forms_entreprise_id ON scraper_forms(entreprise_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_scraper_forms_page_url ON scraper_forms(page_url)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_scraper_emails_scraper_id ON scraper_emails(scraper_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_scraper_emails_entreprise_id ON scraper_emails(entreprise_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_scraper_phones_scraper_id ON scraper_phones(scraper_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_scraper_phones_entreprise_id ON scraper_phones(entreprise_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_scraper_social_scraper_id ON scraper_social_profiles(scraper_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_scraper_social_entreprise_id ON scraper_social_profiles(entreprise_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_scraper_tech_scraper_id ON scraper_technologies(scraper_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_scraper_tech_entreprise_id ON scraper_technologies(entreprise_id)')
+        # Note: Les index pour scraper_people seront créés après la création de la table (voir plus bas)
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_scraper_forms_scraper_id ON scraper_forms(scraper_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_scraper_forms_entreprise_id ON scraper_forms(entreprise_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_scraper_forms_page_url ON scraper_forms(page_url)')
         
-        # Table des personnes
-        cursor.execute('''
+        # Commit pour PostgreSQL avant de créer scraper_people
+        if self.is_postgresql():
+            conn.commit()
+        
+        # Table des personnes (doit être créée AVANT scraper_people qui la référence)
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS personnes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 entreprise_id INTEGER NOT NULL,
@@ -986,8 +945,36 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
+        # Commit pour PostgreSQL après création de personnes
+        if self.is_postgresql():
+            conn.commit()
+        
+        # Créer scraper_people APRÈS personnes (car elle référence personnes)
+        self.execute_sql(cursor,'''
+            CREATE TABLE IF NOT EXISTS scraper_people (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scraper_id INTEGER NOT NULL,
+                entreprise_id INTEGER NOT NULL,
+                person_id INTEGER,
+                name TEXT,
+                title TEXT,
+                email TEXT,
+                linkedin_url TEXT,
+                page_url TEXT,
+                date_found TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (scraper_id) REFERENCES scrapers(id) ON DELETE CASCADE,
+                FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE,
+                FOREIGN KEY (person_id) REFERENCES personnes(id) ON DELETE SET NULL
+            )
+        ''')
+        
+        # Créer les index pour scraper_people maintenant que la table existe
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_scraper_people_scraper_id ON scraper_people(scraper_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_scraper_people_entreprise_id ON scraper_people(entreprise_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_scraper_people_person_id ON scraper_people(person_id)')
+        
         # Tables pour les données OSINT enrichies sur les personnes
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS personnes_osint_details (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 personne_id INTEGER NOT NULL,
@@ -1016,7 +1003,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS personnes_photos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 personne_id INTEGER NOT NULL,
@@ -1028,7 +1015,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS personnes_locations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 personne_id INTEGER NOT NULL,
@@ -1044,7 +1031,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS personnes_hobbies (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 personne_id INTEGER NOT NULL,
@@ -1056,7 +1043,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS personnes_professional_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 personne_id INTEGER NOT NULL,
@@ -1071,7 +1058,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS personnes_family (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 personne_id INTEGER NOT NULL,
@@ -1085,7 +1072,7 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         
-        cursor.execute('''
+        self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS personnes_data_breaches (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 personne_id INTEGER NOT NULL,
@@ -1099,31 +1086,31 @@ class DatabaseSchema(DatabaseBase):
         ''')
         
         # Index pour les personnes
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_personnes_osint_personne ON personnes_osint_details(personne_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_personnes_photos_personne ON personnes_photos(personne_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_personnes_locations_personne ON personnes_locations(personne_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_personnes_hobbies_personne ON personnes_hobbies(personne_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_personnes_professional_personne ON personnes_professional_history(personne_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_personnes_family_personne ON personnes_family(personne_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_personnes_breaches_personne ON personnes_data_breaches(personne_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_personnes_osint_personne ON personnes_osint_details(personne_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_personnes_photos_personne ON personnes_photos(personne_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_personnes_locations_personne ON personnes_locations(personne_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_personnes_hobbies_personne ON personnes_hobbies(personne_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_personnes_professional_personne ON personnes_professional_history(personne_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_personnes_family_personne ON personnes_family(personne_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_personnes_breaches_personne ON personnes_data_breaches(personne_id)')
         
         # Index généraux pour performance
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_entreprises_analyse ON entreprises(analyse_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_entreprises_nom ON entreprises(nom)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_entreprises_secteur ON entreprises(secteur)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_entreprises_geo ON entreprises(longitude, latitude)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_emails_campagne ON emails_envoyes(campagne_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tech_entreprise ON analyses_techniques(entreprise_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_osint_entreprise ON analyses_osint(entreprise_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_pentest_entreprise ON analyses_pentest(entreprise_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_scrapers_entreprise ON scrapers(entreprise_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_scrapers_url ON scrapers(url)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_personnes_entreprise ON personnes(entreprise_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_personnes_manager ON personnes(manager_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_entreprises_analyse ON entreprises(analyse_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_entreprises_nom ON entreprises(nom)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_entreprises_secteur ON entreprises(secteur)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_entreprises_geo ON entreprises(longitude, latitude)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_emails_campagne ON emails_envoyes(campagne_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_tech_entreprise ON analyses_techniques(entreprise_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_osint_entreprise ON analyses_osint(entreprise_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_pentest_entreprise ON analyses_pentest(entreprise_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_scrapers_entreprise ON scrapers(entreprise_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_scrapers_url ON scrapers(url)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_personnes_entreprise ON personnes(entreprise_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_personnes_manager ON personnes(manager_id)')
         
         # Migration : ajouter la colonne is_person si elle n'existe pas
         try:
-            cursor.execute('ALTER TABLE scraper_emails ADD COLUMN is_person INTEGER DEFAULT 0')
+            self.execute_sql(cursor,'ALTER TABLE scraper_emails ADD COLUMN is_person INTEGER DEFAULT 0')
             conn.commit()
         except Exception:
             # La colonne existe déjà, ignorer l'erreur
@@ -1131,10 +1118,16 @@ class DatabaseSchema(DatabaseBase):
         
         # Créer l'index pour is_person après la migration
         try:
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_scraper_emails_is_person ON scraper_emails(is_person)')
-            conn.commit()
+            self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_scraper_emails_is_person ON scraper_emails(is_person)')
+            if not self.is_postgresql():
+                conn.commit()
         except Exception:
-            conn.rollback()
+            if not self.is_postgresql():
+                conn.rollback()
+        
+        # Désactiver autocommit pour PostgreSQL avant de fermer
+        if self.is_postgresql():
+            conn.autocommit = False
         
         conn.close()
         
@@ -1150,7 +1143,7 @@ class DatabaseSchema(DatabaseBase):
         
         try:
             # Activer les clés étrangères
-            cursor.execute('PRAGMA foreign_keys = ON')
+            self.execute_sql(cursor,'PRAGMA foreign_keys = ON')
             conn.commit()
         except Exception as e:
             # Si l'activation échoue, on continue quand même

@@ -54,7 +54,9 @@ celery.conf.update(
     ),
     # Configuration pour Windows : utiliser solo au lieu de prefork
     # Le mode prefork n'est pas supporté sur Windows
-    worker_pool='solo' if sys.platform == 'win32' else 'prefork',
+    # En production Linux, on utilise threads pour une meilleure efficacité mémoire
+    # Le paramètre --pool=threads dans la ligne de commande surcharge cette valeur
+    worker_pool='solo' if sys.platform == 'win32' else 'threads',
     broker_connection_retry_on_startup=True,
     # Configuration des logs
     worker_log_format='[%(asctime)s: %(levelname)s/%(processName)s] %(message)s',

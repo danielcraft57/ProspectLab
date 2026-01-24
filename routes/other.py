@@ -378,14 +378,13 @@ def api_delete_campagne(campagne_id):
     Returns:
         JSON: Résultat de la suppression
     """
-    import sqlite3
-    from services.database.campagnes import CampagneManager
+    from services.database import Database
 
-    campagne_manager = CampagneManager()
-    conn = campagne_manager.get_connection()
+    database = Database()
+    conn = database.get_connection()
     cursor = conn.cursor()
 
-    cursor.execute('DELETE FROM campagnes_email WHERE id = ?', (campagne_id,))
+    database.execute_sql(cursor, 'DELETE FROM campagnes_email WHERE id = ?', (campagne_id,))
     conn.commit()
     deleted = cursor.rowcount > 0
     conn.close()
