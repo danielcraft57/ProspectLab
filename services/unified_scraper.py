@@ -965,7 +965,7 @@ class UnifiedScraper:
         if self.should_stop:
             logger.info(f'[UnifiedScraper] Page {url}: Scraping arrêté, ignorée')
             return
-
+        
         # Valider l'URL
         if not url or not isinstance(url, str):
             logger.error(f'[UnifiedScraper] URL invalide: {url} (type: {type(url)})')
