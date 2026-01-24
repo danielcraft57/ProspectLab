@@ -19,6 +19,8 @@ Bienvenue dans la documentation de ProspectLab. Cette documentation est organis�
 ## Configuration
 
 - [Configuration](configuration/CONFIGURATION.md) - Guide complet de configuration de l'application
+- [Environnements et déploiement](configuration/ENVIRONNEMENTS_ET_DEPLOIEMENT.md) - Organisation dev/prod et architecture de déploiement
+- [Déploiement en production](configuration/DEPLOIEMENT_PRODUCTION.md) - Guide complet du déploiement en production avec HTTPS
 
 ## Guides d'utilisation
 

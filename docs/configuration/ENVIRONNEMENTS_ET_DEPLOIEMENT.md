@@ -1,6 +1,8 @@
 # Environnements, base de données et déploiement de ProspectLab
 
-Ce document explique comment organiser ProspectLab en plusieurs environnements (dev / prod), gérer SQLite ou une future base Postgres, utiliser WSL ou Debian pour les outils OSINT / Pentest, et déployer l'application derrière `node12.lan` avec les sous-domaines `prospectlab.danielcraft.fr` et `campaigns.danielcraft.fr`.
+Ce document explique comment organiser ProspectLab en plusieurs environnements (dev / prod), gérer SQLite ou PostgreSQL, utiliser WSL ou Debian pour les outils OSINT / Pentest, et déployer l'application derrière `node12.lan` avec les sous-domaines `prospectlab.danielcraft.fr` et `campaigns.danielcraft.fr`.
+
+**Note** : Pour un guide détaillé du déploiement en production avec toutes les étapes, voir [DEPLOIEMENT_PRODUCTION.md](DEPLOIEMENT_PRODUCTION.md).
 
 L'objectif est que tu puisses:
 
@@ -142,38 +144,31 @@ DATABASE_PATH=/var/lib/prospectlab/prospectlab.db
 
 Tu n'as pas besoin de modifier le code: `DatabaseBase` lit déjà `DATABASE_PATH` si elle est définie.
 
-### 2.3. Vers Postgres: stratégie de migration
+### 2.3. PostgreSQL en production
 
-Pour passer réellement sur Postgres, il faudra faire plus qu'un simple changement de variable. Aujourd'hui:
+**✅ PostgreSQL est maintenant supporté en production !**
 
-- la connexion est faite avec `sqlite3` ;
-- la syntaxe SQL peut être un peu spécifique à SQLite ;
-- il n'y a pas de ORM type SQLAlchemy.
+Le système détecte automatiquement le type de base de données via la variable `DATABASE_URL` :
 
-Une stratégie raisonnable:
+- Si `DATABASE_URL` est défini et commence par `postgresql://`, PostgreSQL est utilisé
+- Sinon, SQLite est utilisé avec `DATABASE_PATH`
 
-1. **Introduire une configuration générique de base**:
-   - nouvelle variable `DATABASE_URL` (par exemple `postgresql://user:password@host:5432/prospectlab`) ;
-   - garder `DATABASE_PATH` pour SQLite.
+**Configuration PostgreSQL** :
 
-2. **Créer une couche d'abstraction minimale**:
-   - soit en introduisant SQLAlchemy ;
-   - soit en créant un second module de base (par exemple `database/postgres_base.py`) qui expose la même interface que `DatabaseBase`.
+```bash
+DATABASE_URL=postgresql://user:password@host:port/database
+```
 
-3. **Migrer progressivement les services**:
-   - commencer par un ou deux modules (par exemple `campagnes`, `entreprises`) ;
-   - tester les requêtes sur Postgres ;
-   - une fois stable, basculer le reste.
+**Migration SQLite → PostgreSQL** :
 
-4. **Écriture d'un script de migration**:
-   - lire les données depuis SQLite ;
-   - recréer les tables dans Postgres ;
-   - insérer les données.
+1. Les requêtes SQL sont automatiquement adaptées (INSERT OR REPLACE → INSERT ... ON CONFLICT)
+2. L'initialisation de la base crée automatiquement toutes les tables
+3. Les scripts de migration sont gérés automatiquement
 
-Ce plan est plus une feuille de route qu'une fonctionnalité déjà en place. En attendant, la séparation dev/prod repose surtout sur:
-
-- SQLite dev local vs SQLite prod sur un chemin dédié ;
-- variable `DATABASE_PATH` pour choisir l'emplacement physique.
+**En production** :
+- PostgreSQL est utilisé sur `node15.lan`
+- La base est initialisée automatiquement au premier démarrage
+- Voir [DEPLOIEMENT_PRODUCTION.md](DEPLOIEMENT_PRODUCTION.md) pour les détails complets
 
 ---
 
