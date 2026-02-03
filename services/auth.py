@@ -12,11 +12,14 @@ from services.database import Database
 
 class AuthManager:
     """
-    Gère l'authentification des utilisateurs
+    Gère l'authentification des utilisateurs.
+    Dans la version actuelle de ProspectLab, l'application est
+    protégée principalement par la restriction réseau (LAN),
+    l'auth par utilisateur est donc désactivée.
     """
     
     def __init__(self):
-        """Initialise le gestionnaire d'authentification"""
+        """Initialise le gestionnaire d'authentification (DB disponible pour compatibilité)."""
         self.db = Database()
     
     def hash_password(self, password: str) -> str:
@@ -187,12 +190,16 @@ class AuthManager:
     
     def is_authenticated(self) -> bool:
         """
-        Vérifie si l'utilisateur est authentifié.
+        Indique si l'utilisateur est authentifié.
+        
+        Dans la configuration actuelle, l'accès est limité au réseau local
+        (voir RESTRICT_TO_LOCAL_NETWORK) et on considère donc que toute
+        requête autorisée au niveau réseau est "authentifiée".
         
         Returns:
-            bool: True si l'utilisateur est connecté
+            bool: Toujours True (auth désactivée)
         """
-        return 'user_id' in session
+        return True
     
     def get_current_user(self) -> Optional[dict]:
         """
@@ -210,18 +217,22 @@ class AuthManager:
         """
         Vérifie si l'utilisateur est administrateur.
         
-        Returns:
-            bool: True si l'utilisateur est admin
-        """
-        if not self.is_authenticated():
-            return False
+        Dans la configuration actuelle sans authentification utilisateur,
+        on considère que toute personne ayant accès à l'application
+        (donc au réseau interne) peut accéder aux fonctions admin.
         
-        return session.get('is_admin', False)
+        Returns:
+            bool: Toujours True
+        """
+        return True
 
 
 def login_required(f):
     """
-    Decorator pour protéger une route (nécessite une authentification).
+    Decorator pour protéger une route.
+    
+    Dans la nouvelle configuration sans login, ce décorateur
+    est conservé pour compatibilité mais ne bloque plus l'accès.
     
     Usage:
         @auth_bp.route('/dashboard')
@@ -231,12 +242,7 @@ def login_required(f):
     """
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        auth_manager = AuthManager()
-        
-        if not auth_manager.is_authenticated():
-            flash('Vous devez être connecté pour accéder à cette page.', 'warning')
-            return redirect(url_for('auth.login', next=request.url))
-        
+        # Auth désactivée: on laisse simplement passer la requête.
         return f(*args, **kwargs)
     
     return decorated_function
@@ -244,26 +250,15 @@ def login_required(f):
 
 def admin_required(f):
     """
-    Decorator pour protéger une route (nécessite d'être administrateur).
+    Decorator pour protéger une route "admin".
     
-    Usage:
-        @auth_bp.route('/admin')
-        @admin_required
-        def admin():
-            return render_template('admin.html')
+    Dans la nouvelle configuration sans gestion de rôles, ce décorateur
+    est conservé pour compatibilité mais ne restreint plus l'accès.
+    L'accès est supposé déjà filtré par le réseau interne.
     """
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        auth_manager = AuthManager()
-        
-        if not auth_manager.is_authenticated():
-            flash('Vous devez être connecté pour accéder à cette page.', 'warning')
-            return redirect(url_for('auth.login', next=request.url))
-        
-        if not auth_manager.require_admin():
-            flash('Accès refusé. Cette page nécessite des droits administrateur.', 'error')
-            return redirect(url_for('main.home'))
-        
+        # Auth / rôles désactivés: on laisse passer la requête.
         return f(*args, **kwargs)
     
     return decorated_function

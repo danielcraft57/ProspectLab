@@ -55,9 +55,12 @@ WSL_USER=loupix
 
 OSINT_TOOL_TIMEOUT=60
 PENTEST_TOOL_TIMEOUT=120
+
+# Accès HTTP
+RESTRICT_TO_LOCAL_NETWORK=false
 ```
 
-Exemple de `.env.prod` (serveur Debian, sans WSL, SQLite sur disque dédié):
+Exemple de `.env.prod` (serveur Debian ou node15.lan, sans WSL, SQLite/Postgres en prod):
 
 ```bash
 SECRET_KEY=ta-cle-ultra-secrete-en-prod
@@ -69,6 +72,9 @@ CELERY_RESULT_BACKEND=redis://localhost:6379/0
 
 OSINT_TOOL_TIMEOUT=60
 PENTEST_TOOL_TIMEOUT=120
+
+# Accès HTTP
+RESTRICT_TO_LOCAL_NETWORK=true
 ```
 
 En dev, tu peux faire:
@@ -84,6 +90,21 @@ cp .env.prod .env
 ```
 
 Le code ne change pas, seul le contenu du `.env` change selon l'environnement.
+
+### 1.4. Restriction d'accès HTTP par réseau local
+
+ProspectLab peut être protégé non pas par un système de login classique, mais par une **restriction d'accès HTTP au réseau local/VPN**.
+
+- Quand `RESTRICT_TO_LOCAL_NETWORK=false` (dev local) :
+  - l'application est accessible depuis n'importe quelle IP qui peut joindre le serveur ;
+- Quand `RESTRICT_TO_LOCAL_NETWORK=true` (recommandé en prod interne) :
+  - toutes les routes HTTP Flask sont bloquées si l'IP cliente n'est pas dans les réseaux privés classiques (`192.168.0.0/16`, `10.0.0.0/8`, `172.16.0.0/12`) ou localhost ;
+  - **exceptions** importantes :
+    - `/track/...` (pixel et clics de tracking pour les emails sortants) reste toujours accessible ;
+    - `/api/public/...` (API publique protégée par token) reste accessible pour les intégrations externes.
+
+La détection IP côté Flask utilise en priorité les en-têtes `X-Forwarded-For` / `X-Real-IP` envoyés par Nginx, puis `request.remote_addr`.  
+Assure-toi que ta conf Nginx sur `node12.lan` envoie bien ces en-têtes (voir `DEPLOIEMENT_PRODUCTION.md`).
 
 ### 1.3. Option: variable APP_ENV
 

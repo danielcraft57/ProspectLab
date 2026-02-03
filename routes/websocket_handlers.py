@@ -194,7 +194,7 @@ def register_websocket_handlers(socketio, app):
                                         else:
                                             logger.info(f'Lancement de la tâche de scraping pour analysis_id={analysis_id}')
                                             try:
-                                        scraping_task = scrape_analysis_task.delay(analysis_id=analysis_id)
+                                                scraping_task = scrape_analysis_task.delay(analysis_id=analysis_id)
                                                 logger.info(f'Tâche de scraping lancée avec task_id={scraping_task.id}')
                                                 scraping_launched = True
                                             except Exception as scrape_error:
@@ -846,7 +846,7 @@ def register_websocket_handlers(socketio, app):
                                                                                 # et les autres tâches (ajoutées après) ne seront jamais monitorées.
                                                                                 if pentest_completed >= total_pentest:
                                                                                     if getattr(monitor_scraping, 'scraping_done', False):
-                                                                                    break
+                                                                                        break
                                                                                     # Scraping toujours en cours: attendre, de nouvelles tâches peuvent arriver
                                                                                     threading.Event().wait(0.5)
                                                                                     continue

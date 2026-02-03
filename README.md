@@ -15,6 +15,7 @@ Application Flask professionnelle pour la prospection et l'analyse approfondie d
 - **Base de données normalisée** : Stockage structuré avec OpenGraph, images, et métadonnées
 - **Nettoyage automatique** : Suppression automatique des fichiers uploads/exports anciens (via Celery Beat)
 - **Logs centralisés** : Système de logs détaillés avec rotation automatique pour chaque type de tâche
+- **Accès restreint au réseau local (optionnel)** : possibilité de limiter complètement l'interface à ton LAN/VPN tout en gardant les routes de tracking/API publiques accessibles
 
 ## Installation
 
@@ -37,6 +38,7 @@ pip install -r requirements.txt
    - **WSL_DISTRO** : Distribution WSL pour les outils OSINT/Pentest (défaut: kali-linux)
    - **WSL_USER** : Utilisateur WSL (défaut: loupix)
    - **DATABASE_PATH** : (Optionnel) Chemin personnalisé pour la base de données
+   - **RESTRICT_TO_LOCAL_NETWORK** : (Optionnel, `true`/`false`) si activé, l'interface HTTP n'est accessible que depuis le réseau local/VPN (les routes `/track/...` et `/api/public/...` restent disponibles pour l'extérieur)
    
    Voir `env.example` pour la liste complète des variables.
 

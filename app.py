@@ -8,8 +8,9 @@ Architecture modulaire avec :
 - WebSockets pour les mises à jour en temps réel
 """
 
-from flask import Flask
+from flask import Flask, request, render_template
 from flask_socketio import SocketIO
+import ipaddress
 import os
 import sys
 from pathlib import Path
@@ -19,7 +20,13 @@ from logging.handlers import RotatingFileHandler
 # Ajouter le répertoire au path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import UPLOAD_FOLDER, EXPORT_FOLDER, MAX_CONTENT_LENGTH, SECRET_KEY
+from config import (
+    UPLOAD_FOLDER,
+    EXPORT_FOLDER,
+    MAX_CONTENT_LENGTH,
+    SECRET_KEY,
+    RESTRICT_TO_LOCAL_NETWORK,
+)
 from celery_app import make_celery
 
 # Configuration des logs via le module centralisé
@@ -71,6 +78,93 @@ app.register_blueprint(other_bp)
 # Enregistrer les handlers WebSocket
 from routes.websocket_handlers import register_websocket_handlers
 register_websocket_handlers(socketio, app)
+
+
+def _get_client_ip() -> str:
+    """
+    Détermine l'adresse IP "réelle" du client en tenant compte
+    des proxys (X-Forwarded-For / X-Real-IP).
+
+    Returns:
+        str: Adresse IP du client (ou chaîne vide si inconnue)
+    """
+    raw = (
+        request.headers.get('X-Forwarded-For')
+        or request.headers.get('X-Real-IP')
+        or (request.remote_addr if request.remote_addr else '')
+    )
+    if not raw:
+        return ''
+    return raw.split(',')[0].strip()
+
+
+def _client_ip_allowed() -> bool:
+    """
+    Retourne True si la restriction réseau est désactivée
+    ou si l'IP client appartient au réseau local (LAN / localhost).
+    """
+    try:
+        if not RESTRICT_TO_LOCAL_NETWORK:
+            return True
+
+        ip_str = _get_client_ip()
+        if not ip_str:
+            return False
+
+        ip = ipaddress.ip_address(ip_str)
+
+        # Réseaux privés classiques + localhost
+        allowed_networks = [
+            ipaddress.ip_network('192.168.0.0/16'),
+            ipaddress.ip_network('10.0.0.0/8'),
+            ipaddress.ip_network('172.16.0.0/12'),
+            ipaddress.ip_network('127.0.0.0/8'),
+        ]
+
+        return any(ip in net for net in allowed_networks)
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            f"Restriction IP: erreur de vérification ({e}), accès autorisé par sécurité"
+        )
+        # Fail-open pour ne pas bloquer l'app en cas de bug
+        return True
+
+
+@app.before_request
+def restrict_to_local_network():
+    """
+    Bloque l'accès HTTP si l'IP n'est pas dans le réseau local
+    quand RESTRICT_TO_LOCAL_NETWORK est activé.
+
+    Routes qui restent publiques :
+    - /track/... : tracking emails (appelé par les destinataires externes)
+    - /api/public/... : API publique protégée par token
+    """
+    try:
+        path = request.path or ''
+
+        # Tracking et API publique restent accessibles depuis l'extérieur
+        if path.startswith('/track/'):
+            return None
+        if path.startswith('/api/public'):
+            return None
+
+        if _client_ip_allowed():
+            return None
+
+        # Page de restriction simple
+        try:
+            client_ip = _get_client_ip()
+            return render_template('restricted.html', client_ip=client_ip), 403
+        except Exception:
+            # Si le template n'existe pas encore, renvoyer un message texte
+            return "Accès restreint au réseau local", 403
+    except Exception as e:
+        logging.getLogger(__name__).error(
+            f"Restriction IP: erreur dans before_request ({e}), accès autorisé par sécurité"
+        )
+        # Fail-open pour ne pas bloquer l'app en cas de bug
+        return None
 
 # Note: Certaines routes ne sont pas encore migrées vers les blueprints.
 # Pour utiliser toutes les fonctionnalités, utilisez app.py qui contient toutes les routes.
