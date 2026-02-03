@@ -99,6 +99,7 @@ CELERY_BROKER_URL=redis://localhost:6379/1
 CELERY_RESULT_BACKEND=redis://localhost:6379/1
 CELERY_WORKERS=6
 BASE_URL=https://prospectlab.danielcraft.fr
+RESTRICT_TO_LOCAL_NETWORK=true
 ```
 
 Générer une SECRET_KEY :
@@ -358,7 +359,7 @@ Sur node12.lan :
 sudo nginx -t
 sudo systemctl status nginx
 
-# Tester la connexion vers node15.lan
+# Tester la connexion vers node15.lan (depuis le LAN / VPN)
 curl http://node15.lan:5000
 
 # Tester HTTPS
@@ -530,4 +531,6 @@ ping node15.lan
 3. **Workers Celery** : Ajuster `CELERY_WORKERS` selon les ressources disponibles
 4. **Sauvegardes** : Mettre en place des sauvegardes régulières de PostgreSQL
 5. **Monitoring** : Surveiller les logs et l'espace disque régulièrement
+6. **Restriction réseau** : Avec `RESTRICT_TO_LOCAL_NETWORK=true`, l'interface complète de ProspectLab (pages HTML, routes API internes) n'est accessible que depuis le LAN/VPN.  
+   Seules les routes `/track/...` et `/api/public/...` restent exposées à Internet (pour le tracking d'emails et les intégrations externes via token).
 

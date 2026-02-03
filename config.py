@@ -23,6 +23,12 @@ UPLOAD_FOLDER = APP_DIR / 'uploads'
 EXPORT_FOLDER = APP_DIR / 'exports'
 MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
 
+# Restriction optionnelle à un réseau local (similaire à MailPilot)
+# Si RESTRICT_TO_LOCAL_NETWORK=true dans l'environnement, l'app ne sera
+# accessible qu'au réseau local, sauf pour certaines routes publiques
+# (tracking / API publique).
+RESTRICT_TO_LOCAL_NETWORK = os.environ.get('RESTRICT_TO_LOCAL_NETWORK', 'false').lower() == 'true'
+
 # Créer les dossiers si nécessaire
 UPLOAD_FOLDER.mkdir(exist_ok=True)
 EXPORT_FOLDER.mkdir(exist_ok=True)

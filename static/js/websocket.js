@@ -13,6 +13,29 @@ class ProspectLabWebSocket {
     }
 
     connect() {
+        // Ne pas essayer de se connecter sur la page d'accès restreint
+        if (document.body && document.body.classList.contains('restricted-page')) {
+            return;
+        }
+
+        // Vérifier le titre de la page (détection supplémentaire)
+        const pageTitle = document.title || '';
+        if (pageTitle.includes('Accès restreint') || pageTitle.includes('restreint')) {
+            return;
+        }
+
+        // Vérifier si on est sur une page qui nécessite WebSocket
+        const currentPath = window.location.pathname;
+        if (currentPath === '/restricted' || currentPath.includes('restricted')) {
+            return;
+        }
+
+        // Vérifier si le body contient la carte d'accès restreint (détection par contenu)
+        const restrictedCard = document.querySelector('.restricted-card');
+        if (restrictedCard) {
+            return;
+        }
+
         // Détecter si Socket.IO est disponible
         if (typeof io === 'undefined') {
             this.loadSocketIO();
@@ -58,7 +81,16 @@ class ProspectLabWebSocket {
         });
 
         this.socket.on('connect_error', (error) => {
-            console.error('Erreur de connexion WebSocket:', error);
+            // Ne pas spammer la console si on est sur une page qui n'a pas besoin de websocket
+            const currentPath = window.location.pathname;
+            if (currentPath === '/restricted' || currentPath.includes('restricted')) {
+                return;
+            }
+
+            // Réduire le bruit : ne logger que si vraiment nécessaire
+            if (this.reconnectAttempts === 0) {
+                console.warn('Connexion WebSocket échouée, tentative de reconnexion...');
+            }
             this.onConnectionError(error);
             // Tentative de reconnexion automatique
             if (this.reconnectAttempts < this.maxReconnectAttempts) {
@@ -341,12 +373,54 @@ class ProspectLabWebSocket {
 const wsManager = new ProspectLabWebSocket();
 window.wsManager = wsManager; // Exposer sur window pour utilisation globale
 
-// Connexion automatique au chargement
+// Fonction pour vérifier si on est sur la page d'accès restreint
+function isRestrictedPage() {
+    // Vérifier la classe CSS
+    if (document.body && document.body.classList.contains('restricted-page')) {
+        return true;
+    }
+    // Vérifier le titre
+    const pageTitle = document.title || '';
+    if (pageTitle.includes('Accès restreint') || pageTitle.includes('restreint')) {
+        return true;
+    }
+    // Vérifier le path
+    const currentPath = window.location.pathname;
+    if (currentPath === '/restricted' || currentPath.includes('restricted')) {
+        return true;
+    }
+    // Vérifier le contenu (carte d'accès restreint)
+    const restrictedCard = document.querySelector('.restricted-card');
+    if (restrictedCard) {
+        return true;
+    }
+    // Vérifier si le body contient le texte "Accès restreint au réseau local"
+    const bodyText = document.body ? document.body.innerText || document.body.textContent || '' : '';
+    if (bodyText.includes('Accès restreint au réseau local')) {
+        return true;
+    }
+    return false;
+}
+
+// Attendre que le DOM soit complètement chargé avant de vérifier
+function checkAndConnect() {
+    // Attendre un peu pour que le DOM soit complètement chargé
+    setTimeout(() => {
+        // Ne pas se connecter sur la page d'accès restreint
+        if (!isRestrictedPage()) {
+            wsManager.connect();
+        } else {
+            // Page restreinte détectée, ne pas se connecter
+            console.debug('Page d\'accès restreint détectée, WebSocket désactivé');
+        }
+    }, 100);
+}
+
+// Connexion automatique au chargement (uniquement si nécessaire)
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        wsManager.connect();
-    });
+    document.addEventListener('DOMContentLoaded', checkAndConnect);
 } else {
-    wsManager.connect();
+    // DOM déjà chargé, vérifier immédiatement
+    checkAndConnect();
 }
 
