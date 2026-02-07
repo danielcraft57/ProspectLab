@@ -7,7 +7,7 @@ ProspectLab utilise une architecture modulaire avec Flask, Celery et WebSockets 
 ## Structure du projet
 
 ```
-prospectlab/
+ProspectLab/
 ├── app.py                 # Application Flask principale (architecture modulaire)
 ├── celery_app.py          # Configuration Celery
 ├── config.py              # Configuration de l'application

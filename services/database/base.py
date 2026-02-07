@@ -54,7 +54,7 @@ class DatabaseBase:
                 db_path = env_db_path
             else:
                 app_dir = Path(__file__).parent.parent.parent
-                db_path = app_dir / 'prospectlab.db'
+                db_path = app_dir / 'ProspectLab.db'
         
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(exist_ok=True, parents=True)
