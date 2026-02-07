@@ -145,13 +145,13 @@ L'application sera accessible sur http://localhost:5000
 ## Structure du projet
 
 ```
-prospectlab/
+ProspectLab/
 ├── app.py                 # Application Flask principale (architecture moderne)
 ├── celery_app.py          # Configuration Celery pour les tâches asynchrones
 ├── run_celery.py          # Wrapper pour lancer Celery avec gestion Ctrl+C
 ├── config.py              # Configuration centralisée
 ├── requirements.txt       # Dépendances Python
-├── prospectlab.db         # Base de données SQLite (générée automatiquement)
+├── ProspectLab.db         # Base de données SQLite (générée automatiquement)
 ├── docs/                  # Documentation complète
 │   ├── INDEX.md           # Index de la documentation
 │   ├── architecture/      # Documentation de l'architecture
@@ -212,7 +212,7 @@ prospectlab/
 │   │   └── *.js           # Scripts spécifiques aux pages
 │   └── favicon/           # Favicons
 ├── logs/                  # Logs de l'application (rotation automatique)
-│   ├── prospectlab.log    # Logs Flask
+│   ├── ProspectLab.log    # Logs Flask
 │   ├── celery.log         # Logs Celery
 │   ├── analysis_tasks.log # Logs des tâches d'analyse
 │   └── scraping_tasks.log # Logs des tâches de scraping
@@ -248,7 +248,7 @@ L'application utilise une architecture moderne et modulaire :
 
 ### Logs centralisés
 Tous les logs sont centralisés dans le dossier `logs/` avec rotation automatique :
-- Logs Flask : `prospectlab.log`
+- Logs Flask : `ProspectLab.log`
 - Logs par tâche : `analysis_tasks.log`, `scraping_tasks.log`, `technical_analysis_tasks.log`, `cleanup_tasks.log`, `email_tasks.log`
 
 Chaque type de tâche a son propre fichier de log pour faciliter le débogage et le suivi.
