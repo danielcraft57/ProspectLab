@@ -733,6 +733,16 @@ class TechnicalManager(DatabaseBase):
         
         conn.commit()
         conn.close()
+        
+        # Recalculer l'opportunité après l'analyse technique
+        if entreprise_id:
+            try:
+                from services.database.entreprises import EntrepriseManager
+                entreprise_manager = EntrepriseManager()
+                entreprise_manager.update_opportunity_score(entreprise_id)
+            except Exception as e:
+                logger.warning(f'Erreur lors du recalcul de l\'opportunité après analyse technique: {e}')
+        
         return analysis_id
     
     def get_all_technical_analyses(self, limit=100):

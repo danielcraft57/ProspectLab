@@ -6,6 +6,7 @@ Supporte SQLite (dev) et PostgreSQL (prod)
 
 import sqlite3
 import os
+import math
 from pathlib import Path
 from typing import Optional, Union, Any
 from urllib.parse import urlparse
@@ -377,4 +378,22 @@ class DatabaseBase:
             # Ignorer les erreurs "déjà existant"
             if not self.handle_operational_error(e):
                 raise
+    
+    def clean_row_dict(self, row_dict: dict) -> dict:
+        """
+        Nettoie un dictionnaire de ligne pour convertir les NaN en None
+        
+        Args:
+            row_dict: Dictionnaire provenant d'une ligne de base de données
+            
+        Returns:
+            Dictionnaire nettoyé avec NaN remplacés par None
+        """
+        cleaned = {}
+        for key, value in row_dict.items():
+            if isinstance(value, float) and math.isnan(value):
+                cleaned[key] = None
+            else:
+                cleaned[key] = value
+        return cleaned
 

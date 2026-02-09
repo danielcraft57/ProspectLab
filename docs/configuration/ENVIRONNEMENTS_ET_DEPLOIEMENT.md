@@ -1,6 +1,6 @@
 # Environnements, base de données et déploiement de ProspectLab
 
-Ce document explique comment organiser ProspectLab en plusieurs environnements (dev / prod), gérer SQLite ou PostgreSQL, utiliser WSL ou Debian pour les outils OSINT / Pentest, et déployer l'application derrière `node12.lan` avec les sous-domaines `prospectlab.danielcraft.fr` et `campaigns.danielcraft.fr`.
+Ce document explique comment organiser ProspectLab en plusieurs environnements (dev / prod), gérer SQLite ou PostgreSQL, utiliser WSL ou Debian pour les outils OSINT / Pentest, et déployer l'application. Les noms de serveurs et domaines cités (ex. node12.lan, node15.lan, example.fr) sont des exemples à remplacer par vos propres valeurs.
 
 **Note** : Pour un guide détaillé du déploiement en production avec toutes les étapes, voir [DEPLOIEMENT_PRODUCTION.md](DEPLOIEMENT_PRODUCTION.md).
 

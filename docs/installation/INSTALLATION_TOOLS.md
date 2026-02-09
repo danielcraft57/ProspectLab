@@ -16,7 +16,7 @@ Ce guide regroupe tous les outils nécessaires pour maximiser les capacités de 
 wsl -d kali-linux -u loupix
 
 # Aller dans le dossier du projet
-cd /mnt/c/Users/loicDaniel/Documents/DanielCraft/prospectlab
+cd /chemin/vers/ProspectLab
 
 # Installation des outils OSINT
 chmod +x install_osint_tools.sh

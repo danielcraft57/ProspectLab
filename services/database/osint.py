@@ -533,6 +533,15 @@ class OSINTManager(DatabaseBase):
         conn.commit()
         conn.close()
         
+        # Recalculer l'opportunité après l'analyse OSINT
+        if entreprise_id:
+            try:
+                from services.database.entreprises import EntrepriseManager
+                entreprise_manager = EntrepriseManager()
+                entreprise_manager.update_opportunity_score(entreprise_id)
+            except Exception as e:
+                logger.warning(f'Erreur lors du recalcul de l\'opportunité après analyse OSINT: {e}')
+        
         # Logger pour déboguer
         import logging
         logger = logging.getLogger(__name__)

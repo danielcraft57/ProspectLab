@@ -229,6 +229,16 @@ python scripts/test_redis_connection.py
 
 **Résultat :** Affiche les informations de configuration Redis, teste la connexion et vérifie les workers Celery actifs.
 
+### Déploiement en production
+
+Les scripts de déploiement copient le code (routes, services, tasks, templates, static, utils, scripts) vers un serveur distant et synchronisent explicitement chaque dossier pour éviter les soucis d'archives (tar sous Windows).
+
+- **`deploy_production.ps1`** (Windows) : déploiement complet. Usage : `.\scripts\deploy_production.ps1 [serveur] [utilisateur]` (défaut : voir les paramètres en tête du script). Après le transfert principal, envoi explicite de routes, services, tasks, templates, static, utils, scripts via `scp -r` pour garantir leur présence sur le serveur.
+- **`deploy_production.sh`** (Linux/macOS) : même logique. Usage : `./scripts/deploy_production.sh [serveur] [utilisateur] [chemin_distant]`.
+- **`sync_templates_static.ps1`** (Windows) : envoie uniquement `templates/` et `static/` sans refaire tout le déploiement. Utile pour une mise à jour rapide du front. Usage : `.\scripts\sync_templates_static.ps1 [serveur] [utilisateur]`.
+
+Le dossier `scripts/` est inclus dans le déploiement ; les permissions d'exécution des `.sh` sont appliquées côté serveur après transfert.
+
 ## Configuration
 
 Les scripts utilisent les variables de configuration depuis `config.py` :

@@ -17,7 +17,7 @@ Le script d'installation automatique installe tous les outils nécessaires :
 wsl -d kali-linux bash scripts/linux/install_osint_tools_kali.sh
 
 # Ou depuis WSL Kali Linux directement
-cd /mnt/c/Users/loicDaniel/Documents/DanielCraft/prospectlab
+cd /chemin/vers/ProspectLab
 bash scripts/linux/install_osint_tools_kali.sh
 ```
 

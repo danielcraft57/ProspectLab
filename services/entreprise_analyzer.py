@@ -13,7 +13,11 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 import sys
+import logging
 from pathlib import Path
+
+# Configurer le logger
+logger = logging.getLogger(__name__)
 
 # Importer l'analyseur technique
 sys.path.insert(0, str(Path(__file__).parent))
@@ -667,8 +671,19 @@ class EntrepriseAnalyzer:
                     }
                     
                     # Extraire les informations de base du site
-                    response = requests.get(url, headers=self.headers, timeout=10, allow_redirects=True)
-                    response.raise_for_status()
+                    try:
+                        response = requests.get(url, headers=self.headers, timeout=10, allow_redirects=True)
+                        response.raise_for_status()
+                    except requests.exceptions.HTTPError as e:
+                        # En cas d'erreur HTTP, retourner les données déjà collectées
+                        if e.response.status_code in [403, 404, 400]:
+                            logger.warning(f'Erreur HTTP {e.response.status_code} pour {url}, utilisation des données déjà collectées')
+                            return result
+                        raise
+                    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                        # En cas d'erreur réseau, retourner les données déjà collectées
+                        logger.warning(f'Erreur réseau pour {url}: {e}, utilisation des données déjà collectées')
+                        return result
                     soup = BeautifulSoup(response.text, 'html.parser')
                     text = soup.get_text()
                     
@@ -686,8 +701,25 @@ class EntrepriseAnalyzer:
                     pass
             
             # Scraping classique (fallback)
-            response = requests.get(url, headers=self.headers, timeout=10, allow_redirects=True)
-            response.raise_for_status()
+            try:
+                response = requests.get(url, headers=self.headers, timeout=10, allow_redirects=True)
+                response.raise_for_status()
+            except requests.exceptions.HTTPError as e:
+                # Gérer les erreurs HTTP spécifiques
+                if e.response.status_code == 403:
+                    return {'error': f'Accès interdit (403) pour {url}', 'url': url}
+                elif e.response.status_code == 404:
+                    return {'error': f'Page introuvable (404) pour {url}', 'url': url}
+                elif e.response.status_code == 400:
+                    return {'error': f'Requête invalide (400) pour {url}', 'url': url}
+                else:
+                    return {'error': f'Erreur HTTP {e.response.status_code} pour {url}', 'url': url}
+            except requests.exceptions.Timeout:
+                return {'error': f'Timeout lors de l\'accès à {url}', 'url': url}
+            except requests.exceptions.ConnectionError as e:
+                return {'error': f'Erreur de connexion pour {url}: {str(e)}', 'url': url}
+            except requests.exceptions.RequestException as e:
+                return {'error': f'Erreur lors de la requête vers {url}: {str(e)}', 'url': url}
             
             soup = BeautifulSoup(response.text, 'html.parser')
             text = soup.get_text()
@@ -710,7 +742,18 @@ class EntrepriseAnalyzer:
                             # Mettre à jour le soup pour chercher le responsable sur la page contact
                             contact_soup = BeautifulSoup(contact_response.text, 'html.parser')
                             contact_text = contact_soup.get_text()
+                    except requests.exceptions.HTTPError as e:
+                        # Ignorer les erreurs HTTP sur la page contact (403, 404, etc.)
+                        logger.debug(f'Erreur HTTP {e.response.status_code} sur page contact {contact_url}: {e}')
+                        contact_soup = None
+                        contact_text = ''
+                    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                        # Ignorer les erreurs réseau sur la page contact
+                        logger.debug(f'Erreur réseau sur page contact {contact_url}: {e}')
+                        contact_soup = None
+                        contact_text = ''
                     except Exception as e:
+                        logger.debug(f'Erreur lors de l\'accès à la page contact {contact_url}: {e}')
                         contact_soup = None
                         contact_text = ''
             
@@ -850,11 +893,25 @@ class EntrepriseAnalyzer:
     
     def analyze_entreprise(self, row):
         """Analyse une entreprise complète"""
-        name = row.get('name', '')
-        website = row.get('website', '')
-        category = row.get('category', '')
-        address = row.get('address_1', '')
-        phone = row.get('phone_number', '')
+        # Fonction helper pour extraire les valeurs en gérant pandas NA
+        def safe_get(row, key, default=''):
+            """Extrait une valeur d'une row (dict ou Series) en gérant pandas NA"""
+            value = row.get(key, default) if isinstance(row, dict) else row.get(key, default)
+            # Convertir pandas NA en None ou valeur par défaut
+            if pd.isna(value):
+                return default
+            # Convertir en string si nécessaire et nettoyer
+            if isinstance(value, str):
+                value = value.strip()
+                if value.lower() in ['nan', 'none', 'null', 'n/a', '']:
+                    return default
+            return value
+        
+        name = safe_get(row, 'name', '')
+        website = safe_get(row, 'website', '')
+        category = safe_get(row, 'category', '')
+        address = safe_get(row, 'address_1', '')
+        phone = safe_get(row, 'phone_number', '')
         
         result = {
             'name': name,
@@ -867,7 +924,8 @@ class EntrepriseAnalyzer:
         soup = None
         text_for_sector = ''
         
-        if website:
+        # Vérifier que website n'est pas NA et n'est pas vide
+        if pd.notna(website) and website and str(website).strip():
             # Désactiver le scraping complet ici car il sera fait séparément via scrape_analysis_task
             # On fait juste un scraping basique pour obtenir les infos essentielles (titre, description, etc.)
             site_data = self.scrape_website(website, use_global_scraper=False)

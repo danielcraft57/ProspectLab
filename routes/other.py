@@ -404,8 +404,10 @@ def api_get_entreprises_with_emails():
         JSON: Liste des entreprises avec emails
     """
     from services.database.entreprises import EntrepriseManager
+    from utils.helpers import clean_json_dict
     entreprise_manager = EntrepriseManager()
     entreprises = entreprise_manager.get_entreprises_with_emails()
+    entreprises = clean_json_dict(entreprises)
     return jsonify(entreprises)
 
 

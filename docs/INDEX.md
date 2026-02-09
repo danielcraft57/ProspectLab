@@ -49,6 +49,10 @@ Bienvenue dans la documentation de ProspectLab. Cette documentation est organis�
 - [Architecture distribuée Raspberry Pi](developpement/ARCHITECTURE_DISTRIBUEE_RASPBERRY.md) - Notes de travail sur l'utilisation des Raspberry Pi comme workers Celery
 - [Analyse des emails pendant le scraping](developpement/ANALYSE_EMAILS_SCRAPING.md) - Implémentation de l'analyse automatique des emails et corrections associées
 
+## Modifications récentes
+
+- [Changelog technique récent](CHANGELOG_RECENT.md) - Résumé des corrections PostgreSQL, modale, templates et déploiement
+
 ## Fichiers obsolètes
 
 - [Fichiers obsolètes](FICHIERS_OBSOLETES.md) - Liste des fichiers obsolètes conservés pour référence
