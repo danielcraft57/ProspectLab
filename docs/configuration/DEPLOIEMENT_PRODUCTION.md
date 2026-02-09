@@ -1,28 +1,28 @@
 # Déploiement en production - ProspectLab
 
-Ce document décrit le déploiement complet de ProspectLab en production sur `node15.lan` avec reverse proxy HTTPS sur `node12.lan`.
+Ce document décrit le déploiement complet de ProspectLab en production. Remplacez les exemples (nom de serveur, domaine, utilisateur) par vos propres valeurs.
 
 ## Architecture de production
 
 ```
 Internet (HTTPS)
     ↓
-node12.lan (Nginx + SSL Let's Encrypt)
+<SERVEUR_PROXY> (Nginx + SSL Let's Encrypt)
     ↓ (proxy HTTP interne)
-node15.lan:5000 (ProspectLab + Gunicorn)
+<SERVEUR_APP>:5000 (ProspectLab + Gunicorn)
     ↓
 PostgreSQL + Redis + Celery
 ```
 
 ### Composants
 
-- **node12.lan** : Reverse proxy Nginx avec certificats SSL Let's Encrypt
-- **node15.lan** : Application ProspectLab (Flask + Gunicorn + Celery)
+- **Serveur proxy** : Nginx avec certificats SSL Let's Encrypt
+- **Serveur application** : ProspectLab (Flask + Gunicorn + Celery)
 - **PostgreSQL** : Base de données de production
 - **Redis** : Broker de messages pour Celery
 - **Services systemd** : Gestion automatique des services
 
-## Étape 1 : Préparation de node15.lan
+## Étape 1 : Préparation du serveur application
 
 ### 1.1. Installation des dépendances système
 
@@ -67,9 +67,9 @@ Cloner ou copier le projet :
 
 ```bash
 sudo mkdir -p /opt/prospectlab
-sudo chown pi:pi /opt/prospectlab
+sudo chown <UTILISATEUR>:<UTILISATEUR> /opt/prospectlab
 cd /opt/prospectlab
-# Copier les fichiers du projet ici (via git clone ou scp)
+# Copier les fichiers du projet ici (via git clone, scp ou le script scripts/deploy_production.ps1 / .sh)
 ```
 
 Créer l'environnement virtuel :
@@ -98,7 +98,7 @@ DATABASE_URL=postgresql://prospectlab:ton-mot-de-passe@localhost:5432/prospectla
 CELERY_BROKER_URL=redis://localhost:6379/1
 CELERY_RESULT_BACKEND=redis://localhost:6379/1
 CELERY_WORKERS=6
-BASE_URL=https://prospectlab.danielcraft.fr
+BASE_URL=https://<VOTRE_DOMAINE>
 RESTRICT_TO_LOCAL_NETWORK=true
 ```
 
@@ -231,7 +231,7 @@ Vérifier le statut :
 sudo systemctl status prospectlab prospectlab-celery prospectlab-celerybeat
 ```
 
-## Étape 3 : Configuration du reverse proxy sur node12.lan
+## Étape 3 : Configuration du reverse proxy sur <SERVEUR_PROXY>
 
 ### 3.1. Installation de Nginx
 
@@ -242,15 +242,15 @@ sudo apt install -y nginx
 
 ### 3.2. Configuration Nginx
 
-Créer `/etc/nginx/sites-available/prospectlab.danielcraft.fr` :
+Créer `/etc/nginx/sites-available/<VOTRE_DOMAINE>` :
 
 ```nginx
 server {
     listen 80;
-    server_name prospectlab.danielcraft.fr;
+    server_name <VOTRE_DOMAINE>;
 
     location / {
-        proxy_pass http://node15.lan:5000;
+        proxy_pass http://<SERVEUR_APP>:5000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -268,10 +268,10 @@ server {
 
 server {
     listen 80;
-    server_name campaigns.danielcraft.fr;
+    server_name <AUTRE_DOMAINE_OPTIONNEL>;
 
     location / {
-        proxy_pass http://node15.lan:5000;
+        proxy_pass http://<SERVEUR_APP>:5000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -296,7 +296,7 @@ sudo sed -i '/^http {/a\    server_names_hash_bucket_size 128;' /etc/nginx/nginx
 Activer le site :
 
 ```bash
-sudo ln -sf /etc/nginx/sites-available/prospectlab.danielcraft.fr /etc/nginx/sites-enabled/
+sudo ln -sf /etc/nginx/sites-available/<VOTRE_DOMAINE> /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl reload nginx
 ```
@@ -313,8 +313,8 @@ Obtenir les certificats SSL :
 
 ```bash
 sudo certbot --nginx \
-    -d prospectlab.danielcraft.fr \
-    -d campaigns.danielcraft.fr \
+    -d <VOTRE_DOMAINE> \
+    -d <AUTRE_DOMAINE_OPTIONNEL> \
     --non-interactive \
     --agree-tos \
     --email ton-email@example.com \
@@ -337,7 +337,7 @@ sudo systemctl status certbot.timer
 
 ### 4.1. Vérification des services
 
-Sur node15.lan :
+Sur <SERVEUR_APP> :
 
 ```bash
 # Vérifier les services
@@ -352,18 +352,18 @@ curl http://localhost:5000
 
 ### 4.2. Vérification du reverse proxy
 
-Sur node12.lan :
+Sur <SERVEUR_PROXY> :
 
 ```bash
 # Tester Nginx
 sudo nginx -t
 sudo systemctl status nginx
 
-# Tester la connexion vers node15.lan (depuis le LAN / VPN)
-curl http://node15.lan:5000
+# Tester la connexion vers <SERVEUR_APP> (depuis le LAN / VPN)
+curl http://<SERVEUR_APP>:5000
 
 # Tester HTTPS
-curl -I https://prospectlab.danielcraft.fr
+curl -I https://<VOTRE_DOMAINE>
 ```
 
 ### 4.3. Vérification des logs
@@ -496,22 +496,22 @@ sudo nginx -t
 sudo tail -f /var/log/nginx/error.log
 
 # Vérifier la résolution DNS
-ping node15.lan
+ping <SERVEUR_APP>
 ```
 
 ## Résumé de l'architecture finale
 
 - **URLs publiques** :
-  - `https://prospectlab.danielcraft.fr`
-  - `https://campaigns.danielcraft.fr`
+  - `https://<VOTRE_DOMAINE>`
+  - `https://<AUTRE_DOMAINE_OPTIONNEL>`
 
 - **Services actifs** :
-  - ProspectLab (Gunicorn + Flask) sur node15.lan:5000
-  - Celery Worker (6 workers) sur node15.lan
-  - Celery Beat (planificateur) sur node15.lan
-  - PostgreSQL sur node15.lan:5432
-  - Redis sur node15.lan:6379
-  - Nginx (reverse proxy) sur node12.lan
+  - ProspectLab (Gunicorn + Flask) sur <SERVEUR_APP>:5000
+  - Celery Worker (6 workers) sur <SERVEUR_APP>
+  - Celery Beat (planificateur) sur <SERVEUR_APP>
+  - PostgreSQL sur <SERVEUR_APP>:5432
+  - Redis sur <SERVEUR_APP>:6379
+  - Nginx (reverse proxy) sur <SERVEUR_PROXY>
 
 - **Sécurité** :
   - Certificats SSL Let's Encrypt

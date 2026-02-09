@@ -74,6 +74,7 @@ class ScraperManager(DatabaseBase):
         ''', (entreprise_id, url, scraper_type))
         
         existing = cursor.fetchone()
+        logger.debug(f'save_scraper: db_type={self.db_type}, entreprise_id={entreprise_id}, existing={existing is not None}')
         
         if existing:
             # UPDATE: mettre à jour le scraper existant
@@ -109,20 +110,41 @@ class ScraperManager(DatabaseBase):
             ))
         else:
             # INSERT: créer un nouveau scraper
-            self.execute_sql(cursor,'''
-                INSERT INTO scrapers (
-                    entreprise_id, url, scraper_type, emails, people, phones, social_profiles, 
-                    technologies, metadata, visited_urls, total_emails, total_people, total_phones,
-                    total_social_profiles, total_technologies, total_metadata, total_images, total_forms, duration,
-                    date_creation, date_modification
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            ''', (
-                entreprise_id, url, scraper_type, emails_json, people_json, phones_json, 
-                social_json, tech_json, metadata_json, visited_urls, total_emails, total_people,
-                total_phones, total_social_profiles, total_technologies, total_metadata, total_images, total_forms, duration
-            ))
-            scraper_id = cursor.lastrowid
+            # PostgreSQL : lastrowid n'existe pas, on utilise RETURNING id
+            if self.is_postgresql():
+                self.execute_sql(cursor,'''
+                    INSERT INTO scrapers (
+                        entreprise_id, url, scraper_type, emails, people, phones, social_profiles,
+                        technologies, metadata, visited_urls, total_emails, total_people, total_phones,
+                        total_social_profiles, total_technologies, total_metadata, total_images, total_forms, duration,
+                        date_creation, date_modification
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    RETURNING id
+                ''', (
+                    entreprise_id, url, scraper_type, emails_json, people_json, phones_json,
+                    social_json, tech_json, metadata_json, visited_urls, total_emails, total_people,
+                    total_phones, total_social_profiles, total_technologies, total_metadata, total_images, total_forms, duration
+                ))
+                result = cursor.fetchone()
+                scraper_id = result.get('id') if isinstance(result, dict) else (result[0] if result else None)
+            else:
+                self.execute_sql(cursor,'''
+                    INSERT INTO scrapers (
+                        entreprise_id, url, scraper_type, emails, people, phones, social_profiles,
+                        technologies, metadata, visited_urls, total_emails, total_people, total_phones,
+                        total_social_profiles, total_technologies, total_metadata, total_images, total_forms, duration,
+                        date_creation, date_modification
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ''', (
+                    entreprise_id, url, scraper_type, emails_json, people_json, phones_json,
+                    social_json, tech_json, metadata_json, visited_urls, total_emails, total_people,
+                    total_phones, total_social_profiles, total_technologies, total_metadata, total_images, total_forms, duration
+                ))
+                scraper_id = cursor.lastrowid
+        
+        logger.debug(f'save_scraper: scraper_id={scraper_id}, total_images={total_images}, nb_images_list={len(images) if images else 0}')
         
         # Sauvegarder les données normalisées dans les tables séparées (au lieu de JSON)
         try:
@@ -152,6 +174,15 @@ class ScraperManager(DatabaseBase):
         
         conn.commit()
         conn.close()
+        
+        # Recalculer l'opportunité après le scraping (si données importantes trouvées)
+        if entreprise_id and (emails or people or phones):
+            try:
+                from services.database.entreprises import EntrepriseManager
+                entreprise_manager = EntrepriseManager()
+                entreprise_manager.update_opportunity_score(entreprise_id)
+            except Exception as e:
+                logger.warning(f'Erreur lors du recalcul de l\'opportunité après scraping: {e}')
         
         return scraper_id
     
@@ -776,17 +807,23 @@ class ScraperManager(DatabaseBase):
     
     def get_images_by_entreprise(self, entreprise_id):
         """
-        Récupère toutes les images d'une entreprise (depuis le scraper le plus récent)
+        Récupère toutes les images d'une entreprise depuis toutes les sources disponibles :
+        - Table images (scrapées)
+        - Table entreprise_og_images (OpenGraph)
+        - Champs og_image, logo, favicon de la table entreprises
         
         Args:
             entreprise_id: ID de l'entreprise
-        
+            
         Returns:
-            list: Liste des images
+            list: Liste des images avec leurs métadonnées
         """
         conn = self.get_connection()
         cursor = conn.cursor()
         
+        images = []
+        
+        # 1. Récupérer les images depuis la table images (scrapées)
         self.execute_sql(cursor,'''
             SELECT id, entreprise_id, scraper_id, url, alt_text, page_url, width, height, date_found
             FROM images
@@ -795,9 +832,67 @@ class ScraperManager(DatabaseBase):
         ''', (entreprise_id,))
         
         rows = cursor.fetchall()
+        for row in rows:
+            img = self.clean_row_dict(dict(row))
+            images.append(img)
+        
+        # 2. Récupérer les images depuis entreprise_og_images (OpenGraph)
+        self.execute_sql(cursor,'''
+            SELECT image_url as url, alt_text, secure_url, image_type, width, height
+            FROM entreprise_og_images
+            WHERE entreprise_id = ?
+            ORDER BY id DESC
+        ''', (entreprise_id,))
+        
+        og_rows = cursor.fetchall()
+        for row in og_rows:
+            img = self.clean_row_dict(dict(row))
+            # S'assurer que l'URL est complète
+            if img.get('url'):
+                images.append(img)
+        
+        # 3. Récupérer les images depuis les champs de la table entreprises
+        self.execute_sql(cursor,'''
+            SELECT og_image, logo, favicon
+            FROM entreprises
+            WHERE id = ?
+        ''', (entreprise_id,))
+        
+        entreprise_row = cursor.fetchone()
+        if entreprise_row:
+            entreprise_data = self.clean_row_dict(dict(entreprise_row))
+            
+            if entreprise_data.get('og_image'):
+                images.append({
+                    'url': entreprise_data['og_image'],
+                    'alt_text': 'Image OpenGraph',
+                    'source': 'og_image'
+                })
+            if entreprise_data.get('logo'):
+                images.append({
+                    'url': entreprise_data['logo'],
+                    'alt_text': 'Logo',
+                    'source': 'logo'
+                })
+            if entreprise_data.get('favicon'):
+                images.append({
+                    'url': entreprise_data['favicon'],
+                    'alt_text': 'Favicon',
+                    'source': 'favicon'
+                })
+        
         conn.close()
         
-        return [dict(row) for row in rows]
+        # Supprimer les doublons basés sur l'URL
+        seen_urls = set()
+        unique_images = []
+        for img in images:
+            url = img.get('url')
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                unique_images.append(img)
+        
+        return unique_images
     
     def get_scrapers_by_entreprise(self, entreprise_id):
         """

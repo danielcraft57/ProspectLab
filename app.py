@@ -9,6 +9,7 @@ Architecture modulaire avec :
 """
 
 from flask import Flask, request, render_template
+from flask.json.provider import DefaultJSONProvider
 from flask_socketio import SocketIO
 import ipaddress
 import os
@@ -16,6 +17,8 @@ import sys
 from pathlib import Path
 import logging
 from logging.handlers import RotatingFileHandler
+import math
+import json
 
 # Ajouter le répertoire au path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -33,8 +36,25 @@ from celery_app import make_celery
 from services.logging_config import setup_root_logger
 import logging
 
+# JSON encoder personnalisé pour gérer les NaN et Infinity
+class SafeJSONProvider(DefaultJSONProvider):
+    """JSON provider qui convertit automatiquement NaN et Infinity en null"""
+    def dumps(self, obj, **kwargs):
+        """Nettoie les NaN avant la sérialisation JSON"""
+        from utils.helpers import clean_json_dict
+        cleaned_obj = clean_json_dict(obj)
+        return super().dumps(cleaned_obj, **kwargs)
+    
+    def default(self, obj):
+        """Gère les objets non sérialisables"""
+        if isinstance(obj, float):
+            if math.isnan(obj) or math.isinf(obj):
+                return None
+        return super().default(obj)
+
 # Créer l'application Flask
 app = Flask(__name__)
+app.json = SafeJSONProvider(app)
 app.config['UPLOAD_FOLDER'] = str(UPLOAD_FOLDER)
 app.config['EXPORT_FOLDER'] = str(EXPORT_FOLDER)
 app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH

@@ -138,7 +138,19 @@
                     : entreprise.resume;
             }
             
-            const mainImage = entreprise.og_image || entreprise.logo || entreprise.favicon || null;
+            // Chercher l'image principale : og_image, logo, favicon, ou première image OG
+            let mainImage = entreprise.og_image || entreprise.logo || entreprise.favicon || null;
+            
+            // Si pas d'image principale, essayer de récupérer depuis og_data
+            if (!mainImage && entreprise.og_data) {
+                const ogDataList = Array.isArray(entreprise.og_data) ? entreprise.og_data : [entreprise.og_data];
+                for (const ogData of ogDataList) {
+                    if (ogData && ogData.images && ogData.images.length > 0 && ogData.images[0].image_url) {
+                        mainImage = ogData.images[0].image_url;
+                        break;
+                    }
+                }
+            }
             
             return `
                 <div class="entreprise-card" data-id="${entreprise.id}">
@@ -415,15 +427,32 @@
             }
         }
         
+        function updateModalTabCount(tabKey, count) {
+            const btn = document.querySelector(`.tab-btn[data-tab="${tabKey}"]`);
+            if (!btn) return;
+            const labels = { images: 'Images', pages: 'Pages' };
+            btn.textContent = (labels[tabKey] || tabKey) + ' (' + (count || 0) + ')';
+        }
+        
         function createModalContent(entreprise) {
             const tags = entreprise.tags || [];
-            
+            const nbPages = (entreprise.pages_count != null && entreprise.pages_count !== '') ? Number(entreprise.pages_count) : (() => {
+                const ogDataList = Array.isArray(entreprise.og_data) ? entreprise.og_data : (entreprise.og_data ? [entreprise.og_data] : []);
+                return ogDataList.length;
+            })();
+            const nbImages = (entreprise.images_count != null && entreprise.images_count !== '') ? Number(entreprise.images_count) : (() => {
+                let n = (entreprise.og_image ? 1 : 0) + (entreprise.logo ? 1 : 0) + (entreprise.favicon ? 1 : 0);
+                const ogDataList = Array.isArray(entreprise.og_data) ? entreprise.og_data : (entreprise.og_data ? [entreprise.og_data] : []);
+                ogDataList.forEach(og => { if (og && og.images && og.images.length) n += og.images.length; });
+                return n;
+            })();
+
             return `
                 <div class="entreprise-modal-tabs">
                     <div class="tabs-header">
                         <button class="tab-btn active" data-tab="info">Info</button>
-                        <button class="tab-btn" data-tab="images">Images</button>
-                        <button class="tab-btn" data-tab="pages">Pages</button>
+                        <button class="tab-btn" data-tab="images">Images (${nbImages})</button>
+                        <button class="tab-btn" data-tab="pages">Pages (${nbPages})</button>
                         <button class="tab-btn" data-tab="scraping">Résultats scraping</button>
                         <button class="tab-btn" data-tab="technique">Analyse technique</button>
                         <button class="tab-btn" data-tab="osint">Analyse OSINT</button>
@@ -432,32 +461,49 @@
                     
                     <div class="tabs-content">
                         <div class="tab-panel active" id="tab-info">
-                            ${(entreprise.og_image || entreprise.logo || entreprise.favicon) ? `
-                            <div class="detail-section" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 2rem; border-radius: 8px;">
-                                <div style="text-align: center;">
-                                    <div style="display: flex; align-items: center; justify-content: center; gap: 2rem; flex-wrap: wrap;">
-                                        ${entreprise.og_image ? `
-                                        <div style="flex: 1; min-width: 200px;">
-                                            <h4 style="color: white; margin: 0 0 1rem 0; font-size: 0.9rem; text-transform: uppercase; opacity: 0.9;">Image OpenGraph</h4>
-                                            <img src="${entreprise.og_image}" alt="Image OpenGraph" style="max-width: 100%; max-height: 300px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); background: white; padding: 0.5rem;" onerror="this.style.display='none'">
-                                        </div>
-                                        ` : ''}
-                                        ${entreprise.logo ? `
-                                        <div style="flex: 1; min-width: 150px;">
-                                            <h4 style="color: white; margin: 0 0 1rem 0; font-size: 0.9rem; text-transform: uppercase; opacity: 0.9;">Logo</h4>
-                                            <img src="${entreprise.logo}" alt="Logo" style="max-width: 100%; max-height: 150px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); background: white; padding: 0.5rem;" onerror="this.style.display='none'">
-                                        </div>
-                                        ` : ''}
-                                        ${entreprise.favicon ? `
-                                        <div style="flex: 1; min-width: 100px;">
-                                            <h4 style="color: white; margin: 0 0 1rem 0; font-size: 0.9rem; text-transform: uppercase; opacity: 0.9;">Favicon</h4>
-                                            <img src="${entreprise.favicon}" alt="Favicon" style="max-width: 64px; max-height: 64px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); background: white; padding: 0.5rem;" onerror="this.style.display='none'">
-                                        </div>
-                                        ` : ''}
-                                    </div>
-                                </div>
-                            </div>
-                            ` : ''}
+                            ${(function() {
+                                // Récupérer toutes les images disponibles
+                                const imagesToShow = [];
+                                
+                                if (entreprise.og_image) {
+                                    imagesToShow.push({url: entreprise.og_image, type: 'Image OpenGraph'});
+                                }
+                                if (entreprise.logo) {
+                                    imagesToShow.push({url: entreprise.logo, type: 'Logo'});
+                                }
+                                if (entreprise.favicon) {
+                                    imagesToShow.push({url: entreprise.favicon, type: 'Favicon'});
+                                }
+                                
+                                // Ajouter les images depuis og_data
+                                if (entreprise.og_data) {
+                                    const ogDataList = Array.isArray(entreprise.og_data) ? entreprise.og_data : [entreprise.og_data];
+                                    ogDataList.forEach(ogData => {
+                                        if (ogData && ogData.images && Array.isArray(ogData.images)) {
+                                            ogData.images.forEach(img => {
+                                                if (img && img.image_url && !imagesToShow.find(i => i.url === img.image_url)) {
+                                                    imagesToShow.push({url: img.image_url, type: 'Image OpenGraph', alt: img.alt_text});
+                                                }
+                                            });
+                                        }
+                                    });
+                                }
+                                
+                                if (imagesToShow.length === 0) return '';
+                                
+                                let html = '<div class="detail-section" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 2rem; border-radius: 8px;"><div style="text-align: center;"><div style="display: flex; align-items: center; justify-content: center; gap: 2rem; flex-wrap: wrap;">';
+                                
+                                imagesToShow.forEach(img => {
+                                    const maxHeight = img.type === 'Favicon' ? '64px' : img.type === 'Logo' ? '150px' : '300px';
+                                    html += `<div style="flex: 1; min-width: ${img.type === 'Favicon' ? '100px' : img.type === 'Logo' ? '150px' : '200px'};">
+                                        <h4 style="color: white; margin: 0 0 1rem 0; font-size: 0.9rem; text-transform: uppercase; opacity: 0.9;">${Formatters.escapeHtml(img.type)}</h4>
+                                        <img src="${Formatters.escapeHtml(img.url)}" alt="${Formatters.escapeHtml(img.alt || img.type)}" style="max-width: 100%; max-height: ${maxHeight}; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); background: white; padding: 0.5rem;" onerror="this.style.display='none'">
+                                    </div>`;
+                                });
+                                
+                                html += '</div></div></div>';
+                                return html;
+                            })()}
                             ${entreprise.resume ? `
                             <div class="detail-section" style="margin-bottom: 1.5rem; background: #f8f9fa; padding: 1.5rem; border-radius: 8px; border-left: 4px solid #667eea;">
                                 <h3 style="margin: 0 0 0.75rem 0; color: #2c3e50; font-size: 1.1rem;"><i class="fas fa-file-alt"></i> Résumé de l'entreprise</h3>
@@ -1089,9 +1135,11 @@
                     
                     if (!images || images.length === 0) {
                         container.innerHTML = '<p class="empty-state">Aucune image trouvée pour ce site.</p>';
+                        updateModalTabCount('images', 0);
                         return;
                     }
                     
+                    updateModalTabCount('images', images.length);
                     const maxImages = 60;
                     const limited = images.slice(0, maxImages);
                     let html = '<div class="entreprise-images-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px;">';

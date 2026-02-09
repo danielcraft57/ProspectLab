@@ -11,6 +11,13 @@ from .base import DatabaseBase
 
 logger = logging.getLogger(__name__)
 
+# Importer le calculateur d'opportunité
+try:
+    from services.opportunity_calculator import OpportunityCalculator
+except ImportError:
+    OpportunityCalculator = None
+    logger.warning('OpportunityCalculator non disponible')
+
 
 class EntrepriseManager(DatabaseBase):
     """
@@ -242,6 +249,17 @@ class EntrepriseManager(DatabaseBase):
         conn.commit()
         conn.close()
         
+        # Calculer et mettre à jour l'opportunité si le calculateur est disponible
+        # (fait après le commit pour éviter les problèmes de transaction)
+        if OpportunityCalculator:
+            try:
+                # Attendre un peu pour s'assurer que les données sont bien sauvegardées
+                import time
+                time.sleep(0.1)
+                self.update_opportunity_score(entreprise_id)
+            except Exception as e:
+                logger.warning(f'Erreur lors du calcul initial de l\'opportunité pour entreprise {entreprise_id}: {e}')
+        
         return entreprise_id
     
     def _save_og_data_in_transaction(self, cursor, entreprise_id, og_tags, page_url=None):
@@ -272,18 +290,34 @@ class EntrepriseManager(DatabaseBase):
         else:
             self.execute_sql(cursor, 'DELETE FROM entreprise_og_data WHERE entreprise_id = ? AND page_url IS NULL', (entreprise_id,))
         
-        # Insérer les données principales
-        self.execute_sql(cursor, '''
-            INSERT INTO entreprise_og_data (
+        # Insérer les données principales (PostgreSQL : RETURNING id car lastrowid n'existe pas)
+        if self.is_postgresql():
+            self.execute_sql(cursor, '''
+                INSERT INTO entreprise_og_data (
+                    entreprise_id, page_url, og_title, og_type, og_url, og_description,
+                    og_determiner, og_locale, og_site_name, og_audio, og_video
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                RETURNING id
+            ''', (
                 entreprise_id, page_url, og_title, og_type, og_url, og_description,
                 og_determiner, og_locale, og_site_name, og_audio, og_video
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            entreprise_id, page_url, og_title, og_type, og_url, og_description,
-            og_determiner, og_locale, og_site_name, og_audio, og_video
-        ))
+            ))
+            result = cursor.fetchone()
+            og_data_id = result.get('id') if isinstance(result, dict) else (result[0] if result else None)
+        else:
+            self.execute_sql(cursor, '''
+                INSERT INTO entreprise_og_data (
+                    entreprise_id, page_url, og_title, og_type, og_url, og_description,
+                    og_determiner, og_locale, og_site_name, og_audio, og_video
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                entreprise_id, page_url, og_title, og_type, og_url, og_description,
+                og_determiner, og_locale, og_site_name, og_audio, og_video
+            ))
+            og_data_id = cursor.lastrowid
         
-        og_data_id = cursor.lastrowid
+        if not og_data_id:
+            return
         
         # Traiter les images
         images = []
@@ -468,13 +502,13 @@ class EntrepriseManager(DatabaseBase):
             
             # Récupérer les images, vidéos, audios, locales pour cet OG
             self.execute_sql(cursor,'SELECT * FROM entreprise_og_images WHERE og_data_id = ? ORDER BY id', (og_data_id,))
-            og_data['images'] = [dict(row) for row in cursor.fetchall()]
+            og_data['images'] = [self.clean_row_dict(dict(row)) for row in cursor.fetchall()]
             
             self.execute_sql(cursor,'SELECT * FROM entreprise_og_videos WHERE og_data_id = ? ORDER BY id', (og_data_id,))
-            og_data['videos'] = [dict(row) for row in cursor.fetchall()]
+            og_data['videos'] = [self.clean_row_dict(dict(row)) for row in cursor.fetchall()]
             
             self.execute_sql(cursor,'SELECT * FROM entreprise_og_audios WHERE og_data_id = ? ORDER BY id', (og_data_id,))
-            og_data['audios'] = [dict(row) for row in cursor.fetchall()]
+            og_data['audios'] = [self.clean_row_dict(dict(row)) for row in cursor.fetchall()]
             
             self.execute_sql(cursor,'SELECT locale FROM entreprise_og_locales WHERE og_data_id = ? ORDER BY locale', (og_data_id,))
             og_data['locales_alternate'] = [row[0] for row in cursor.fetchall()]
@@ -490,13 +524,13 @@ class EntrepriseManager(DatabaseBase):
             
             # Récupérer les images, vidéos, audios, locales pour cet OG
             self.execute_sql(cursor,'SELECT * FROM entreprise_og_images WHERE og_data_id = ? ORDER BY id', (og_data_id,))
-            og_data['images'] = [dict(row) for row in cursor.fetchall()]
+            og_data['images'] = [self.clean_row_dict(dict(row)) for row in cursor.fetchall()]
             
             self.execute_sql(cursor,'SELECT * FROM entreprise_og_videos WHERE og_data_id = ? ORDER BY id', (og_data_id,))
-            og_data['videos'] = [dict(row) for row in cursor.fetchall()]
+            og_data['videos'] = [self.clean_row_dict(dict(row)) for row in cursor.fetchall()]
             
             self.execute_sql(cursor,'SELECT * FROM entreprise_og_audios WHERE og_data_id = ? ORDER BY id', (og_data_id,))
-            og_data['audios'] = [dict(row) for row in cursor.fetchall()]
+            og_data['audios'] = [self.clean_row_dict(dict(row)) for row in cursor.fetchall()]
             
             self.execute_sql(cursor,'SELECT locale FROM entreprise_og_locales WHERE og_data_id = ? ORDER BY locale', (og_data_id,))
             og_data['locales_alternate'] = [row[0] for row in cursor.fetchall()]
@@ -569,10 +603,14 @@ class EntrepriseManager(DatabaseBase):
         rows = cursor.fetchall()
         conn.close()
         
+        # Importer la fonction de nettoyage depuis les utils
+        from utils.helpers import clean_json_dict
+        
         # Parser les tags et charger les données OpenGraph pour chaque entreprise
         entreprises = []
         for row in rows:
-            entreprise = dict(row)
+            entreprise = self.clean_row_dict(dict(row))
+            
             if entreprise.get('tags'):
                 try:
                     entreprise['tags'] = json.loads(entreprise['tags']) if isinstance(entreprise['tags'], str) else entreprise['tags']
@@ -585,6 +623,9 @@ class EntrepriseManager(DatabaseBase):
             entreprise['og_data'] = self.get_og_data(entreprise['id'])
             
             entreprises.append(entreprise)
+        
+        # Nettoyer toutes les entreprises en une seule fois (double sécurité)
+        entreprises = clean_json_dict(entreprises)
         
         return entreprises
     
@@ -619,7 +660,7 @@ class EntrepriseManager(DatabaseBase):
             conn.close()
             return None
         
-        entreprise = dict(row)
+        entreprise = self.clean_row_dict(dict(row))
         
         # Parser les tags
         if entreprise.get('tags'):
@@ -632,9 +673,66 @@ class EntrepriseManager(DatabaseBase):
         
         # Charger les données OpenGraph
         entreprise['og_data'] = self.get_og_data(entreprise_id)
+        # Compteurs pour la modale (images = toutes sources, pages = nb d'OG)
+        og_data = entreprise['og_data']
+        entreprise['pages_count'] = len(og_data) if isinstance(og_data, list) else (1 if og_data else 0)
+        try:
+            images_list = self.get_images_by_entreprise(entreprise_id)
+            entreprise['images_count'] = len(images_list) if images_list else 0
+        except Exception:
+            entreprise['images_count'] = 0
+        
+        # Nettoyer les valeurs NaN avant de retourner (double sécurité)
+        from utils.helpers import clean_json_dict
+        entreprise = clean_json_dict(entreprise)
         
         conn.close()
         return entreprise
+    
+    def update_opportunity_score(self, entreprise_id):
+        """
+        Met à jour le score d'opportunité d'une entreprise en utilisant toutes les analyses disponibles
+        
+        Args:
+            entreprise_id: ID de l'entreprise
+            
+        Returns:
+            dict: Résultat du calcul d'opportunité ou None si erreur
+        """
+        if not OpportunityCalculator:
+            logger.warning('OpportunityCalculator non disponible, impossible de calculer l\'opportunité')
+            return None
+        
+        try:
+            # Récupérer les données de l'entreprise
+            entreprise = self.get_entreprise(entreprise_id)
+            if not entreprise:
+                logger.warning(f'Entreprise {entreprise_id} introuvable')
+                return None
+            
+            # Calculer le score d'opportunité
+            # Passer self qui hérite de tous les managers nécessaires
+            calculator = OpportunityCalculator(database=self)
+            opportunity_result = calculator.calculate_opportunity_from_entreprise(entreprise)
+            
+            # Mettre à jour l'opportunité dans la base de données
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            
+            self.execute_sql(cursor,
+                'UPDATE entreprises SET opportunite = ? WHERE id = ?',
+                (opportunity_result['opportunity'], entreprise_id)
+            )
+            
+            conn.commit()
+            conn.close()
+            
+            logger.info(f'Opportunité mise à jour pour entreprise {entreprise_id}: {opportunity_result["opportunity"]} (score: {opportunity_result["score"]})')
+            
+            return opportunity_result
+        except Exception as e:
+            logger.error(f'Erreur lors du calcul de l\'opportunité pour entreprise {entreprise_id}: {e}', exc_info=True)
+            return None
     
     def update_entreprise_tags(self, entreprise_id, tags):
         """
@@ -969,4 +1067,10 @@ class EntrepriseManager(DatabaseBase):
                 'entreprise_id': row['entreprise_id']
             })
 
-        return list(entreprises_dict.values())
+        result = list(entreprises_dict.values())
+        
+        # Nettoyer les valeurs NaN pour la sérialisation JSON
+        from utils.helpers import clean_json_dict
+        result = clean_json_dict(result)
+        
+        return result

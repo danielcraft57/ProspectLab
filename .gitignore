@@ -49,6 +49,8 @@ instance/
 logs/*.log
 logs/*.log.*
 *.log
+logs_analysis/
+logs_server/
 
 # Uploads et exports
 uploads/*

@@ -45,6 +45,10 @@ def get_entreprises():
         
         entreprises = database.get_entreprises(filters=filters if filters else None, limit=limit, offset=offset)
         
+        # Nettoyer les valeurs NaN pour la sérialisation JSON
+        from utils.helpers import clean_json_dict
+        entreprises = clean_json_dict(entreprises)
+        
         return jsonify({
             'success': True,
             'count': len(entreprises),
@@ -79,6 +83,10 @@ def get_entreprise(entreprise_id):
                 'success': False,
                 'error': 'Entreprise introuvable'
             }), 404
+        
+        # Nettoyer les valeurs NaN pour la sérialisation JSON
+        from utils.helpers import clean_json_dict
+        entreprise = clean_json_dict(entreprise)
         
         return jsonify({
             'success': True,

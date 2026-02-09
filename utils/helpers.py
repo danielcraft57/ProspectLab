@@ -3,6 +3,7 @@ Fonctions utilitaires pour ProspectLab
 """
 
 import os
+import math
 from werkzeug.utils import secure_filename
 from config import ALLOWED_EXTENSIONS
 
@@ -84,4 +85,55 @@ def get_file_path(upload_folder, filename):
         '/uploads/test.xlsx'
     """
     return os.path.join(upload_folder, secure_filename(filename))
+
+
+def clean_json_value(value):
+    """
+    Convertit les valeurs NaN et Infinity en None pour la sérialisation JSON
+    
+    Args:
+        value: Valeur à nettoyer (peut être de n'importe quel type)
+        
+    Returns:
+        Valeur nettoyée (None si NaN ou Infinity, sinon valeur originale)
+        
+    Example:
+        >>> import math
+        >>> clean_json_value(math.nan)
+        None
+        >>> clean_json_value(5.0)
+        5.0
+        >>> clean_json_value({'key': math.nan})
+        {'key': None}
+    """
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            return None
+    return value
+
+
+def clean_json_dict(data):
+    """
+    Nettoie récursivement un dictionnaire ou une liste des valeurs NaN et Infinity
+    pour la sérialisation JSON
+    
+    Args:
+        data: Données à nettoyer (dict, list, ou valeur simple)
+        
+    Returns:
+        Données nettoyées avec NaN/Infinity remplacés par None
+        
+    Example:
+        >>> import math
+        >>> clean_json_dict({'note': math.nan, 'score': 5.0})
+        {'note': None, 'score': 5.0}
+        >>> clean_json_dict([{'a': math.nan}, {'b': 10}])
+        [{'a': None}, {'b': 10}]
+    """
+    if isinstance(data, dict):
+        return {k: clean_json_dict(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [clean_json_dict(item) for item in data]
+    else:
+        return clean_json_value(data)
 

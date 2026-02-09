@@ -313,7 +313,21 @@ def analyze_entreprise_task(self, filepath, output_path, max_workers=4, delay=0.
         database.execute_sql(cursor, 'SELECT id FROM entreprises')
         rows = cursor.fetchall()
         # Gérer les dictionnaires PostgreSQL et les tuples SQLite
-        analyzer.existing_ids_before = {row['id'] if isinstance(row, dict) else row[0] for row in rows}
+        # Récupérer les IDs existants en gérant les différents formats (dict ou tuple)
+        analyzer.existing_ids_before = set()
+        for row in rows:
+            try:
+                if isinstance(row, dict):
+                    if 'id' in row:
+                        analyzer.existing_ids_before.add(row['id'])
+                elif isinstance(row, (list, tuple)) and len(row) > 0:
+                    # Si c'est un tuple/liste, prendre le premier élément (généralement l'ID)
+                    analyzer.existing_ids_before.add(row[0])
+                else:
+                    logger.warning(f'Format de row inattendu pour existing_ids_before: {type(row)}')
+            except (KeyError, IndexError, TypeError) as e:
+                logger.warning(f'Erreur lors de l\'extraction de l\'ID depuis row: {e}, row type: {type(row)}')
+                continue
         conn.close()
         logger.info(f'{len(analyzer.existing_ids_before)} entreprises déjà présentes avant analyse')
         

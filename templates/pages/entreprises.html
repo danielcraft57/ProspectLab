@@ -40,9 +40,11 @@
                 <label for="filter-opportunite">Opportunité</label>
                 <select id="filter-opportunite" class="form-select">
                     <option value="">Toutes les opportunités</option>
+                    <option value="Très élevée">Très élevée</option>
                     <option value="Élevée">Élevée</option>
                     <option value="Moyenne">Moyenne</option>
                     <option value="Faible">Faible</option>
+                    <option value="Très faible">Très faible</option>
                 </select>
             </div>
             
@@ -110,6 +112,6 @@
 <script src="{{ url_for('static', filename='js/modules/analyses/pentest.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/analyses/scraping.js') }}"></script>
 <!-- Script principal (chargement différé) -->
-<script src="{{ url_for('static', filename='js/entreprises.refactored.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/entreprises.refactored.js') }}?v=5" defer></script>
 {% endblock %}
 

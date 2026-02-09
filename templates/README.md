@@ -113,15 +113,11 @@ Pour les bibliothèques externes (Chart.js, Leaflet, etc.), chargez-les uniqueme
 {% endblock %}
 ```
 
-## Migration depuis l'ancienne structure
+## Où sont les pages
 
-Les anciens templates à la racine de `templates/` fonctionnent toujours. La migration vers `pages/` est progressive et optionnelle.
+Les pages principales sont dans `pages/`. Le helper `render_page('nom.html')` charge d’abord `pages/nom.html`, puis en secours le fichier à la racine. Les doublons à la racine ont été supprimés : une seule source par page dans `pages/`.
 
-Pour migrer un template :
-1. Déplacer le fichier vers `pages/`
-2. Remplacer les patterns répétitifs par des composants
-3. Utiliser les partials pour les parties communes
-4. Mettre à jour la route correspondante dans `routes/`
+À la racine de `templates/` restent : `base.html`, `error.html`, `home.html`, `index.html`, `login.html`, `api_tokens.html`, `campagnes.html`, `restricted.html`, plus `components/` et `partials/`.
 
 ## Bonnes pratiques
 

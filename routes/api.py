@@ -83,6 +83,10 @@ def entreprises():
             analyse_id=analyse_id, 
             filters=filters if filters else None
         )
+        
+        # Nettoyer les valeurs NaN pour la sérialisation JSON (double sécurité)
+        from utils.helpers import clean_json_dict
+        entreprises_list = clean_json_dict(entreprises_list)
         return jsonify(entreprises_list)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -138,7 +142,9 @@ def entreprise_detail(entreprise_id):
         row = cursor.fetchone()
         
         if row:
-            entreprise = dict(row)
+            # Utiliser clean_row_dict pour nettoyer les NaN dès la conversion
+            entreprise = database.clean_row_dict(dict(row))
+            
             # Parser les tags si c'est une string JSON
             if entreprise.get('tags'):
                 try:
@@ -157,6 +163,10 @@ def entreprise_detail(entreprise_id):
                 logging.getLogger(__name__).warning(f'Erreur lors du chargement des données OG pour entreprise {entreprise_id}: {og_error}')
                 entreprise['og_data'] = None
             
+            # Nettoyer les valeurs NaN pour la sérialisation JSON (double sécurité)
+            from utils.helpers import clean_json_dict
+            entreprise = clean_json_dict(entreprise)
+            
             conn.close()
             return jsonify(entreprise)
         else:
@@ -166,6 +176,37 @@ def entreprise_detail(entreprise_id):
         import logging
         import traceback
         logging.getLogger(__name__).error(f'Erreur dans entreprise_detail pour entreprise {entreprise_id}: {e}\n{traceback.format_exc()}')
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/entreprise/<int:entreprise_id>/recalculate-opportunity', methods=['POST'])
+@login_required
+def recalculate_opportunity(entreprise_id):
+    """
+    API: Recalcule le score d'opportunité d'une entreprise
+    
+    Args:
+        entreprise_id (int): ID de l'entreprise
+        
+    Returns:
+        JSON: Résultat du calcul avec breakdown détaillé
+    """
+    try:
+        result = database.update_opportunity_score(entreprise_id)
+        if result:
+            return jsonify({
+                'success': True,
+                'opportunity': result['opportunity'],
+                'score': result['score'],
+                'breakdown': result['breakdown'],
+                'indicators': result['indicators']
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Impossible de calculer l\'opportunité'
+            }), 500
+    except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 
