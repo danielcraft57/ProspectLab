@@ -162,14 +162,21 @@ echo "✅ Répertoires créés"
 echo ""
 
 # Ajouter les permissions d'exécution aux scripts shell
-echo "[7.5/8] Configuration des permissions des scripts..."
+echo "[7.5/9] Configuration des permissions des scripts..."
 ssh "$USER@$SERVER" "cd $REMOTE_PATH && find scripts/linux -name '*.sh' -type f -exec chmod +x {} \; 2>/dev/null || true"
 ssh "$USER@$SERVER" "cd $REMOTE_PATH && find scripts -name '*.sh' -type f -exec chmod +x {} \; 2>/dev/null || true"
 echo "✅ Permissions des scripts configurées"
 echo ""
 
+# Nettoyage du cache et redémarrage des services
+echo "[8/9] Nettoyage du cache et redémarrage des services..."
+ssh "$USER@$SERVER" "cd $REMOTE_PATH; if [ -x scripts/linux/clear-logs.sh ]; then ./scripts/linux/clear-logs.sh; fi"
+ssh "$USER@$SERVER" "sudo systemctl restart prospectlab prospectlab-celery prospectlab-celerybeat"
+echo "✅ Cache vidé et services redémarrés"
+echo ""
+
 # Instructions finales
-echo "[8/8] Déploiement terminé !"
+echo "[9/9] Déploiement terminé !"
 echo ""
 echo "Prochaines étapes:"
 echo "1. Connectez-vous au serveur de production"
@@ -177,7 +184,7 @@ echo "2. Allez dans le répertoire de déploiement"
 echo "3. Configurez le fichier .env avec vos paramètres de production"
 echo "4. Activez l'environnement virtuel: source venv/bin/activate"
 echo "5. Initialisez la base de données si nécessaire"
-echo "6. Démarrez l'application avec Gunicorn ou configurez un service systemd"
+echo "6. Démarrez l'application avec Gunicorn ou vérifiez les services systemd"
 echo ""
 echo "Pour plus d'informations, consultez:"
 echo "  docs/configuration/DEPLOIEMENT_PRODUCTION.md"

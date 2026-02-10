@@ -1009,6 +1009,123 @@ class EntrepriseManager(DatabaseBase):
         conn.close()
         return stats
     
+    def get_ciblage_suggestions(self):
+        """
+        Retourne les valeurs distinctes pour l'autocomplétion des critères de ciblage
+        (secteur, opportunité, statut, tags).
+
+        Returns:
+            dict: {"secteurs": [...], "opportunites": [...], "statuts": [...], "tags": [...]}
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        result = {"secteurs": [], "opportunites": [], "statuts": [], "tags": []}
+        try:
+            self.execute_sql(cursor, '''
+                SELECT secteur FROM entreprises
+                WHERE secteur IS NOT NULL AND secteur != ''
+                GROUP BY secteur ORDER BY secteur
+            ''')
+            result["secteurs"] = [row["secteur"] for row in cursor.fetchall()]
+        except Exception:
+            pass
+        try:
+            self.execute_sql(cursor, '''
+                SELECT opportunite FROM entreprises
+                WHERE opportunite IS NOT NULL AND opportunite != ''
+                GROUP BY opportunite ORDER BY opportunite
+            ''')
+            result["opportunites"] = [row["opportunite"] for row in cursor.fetchall()]
+        except Exception:
+            pass
+        try:
+            self.execute_sql(cursor, '''
+                SELECT statut FROM entreprises
+                WHERE statut IS NOT NULL AND statut != ''
+                GROUP BY statut ORDER BY statut
+            ''')
+            result["statuts"] = [row["statut"] for row in cursor.fetchall()]
+        except Exception:
+            pass
+        try:
+            self.execute_sql(cursor, 'SELECT tags FROM entreprises WHERE tags IS NOT NULL AND tags != ""')
+            tags_set = set()
+            for row in cursor.fetchall():
+                raw = row.get("tags")
+                if not raw:
+                    continue
+                try:
+                    parsed = json.loads(raw) if isinstance(raw, str) else raw
+                    if isinstance(parsed, list):
+                        for t in parsed:
+                            if isinstance(t, str) and t.strip():
+                                tags_set.add(t.strip())
+                except Exception:
+                    pass
+            result["tags"] = sorted(tags_set)
+        except Exception:
+            pass
+        conn.close()
+        return result
+
+    def get_ciblage_suggestions_with_counts(self):
+        """
+        Retourne les valeurs distinctes avec effectifs pour l'autocomplétion (secteur, opportunité, statut, tags).
+
+        Returns:
+            dict: {"secteurs": [{"value": str, "count": int}], ...}
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        result = {"secteurs": [], "opportunites": [], "statuts": [], "tags": []}
+        try:
+            self.execute_sql(cursor, '''
+                SELECT secteur as value, COUNT(*) as count FROM entreprises
+                WHERE secteur IS NOT NULL AND secteur != ''
+                GROUP BY secteur ORDER BY count DESC, secteur
+            ''')
+            result["secteurs"] = [{"value": row["value"], "count": row["count"]} for row in cursor.fetchall()]
+        except Exception:
+            pass
+        try:
+            self.execute_sql(cursor, '''
+                SELECT opportunite as value, COUNT(*) as count FROM entreprises
+                WHERE opportunite IS NOT NULL AND opportunite != ''
+                GROUP BY opportunite ORDER BY count DESC, opportunite
+            ''')
+            result["opportunites"] = [{"value": row["value"], "count": row["count"]} for row in cursor.fetchall()]
+        except Exception:
+            pass
+        try:
+            self.execute_sql(cursor, '''
+                SELECT statut as value, COUNT(*) as count FROM entreprises
+                WHERE statut IS NOT NULL AND statut != ''
+                GROUP BY statut ORDER BY count DESC, statut
+            ''')
+            result["statuts"] = [{"value": row["value"], "count": row["count"]} for row in cursor.fetchall()]
+        except Exception:
+            pass
+        try:
+            self.execute_sql(cursor, 'SELECT tags FROM entreprises WHERE tags IS NOT NULL AND tags != ""')
+            tags_count = {}
+            for row in cursor.fetchall():
+                raw = row.get("tags")
+                if not raw:
+                    continue
+                try:
+                    parsed = json.loads(raw) if isinstance(raw, str) else raw
+                    if isinstance(parsed, list):
+                        for t in parsed:
+                            if isinstance(t, str) and t.strip():
+                                tags_count[t.strip()] = tags_count.get(t.strip(), 0) + 1
+                except Exception:
+                    pass
+            result["tags"] = [{"value": v, "count": c} for v, c in sorted(tags_count.items(), key=lambda x: (-x[1], x[0]))]
+        except Exception:
+            pass
+        conn.close()
+        return result
+
     def get_entreprises_with_emails(self):
         """
         Récupère toutes les entreprises avec leurs emails disponibles pour les campagnes.
@@ -1020,20 +1137,23 @@ class EntrepriseManager(DatabaseBase):
         # row_factory est déjà configuré dans get_connection() (SQLite) ou via RealDictCursor (PostgreSQL)
         cursor = conn.cursor()
 
-        # Récupérer les entreprises avec leurs emails depuis scraper_emails
+        # Récupérer les entreprises avec leurs emails (tri: personne en priorité, puis date)
         self.execute_sql(cursor,'''
-            SELECT DISTINCT
+            SELECT
                 e.id,
                 e.nom,
                 e.secteur,
                 se.email,
                 se.name_info as email_nom,
                 se.page_url as source,
-                se.entreprise_id
+                se.entreprise_id,
+                COALESCE(se.is_person, 0) as is_person,
+                se.domain,
+                se.date_found
             FROM entreprises e
             INNER JOIN scraper_emails se ON e.id = se.entreprise_id
             WHERE se.email IS NOT NULL AND se.email != ''
-            ORDER BY e.nom, se.email
+            ORDER BY e.nom, COALESCE(se.is_person, 0) DESC, se.date_found DESC, se.id
         ''')
 
         rows = cursor.fetchall()
@@ -1060,12 +1180,17 @@ class EntrepriseManager(DatabaseBase):
             from utils.name_formatter import format_name
             email_nom = format_name(row['email_nom'])
 
-            entreprises_dict[entreprise_id]['emails'].append({
-                'email': row['email'],
-                'nom': email_nom,
-                'source': source,
-                'entreprise_id': row['entreprise_id']
-            })
+            # Éviter les doublons (même email pour une entreprise) en gardant le premier (prioritaire)
+            emails_list = entreprises_dict[entreprise_id]['emails']
+            if not any(em['email'] == row['email'] for em in emails_list):
+                emails_list.append({
+                    'email': row['email'],
+                    'nom': email_nom,
+                    'source': source,
+                    'entreprise_id': row['entreprise_id'],
+                    'is_person': bool(row.get('is_person')),
+                    'domain': row.get('domain') or (row['email'].split('@')[-1] if row.get('email') else None)
+                })
 
         result = list(entreprises_dict.values())
         
@@ -1073,4 +1198,113 @@ class EntrepriseManager(DatabaseBase):
         from utils.helpers import clean_json_dict
         result = clean_json_dict(result)
         
+        return result
+    
+    def get_entreprises_for_campagne(self, filters=None):
+        """
+        Récupère les entreprises avec emails pour une campagne, avec filtres de ciblage.
+        
+        Args:
+            filters: Dictionnaire optionnel de filtres :
+                - secteur: valeur exacte
+                - secteur_contains: sous-chaîne (LIKE)
+                - opportunite: liste de valeurs (ex. ["Très élevée", "Élevée"])
+                - statut: valeur exacte
+                - tags_contains: sous-chaîne dans les tags (JSON)
+                - favori: True pour favoris uniquement
+                - search: recherche dans nom, secteur, email_principal, responsable
+                - score_securite_max: score sécurité <= cette valeur
+                - exclude_already_contacted: True pour exclure les entreprises déjà contactées
+        
+        Returns:
+            list[dict]: Même format que get_entreprises_with_emails (id, nom, secteur, emails)
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        base_sql = '''
+            SELECT
+                e.id,
+                e.nom,
+                e.secteur,
+                se.email,
+                se.name_info as email_nom,
+                se.page_url as source,
+                se.entreprise_id,
+                COALESCE(se.is_person, 0) as is_person,
+                se.domain,
+                se.date_found
+            FROM entreprises e
+            INNER JOIN scraper_emails se ON e.id = se.entreprise_id
+            WHERE se.email IS NOT NULL AND se.email != ''
+        '''
+        params = []
+        
+        if filters:
+            if filters.get('secteur'):
+                base_sql += ' AND e.secteur = ?'
+                params.append(filters['secteur'])
+            if filters.get('secteur_contains'):
+                base_sql += ' AND e.secteur LIKE ?'
+                params.append('%' + str(filters['secteur_contains']) + '%')
+            if filters.get('opportunite') and isinstance(filters['opportunite'], list):
+                placeholders = ','.join(['?' for _ in filters['opportunite']])
+                base_sql += f' AND e.opportunite IN ({placeholders})'
+                params.extend(filters['opportunite'])
+            elif filters.get('opportunite') and isinstance(filters['opportunite'], str):
+                base_sql += ' AND e.opportunite = ?'
+                params.append(filters['opportunite'])
+            if filters.get('statut'):
+                base_sql += ' AND e.statut = ?'
+                params.append(filters['statut'])
+            if filters.get('tags_contains'):
+                base_sql += ' AND e.tags LIKE ?'
+                params.append('%' + str(filters['tags_contains']) + '%')
+            if filters.get('favori'):
+                base_sql += ' AND e.favori = 1'
+            if filters.get('search'):
+                term = '%' + str(filters['search']) + '%'
+                base_sql += ' AND (e.nom LIKE ? OR e.secteur LIKE ? OR e.email_principal LIKE ? OR e.responsable LIKE ?)'
+                params.extend([term, term, term, term])
+            if filters.get('score_securite_max') is not None:
+                base_sql += ' AND e.score_securite IS NOT NULL AND e.score_securite <= ?'
+                params.append(int(filters['score_securite_max']))
+            if filters.get('exclude_already_contacted'):
+                base_sql += ' AND e.id NOT IN (SELECT entreprise_id FROM emails_envoyes WHERE entreprise_id IS NOT NULL)'
+        
+        base_sql += ' ORDER BY e.nom, COALESCE(se.is_person, 0) DESC, se.date_found DESC, se.id'
+        
+        self.execute_sql(cursor, base_sql, tuple(params) if params else None)
+        rows = cursor.fetchall()
+        conn.close()
+        
+        entreprises_dict = {}
+        for row in rows:
+            r = dict(row)
+            entreprise_id = r['id']
+            if entreprise_id not in entreprises_dict:
+                entreprises_dict[entreprise_id] = {
+                    'id': entreprise_id,
+                    'nom': r['nom'],
+                    'secteur': r['secteur'],
+                    'emails': []
+                }
+            source = r['source'] if r['source'] else 'scraper'
+            from utils.name_formatter import format_name
+            email_nom = format_name(r['email_nom'])
+            emails_list = entreprises_dict[entreprise_id]['emails']
+            if not any(em['email'] == r['email'] for em in emails_list):
+                domain = r.get('domain') or (r['email'].split('@')[-1] if r.get('email') else None)
+                emails_list.append({
+                    'email': r['email'],
+                    'nom': email_nom,
+                    'source': source,
+                    'entreprise_id': r['entreprise_id'],
+                    'is_person': bool(r.get('is_person')),
+                    'domain': domain
+                })
+        
+        result = list(entreprises_dict.values())
+        from utils.helpers import clean_json_dict
+        result = clean_json_dict(result)
         return result

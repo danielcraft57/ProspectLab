@@ -3,13 +3,40 @@
 let selectedRecipients = [];
 let entreprisesData = [];
 let templatesData = [];
+let objectifsCiblage = [];
+let segmentsCiblage = [];
 let socket = null;
+/** ID de la campagne actuellement affichée dans la modale de résultats. */
+let currentResultsCampagneId = null;
+/** Timer pour le rafraîchissement périodique des résultats. */
+let resultsRefreshTimer = null;
+/** Liste complète des campagnes chargées depuis l'API. */
+let campagnesData = [];
+/** Données affichées après filtrage emails (étape 2). */
+let displayedEntreprisesData = [];
+/** IDs des entreprises sélectionnées à l'étape 1. */
+let selectedEntrepriseIds = [];
+/** Terme de recherche pour les entreprises (étape 1). */
+let step1SearchTerm = '';
+/** Debounce timer pour chargement auto critères. */
+let ciblageDebounceTimer = null;
+
+// Étape courante du formulaire nouvelle campagne (1, 2 ou 3)
+let campagneModalStep = 1;
 
 // Initialisation
 document.addEventListener('DOMContentLoaded', function() {
     loadCampagnes();
     loadTemplates();
     loadEntreprises();
+    loadObjectifsCiblage();
+    loadSegmentsCiblage();
+    loadCiblageSuggestionsWithCounts();
+    initCiblageModeSwitch();
+    initCiblageAutoLoad();
+    initEmailFiltersListeners();
+    initStep1Search();
+    initCampagnesFilters();
     initWebSocket();
 });
 
@@ -18,18 +45,129 @@ async function loadCampagnes() {
     try {
         const response = await fetch('/api/campagnes');
         const campagnes = await response.json();
-        displayCampagnes(campagnes);
+        campagnesData = Array.isArray(campagnes) ? campagnes : [];
+        applyCampagnesFilters();
     } catch (error) {
-        document.getElementById('campagnes-grid').innerHTML =
-            '<div class="empty-state"><p>Erreur lors du chargement des campagnes</p></div>';
+        const grid = document.getElementById('campagnes-grid');
+        if (grid) {
+            grid.innerHTML =
+                '<div class="empty-state"><p>Erreur lors du chargement des campagnes</p></div>';
+        }
     }
+}
+
+/**
+ * Initialise les filtres/recherche sur la liste des campagnes.
+ * Recherche plein texte sur nom/sujet, filtre par statut et plage de dates.
+ */
+function initCampagnesFilters() {
+    const searchInput = document.getElementById('campagnes-search');
+    const statutSelect = document.getElementById('campagnes-statut-filter');
+    const dateFromInput = document.getElementById('campagnes-date-from');
+    const dateToInput = document.getElementById('campagnes-date-to');
+    const resetBtn = document.getElementById('campagnes-filters-reset');
+
+    if (!searchInput && !statutSelect && !dateFromInput && !dateToInput) {
+        return;
+    }
+
+    if (searchInput) {
+        searchInput.addEventListener('input', function() {
+            applyCampagnesFilters();
+        });
+    }
+
+    if (statutSelect) {
+        statutSelect.addEventListener('change', function() {
+            applyCampagnesFilters();
+        });
+    }
+
+    const dateInputs = [dateFromInput, dateToInput];
+    dateInputs.forEach(function(input) {
+        if (input) {
+            input.addEventListener('change', function() {
+                applyCampagnesFilters();
+            });
+        }
+    });
+
+    if (resetBtn) {
+        resetBtn.addEventListener('click', function() {
+            if (searchInput) searchInput.value = '';
+            if (statutSelect) statutSelect.value = '';
+            if (dateFromInput) dateFromInput.value = '';
+            if (dateToInput) dateToInput.value = '';
+            applyCampagnesFilters();
+        });
+    }
+}
+
+/**
+ * Applique les filtres en mémoire et rafraîchit l'affichage des campagnes.
+ */
+function applyCampagnesFilters() {
+    if (!Array.isArray(campagnesData) || campagnesData.length === 0) {
+        displayCampagnes([]);
+        return;
+    }
+
+    const searchInput = document.getElementById('campagnes-search');
+    const statutSelect = document.getElementById('campagnes-statut-filter');
+    const dateFromInput = document.getElementById('campagnes-date-from');
+    const dateToInput = document.getElementById('campagnes-date-to');
+
+    const search = searchInput && searchInput.value
+        ? searchInput.value.trim().toLowerCase()
+        : '';
+    const statut = statutSelect && statutSelect.value ? statutSelect.value : '';
+    const dateFromVal = dateFromInput && dateFromInput.value ? dateFromInput.value : '';
+    const dateToVal = dateToInput && dateToInput.value ? dateToInput.value : '';
+
+    let filtered = campagnesData.slice();
+
+    if (search) {
+        filtered = filtered.filter(function(campagne) {
+            const haystack = [
+                campagne.nom || '',
+                campagne.sujet || '',
+                campagne.template_id || ''
+            ].join(' ').toLowerCase();
+            return haystack.indexOf(search) !== -1;
+        });
+    }
+
+    if (statut) {
+        filtered = filtered.filter(function(campagne) {
+            return campagne.statut === statut;
+        });
+    }
+
+    if (dateFromVal) {
+        const fromDate = new Date(dateFromVal + 'T00:00:00');
+        filtered = filtered.filter(function(campagne) {
+            if (!campagne.date_creation) return false;
+            return new Date(campagne.date_creation) >= fromDate;
+        });
+    }
+
+    if (dateToVal) {
+        const toDate = new Date(dateToVal + 'T23:59:59');
+        filtered = filtered.filter(function(campagne) {
+            if (!campagne.date_creation) return false;
+            return new Date(campagne.date_creation) <= toDate;
+        });
+    }
+
+    displayCampagnes(filtered);
 }
 
 // Afficher les campagnes
 function displayCampagnes(campagnes) {
     const grid = document.getElementById('campagnes-grid');
+    const countEl = document.getElementById('campagnes-results-count');
 
-    if (campagnes.length === 0) {
+    if (!campagnes || campagnes.length === 0) {
         grid.innerHTML = `
             <div class="empty-state">
                 <div class="empty-state-icon">📧</div>
@@ -37,6 +175,10 @@ function displayCampagnes(campagnes) {
                 <p>Créez votre première campagne pour commencer</p>
             </div>
         `;
+        if (countEl) {
+            countEl.textContent = '0 campagne';
+            countEl.classList.remove('is-filtered');
+        }
         return;
     }
 
@@ -84,6 +226,17 @@ function displayCampagnes(campagnes) {
             ` : ''}
         </div>
     `).join('');
+
+    if (countEl) {
+        const total = Array.isArray(campagnesData) ? campagnesData.length : campagnes.length;
+        const current = campagnes.length;
+        countEl.textContent = current + (current > 1 ? ' campagnes' : ' campagne');
+        if (current < total) {
+            countEl.classList.add('is-filtered');
+        } else {
+            countEl.classList.remove('is-filtered');
+        }
+    }
 }
 
 // Charger les templates
@@ -172,82 +325,536 @@ async function loadTemplates() {
     }
 }
 
-// Charger les entreprises avec emails
+// Charger les objectifs de ciblage (pour le select)
+async function loadObjectifsCiblage() {
+    try {
+        const response = await fetch('/api/ciblage/objectifs');
+        objectifsCiblage = await response.json();
+        const select = document.getElementById('ciblage-objectif');
+        if (!select) return;
+        select.innerHTML = '<option value="">Choisir un objectif...</option>';
+        objectifsCiblage.forEach(function(obj) {
+            const opt = document.createElement('option');
+            opt.value = obj.id;
+            opt.textContent = obj.nom;
+            select.appendChild(opt);
+        });
+    } catch (e) {}
+}
+
+// Charger les segments sauvegardés
+async function loadSegmentsCiblage() {
+    try {
+        const response = await fetch('/api/ciblage/segments');
+        segmentsCiblage = await response.json();
+        const select = document.getElementById('ciblage-segment');
+        if (!select) return;
+        select.innerHTML = '<option value="">Choisir un segment...</option>';
+        segmentsCiblage.forEach(function(seg) {
+            const opt = document.createElement('option');
+            opt.value = seg.id;
+            opt.textContent = seg.nom + (seg.description ? ' - ' + seg.description : '');
+            opt.dataset.criteres = JSON.stringify(seg.criteres || {});
+            select.appendChild(opt);
+        });
+    } catch (e) {}
+}
+
+// Retire le suffixe " (123)" des valeurs d'autocomplétion pour l'API
+function stripCountSuffix(val) {
+    if (!val || typeof val !== 'string') return val;
+    return val.replace(/\s*\(\d+\)\s*$/, '').trim();
+}
+
+// Charger les suggestions avec effectifs pour autocomplétion (affiche "Valeur (count)")
+function loadCiblageSuggestionsWithCounts() {
+    fetch('/api/ciblage/suggestions?with_counts=1')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            fillDatalistWithCounts('datalist-secteur', data.secteurs || []);
+            fillDatalistWithCounts('datalist-opportunite', data.opportunites || []);
+            fillDatalistWithCounts('datalist-statut', data.statuts || []);
+            fillDatalistWithCounts('datalist-tags', data.tags || []);
+        })
+        .catch(function() {});
+}
+
+function fillDatalistWithCounts(id, items) {
+    var el = document.getElementById(id);
+    if (!el || !Array.isArray(items)) return;
+    el.innerHTML = '';
+    items.forEach(function(item) {
+        var v = item && (item.value != null ? item.value : item);
+        var c = item && item.count != null ? item.count : 0;
+        if (v === undefined || v === null) return;
+        var opt = document.createElement('option');
+        opt.value = c > 0 ? v + ' (' + c + ')' : v;
+        el.appendChild(opt);
+    });
+}
+
+// Chargement automatique : objectif/segment au change, critères en debounce
+function initCiblageAutoLoad() {
+    var objSel = document.getElementById('ciblage-objectif');
+    var segSel = document.getElementById('ciblage-segment');
+    if (objSel) objSel.addEventListener('change', function() { if (objSel.value) loadByObjectif(); });
+    if (segSel) segSel.addEventListener('change', function() { if (segSel.value) loadBySegment(); });
+    var debounceMs = 500;
+    function scheduleCriteres() {
+        if (ciblageDebounceTimer) clearTimeout(ciblageDebounceTimer);
+        ciblageDebounceTimer = setTimeout(function() {
+            ciblageDebounceTimer = null;
+            var mode = document.querySelector('input[name="ciblage_mode"]:checked');
+            if (mode && mode.value === 'criteres') loadByCriteres();
+        }, debounceMs);
+    }
+    ['ciblage-secteur', 'ciblage-opportunite', 'ciblage-statut', 'ciblage-tags', 'ciblage-score-max'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.addEventListener('input', scheduleCriteres);
+    });
+    var excludeCb = document.getElementById('ciblage-exclude-contactes');
+    if (excludeCb) excludeCb.addEventListener('change', scheduleCriteres);
+}
+
+// Listeners sur les filtres emails (partie 2) : réafficher la liste
+function initEmailFiltersListeners() {
+    var ids = ['filter-email-person-only', 'filter-email-with-name', 'filter-email-exclude-domains', 'filter-email-exclude-contains'];
+    ids.forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.addEventListener('change', applyEmailFiltersAndDisplay);
+        if (el) el.addEventListener('input', applyEmailFiltersAndDisplay);
+    });
+}
+
+function applyEmailFiltersAndDisplay() {
+    if (entreprisesData.length === 0) return;
+    displayEntreprises();
+}
+
+// Recherche entreprise (étape 1) : filtre nom / secteur / email
+function initStep1Search() {
+    var input = document.getElementById('entreprise-search');
+    var clearBtn = document.getElementById('entreprise-search-clear');
+    if (!input) return;
+    var debounce;
+    input.addEventListener('input', function() {
+        var value = this.value || '';
+        if (debounce) clearTimeout(debounce);
+        debounce = setTimeout(function() {
+            step1SearchTerm = value.trim().toLowerCase();
+            displayEntreprisesStep1();
+        }, 250);
+    });
+    if (clearBtn) {
+        clearBtn.addEventListener('click', function() {
+            input.value = '';
+            step1SearchTerm = '';
+            displayEntreprisesStep1();
+            input.focus();
+        });
+    }
+}
+
+// Applique les critères de filtrage emails et retourne une copie (source = liste d'entreprises)
+function applyEmailFilters(sourceData) {
+    var source = sourceData || entreprisesData || [];
+    var personOnly = document.getElementById('filter-email-person-only') && document.getElementById('filter-email-person-only').checked;
+    var withName = document.getElementById('filter-email-with-name') && document.getElementById('filter-email-with-name').checked;
+    var excludeDomainsRaw = (document.getElementById('filter-email-exclude-domains') && document.getElementById('filter-email-exclude-domains').value) || '';
+    var excludeContains = (document.getElementById('filter-email-exclude-contains') && document.getElementById('filter-email-exclude-contains').value.trim().toLowerCase()) || '';
+    var excludeDomains = excludeDomainsRaw.split(',').map(function(s) { return s.trim().toLowerCase(); }).filter(Boolean);
+
+    return source.map(function(ent) {
+        var emails = (ent.emails || []).filter(function(em) {
+            if (personOnly && !em.is_person) return false;
+            if (withName && (!em.nom || em.nom === 'N/A' || !em.nom.trim())) return false;
+            var domain = (em.domain || (em.email && em.email.split('@')[1]) || '').toLowerCase();
+            if (domain && excludeDomains.some(function(d) { return domain === d || domain.endsWith('.' + d); })) return false;
+            if (excludeContains && (em.email || '').toLowerCase().indexOf(excludeContains) !== -1) return false;
+            return true;
+        });
+        return { id: ent.id, nom: ent.nom, secteur: ent.secteur, emails: emails };
+    }).filter(function(ent) { return ent.emails.length > 0; });
+}
+
+// Indique si le template a 3 étapes (Entreprises, Emails, Message) ou 2 (Ciblage, Message)
+function hasThreeSteps() {
+    return !!document.getElementById('campagne-step-3');
+}
+
+// Affiche uniquement l'étape N (1, 2 ou 3), masque les autres. Gère template 2 ou 3 steps.
+function showCampagneStep(stepNum) {
+    var s1 = document.getElementById('campagne-step-1');
+    var s2 = document.getElementById('campagne-step-2');
+    var s3 = document.getElementById('campagne-step-3');
+    var i1 = document.getElementById('step-indicator-1');
+    var i2 = document.getElementById('step-indicator-2');
+    var i3 = document.getElementById('step-indicator-3');
+    if (s1) s1.style.display = stepNum === 1 ? 'block' : 'none';
+    if (s2) s2.style.display = stepNum === 2 ? 'block' : 'none';
+    if (s3) s3.style.display = stepNum === 3 ? 'block' : 'none';
+    if (i1) i1.classList.toggle('step-active', stepNum === 1);
+    if (i2) i2.classList.toggle('step-active', stepNum === 2);
+    if (i3) i3.classList.toggle('step-active', stepNum === 3);
+    var btnPrev = document.getElementById('btn-campagne-prev');
+    var btnNext = document.getElementById('btn-campagne-next');
+    var btnSubmit = document.getElementById('btn-campagne-submit');
+    if (btnPrev) btnPrev.style.display = stepNum === 1 ? 'none' : 'inline-block';
+    if (btnNext) btnNext.style.display = stepNum === 3 ? 'none' : 'inline-block';
+    if (btnSubmit) btnSubmit.style.display = stepNum === 3 ? 'inline-block' : 'none';
+}
+
+// Clic sur l'en-tête d'étape (rond + label)
+function goToStepFromHeader(step) {
+    var threeSteps = hasThreeSteps();
+    if (step === 1) {
+        campagneModalStep = 1;
+        showCampagneStep(1);
+        return;
+    }
+    if (step === 2) {
+        if (!threeSteps) {
+            campagneModalStep = 2;
+            showCampagneStep(2);
+            return;
+        }
+        // En 3 steps, il faut au moins une entreprise sélectionnée
+        if (!selectedEntrepriseIds || selectedEntrepriseIds.length === 0) return;
+        campagneModalStep = 2;
+        displayEntreprisesStep2();
+        showCampagneStep(2);
+        return;
+    }
+    if (step === 3 && threeSteps) {
+        // Ne pas autoriser de sauter directement à 3 depuis 1
+        if (campagneModalStep < 2) return;
+        campagneModalStep = 3;
+        showCampagneStep(3);
+    }
+}
+
+// Passer à l'étape suivante
+function campagneStepNext() {
+    var threeSteps = hasThreeSteps();
+    if (campagneModalStep === 1) {
+        if (threeSteps && selectedEntrepriseIds.length === 0) {
+            alert('Sélectionnez au moins une entreprise avant de continuer.');
+            return;
+        }
+        if (threeSteps) {
+            selectedRecipients = [];
+            campagneModalStep = 2;
+            displayEntreprisesStep2();
+        } else {
+            campagneModalStep = 2;
+        }
+        showCampagneStep(2);
+    } else if (campagneModalStep === 2) {
+        if (threeSteps) {
+            campagneModalStep = 3;
+            showCampagneStep(3);
+        }
+    }
+}
+
+// Revenir à l'étape précédente
+function campagneStepPrev() {
+    if (campagneModalStep === 2) {
+        campagneModalStep = 1;
+        showCampagneStep(1);
+    } else if (campagneModalStep === 3) {
+        campagneModalStep = 2;
+        showCampagneStep(2);
+    }
+}
+
+// Afficher/masquer les blocs ciblage selon le mode
+function initCiblageModeSwitch() {
+    const radios = document.querySelectorAll('input[name="ciblage_mode"]');
+    const blockObjectif = document.getElementById('ciblage-objectif-block');
+    const blockCriteres = document.getElementById('ciblage-criteres-block');
+    const blockSegment = document.getElementById('ciblage-segment-block');
+    if (!blockObjectif || !blockCriteres || !blockSegment) return;
+    function updateBlocks() {
+        const mode = document.querySelector('input[name="ciblage_mode"]:checked');
+        const v = mode ? mode.value : 'toutes';
+        blockObjectif.style.display = v === 'objectif' ? 'block' : 'none';
+        blockCriteres.style.display = v === 'criteres' ? 'block' : 'none';
+        blockSegment.style.display = v === 'segment' ? 'block' : 'none';
+        if (v === 'objectif') {
+            const sel = document.getElementById('ciblage-objectif');
+            const desc = document.getElementById('ciblage-objectif-desc');
+            const obj = objectifsCiblage.find(function(o) { return o.id === sel.value; });
+            desc.textContent = obj ? obj.description : '';
+        }
+    }
+    radios.forEach(function(r) { r.addEventListener('change', updateBlocks); });
+    document.getElementById('ciblage-objectif').addEventListener('change', updateBlocks);
+    updateBlocks();
+}
+
+// Charger les prospects selon l'objectif sélectionné
+async function loadByObjectif() {
+    const objectifId = document.getElementById('ciblage-objectif').value;
+    if (!objectifId) return;
+    const obj = objectifsCiblage.find(function(o) { return o.id === objectifId; });
+    if (!obj || !obj.filters) return;
+    await loadEntreprisesWithFilters(obj.filters);
+}
+
+// Charger les prospects selon les critères saisis
+async function loadByCriteres() {
+    const filters = {};
+    const secteur = stripCountSuffix(document.getElementById('ciblage-secteur').value.trim());
+    if (secteur) filters.secteur_contains = secteur;
+    const oppRaw = document.getElementById('ciblage-opportunite').value.trim();
+    const opp = oppRaw.split(',').map(function(s) { return stripCountSuffix(s.trim()); }).filter(Boolean);
+    if (opp.length) filters.opportunite = opp;
+    const statut = stripCountSuffix(document.getElementById('ciblage-statut').value.trim());
+    if (statut) filters.statut = statut;
+    const tags = stripCountSuffix(document.getElementById('ciblage-tags').value.trim());
+    if (tags) filters.tags_contains = tags;
+    const scoreMax = document.getElementById('ciblage-score-max').value;
+    if (scoreMax) filters.score_securite_max = parseInt(scoreMax, 10);
+    if (document.getElementById('ciblage-exclude-contactes').checked) filters.exclude_already_contacted = true;
+    await loadEntreprisesWithFilters(filters);
+}
+
+// Charger les prospects selon le segment sauvegardé
+async function loadBySegment() {
+    const select = document.getElementById('ciblage-segment');
+    const segId = select.value;
+    if (!segId) return;
+    const opt = select.querySelector('option:checked');
+    const criteres = opt && opt.dataset.criteres ? JSON.parse(opt.dataset.criteres) : {};
+    await loadEntreprisesWithFilters(criteres);
+}
+
+// Conteneur étape 1 : priorité entreprises-selector (3 steps), sinon recipients-selector (ancienne structure)
+function getStep1Container() {
+    return document.getElementById('entreprises-selector') || document.getElementById('recipients-selector');
+}
+
+// Appel API ciblage et mise à jour de la liste (étape 1 : entreprises uniquement)
+function loadEntreprisesWithFilters(filters) {
+    const container = getStep1Container();
+    if (!container) return;
+    container.innerHTML = '<div class="loading">Chargement des prospects...</div>';
+    const params = new URLSearchParams();
+    if (filters.secteur) params.set('secteur', filters.secteur);
+    if (filters.secteur_contains) params.set('secteur_contains', filters.secteur_contains);
+    if (filters.opportunite && filters.opportunite.length) params.set('opportunite', filters.opportunite.join(','));
+    if (filters.statut) params.set('statut', filters.statut);
+    if (filters.tags_contains) params.set('tags_contains', filters.tags_contains);
+    if (filters.favori) params.set('favori', '1');
+    if (filters.search) params.set('search', filters.search);
+    if (filters.score_securite_max != null) params.set('score_securite_max', String(filters.score_securite_max));
+    if (filters.exclude_already_contacted) params.set('exclude_already_contacted', '1');
+    const url = '/api/ciblage/entreprises?' + params.toString();
+    return fetch(url)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            entreprisesData = data;
+            selectedEntrepriseIds = [];
+            displayEntreprisesStep1();
+        })
+        .catch(function() {
+            container.innerHTML = '<div class="empty-state"><p>Erreur lors du chargement des prospects</p></div>';
+        });
+}
+
+// Charger les entreprises avec emails (toutes, pas de filtre) - étape 1
 async function loadEntreprises() {
+    const container = getStep1Container();
+    if (!container) return;
     try {
         const response = await fetch('/api/entreprises/emails');
         entreprisesData = await response.json();
-        displayEntreprises();
+        selectedEntrepriseIds = [];
+        displayEntreprisesStep1();
     } catch (error) {
-        document.getElementById('recipients-selector').innerHTML =
-            '<div class="empty-state"><p>Erreur lors du chargement des entreprises</p></div>';
+        container.innerHTML = '<div class="empty-state"><p>Erreur lors du chargement des entreprises</p></div>';
     }
 }
 
-// Afficher les entreprises
-function displayEntreprises() {
-    const container = document.getElementById('recipients-selector');
+// Étape 1 : afficher la liste des entreprises (checkboxes, sans détail des emails)
+function displayEntreprisesStep1() {
+    const container = getStep1Container();
+    const countEl = document.getElementById('step1-results-count');
+    if (!container) return;
 
-    if (entreprisesData.length === 0) {
+    var list = (entreprisesData || []).slice();
+
+    if (step1SearchTerm) {
+        list = list.filter(function(ent) {
+            var nom = (ent.nom || '').toLowerCase();
+            var secteur = (ent.secteur || '').toLowerCase();
+            var hasEmailMatch = (ent.emails || []).some(function(em) {
+                return (em.email || '').toLowerCase().indexOf(step1SearchTerm) !== -1;
+            });
+            return nom.indexOf(step1SearchTerm) !== -1 ||
+                   secteur.indexOf(step1SearchTerm) !== -1 ||
+                   hasEmailMatch;
+        });
+    }
+
+    if (!list || list.length === 0) {
         container.innerHTML = '<div class="empty-state"><p>Aucune entreprise avec email disponible</p></div>';
+        if (countEl) countEl.style.display = 'none';
         return;
     }
 
-    container.innerHTML = entreprisesData.map(entreprise => {
-        const emails = entreprise.emails || [];
-        if (emails.length === 0) return '';
+    var totalEmails = list.reduce(function(sum, e) { return sum + (e.emails && e.emails.length); }, 0);
+    if (countEl) {
+        countEl.textContent = list.length + ' entreprise(s), ' + totalEmails + ' email(s)';
+        countEl.style.display = 'block';
+    }
 
-        return `
-            <div class="entreprise-item" data-entreprise-id="${entreprise.id}">
-                <div class="entreprise-header">
-                    <div>
-                        <div class="entreprise-name">${escapeHtml(entreprise.nom)}</div>
-                        ${entreprise.secteur ? `<div style="font-size: 0.85em; color: #666;">${escapeHtml(entreprise.secteur)}</div>` : ''}                                                                                                             
-                    </div>
-                    <div class="checkbox-wrapper">
-                        <input type="checkbox"
-                               id="entreprise-${entreprise.id}"
-                               onchange="toggleEntreprise(${entreprise.id}, this.checked)">
-                        <label for="entreprise-${entreprise.id}">Tout sélectionner</label>
-                    </div>
-                </div>
-                <div class="emails-list">
-                    ${emails.map((email, idx) => `
-                        <div class="email-item">
-                            <input type="checkbox"
-                                   id="email-${entreprise.id}-${idx}"
-                                   data-email='${JSON.stringify(email)}'
-                                   onchange="toggleEmail(${entreprise.id}, ${idx}, this.checked)">
-                            <span class="email-address">${escapeHtml(email.email)}</span>
-                            ${email.nom && email.nom !== 'N/A' ? `<span>(${escapeHtml(email.nom)})</span>` : ''}
-                            <span class="email-source">${email.source}</span>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        `;
-    }).filter(html => html).join('');
+    container.innerHTML = list.map(function(ent) {
+        var nb = (ent.emails && ent.emails.length) || 0;
+        if (nb === 0) return '';
+        return '<div class="entreprise-item step1-ent-item step1-card-clickable" data-entreprise-id="' + ent.id + '" onclick="toggleEntrepriseStep1ByCard(event, ' + ent.id + ')">' +
+            '<div class="entreprise-header">' +
+            '<div><div class="entreprise-name">' + escapeHtml(ent.nom) + '</div>' +
+            (ent.secteur ? '<div class="entreprise-secteur">' + escapeHtml(ent.secteur) + '</div>' : '') +
+            '<div class="entreprise-email-count">' + nb + ' email(s)</div>' +
+            '</div>' +
+            '<div class="checkbox-wrapper">' +
+            '<input type="checkbox" id="ent-' + ent.id + '" onchange="toggleEntrepriseStep1(' + ent.id + ', this.checked)">' +
+            '<label for="ent-' + ent.id + '">Sélectionner</label>' +
+            '</div></div></div>';
+    }).filter(Boolean).join('');
 }
 
-// Toggle entreprise (sélectionner/désélectionner tous les emails)
+// Clic sur tout le cadre entreprise (étape 1) : toggle la sélection sauf si clic sur la case/label
+function toggleEntrepriseStep1ByCard(event, entrepriseId) {
+    if (event.target.closest('input[type="checkbox"]') || event.target.closest('label')) return;
+    var cb = document.getElementById('ent-' + entrepriseId);
+    if (!cb) return;
+    cb.checked = !cb.checked;
+    toggleEntrepriseStep1(entrepriseId, cb.checked);
+}
+
+// Étape 2 : clic sur toute la ligne email pour cocher/décocher la case
+function toggleEmailByRow(event, entrepriseId, emailIdx) {
+    if (event.target.closest('input[type="checkbox"]') || event.target.closest('label')) return;
+    var cb = document.getElementById('email-' + entrepriseId + '-' + emailIdx);
+    if (!cb) return;
+    cb.checked = !cb.checked;
+    toggleEmail(entrepriseId, emailIdx, cb.checked);
+}
+
+function toggleEntrepriseStep1(entrepriseId, checked) {
+    var idx = selectedEntrepriseIds.indexOf(entrepriseId);
+    if (checked && idx === -1) selectedEntrepriseIds.push(entrepriseId);
+    if (!checked && idx !== -1) selectedEntrepriseIds.splice(idx, 1);
+    var item = document.querySelector('.step1-ent-item[data-entreprise-id="' + entrepriseId + '"]');
+    if (item) item.classList.toggle('selected', checked);
+}
+
+// Étape 2 : filtre emails sur les entreprises choisies, puis afficher la liste des emails
+function displayEntreprisesStep2() {
+    var source = entreprisesData.filter(function(e) { return selectedEntrepriseIds.indexOf(e.id) !== -1; });
+    displayedEntreprisesData = applyEmailFilters(source);
+    var container = document.getElementById('recipients-selector');
+    var countEl = document.getElementById('ciblage-results-count');
+    if (!container) return;
+
+    if (displayedEntreprisesData.length === 0) {
+        container.innerHTML = '<div class="empty-state"><p>Aucun email ne correspond aux filtres. Assouplissez les critères ou choisissez d\'autres entreprises.</p></div>';
+        if (countEl) countEl.style.display = 'none';
+        return;
+    }
+
+    var totalEmails = displayedEntreprisesData.reduce(function(sum, e) { return sum + (e.emails && e.emails.length); }, 0);
+    if (countEl) {
+        countEl.textContent = displayedEntreprisesData.length + ' entreprise(s), ' + totalEmails + ' email(s)';
+        countEl.style.display = 'block';
+    }
+
+    container.innerHTML = displayedEntreprisesData.map(function(entreprise) {
+        var emails = entreprise.emails || [];
+        if (emails.length === 0) return '';
+        return '<div class="entreprise-item step2-card-clickable" data-entreprise-id="' + entreprise.id + '" onclick="toggleEntrepriseStep2ByCard(event, ' + entreprise.id + ')">' +
+            '<div class="entreprise-header">' +
+            '<div><div class="entreprise-name">' + escapeHtml(entreprise.nom) + '</div>' +
+            (entreprise.secteur ? '<div class="entreprise-secteur">' + escapeHtml(entreprise.secteur) + '</div>' : '') +
+            '</div>' +
+            '<div class="checkbox-wrapper">' +
+            '<input type="checkbox" id="entreprise-' + entreprise.id + '" onchange="toggleEntreprise(' + entreprise.id + ', this.checked)">' +
+            '<label for="entreprise-' + entreprise.id + '">Tout sélectionner</label>' +
+            '</div></div>' +
+            '<div class="emails-list">' +
+            emails.map(function(email, idx) {
+                var dataEmail = escapeHtml(JSON.stringify(email));
+                return '<div class="email-item email-row-clickable" onclick="toggleEmailByRow(event, ' + entreprise.id + ', ' + idx + ')">' +
+                    '<input type="checkbox" id="email-' + entreprise.id + '-' + idx + '" data-email="' + dataEmail + '" onchange="toggleEmail(' + entreprise.id + ', ' + idx + ', this.checked)">' +
+                    '<span class="email-address">' + escapeHtml(email.email) + '</span>' +
+                    (email.nom && email.nom !== 'N/A' ? '<span> (' + escapeHtml(email.nom) + ')</span>' : '') +
+                    '<span class="email-source">' + escapeHtml(email.source || '') + '</span>' +
+                    '</div>';
+            }).join('') +
+            '</div></div>';
+    }).filter(Boolean).join('');
+    updateSelectedCount();
+}
+
+// Étape 2 : clic sur le cadre entreprise (hors cases & lignes email) -> tout sélectionner / tout désélectionner
+function toggleEntrepriseStep2ByCard(event, entrepriseId) {
+    // Si on clique sur une case, un label ou une ligne email, on laisse leurs handlers dédiés gérer
+    if (event.target.closest('input[type="checkbox"]') ||
+        event.target.closest('label') ||
+        event.target.closest('.email-item')) {
+        return;
+    }
+
+    var entreprise = displayedEntreprisesData.find(function(e) { return e.id === entrepriseId; });
+    if (!entreprise) return;
+    var emails = entreprise.emails || [];
+    if (!emails.length) return;
+
+    // Vérifier si tous les emails visibles de cette entreprise sont déjà cochés
+    var allChecked = emails.every(function(email, idx) {
+        var cb = document.getElementById('email-' + entrepriseId + '-' + idx);
+        return cb && cb.checked;
+    });
+
+    var newChecked = !allChecked;
+
+    // Mettre à jour la checkbox "Tout sélectionner"
+    var headerCb = document.getElementById('entreprise-' + entrepriseId);
+    if (headerCb) {
+        headerCb.checked = newChecked;
+    }
+
+    // Appliquer sur tous les emails via la fonction existante
+    toggleEntreprise(entrepriseId, newChecked);
+}
+
+// Afficher les entreprises (étape 2 uniquement, utilisé aussi quand les filtres email changent)
+function displayEntreprises() {
+    if (campagneModalStep !== 2) return;
+    displayEntreprisesStep2();
+}
+
+// Toggle entreprise (sélectionner/désélectionner tous les emails affichés)
 function toggleEntreprise(entrepriseId, checked) {
-    const entreprise = entreprisesData.find(e => e.id === entrepriseId);
+    const entreprise = displayedEntreprisesData.find(function(e) { return e.id === entrepriseId; });
     if (!entreprise) return;
 
-    entreprise.emails.forEach((email, idx) => {
-        const checkbox = document.getElementById(`email-${entrepriseId}-${idx}`);
+    (entreprise.emails || []).forEach(function(email, idx) {
+        var checkbox = document.getElementById('email-' + entrepriseId + '-' + idx);
         if (checkbox) {
             checkbox.checked = checked;
             toggleEmail(entrepriseId, idx, checked);
         }
     });
-
     updateEntrepriseItemStyle(entrepriseId, checked);
 }
 
 // Toggle email individuel
 function toggleEmail(entrepriseId, emailIdx, checked) {
-    const entreprise = entreprisesData.find(e => e.id === entrepriseId);
+    const entreprise = displayedEntreprisesData.find(function(e) { return e.id === entrepriseId; });
     if (!entreprise || !entreprise.emails[emailIdx]) return;
 
     const email = entreprise.emails[emailIdx];
@@ -275,24 +882,24 @@ function toggleEmail(entrepriseId, emailIdx, checked) {
 }
 
 // Mettre à jour le style de l'item entreprise
-function updateEntrepriseItemStyle(entrepriseId, forceChecked = null) {
-    const item = document.querySelector(`.entreprise-item[data-entreprise-id="${entrepriseId}"]`);
+function updateEntrepriseItemStyle(entrepriseId, forceChecked) {
+    const item = document.querySelector('.entreprise-item[data-entreprise-id="' + entrepriseId + '"]');
     if (!item) return;
 
-    const entreprise = entreprisesData.find(e => e.id === entrepriseId);
+    const entreprise = displayedEntreprisesData.find(function(e) { return e.id === entrepriseId; });
     if (!entreprise) return;
 
-    const allChecked = entreprise.emails.every((email, idx) => {
-        const checkbox = document.getElementById(`email-${entrepriseId}-${idx}`);
+    const emails = entreprise.emails || [];
+    const allChecked = emails.every(function(email, idx) {
+        var checkbox = document.getElementById('email-' + entrepriseId + '-' + idx);
+        return checkbox && checkbox.checked;
+    });
+    const someChecked = emails.some(function(email, idx) {
+        var checkbox = document.getElementById('email-' + entrepriseId + '-' + idx);
         return checkbox && checkbox.checked;
     });
 
-    const someChecked = entreprise.emails.some((email, idx) => {
-        const checkbox = document.getElementById(`email-${entrepriseId}-${idx}`);
-        return checkbox && checkbox.checked;
-    });
-
-    if (forceChecked !== null) {
+    if (typeof forceChecked === 'boolean') {
         item.classList.toggle('selected', forceChecked);
     } else {
         item.classList.toggle('selected', someChecked);
@@ -312,21 +919,28 @@ function updateSelectedCount() {
     }
 }
 
-// Ouvrir le modal de nouvelle campagne
+// Ouvrir le modal de nouvelle campagne (toujours à l'étape 1)
 function openNewCampagneModal() {
     selectedRecipients = [];
-    document.getElementById('campagne-form').reset();
-    document.getElementById('selected-count').style.display = 'none';
-    document.getElementById('campagne-modal').style.display = 'block';
-
-    // Décocher toutes les cases
-    document.querySelectorAll('#recipients-selector input[type="checkbox"]').forEach(cb => {
-        cb.checked = false;
-    });
-
-    document.querySelectorAll('.entreprise-item').forEach(item => {
-        item.classList.remove('selected');
-    });
+    selectedEntrepriseIds = [];
+    var form = document.getElementById('campagne-form');
+    if (form) form.reset();
+    var selCount = document.getElementById('selected-count');
+    if (selCount) selCount.style.display = 'none';
+    var modal = document.getElementById('campagne-modal');
+    if (modal) modal.style.display = 'block';
+    campagneModalStep = 1;
+    showCampagneStep(1);
+    var modeToutes = document.querySelector('input[name="ciblage_mode"][value="toutes"]');
+    if (modeToutes) modeToutes.checked = true;
+    var blkObj = document.getElementById('ciblage-objectif-block');
+    var blkCrit = document.getElementById('ciblage-criteres-block');
+    var blkSeg = document.getElementById('ciblage-segment-block');
+    if (blkObj) blkObj.style.display = 'none';
+    if (blkCrit) blkCrit.style.display = 'none';
+    if (blkSeg) blkSeg.style.display = 'none';
+    loadCiblageSuggestionsWithCounts();
+    loadEntreprises();
 }
 
 // Fermer le modal
@@ -336,46 +950,60 @@ function closeModal() {
 
 // Soumettre la campagne
 // Générer un nom de campagne automatique
-function generateCampagneName(templateName, recipientCount) {
-    const now = new Date();
-    const dateStr = now.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
-    const timeStr = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-    
-    // Noms courts et originaux
-    const prefixes = ['📧', '🚀', '⚡', '🎯', '💼', '📬', '✨', '🔥'];
-    const randomPrefix = prefixes[Math.floor(Math.random() * prefixes.length)];
-    
-    // Nom du template (raccourci)
-    let templatePart = '';
+/**
+ * Génère un nom de campagne lisible à partir du template
+ * et du contexte (secteur principal / exemple d'entreprise).
+ * 
+ * Objectif: produire un nom texte simple du type
+ * "Présence en ligne - Technologie" sans icônes ni compteur.
+ *
+ * @param {string|null} templateName Nom du template sélectionné
+ * @param {number} recipientCount Nombre de destinataires
+ * @param {string|null} sectorLabel Secteur principal (ou null)
+ * @param {string|null} entrepriseLabel Nom d'entreprise représentatif (ou null)
+ * @returns {string} Nom de campagne
+ */
+function generateCampagneName(templateName, recipientCount, sectorLabel, entrepriseLabel) {
+    // Libellés plus explicites en fonction du template
+    let templateLabel = '';
     if (templateName) {
-        // Extraire un mot clé du nom du template
-        const keywords = {
-            'modernisation': 'Mod',
-            'optimisation': 'Opt',
-            'sécurité': 'Sec',
-            'présence': 'Pres',
-            'audit': 'Audit'
+        const lower = templateName.toLowerCase();
+        const keywordLabels = {
+            'modernisation': 'Modernisation présence',
+            'optimisation': 'Optimisation conversion',
+            'sécurité': 'Sécurité & fiabilité',
+            'présence': 'Présence en ligne',
+            'audit': 'Audit digital'
         };
-        for (const [key, val] of Object.entries(keywords)) {
-            if (templateName.toLowerCase().includes(key)) {
-                templatePart = val;
+        for (const key in keywordLabels) {
+            if (Object.prototype.hasOwnProperty.call(keywordLabels, key) && lower.indexOf(key) !== -1) {
+                templateLabel = keywordLabels[key];
                 break;
             }
         }
-        if (!templatePart) {
-            templatePart = templateName.substring(0, 4).toUpperCase();
+        if (!templateLabel) {
+            templateLabel = templateName.trim();
         }
+    } else {
+        templateLabel = 'Campagne email';
+    }
+
+    // Secteur ou nom d'entreprise (court) - sert de "deuxième nom" / contexte
+    let contextPart = '';
+    if (sectorLabel) {
+        const s = sectorLabel.trim();
+        contextPart = s.length > 16 ? s.split(' ')[0] : s;
+    } else if (entrepriseLabel) {
+        const n = entrepriseLabel.trim();
+        contextPart = n.length > 18 ? n.split(' ')[0] : n;
     }
     
-    // Construire le nom
+    // Construire le nom final, sans icônes ni compteur
     const parts = [
-        randomPrefix,
-        dateStr.replace(/\//g, '.'),
-        timeStr.replace(':', 'h'),
-        templatePart ? `-${templatePart}` : '',
-        recipientCount > 0 ? `(${recipientCount})` : ''
-    ].filter(p => p !== '');
-    
+        templateLabel,
+        contextPart
+    ].filter(function(p) { return p && p !== ''; });
+
     return parts.join(' ');
 }
 
@@ -393,10 +1021,17 @@ async function submitCampagne() {
         return;
     }
 
-    // Générer automatiquement le nom de la campagne
+    // Générer automatiquement le nom de la campagne (en tenant compte du secteur / nom)
     const template = templatesData.find(t => t.id === templateId);
     const templateName = template ? template.name : null;
-    const nom = generateCampagneName(templateName, selectedRecipients.length);
+    // Contexte: secteur principal + exemple d'entreprise
+    const context = getCampagneContext();
+    const nom = generateCampagneName(
+        templateName,
+        selectedRecipients.length,
+        context.sectorLabel,
+        context.entrepriseLabel
+    );
 
     if (selectedRecipients.length === 0) {
         alert('Veuillez sélectionner au moins un destinataire');
@@ -406,6 +1041,39 @@ async function submitCampagne() {
     if (!templateId && !customMessage) {
         alert('Veuillez sélectionner un modèle ou saisir un message personnalisé');
         return;
+    }
+
+    /**
+     * Détermine le secteur principal et un exemple d'entreprise
+     * à partir des entreprises sélectionnées (étape 1).
+     *
+     * @returns {{sectorLabel: string|null, entrepriseLabel: string|null}}
+     */
+    function getCampagneContext() {
+        if (!entreprisesData || !selectedEntrepriseIds || selectedEntrepriseIds.length === 0) {
+            return { sectorLabel: null, entrepriseLabel: null };
+        }
+        const map = entreprisesData.filter(e => selectedEntrepriseIds.indexOf(e.id) !== -1);
+        if (map.length === 0) {
+            return { sectorLabel: null, entrepriseLabel: null };
+        }
+        // Secteur le plus fréquent
+        const counts = {};
+        map.forEach(e => {
+            const s = (e.secteur || '').trim();
+            if (!s) return;
+            counts[s] = (counts[s] || 0) + 1;
+        });
+        let sectorLabel = null;
+        let maxCount = 0;
+        Object.entries(counts).forEach(([s, c]) => {
+            if (c > maxCount) {
+                maxCount = c;
+                sectorLabel = s;
+            }
+        });
+        const entrepriseLabel = map[0].nom || null;
+        return { sectorLabel, entrepriseLabel };
     }
 
     const submitBtn = document.querySelector('.btn-submit');
@@ -477,6 +1145,13 @@ function openResultsModal(campagneId, campagneName) {
         campagneNameEl.textContent = campagneName || `Campagne #${campagneId}`;
     }
 
+    // Sauvegarder l'ID courant et annuler un éventuel ancien timer
+    currentResultsCampagneId = campagneId;
+    if (resultsRefreshTimer) {
+        clearInterval(resultsRefreshTimer);
+        resultsRefreshTimer = null;
+    }
+
     // Afficher le loading
     body.innerHTML = `
         <div class="results-loading">
@@ -487,40 +1162,62 @@ function openResultsModal(campagneId, campagneName) {
 
     modal.classList.add('show');
 
-    // Charger les statistiques
+    // Charger les statistiques immédiatement
     loadCampagneResults(campagneId);
+
+    // Mettre à jour les résultats en temps réel tant que la modale est ouverte
+    resultsRefreshTimer = setInterval(function() {
+        if (!document.body.contains(modal) || !modal.classList.contains('show')) {
+            clearInterval(resultsRefreshTimer);
+            resultsRefreshTimer = null;
+            return;
+        }
+        if (currentResultsCampagneId) {
+            loadCampagneResults(currentResultsCampagneId, true);
+        }
+    }, 5000);
 }
 
 // Fermer la modale de résultats
 function closeResultsModal() {
     const modal = document.getElementById('results-modal');
     modal.classList.remove('show');
+
+    // Arrêter le rafraîchissement en temps réel
+    if (resultsRefreshTimer) {
+        clearInterval(resultsRefreshTimer);
+        resultsRefreshTimer = null;
+    }
+    currentResultsCampagneId = null;
 }
 
 // Charger les résultats de la campagne
-async function loadCampagneResults(campagneId) {
+async function loadCampagneResults(campagneId, silent) {
     try {
         const response = await fetch(`/api/tracking/campagne/${campagneId}`);
         const stats = await response.json();
 
-        displayCampagneResults(stats);
+        displayCampagneResults(stats, !!silent);
     } catch (error) {
-        const body = document.getElementById('results-modal-body');
-        body.innerHTML = `
-            <div class="results-loading">
-                <p style="color: #e74c3c;">Erreur lors du chargement des résultats</p>
-            </div>
-        `;
+        if (!silent) {
+            const body = document.getElementById('results-modal-body');
+            body.innerHTML = `
+                <div class="results-loading">
+                    <p style="color: #e74c3c;">Erreur lors du chargement des résultats</p>
+                </div>
+            `;
+        }
     }
 }
 
 // Afficher les résultats de la campagne
-function displayCampagneResults(stats) {
+function displayCampagneResults(stats, silentRefresh) {
     const body = document.getElementById('results-modal-body');
 
     const openRate = stats.open_rate ? stats.open_rate.toFixed(1) : '0.0';
     const clickRate = stats.click_rate ? stats.click_rate.toFixed(1) : '0.0';
-    const avgReadTime = stats.avg_read_time ? Math.round(stats.avg_read_time) : 'N/A';
+    const hasReadTime = stats.avg_read_time != null && !isNaN(stats.avg_read_time);
+    const avgReadTime = hasReadTime ? Math.round(stats.avg_read_time) : null;
 
     // Fonction pour obtenir le badge de statut
     function getStatusBadge(statut, hasOpened, hasClicked) {
@@ -536,6 +1233,81 @@ function displayCampagneResults(stats) {
         return '<span class="status-badge status-sent">Envoyé</span>';
     }
 
+    // Si on est en rafraîchissement silencieux et que la structure existe déjà,
+    // on met à jour en place pour éviter un flash complet.
+    if (silentRefresh) {
+        const container = body.querySelector('.results-content');
+        if (container) {
+            // Mettre à jour les cartes de stats
+            const statCards = container.querySelectorAll('.stat-card');
+            if (statCards.length >= 4) {
+                // Emails envoyés
+                statCards[0].querySelector('.stat-value-large').textContent = stats.total_emails || 0;
+                // Ouvertures
+                statCards[1].querySelector('.stat-value-large').textContent = stats.total_opens || 0;
+                const openSub = statCards[1].querySelector('.stat-sublabel');
+                if (openSub) {
+                    openSub.textContent = `${openRate}% du total`;
+                }
+                // Clics
+                statCards[2].querySelector('.stat-value-large').textContent = stats.total_clicks || 0;
+                const clickSub = statCards[2].querySelector('.stat-sublabel');
+                if (clickSub) {
+                    clickSub.textContent = `${clickRate}% du total`;
+                }
+                // Taux d'ouverture
+                statCards[3].querySelector('.stat-value-large').textContent = `${openRate}%`;
+            }
+
+            // Mettre à jour les indicateurs de performance
+            const perfCards = container.querySelectorAll('.performance-card');
+            if (perfCards.length >= 2) {
+                // Taux de clic
+                const clickValEl = perfCards[0].querySelector('.performance-value');
+                if (clickValEl) {
+                    clickValEl.textContent = `${clickRate}%`;
+                }
+                // Temps de lecture moyen
+                const readValEl = perfCards[1].querySelector('.performance-value');
+                if (readValEl) {
+                    readValEl.textContent = avgReadTime !== null ? `${avgReadTime}s` : 'Non mesuré';
+                }
+            }
+
+            // Mettre à jour le tableau des emails
+            const tbody = container.querySelector('.results-table tbody');
+            if (tbody && stats.emails && stats.emails.length > 0) {
+                tbody.innerHTML = stats.emails.map(function(email) {
+                    return (
+                        '<tr class="' + (email.has_clicked ? 'row-clicked' : (email.has_opened ? 'row-opened' : '')) + '">' +
+                            '<td>' +
+                                '<div class="contact-name">' + formatContactName(email.nom_destinataire) + '</div>' +
+                                '<div class="contact-email">' + escapeHtml(email.email) + '</div>' +
+                            '</td>' +
+                            '<td>' + escapeHtml(email.entreprise || 'N/A') + '</td>' +
+                            '<td class="text-center">' + getStatusBadge(email.statut, email.has_opened, email.has_clicked) + '</td>' +
+                            '<td class="text-center">' +
+                                (email.opens > 0
+                                    ? '<span class="stat-value stat-opens">' + email.opens + '</span>'
+                                    : '<span class="stat-value stat-zero">0</span>') +
+                            '</td>' +
+                            '<td class="text-center">' +
+                                (email.clicks > 0
+                                    ? '<span class="stat-value stat-clicks">' + email.clicks + '</span>'
+                                    : '<span class="stat-value stat-zero">0</span>') +
+                            '</td>' +
+                            '<td class="text-muted">' + formatDate(email.date_envoi) + '</td>' +
+                            '<td class="text-muted">' + formatDate(email.last_open) + '</td>' +
+                        '</tr>'
+                    );
+                }).join('');
+            }
+
+            return;
+        }
+    }
+
+    // Rendu complet (premier affichage ou fallback)
     // Tableau des emails
     let emailsTable = '';
     if (stats.emails && stats.emails.length > 0) {
@@ -620,7 +1392,7 @@ function displayCampagneResults(stats) {
                     <div class="performance-icon">⏱</div>
                     <div class="performance-content">
                         <div class="performance-label">Temps de lecture moyen</div>
-                        <div class="performance-value">${avgReadTime}s</div>
+                        <div class="performance-value">${avgReadTime !== null ? `${avgReadTime}s` : 'Non mesuré'}</div>
                     </div>
                 </div>
             </div>

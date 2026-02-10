@@ -258,14 +258,21 @@ def api_template_detail(template_id):
 def list_campagnes():
     """
     Liste toutes les campagnes email.
-
-    Returns:
-        str: Template HTML de la liste des campagnes
+    Utilise le template 3 étapes situé dans templates/pages/campagnes.html.
     """
     from services.database.campagnes import CampagneManager
+    from flask import make_response
+    from utils.template_helpers import render_page
+
     campagne_manager = CampagneManager()
     campagnes = campagne_manager.list_campagnes(limit=100)
-    return render_page('campagnes.html', campagnes=campagnes)
+
+    # On cible explicitement pages/campagnes.html pour coller à la structure de déploiement
+    resp = make_response(render_page('pages/campagnes.html', campagnes=campagnes))
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
 
 
 @other_bp.route('/api/campagnes', methods=['GET'])
@@ -311,9 +318,9 @@ def api_create_campagne():
         now = datetime.now()
         date_str = now.strftime('%d.%m')
         time_str = now.strftime('%Hh%M')
-        template_name = template_id or 'Custom'
-        recipient_count = len(recipients) if recipients else 0
-        nom = f'📧 {date_str} {time_str} - {template_name[:10]} ({recipient_count})'
+        template_name = template_id or 'Campagne email'
+        # Nom simple, sans icônes ni compteur (le volume est déjà affiché dans la carte)
+        nom = f'{template_name[:40]} - {date_str} {time_str}'
 
     if not recipients:
         return jsonify({'error': 'Aucun destinataire fourni'}), 400
@@ -409,6 +416,102 @@ def api_get_entreprises_with_emails():
     entreprises = entreprise_manager.get_entreprises_with_emails()
     entreprises = clean_json_dict(entreprises)
     return jsonify(entreprises)
+
+
+@other_bp.route('/api/ciblage/objectifs', methods=['GET'])
+@login_required
+def api_ciblage_objectifs():
+    """
+    API: Liste des objectifs de ciblage prédéfinis (Formations, Modernisation, etc.).
+    """
+    from services.ciblage_objectifs import get_objectifs
+    return jsonify(get_objectifs())
+
+
+@other_bp.route('/api/ciblage/suggestions', methods=['GET'])
+@login_required
+def api_ciblage_suggestions():
+    """
+    API: Valeurs distinctes pour autocomplétion (secteurs, opportunités, statuts, tags).
+    Query: with_counts=1 pour avoir les effectifs (value, count).
+    """
+    from services.database.entreprises import EntrepriseManager
+    manager = EntrepriseManager()
+    if request.args.get('with_counts') in ('1', 'true', 'True'):
+        return jsonify(manager.get_ciblage_suggestions_with_counts())
+    return jsonify(manager.get_ciblage_suggestions())
+
+
+@other_bp.route('/api/ciblage/entreprises', methods=['GET'])
+@login_required
+def api_ciblage_entreprises():
+    """
+    API: Entreprises avec emails pour campagne, avec filtres de ciblage.
+    Query params: secteur, secteur_contains, opportunite (virgule), statut, tags_contains,
+    favori (1/0), search, score_securite_max, exclude_already_contacted (1/true).
+    """
+    from services.database.entreprises import EntrepriseManager
+    from utils.helpers import clean_json_dict
+    filters = {}
+    if request.args.get('secteur'):
+        filters['secteur'] = request.args.get('secteur')
+    if request.args.get('secteur_contains'):
+        filters['secteur_contains'] = request.args.get('secteur_contains')
+    if request.args.get('opportunite'):
+        filters['opportunite'] = [s.strip() for s in request.args.get('opportunite').split(',') if s.strip()]
+    if request.args.get('statut'):
+        filters['statut'] = request.args.get('statut')
+    if request.args.get('tags_contains'):
+        filters['tags_contains'] = request.args.get('tags_contains')
+    if request.args.get('favori') in ('1', 'true', 'True'):
+        filters['favori'] = True
+    if request.args.get('search'):
+        filters['search'] = request.args.get('search')
+    if request.args.get('score_securite_max'):
+        try:
+            filters['score_securite_max'] = int(request.args.get('score_securite_max'))
+        except ValueError:
+            pass
+    if request.args.get('exclude_already_contacted') in ('1', 'true', 'True'):
+        filters['exclude_already_contacted'] = True
+    entreprise_manager = EntrepriseManager()
+    entreprises = entreprise_manager.get_entreprises_for_campagne(filters)
+    return jsonify(clean_json_dict(entreprises))
+
+
+@other_bp.route('/api/ciblage/segments', methods=['GET', 'POST'])
+@login_required
+def api_ciblage_segments():
+    """
+    GET: Liste des segments de ciblage sauvegardés.
+    POST: Crée un segment (body: nom, description?, criteres?).
+    """
+    from services.database.campagnes import CampagneManager
+    db = CampagneManager()
+    if request.method == 'GET':
+        segments = db.get_segments()
+        return jsonify(segments)
+    data = request.get_json() or {}
+    nom = data.get('nom') or request.form.get('nom')
+    if not nom:
+        return jsonify({'error': 'nom requis'}), 400
+    segment_id = db.create_segment(
+        nom=nom,
+        description=data.get('description') or request.form.get('description'),
+        criteres=data.get('criteres') or {}
+    )
+    return jsonify({'id': segment_id, 'nom': nom}), 201
+
+
+@other_bp.route('/api/ciblage/segments/<int:segment_id>', methods=['DELETE'])
+@login_required
+def api_ciblage_segment_delete(segment_id):
+    """Supprime un segment de ciblage."""
+    from services.database.campagnes import CampagneManager
+    db = CampagneManager()
+    if db.delete_segment(segment_id):
+        return jsonify({'success': True})
+    return jsonify({'error': 'Segment introuvable'}), 404
 
 
 @other_bp.route('/track/pixel/<tracking_token>')

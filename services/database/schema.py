@@ -301,6 +301,18 @@ class DatabaseSchema(DatabaseBase):
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_tracking_token ON email_tracking_events(tracking_token)')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_tracking_event_type ON email_tracking_events(event_type)')
         
+        # Table des segments de ciblage (critères sauvegardés pour les campagnes)
+        self.execute_sql(cursor, '''
+            CREATE TABLE IF NOT EXISTS segments_ciblage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nom TEXT NOT NULL,
+                description TEXT,
+                criteres_json TEXT,
+                date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_segments_ciblage_nom ON segments_ciblage(nom)')
+        
         # Table des analyses techniques
         self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analyses_techniques (

@@ -33,15 +33,28 @@ class CampagneManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
 
-        self.execute_sql(cursor,
-            '''
-            INSERT INTO campagnes_email (nom, template_id, sujet, total_destinataires, total_envoyes, total_reussis, statut)
-            VALUES (?, ?, ?, ?, 0, 0, ?)
-            ''',
-            (nom, template_id, sujet, total_destinataires, statut)
-        )
+        # Gestion SQLite / PostgreSQL pour récupérer proprement l'ID
+        if self.is_postgresql():
+            self.execute_sql(cursor,
+                '''
+                INSERT INTO campagnes_email (nom, template_id, sujet, total_destinataires, total_envoyes, total_reussis, statut)
+                VALUES (?, ?, ?, ?, 0, 0, ?)
+                RETURNING id
+                ''',
+                (nom, template_id, sujet, total_destinataires, statut)
+            )
+            row = cursor.fetchone()
+            campagne_id = row.get('id') if isinstance(row, dict) else (row[0] if row else None)
+        else:
+            self.execute_sql(cursor,
+                '''
+                INSERT INTO campagnes_email (nom, template_id, sujet, total_destinataires, total_envoyes, total_reussis, statut)
+                VALUES (?, ?, ?, ?, 0, 0, ?)
+                ''',
+                (nom, template_id, sujet, total_destinataires, statut)
+            )
+            campagne_id = cursor.lastrowid
 
-        campagne_id = cursor.lastrowid
         conn.commit()
         conn.close()
         return campagne_id
@@ -209,8 +222,16 @@ class CampagneManager(DatabaseBase):
         cursor = conn.cursor()
 
         # On s'adapte au schéma existant (certains environnements n'ont pas encore tracking_token)
-        self.execute_sql(cursor,"PRAGMA table_info(emails_envoyes)")
-        cols = {row[1] for row in cursor.fetchall()}
+        if self.is_postgresql():
+            self.execute_sql(cursor, """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'emails_envoyes'
+            """)
+            cols = {row['column_name'] for row in cursor.fetchall()}
+        else:
+            self.execute_sql(cursor, "PRAGMA table_info(emails_envoyes)")
+            cols = {row[1] for row in cursor.fetchall()}
 
         if 'tracking_token' in cols:
             self.execute_sql(cursor,
@@ -251,8 +272,16 @@ class CampagneManager(DatabaseBase):
         cursor = conn.cursor()
 
         # Si la colonne n'existe pas encore, on ne fait rien (schéma pas migré)
-        self.execute_sql(cursor,"PRAGMA table_info(emails_envoyes)")
-        cols = {row[1] for row in cursor.fetchall()}
+        if self.is_postgresql():
+            self.execute_sql(cursor, """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'emails_envoyes'
+            """)
+            cols = {row['column_name'] for row in cursor.fetchall()}
+        else:
+            self.execute_sql(cursor, "PRAGMA table_info(emails_envoyes)")
+            cols = {row[1] for row in cursor.fetchall()}
         if 'tracking_token' not in cols:
             conn.close()
             return False
@@ -328,7 +357,20 @@ class CampagneManager(DatabaseBase):
             conn.close()
             return None
 
-        email_id = row[0]
+        # Compatibilité SQLite (tuple) / PostgreSQL (dict-like)
+        try:
+            if isinstance(row, dict):
+                email_id = row.get('id')
+            else:
+                email_id = row[0]
+        except Exception:
+            email_id = None
+
+        if not email_id:
+            import logging
+            logging.getLogger(__name__).warning(f'Impossible de récupérer email_id pour le token: {tracking_token[:10]}...')
+            conn.close()
+            return None
 
         if isinstance(event_data, dict):
             event_data = json.dumps(event_data)
@@ -544,14 +586,24 @@ class CampagneManager(DatabaseBase):
                 'total_events': row['total_events']
             }
 
-        self.execute_sql(cursor,
-            f'''
-            SELECT AVG(CAST(json_extract(event_data, '$.read_time') AS REAL)) as avg_read_time
-            FROM email_tracking_events
-            WHERE email_id IN ({placeholders}) AND event_type = 'read_time' AND event_data IS NOT NULL
-            ''',
-            email_ids
-        )
+        if self.is_postgresql():
+            self.execute_sql(cursor,
+                f'''
+                SELECT AVG(CAST((event_data::json->>'read_time') AS DOUBLE PRECISION)) as avg_read_time
+                FROM email_tracking_events
+                WHERE email_id IN ({placeholders}) AND event_type = 'read_time' AND event_data IS NOT NULL
+                ''',
+                email_ids
+            )
+        else:
+            self.execute_sql(cursor,
+                f'''
+                SELECT AVG(CAST(json_extract(event_data, '$.read_time') AS REAL)) as avg_read_time
+                FROM email_tracking_events
+                WHERE email_id IN ({placeholders}) AND event_type = 'read_time' AND event_data IS NOT NULL
+                ''',
+                email_ids
+            )
         avg_read_time_row = cursor.fetchone()
         avg_read_time = avg_read_time_row['avg_read_time'] if avg_read_time_row and avg_read_time_row['avg_read_time'] else None
 
@@ -582,3 +634,87 @@ class CampagneManager(DatabaseBase):
             'stats_by_type': stats_by_type,
             'emails': emails
         }
+    
+    def create_segment(self, nom, description=None, criteres=None):
+        """
+        Crée un segment de ciblage (critères sauvegardés).
+        
+        Args:
+            nom: Nom du segment
+            description: Description optionnelle
+            criteres: Dict de critères (secteur, opportunite, etc.)
+        
+        Returns:
+            int: ID du segment créé
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        criteres_json = json.dumps(criteres) if criteres else None
+        if self.is_postgresql():
+            self.execute_sql(cursor, '''
+                INSERT INTO segments_ciblage (nom, description, criteres_json)
+                VALUES (?, ?, ?)
+                RETURNING id
+            ''', (nom, description, criteres_json))
+            row = cursor.fetchone()
+            segment_id = row.get('id') if isinstance(row, dict) else (row[0] if row else None)
+        else:
+            self.execute_sql(cursor, '''
+                INSERT INTO segments_ciblage (nom, description, criteres_json)
+                VALUES (?, ?, ?)
+            ''', (nom, description, criteres_json))
+            segment_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return segment_id
+    
+    def get_segments(self):
+        """Retourne la liste des segments de ciblage."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self.execute_sql(cursor, 'SELECT id, nom, description, criteres_json, date_creation FROM segments_ciblage ORDER BY nom')
+        rows = cursor.fetchall()
+        conn.close()
+        result = []
+        for row in rows:
+            r = dict(row)
+            if r.get('criteres_json'):
+                try:
+                    r['criteres'] = json.loads(r['criteres_json'])
+                except Exception:
+                    r['criteres'] = {}
+            else:
+                r['criteres'] = {}
+            del r['criteres_json']
+            result.append(r)
+        return result
+    
+    def get_segment(self, segment_id):
+        """Retourne un segment par id ou None."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self.execute_sql(cursor, 'SELECT id, nom, description, criteres_json, date_creation FROM segments_ciblage WHERE id = ?', (segment_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        r = dict(row)
+        if r.get('criteres_json'):
+            try:
+                r['criteres'] = json.loads(r['criteres_json'])
+            except Exception:
+                r['criteres'] = {}
+        else:
+            r['criteres'] = {}
+        del r['criteres_json']
+        return r
+    
+    def delete_segment(self, segment_id):
+        """Supprime un segment. Retourne True si supprimé."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self.execute_sql(cursor, 'DELETE FROM segments_ciblage WHERE id = ?', (segment_id,))
+        conn.commit()
+        deleted = cursor.rowcount > 0
+        conn.close()
+        return deleted

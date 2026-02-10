@@ -23,7 +23,7 @@ Write-Host ""
 $PROJECT_DIR = (Get-Item (Split-Path -Parent $PSScriptRoot)).FullName
 
 # Vérifier la connexion SSH
-Write-Host "[1/8] Vérification de la connexion SSH..." -ForegroundColor Yellow
+Write-Host "[1/9] Vérification de la connexion SSH..." -ForegroundColor Yellow
 try {
     $result = ssh -o ConnectTimeout=5 "$User@$Server" "echo 'Connexion OK'" 2>&1
     if ($LASTEXITCODE -ne 0) {
@@ -41,7 +41,7 @@ try {
 Write-Host ""
 
 # Créer le répertoire de déploiement local
-Write-Host "[2/8] Préparation des fichiers locaux..." -ForegroundColor Yellow
+Write-Host "[2/9] Préparation des fichiers locaux..." -ForegroundColor Yellow
 $deployDir = Join-Path $PROJECT_DIR "deploy"
 if (Test-Path $deployDir) {
     Remove-Item -Recurse -Force $deployDir
@@ -135,7 +135,7 @@ Write-Host "✅ Fichiers préparés" -ForegroundColor Green
 Write-Host ""
 
 # Vérifier Python sur le serveur
-Write-Host "[3/8] Vérification de Python..." -ForegroundColor Yellow
+Write-Host "[3/9] Vérification de Python..." -ForegroundColor Yellow
 $pythonVersion = ssh "$User@$Server" "python3 --version 2>&1" | Select-Object -First 1
 if (-not $pythonVersion) {
     Write-Host "❌ Python3 n'est pas installé sur le serveur" -ForegroundColor Red
@@ -145,13 +145,13 @@ Write-Host "✅ $pythonVersion détecté" -ForegroundColor Green
 Write-Host ""
 
 # Créer le répertoire sur le serveur
-Write-Host "[4/8] Préparation du répertoire sur le serveur..." -ForegroundColor Yellow
+Write-Host "[4/9] Préparation du répertoire sur le serveur..." -ForegroundColor Yellow
 ssh "$User@$Server" "sudo mkdir -p $RemotePath && sudo chown -R $User`:$User $RemotePath" | Out-Null
 Write-Host "✅ Répertoire créé sur le serveur" -ForegroundColor Green
 Write-Host ""
 
 # Copier les fichiers vers le serveur
-Write-Host "[5/8] Transfert des fichiers vers le serveur..." -ForegroundColor Yellow
+Write-Host "[5/9] Transfert des fichiers vers le serveur..." -ForegroundColor Yellow
 Write-Host "   Cela peut prendre quelques instants..." -ForegroundColor Gray
 
 # Utiliser rsync si disponible, sinon tar+scp pour éviter les problèmes de chemins Windows
@@ -230,7 +230,7 @@ Write-Host "✅ Dossiers synchronisés (routes, services, tasks, templates, stat
 Write-Host ""
 
 # Créer l'environnement virtuel sur le serveur
-Write-Host "[6/8] Configuration de l'environnement virtuel..." -ForegroundColor Yellow
+Write-Host "[6/9] Configuration de l'environnement virtuel..." -ForegroundColor Yellow
 ssh "$User@$Server" "cd $RemotePath && if [ ! -d venv ]; then python3 -m venv venv; fi" | Out-Null
 ssh "$User@$Server" "cd $RemotePath && source venv/bin/activate && pip install --upgrade pip setuptools wheel && pip install -r requirements.txt" | Out-Null
 if ($LASTEXITCODE -ne 0) {
@@ -241,20 +241,27 @@ Write-Host "✅ Environnement virtuel configuré" -ForegroundColor Green
 Write-Host ""
 
 # Créer les répertoires nécessaires
-Write-Host "[7/8] Création des répertoires nécessaires..." -ForegroundColor Yellow
+Write-Host "[7/9] Création des répertoires nécessaires..." -ForegroundColor Yellow
 ssh "$User@$Server" "cd $RemotePath && mkdir -p logs logs_server" | Out-Null
 Write-Host "✅ Répertoires créés" -ForegroundColor Green
 Write-Host ""
 
 # Ajouter les permissions d'exécution aux scripts shell
-Write-Host "[7.5/8] Configuration des permissions des scripts..." -ForegroundColor Yellow
+Write-Host "[7.5/9] Configuration des permissions des scripts..." -ForegroundColor Yellow
 ssh "$User@$Server" "cd $RemotePath && find scripts/linux -name '*.sh' -type f -exec chmod +x {} \; 2>/dev/null || true" | Out-Null
 ssh "$User@$Server" "cd $RemotePath && find scripts -name '*.sh' -type f -exec chmod +x {} \; 2>/dev/null || true" | Out-Null
 Write-Host "✅ Permissions des scripts configurées" -ForegroundColor Green
 Write-Host ""
 
+# Nettoyage du cache et redémarrage des services
+Write-Host "[8/9] Nettoyage du cache et redémarrage des services..." -ForegroundColor Yellow
+ssh "$User@$Server" "cd $RemotePath && if [ -x scripts/clear-cache.sh ]; then ./scripts/clear-cache.sh; fi" | Out-Null
+ssh "$User@$Server" "sudo systemctl restart prospectlab prospectlab-celery prospectlab-celerybeat" | Out-Null
+Write-Host "✅ Cache vidé et services redémarrés" -ForegroundColor Green
+Write-Host ""
+
 # Instructions finales
-Write-Host "[8/8] Déploiement terminé !" -ForegroundColor Green
+Write-Host "[9/9] Déploiement terminé !" -ForegroundColor Green
 Write-Host ""
 Write-Host "Prochaines étapes:" -ForegroundColor Cyan
 Write-Host "1. Connectez-vous au serveur de production" -ForegroundColor Yellow
