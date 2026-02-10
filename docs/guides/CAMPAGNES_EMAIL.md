@@ -175,3 +175,28 @@ Les logs des campagnes sont enregistrés dans `logs/email_tasks.log` avec :
 - [ ] Templates personnalisables par l'utilisateur
 - [ ] Export des résultats en CSV/Excel
 
+## Temps de lecture moyen (spécification)
+
+Actuellement, le champ "Temps de lecture moyen" dans la modale de résultats affiche **"Non mesuré"** car aucun événement `read_time` n'est encore enregistré.
+
+Spécification cible :
+
+- **Objectif** : mesurer approximativement le temps pendant lequel un destinataire lit le contenu lié à la campagne (par exemple une landing page).
+- **Événement de tracking** :
+  - Type : `read_time`
+  - Table : `email_tracking_events`
+  - Colonne `event_data` (JSON) contenant au minimum :
+    ```json
+    { "read_time": 42 }
+    ```
+    où `read_time` est exprimé en secondes.
+- **Calcul** :
+  - Pour un email donné : moyenne des `read_time` enregistrés pour `email_id` et `event_type = 'read_time'`.
+  - Pour une campagne : moyenne de tous les `read_time` des emails de la campagne (champ `avg_read_time` renvoyé par l'API).
+- **Collecte côté frontend** (à implémenter dans un second temps) :
+  - Sur les pages de destination (site `danielcraft.fr` ou autre) liées depuis l'email :
+    - Récupérer un identifiant de tracking (par exemple `tracking_token` ou `email_id`) dans l'URL.
+    - Mesurer le temps passé sur la page (timer JS démarré au `DOMContentLoaded`, interrompu au `beforeunload`).
+    - Envoyer une requête HTTP (par ex. `POST /track/read_time/<tracking_token>?seconds=42`) qui créera un événement `read_time`.
+  - Important : les clients email bloquent le JavaScript, donc la mesure doit se faire sur une page web contrôlée (landing page), pas dans l'email lui-même.
+

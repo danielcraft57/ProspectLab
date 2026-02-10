@@ -1,0 +1,267 @@
+{% extends "base.html" %}
+
+{% block title %}Campagnes Email - ProspectLab{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/campagnes.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="campagnes-container">
+    <div class="page-header">
+        <h1>Campagnes Email</h1>
+        <button class="btn-new-campagne" onclick="openNewCampagneModal()">
+            + Nouvelle campagne
+        </button>
+    </div>
+
+    <div class="campagnes-filters">
+        <div class="campagnes-filters-main">
+            <label for="campagnes-search" class="filter-label">Recherche</label>
+            <div class="campagnes-search-input">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input type="text" id="campagnes-search" placeholder="Nom de campagne, sujet, secteur..." autocomplete="off">
+            </div>
+        </div>
+        <div class="campagnes-filters-row">
+            <div class="filter-group">
+                <label for="campagnes-statut-filter" class="filter-label">Statut</label>
+                <select id="campagnes-statut-filter">
+                    <option value="">Tous</option>
+                    <option value="draft">Brouillon</option>
+                    <option value="scheduled">Planifiée</option>
+                    <option value="running">En cours</option>
+                    <option value="completed">Terminée</option>
+                    <option value="failed">Erreur</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="campagnes-date-from" class="filter-label">Du</label>
+                <input type="date" id="campagnes-date-from">
+            </div>
+            <div class="filter-group">
+                <label for="campagnes-date-to" class="filter-label">Au</label>
+                <input type="date" id="campagnes-date-to">
+            </div>
+            <div class="filter-group filter-group-reset">
+                <button type="button" id="campagnes-filters-reset" class="btn-filters-reset">Réinitialiser</button>
+            </div>
+        </div>
+        <div id="campagnes-results-count" class="campagnes-results-count"></div>
+    </div>
+
+    <div id="campagnes-grid" class="campagnes-grid">
+        <div class="loading">Chargement des campagnes...</div>
+    </div>
+</div>
+
+<!-- Modal 3 étapes : 1=Entreprises, 2=Emails, 3=Message -->
+<div id="campagne-modal" class="modal" data-campagne-steps="3" style="display: none;">
+    <div class="modal-content modal-campagne-steps">
+        <div class="modal-header">
+            <h2>Nouvelle campagne email</h2>
+            <button class="close-modal" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="modal-steps-indicator" role="tablist" aria-label="Étapes">
+            <div class="step-item" data-step="1" onclick="goToStepFromHeader(1)">
+                <span id="step-indicator-1" class="step-dot step-active" aria-current="step">1</span>
+                <div class="step-label">
+                    <span class="step-icon"><i class="fa-solid fa-building"></i></span>
+                    <span>Entreprises</span>
+                </div>
+            </div>
+            <span class="step-line" aria-hidden="true"></span>
+            <div class="step-item" data-step="2" onclick="goToStepFromHeader(2)">
+                <span id="step-indicator-2" class="step-dot">2</span>
+                <div class="step-label">
+                    <span class="step-icon"><i class="fa-solid fa-envelope-open-text"></i></span>
+                    <span>Emails</span>
+                </div>
+            </div>
+            <span class="step-line" aria-hidden="true"></span>
+            <div class="step-item" data-step="3" onclick="goToStepFromHeader(3)">
+                <span id="step-indicator-3" class="step-dot">3</span>
+                <div class="step-label">
+                    <span class="step-icon"><i class="fa-solid fa-pen-to-square"></i></span>
+                    <span>Message</span>
+                </div>
+            </div>
+        </div>
+        <div class="modal-body">
+            <form id="campagne-form">
+                <!-- Étape 1 : Ciblage + sélection des entreprises -->
+                <div id="campagne-step-1" class="campagne-step" role="tabpanel" aria-labelledby="step-indicator-1" style="display: block;">
+                    <div class="form-section ciblage-section">
+                        <div class="form-section-title">Ciblage</div>
+                        <div class="ciblage-mode">
+                            <label class="ciblage-radio"><input type="radio" name="ciblage_mode" value="toutes" checked> Toutes avec email</label>
+                            <label class="ciblage-radio"><input type="radio" name="ciblage_mode" value="objectif"> Par objectif</label>
+                            <label class="ciblage-radio"><input type="radio" name="ciblage_mode" value="criteres"> Par critères</label>
+                            <label class="ciblage-radio"><input type="radio" name="ciblage_mode" value="segment"> Segment sauvegardé</label>
+                        </div>
+                        <div id="ciblage-objectif-block" class="ciblage-block" style="display: none;">
+                            <div class="form-group">
+                                <label for="ciblage-objectif">Objectif</label>
+                                <select id="ciblage-objectif">
+                                    <option value="">Choisir un objectif...</option>
+                                </select>
+                                <p id="ciblage-objectif-desc" class="ciblage-desc"></p>
+                            </div>
+                        </div>
+                        <div id="ciblage-criteres-block" class="ciblage-block" style="display: none;">
+                            <div class="form-group ciblage-field">
+                                <label for="ciblage-secteur">Secteur (contient)</label>
+                                <input type="text" id="ciblage-secteur" list="datalist-secteur" placeholder="Ex: Formation" autocomplete="off">
+                                <datalist id="datalist-secteur"></datalist>
+                            </div>
+                            <div class="form-group ciblage-field">
+                                <label for="ciblage-opportunite">Opportunité (séparer par des virgules)</label>
+                                <input type="text" id="ciblage-opportunite" list="datalist-opportunite" placeholder="Ex: Très élevée, Élevée" autocomplete="off">
+                                <datalist id="datalist-opportunite"></datalist>
+                            </div>
+                            <div class="form-group ciblage-field">
+                                <label for="ciblage-statut">Statut</label>
+                                <input type="text" id="ciblage-statut" list="datalist-statut" placeholder="Ex: Actif" autocomplete="off">
+                                <datalist id="datalist-statut"></datalist>
+                            </div>
+                            <div class="form-group ciblage-field">
+                                <label for="ciblage-tags">Tags (contient)</label>
+                                <input type="text" id="ciblage-tags" list="datalist-tags" placeholder="Ex: formation" autocomplete="off">
+                                <datalist id="datalist-tags"></datalist>
+                            </div>
+                            <div class="form-group ciblage-field">
+                                <label for="ciblage-score-max">Score sécurité max</label>
+                                <input type="number" id="ciblage-score-max" placeholder="Ex: 50" min="0" max="100">
+                            </div>
+                            <div class="form-group ciblage-field ciblage-checkbox">
+                                <label><input type="checkbox" id="ciblage-exclude-contactes"> Exclure déjà contactés</label>
+                            </div>
+                            <p class="ciblage-auto-hint">Les résultats se mettent à jour automatiquement.</p>
+                        </div>
+                        <div id="ciblage-segment-block" class="ciblage-block" style="display: none;">
+                            <div class="form-group">
+                                <label for="ciblage-segment">Segment</label>
+                                <select id="ciblage-segment">
+                                    <option value="">Choisir un segment...</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-section">
+                        <div class="form-section-title">Sélection des entreprises</div>
+                        <p class="form-hint">Choisissez les entreprises à contacter. À l&apos;étape 2 vous filtrerez les emails.</p>
+                        <div id="step1-results-count" class="results-count" style="display: none;"></div>
+                        <div class="form-group entreprise-search-row">
+                            <label for="entreprise-search">Rechercher une entreprise</label>
+                            <div class="entreprise-search-input">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input type="text" id="entreprise-search" placeholder="Nom, secteur, email..." autocomplete="off">
+                                <button type="button" id="entreprise-search-clear">Effacer</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <div id="entreprises-selector" class="recipients-selector">
+                                <div class="loading">Chargement des entreprises...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Étape 2 : Filtrage des emails + sélection des destinataires -->
+                <div id="campagne-step-2" class="campagne-step" role="tabpanel" aria-labelledby="step-indicator-2" style="display: none;">
+                    <div class="form-section form-section-email-filters">
+                        <div class="form-section-title">Filtrage des emails</div>
+                        <p class="form-hint">Affinez les emails affichés pour éviter doublons et adresses techniques.</p>
+                        <div class="email-filters-row">
+                            <div class="form-group ciblage-checkbox">
+                                <label><input type="checkbox" id="filter-email-person-only"> Uniquement contacts &laquo; personne &raquo; (nom prénom détecté)</label>
+                            </div>
+                            <div class="form-group ciblage-checkbox">
+                                <label><input type="checkbox" id="filter-email-with-name"> Uniquement emails avec nom de contact</label>
+                            </div>
+                            <div class="form-group ciblage-field">
+                                <label for="filter-email-exclude-domains">Exclure les domaines (virgules)</label>
+                                <input type="text" id="filter-email-exclude-domains" placeholder="Ex: sentry.io, wixpress.com, partoo.fr">
+                            </div>
+                            <div class="form-group ciblage-field">
+                                <label for="filter-email-exclude-contains">Exclure si l&apos;email contient</label>
+                                <input type="text" id="filter-email-exclude-contains" placeholder="Ex: noreply, no-reply">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-section">
+                        <div class="form-section-title">Sélection des destinataires</div>
+                        <div id="ciblage-results-count" class="results-count" style="display: none;"></div>
+                        <div class="form-group">
+                            <div id="recipients-selector" class="recipients-selector">
+                            </div>
+                            <div id="selected-count" class="selected-count" style="display: none;">
+                                0 destinataire(s) sélectionné(s)
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Étape 3 : Message -->
+                <div id="campagne-step-3" class="campagne-step" role="tabpanel" aria-labelledby="step-indicator-3" style="display: none;">
+                    <div class="form-section">
+                        <div class="form-section-title">Contenu du message</div>
+                        <div class="form-group">
+                            <label for="campagne-template">Modèle de message</label>
+                            <select id="campagne-template" name="template_id">
+                                <option value="">Aucun (message personnalisé)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="campagne-sujet">Sujet de l'email *</label>
+                            <input type="text" id="campagne-sujet" name="sujet" required placeholder="Ex: Partenariat développement web">
+                        </div>
+                        <div class="form-group">
+                            <label for="campagne-message">Message personnalisé (si aucun modèle)</label>
+                            <textarea id="campagne-message" name="custom_message" rows="8" placeholder="Votre message... (peut contenir {nom}, {entreprise}, {email})"></textarea>
+                            <div id="template-preview" style="display: none;"></div>
+                            <div class="form-hint">Les modèles HTML sont affichés en aperçu. Le contenu sera utilisé lors de l'envoi.</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="campagne-delay">Délai entre envois (secondes)</label>
+                            <input type="number" id="campagne-delay" name="delay" value="2" min="1" max="10">
+                        </div>
+                    </div>
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer modal-footer-steps">
+            <button type="button" id="btn-campagne-prev" class="btn-cancel" style="display: none;" onclick="campagneStepPrev()">Précédent</button>
+            <div class="modal-footer-right">
+                <button type="button" class="btn-cancel" onclick="closeModal()">Annuler</button>
+                <button type="button" id="btn-campagne-next" class="btn-submit" onclick="campagneStepNext()">Suivant</button>
+                <button type="button" id="btn-campagne-submit" class="btn-submit" style="display: none;" onclick="submitCampagne()">Lancer la campagne</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modale de résultats de campagne -->
+<div id="results-modal" class="modal-results">
+    <div class="modal-results-content">
+        <div class="modal-results-header">
+            <div class="modal-results-title">
+                <h2>📊 Résultats de la campagne</h2>
+                <span id="results-campagne-name" class="results-campagne-name"></span>
+            </div>
+            <button class="modal-results-close" onclick="closeResultsModal()">&times;</button>
+        </div>
+        <div class="modal-results-body" id="results-modal-body">
+            <div class="results-loading">
+                <div class="loading-spinner"></div>
+                <p>Chargement des résultats...</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/campagnes.js') }}?v=3steps"></script>
+{% endblock %}
+
