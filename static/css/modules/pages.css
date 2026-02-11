@@ -835,3 +835,202 @@
     font-weight: 500;
 }
 
+/* ============================================
+   Mode dark - Dashboard, cartes entreprise, listes
+   ============================================ */
+
+/* Dashboard: cartes stats et chiffres */
+body[data-theme="dark"] .stat-card {
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+}
+
+body[data-theme="dark"] .stat-card h3 {
+    color: #94a3b8;
+}
+
+body[data-theme="dark"] .stat-number {
+    color: #e5e7eb;
+}
+
+/* Dashboard: cartes graphiques */
+body[data-theme="dark"] .chart-card {
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+}
+
+body[data-theme="dark"] .chart-card h3 {
+    color: #e5e7eb;
+}
+
+/* Dashboard: analyses récentes */
+body[data-theme="dark"] .recent-analyses h2 {
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] .analysis-item {
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+
+body[data-theme="dark"] .analysis-item h4 {
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] .analysis-item p {
+    color: #94a3b8;
+}
+
+/* Page entreprises: cartes */
+body[data-theme="dark"] .entreprise-card {
+    background: #0f172a;
+    border-color: #1e293b;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+}
+
+body[data-theme="dark"] .entreprise-card:hover {
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+
+body[data-theme="dark"] .card-logo-container {
+    background: #0f172a;
+    border-color: #1e293b;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+}
+
+body[data-theme="dark"] .card-header {
+    background: #1e293b;
+    border-bottom-color: #334155;
+}
+
+body[data-theme="dark"] .card-header h3 {
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] .card-body p,
+body[data-theme="dark"] .card-body a {
+    color: #cbd5e1;
+}
+
+body[data-theme="dark"] .card-body .resume-preview {
+    color: #94a3b8 !important;
+}
+
+body[data-theme="dark"] .card-body strong {
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] .card-body div[style*="border-top"] {
+    border-top-color: #334155 !important;
+}
+
+body[data-theme="dark"] .card-footer {
+    background: #1e293b;
+    border-top-color: #334155;
+}
+
+/* Liste en ligne (entreprises) */
+body[data-theme="dark"] .entreprise-row {
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+
+body[data-theme="dark"] .row-name h3 {
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] .row-info {
+    color: #94a3b8;
+}
+
+/* Filtres et vues */
+body[data-theme="dark"] .filters-card {
+    background: #0f172a;
+    border: 1px solid #1e293b;
+}
+
+body[data-theme="dark"] .filters-card h3,
+body[data-theme="dark"] .filter-group label {
+    color: #e2e8f0;
+}
+
+body[data-theme="dark"] .form-input,
+body[data-theme="dark"] .form-select {
+    background-color: #0f172a;
+    border-color: #334155;
+    color: #e2e8f0;
+}
+
+body[data-theme="dark"] .view-btn {
+    background: #0f172a;
+    border-color: #334155;
+    color: #e2e8f0;
+}
+
+body[data-theme="dark"] .view-btn.active {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: white;
+}
+
+body[data-theme="dark"] .btn-pagination {
+    background: #0f172a;
+    border-color: #334155;
+    color: #e2e8f0;
+}
+
+body[data-theme="dark"] .btn-pagination:hover:not(.disabled) {
+    background: #1e293b;
+    border-color: #2563eb;
+}
+
+body[data-theme="dark"] .no-results {
+    color: #94a3b8;
+}
+
+/* Tags sur les cartes */
+body[data-theme="dark"] .tag {
+    background: #1e293b;
+    color: #93c5fd;
+}
+
+/* Badges (statut, sécurité, pentest) sur fond sombre */
+body[data-theme="dark"] .badge-success {
+    background: #14532d;
+    color: #86efac;
+}
+
+body[data-theme="dark"] .badge-warning {
+    background: #713f12;
+    color: #fcd34d;
+}
+
+body[data-theme="dark"] .badge-danger {
+    background: #7f1d1d;
+    color: #fecaca;
+}
+
+body[data-theme="dark"] .badge-info {
+    background: #0c4a6e;
+    color: #7dd3fc;
+}
+
+body[data-theme="dark"] .badge-secondary {
+    background: #334155;
+    color: #e2e8f0;
+}
+
+body[data-theme="dark"] .badge-outline {
+    border-color: #475569;
+    color: #94a3b8;
+}
+
+/* Progress message */
+body[data-theme="dark"] .progress-message {
+    color: #94a3b8;
+}
+

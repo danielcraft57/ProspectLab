@@ -16,6 +16,42 @@ from services.auth import login_required
 upload_bp = Blueprint('upload', __name__)
 
 
+def _preview_stats_from_df(df):
+    """
+    Calcule les statistiques du fichier pour le bloc récapitulatif (nombre d'entreprises, avec website, etc.).
+    
+    Args:
+        df: DataFrame pandas du fichier Excel
+        
+    Returns:
+        dict: total, with_website, with_phone, with_address, with_category
+    """
+    if df is None or df.empty:
+        return {'total': 0, 'with_website': 0, 'with_phone': 0, 'with_address': 0, 'with_category': 0}
+    
+    def filled(series):
+        return series.notna() & (series.astype(str).str.strip() != '')
+
+    total = len(df)
+    with_website = filled(df['website']).sum() if 'website' in df.columns else 0
+    with_phone = filled(df['phone_number']).sum() if 'phone_number' in df.columns else 0
+    with_category = filled(df['category']).sum() if 'category' in df.columns else 0
+    addr_cols = [c for c in ('address_1', 'address_2', 'address_full') if c in df.columns]
+    if addr_cols:
+        has_addr = (df[addr_cols].fillna('').astype(str).apply(lambda s: s.str.strip() != '')).any(axis=1)
+        with_address = int(has_addr.sum())
+    else:
+        with_address = 0
+
+    return {
+        'total': int(total),
+        'with_website': int(with_website),
+        'with_phone': int(with_phone),
+        'with_address': int(with_address),
+        'with_category': int(with_category),
+    }
+
+
 @upload_bp.route('/upload', methods=['GET', 'POST'])
 @login_required
 def upload_file():
@@ -60,17 +96,19 @@ def upload_file():
                 
                 preview = df.head(10).to_dict('records')
                 columns = list(df.columns)
-                
+                preview_stats = _preview_stats_from_df(df)
+
                 # Debug: logger la valeur de CELERY_WORKERS
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.info(f'Rendu preview.html avec celery_workers={CELERY_WORKERS}')
-                
-                return render_page('preview.html', 
+
+                return render_page('preview.html',
                                      filename=filename,
                                      preview=preview,
                                      columns=columns,
                                      total_rows=len(df),
+                                     preview_stats=preview_stats,
                                      validation_warnings=validation_warnings[:10],
                                      celery_workers=CELERY_WORKERS)
             except Exception as e:
@@ -122,17 +160,19 @@ def preview_file(filename):
         
         preview = df.head(10).to_dict('records')
         columns = list(df.columns)
-        
+        preview_stats = _preview_stats_from_df(df)
+
         # Debug: logger la valeur de CELERY_WORKERS
         import logging
         logger = logging.getLogger(__name__)
         logger.info(f'Rendu preview.html avec celery_workers={CELERY_WORKERS}')
-        
-        return render_page('preview.html', 
+
+        return render_page('preview.html',
                              filename=filename,
                              preview=preview,
                              columns=columns,
                              total_rows=len(df),
+                             preview_stats=preview_stats,
                              celery_workers=CELERY_WORKERS,
                              validation_warnings=validation_warnings[:10])
     except pd.errors.EmptyDataError:

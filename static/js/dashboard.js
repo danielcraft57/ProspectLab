@@ -4,6 +4,24 @@
  */
 
 (function() {
+    /** Retourne les options de couleur Chart.js selon le thème (dark/light) */
+    function getChartThemeOptions() {
+        const isDark = document.body.getAttribute('data-theme') === 'dark';
+        const textColor = isDark ? '#e2e8f0' : '#666';
+        return {
+            color: textColor,
+            plugins: {
+                legend: {
+                    labels: { color: textColor }
+                }
+            },
+            scales: isDark ? {
+                x: { ticks: { color: textColor } },
+                y: { ticks: { color: textColor } }
+            } : undefined
+        };
+    }
+
     // Charger les statistiques
     async function loadStatistics() {
         try {
@@ -49,7 +67,8 @@
                 responsive: true,
                 plugins: {
                     legend: {
-                        position: 'bottom'
+                        position: 'bottom',
+                        labels: getChartThemeOptions().plugins.legend.labels
                     }
                 }
             }
@@ -70,14 +89,24 @@
                     backgroundColor: '#3498db'
                 }]
             },
-            options: {
-                responsive: true,
-                scales: {
-                    y: {
-                        beginAtZero: true
+            options: (function() {
+                var theme = getChartThemeOptions();
+                return {
+                    responsive: true,
+                    plugins: {
+                        legend: { labels: theme.plugins.legend.labels }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: { color: theme.color }
+                        },
+                        x: {
+                            ticks: { color: theme.color }
+                        }
                     }
-                }
-            }
+                };
+            })()
         });
     }
     

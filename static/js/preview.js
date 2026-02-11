@@ -31,6 +31,42 @@
     progressBar.appendChild(progressFill);
     progressContainer.appendChild(progressBar);
     progressContainer.appendChild(progressText);
+
+    // Gestion du bloc de prévisualisation (ouverture/fermeture animée)
+    const previewSection = document.getElementById('preview-section');
+    const previewContent = document.getElementById('preview-content');
+    const previewToggleBtn = document.getElementById('preview-toggle-btn');
+
+    function setPreviewExpanded(expanded) {
+        if (!previewSection || !previewContent || !previewToggleBtn) return;
+        var icon = previewToggleBtn.querySelector('.preview-toggle-icon');
+        var label = previewToggleBtn.querySelector('.preview-toggle-label');
+        if (expanded) {
+            previewSection.classList.remove('preview-collapsed');
+            previewSection.classList.add('preview-expanded');
+            previewContent.style.maxHeight = previewContent.scrollHeight + 'px';
+            previewToggleBtn.setAttribute('aria-expanded', 'true');
+            if (icon) { icon.classList.remove('fa-chevron-down'); icon.classList.add('fa-chevron-up'); }
+            if (label) { label.textContent = 'Réduire l\'aperçu'; }
+        } else {
+            previewSection.classList.remove('preview-expanded');
+            previewSection.classList.add('preview-collapsed');
+            previewContent.style.maxHeight = '0px';
+            previewToggleBtn.setAttribute('aria-expanded', 'false');
+            if (icon) { icon.classList.remove('fa-chevron-up'); icon.classList.add('fa-chevron-down'); }
+            if (label) { label.textContent = 'Afficher l\'aperçu détaillé'; }
+        }
+    }
+
+    if (previewToggleBtn) {
+        previewToggleBtn.addEventListener('click', function() {
+            const isExpanded = previewSection.classList.contains('preview-expanded');
+            setPreviewExpanded(!isExpanded);
+        });
+
+        // Initial: aperçu replié mais avec une petite animation si l'utilisateur ouvre
+        setPreviewExpanded(false);
+    }
     
     // Fonction pour vérifier et attendre la connexion WebSocket
     function waitForWebSocket(callback, maxWait = 10000) {
@@ -257,6 +293,15 @@
         // Ajouter la barre de progression
         if (!statusDiv.nextElementSibling || statusDiv.nextElementSibling.id !== 'progress-container') {
             statusDiv.after(progressContainer);
+        }
+
+        // Mettre en avant la carte d'analyse et replier l'aperçu pour focaliser l'attention
+        const analyzeCard = document.querySelector('.analyze-card');
+        if (analyzeCard) {
+            analyzeCard.classList.add('analyze-active');
+        }
+        if (previewSection && previewContent && previewToggleBtn) {
+            setPreviewExpanded(false);
         }
         
         progressFill.style.width = '0%';

@@ -1119,3 +1119,44 @@
 .page-card img:hover {
     transform: scale(1.05);
 }
+
+/* Mode dark - modale entreprise (onglets et contenu) */
+body[data-theme="dark"] .tabs-header {
+    border-bottom-color: #334155;
+}
+
+body[data-theme="dark"] .tab-btn {
+    color: #94a3b8;
+}
+
+body[data-theme="dark"] .tab-btn:hover {
+    color: #e5e7eb;
+    background: #1e293b;
+}
+
+body[data-theme="dark"] .tab-btn.active {
+    color: #93c5fd;
+    border-bottom-color: #93c5fd;
+}
+
+body[data-theme="dark"] .info-row {
+    background: #1e293b;
+    border: 1px solid #334155;
+}
+
+body[data-theme="dark"] .info-label {
+    color: #94a3b8;
+}
+
+body[data-theme="dark"] .info-value {
+    color: #e2e8f0;
+}
+
+body[data-theme="dark"] .tech-info-section {
+    border-top-color: #334155;
+}
+
+body[data-theme="dark"] .analyses-status {
+    background: #1e293b;
+    color: #e2e8f0;
+}

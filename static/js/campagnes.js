@@ -51,7 +51,7 @@ async function loadCampagnes() {
         const grid = document.getElementById('campagnes-grid');
         if (grid) {
             grid.innerHTML =
-                '<div class="empty-state"><p>Erreur lors du chargement des campagnes</p></div>';
+            '<div class="empty-state"><p>Erreur lors du chargement des campagnes</p></div>';
         }
     }
 }
@@ -1003,7 +1003,7 @@ function generateCampagneName(templateName, recipientCount, sectorLabel, entrepr
         templateLabel,
         contextPart
     ].filter(function(p) { return p && p !== ''; });
-
+    
     return parts.join(' ');
 }
 
@@ -1200,12 +1200,12 @@ async function loadCampagneResults(campagneId, silent) {
         displayCampagneResults(stats, !!silent);
     } catch (error) {
         if (!silent) {
-            const body = document.getElementById('results-modal-body');
-            body.innerHTML = `
-                <div class="results-loading">
-                    <p style="color: #e74c3c;">Erreur lors du chargement des résultats</p>
-                </div>
-            `;
+        const body = document.getElementById('results-modal-body');
+        body.innerHTML = `
+            <div class="results-loading">
+                <p style="color: #e74c3c;">Erreur lors du chargement des résultats</p>
+            </div>
+        `;
         }
     }
 }
