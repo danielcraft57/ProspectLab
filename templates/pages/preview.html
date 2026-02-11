@@ -2,10 +2,41 @@
 
 {% block title %}Prévisualisation - ProspectLab{% endblock %}
 
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/campagnes.css') }}">
+{% endblock %}
+
 {% block content %}
-<div class="page-header" data-filename="{{ filename }}" data-download-file-url="{{ url_for('other.download_file', filename='') }}" data-celery-workers="{{ celery_workers|default(4) }}">
+<div class="preview-page">
+<div class="page-header preview-page-header" data-filename="{{ filename }}" data-download-file-url="{{ url_for('other.download_file', filename='') }}" data-celery-workers="{{ celery_workers|default(4) }}">
     <h1>Prévisualisation du fichier</h1>
-    <p>Fichier : <strong>{{ filename }}</strong> ({{ total_rows }} lignes)</p>
+    <p class="preview-file-info">Fichier : <strong>{{ filename }}</strong> ({{ total_rows }} lignes)</p>
+</div>
+
+<div class="preview-stats-block">
+    <h2 class="preview-stats-title">Résumé du fichier</h2>
+    <div class="preview-stats-grid">
+        <div class="preview-stat-item">
+            <span class="preview-stat-value" id="preview-stat-total">{{ preview_stats.total|default(total_rows)|default(0) }}</span>
+            <span class="preview-stat-label">Entreprises</span>
+        </div>
+        <div class="preview-stat-item">
+            <span class="preview-stat-value">{{ preview_stats.with_website|default(0) }}</span>
+            <span class="preview-stat-label">Avec site web</span>
+        </div>
+        <div class="preview-stat-item">
+            <span class="preview-stat-value">{{ preview_stats.with_phone|default(0) }}</span>
+            <span class="preview-stat-label">Avec téléphone</span>
+        </div>
+        <div class="preview-stat-item">
+            <span class="preview-stat-value">{{ preview_stats.with_address|default(0) }}</span>
+            <span class="preview-stat-label">Avec adresse</span>
+        </div>
+        <div class="preview-stat-item">
+            <span class="preview-stat-value">{{ preview_stats.with_category|default(0) }}</span>
+            <span class="preview-stat-label">Avec catégorie</span>
+        </div>
+    </div>
 </div>
 
 {% if validation_warnings %}
@@ -23,47 +54,59 @@
 </div>
 {% endif %}
 
-<div class="preview-section">
-    <h2>Aperçu des données (10 premières lignes)</h2>
-    <div class="table-container">
-        <table class="data-table">
-            <thead>
-                <tr>
-                    {% for col in columns %}
-                    <th>{{ col }}</th>
-                    {% endfor %}
-                </tr>
-            </thead>
-            <tbody>
-                {% for row in preview %}
-                <tr>
-                    {% for col in columns %}
-                    <td>{{ row.get(col, '') }}</td>
-                    {% endfor %}
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-</div>
-
-<div class="analyze-section">
+<div class="analyze-section analyze-card">
     <h2>Lancer l'analyse</h2>
     
     <form id="analyze-form" class="analyze-form">
-        <div class="form-group" style="margin-bottom: 1rem;">
-            <p style="color: #666; font-size: 0.9rem; margin: 0;">
+        <div class="form-group analyze-intro">
+            <p>
                 L'analyse utilise Celery avec {{ celery_workers|default(4) }} workers en parallèle pour une performance optimale.
             </p>
         </div>
         
-        <div class="form-actions" style="display: flex; gap: 1rem; align-items: center;">
+        <div class="form-actions analyze-actions">
             <button type="submit" class="btn btn-primary" id="start-analysis-btn">Lancer l'analyse</button>
             <button type="button" class="btn btn-danger" id="stop-analysis-btn" style="display: none;">Arrêter l'analyse</button>
         </div>
     </form>
     
     <div id="analyze-status" class="status-message" style="display: none;"></div>
+</div>
+
+<div class="preview-section preview-card preview-collapsed" id="preview-section">
+    <div class="preview-header">
+        <div>
+            <h2>Aperçu des données</h2>
+            <p class="preview-subtitle">10 premières lignes sur {{ total_rows }} (pour vérifier que le mapping te convient).</p>
+        </div>
+        <button type="button" class="preview-toggle-btn" id="preview-toggle-btn" aria-expanded="false">
+            <i class="fas fa-chevron-down preview-toggle-icon" aria-hidden="true"></i>
+            <span class="preview-toggle-label">Afficher l'aperçu détaillé</span>
+        </button>
+    </div>
+    <div class="preview-content" id="preview-content">
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        {% for col in columns %}
+                        <th>{{ col }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in preview %}
+                    <tr>
+                        {% for col in columns %}
+                        <td>{{ row.get(col, '') }}</td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
 </div>
 {% endblock %}
 

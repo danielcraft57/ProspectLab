@@ -608,19 +608,27 @@ class EntrepriseManager(DatabaseBase):
         
         # Parser les tags et charger les données OpenGraph pour chaque entreprise
         entreprises = []
+        import logging
+        logger = logging.getLogger(__name__)
+
         for row in rows:
             entreprise = self.clean_row_dict(dict(row))
             
             if entreprise.get('tags'):
                 try:
                     entreprise['tags'] = json.loads(entreprise['tags']) if isinstance(entreprise['tags'], str) else entreprise['tags']
-                except:
+                except Exception:
                     entreprise['tags'] = []
             else:
                 entreprise['tags'] = []
             
             # Charger les données OpenGraph depuis les tables normalisées
-            entreprise['og_data'] = self.get_og_data(entreprise['id'])
+            try:
+                entreprise['og_data'] = self.get_og_data(entreprise['id'])
+            except Exception as og_error:
+                # Sur certains environnements anciens, les tables OG peuvent ne pas encore exister.
+                logger.warning(f"[Database] Erreur lors du chargement des données OG pour entreprise {entreprise.get('id')}: {og_error}")
+                entreprise['og_data'] = None
             
             entreprises.append(entreprise)
         
