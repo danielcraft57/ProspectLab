@@ -214,6 +214,8 @@ class DatabaseSchema(DatabaseBase):
                 statut TEXT
             )
         ''')
+        self.safe_execute_sql(cursor, 'ALTER TABLE campagnes_email ADD COLUMN scheduled_at TEXT')
+        self.safe_execute_sql(cursor, 'ALTER TABLE campagnes_email ADD COLUMN campaign_params_json TEXT')
         
         # Table des emails envoyés
         self.execute_sql(cursor, '''

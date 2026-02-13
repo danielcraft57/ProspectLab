@@ -28,6 +28,7 @@ let campagneModalStep = 1;
 document.addEventListener('DOMContentLoaded', function() {
     loadCampagnes();
     loadTemplates();
+    initTemplateSelectListener();
     loadEntreprises();
     loadObjectifsCiblage();
     loadSegmentsCiblage();
@@ -35,6 +36,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initCiblageModeSwitch();
     initCiblageAutoLoad();
     initEmailFiltersListeners();
+    initScheduleFields();
     initStep1Search();
     initCampagnesFilters();
     initWebSocket();
@@ -239,89 +241,82 @@ function displayCampagnes(campagnes) {
     }
 }
 
-// Charger les templates
+// Charger les templates et remplir le select "Modèle de message" (étape 3)
 async function loadTemplates() {
+    var select = document.getElementById('campagne-template');
+    if (!select) return;
     try {
-        const response = await fetch('/api/templates');
-        const allTemplates = await response.json();
+        var response = await fetch('/api/templates');
+        var data = await response.json();
+        templatesData = Array.isArray(data) ? data : [];
+        if (!response.ok) {
+            templatesData = [];
+        }
+    } catch (e) {
+        templatesData = [];
+    }
+    select.innerHTML = '<option value="">Aucun (message personnalisé)</option>';
+    templatesData.forEach(function(template) {
+        var option = document.createElement('option');
+        option.value = template.id;
+        option.textContent = template.name || template.id;
+        select.appendChild(option);
+    });
+}
 
-        // Filtrer pour ne garder que les templates HTML
-        templatesData = allTemplates.filter(t => t.is_html === true);
+// Attacher une seule fois le listener "change" du select Modèle de message
+function initTemplateSelectListener() {
+    var select = document.getElementById('campagne-template');
+    if (!select) return;
+    select.addEventListener('change', onCampagneTemplateChange);
+}
 
-        const select = document.getElementById('campagne-template');
-        select.innerHTML = '<option value="">Aucun (message personnalisé)</option>';
-        
-        templatesData.forEach(template => {
-            const option = document.createElement('option');
-            option.value = template.id;
-            option.textContent = template.name;
-            select.appendChild(option);
-        });
-
-        // Écouter les changements de template
-        select.addEventListener('change', function() {
-            const template = templatesData.find(t => t.id === this.value);
-            const messageTextarea = document.getElementById('campagne-message');
-            let previewDiv = document.getElementById('template-preview');
-            
-            if (template) {
-                document.getElementById('campagne-sujet').value = template.subject || '';
-                
-                // Pour les templates HTML, on cache le textarea et on affiche un aperçu
-                if (template.is_html) {
-                    messageTextarea.style.display = 'none';
-                    
-                    // Créer l'aperçu si nécessaire
-                    if (!previewDiv) {
-                        previewDiv = document.createElement('div');
-                        previewDiv.id = 'template-preview';
-                        previewDiv.className = 'template-preview';
-                        messageTextarea.parentNode.insertBefore(previewDiv, messageTextarea.nextSibling);
-                    }
-                    
-                    // Afficher l'aperçu dans un iframe pour un rendu propre
-                    previewDiv.style.display = 'block';
-                    
-                    // Créer l'iframe
-                    let iframe = previewDiv.querySelector('iframe');
-                    if (!iframe) {
-                        iframe = document.createElement('iframe');
-                        iframe.style.width = '100%';
-                        iframe.style.border = 'none';
-                        iframe.style.minHeight = '400px';
-                        iframe.style.background = 'white';
-                        previewDiv.innerHTML = '';
-                        previewDiv.appendChild(iframe);
-                    }
-                    
-                    // Écrire le contenu dans l'iframe
-                    try {
-                        const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-                        iframeDoc.open();
-                        iframeDoc.write(template.content);
-                        iframeDoc.close();
-                    } catch (e) {
-                        // Fallback : afficher le HTML directement si l'iframe ne fonctionne pas
-                        previewDiv.innerHTML = '<div style="padding: 20px; max-height: 400px; overflow-y: auto;">' + template.content + '</div>';
-                    }
-                } else {
-                    messageTextarea.style.display = 'block';
-                    messageTextarea.value = template.content || '';
-                    if (previewDiv) {
-                        previewDiv.style.display = 'none';
-                    }
-                }
-            } else {
-                // Aucun template sélectionné
-                messageTextarea.style.display = 'block';
-                messageTextarea.value = '';
-                if (previewDiv) {
-                    previewDiv.style.display = 'none';
-                }
+function onCampagneTemplateChange() {
+    var select = document.getElementById('campagne-template');
+    var value = select ? select.value : '';
+    var template = templatesData.find(function(t) { return t.id === value; });
+    var messageTextarea = document.getElementById('campagne-message');
+    var previewDiv = document.getElementById('template-preview');
+    if (!messageTextarea) return;
+    if (template) {
+        var sujetEl = document.getElementById('campagne-sujet');
+        if (sujetEl) sujetEl.value = template.subject || '';
+        if (template.is_html) {
+            messageTextarea.style.display = 'none';
+            if (!previewDiv) {
+                previewDiv = document.createElement('div');
+                previewDiv.id = 'template-preview';
+                previewDiv.className = 'template-preview';
+                messageTextarea.parentNode.insertBefore(previewDiv, messageTextarea.nextSibling);
             }
-        });
-    } catch (error) {
-        // Erreur silencieuse, les templates ne sont pas critiques
+            previewDiv.style.display = 'block';
+            var iframe = previewDiv.querySelector('iframe');
+            if (!iframe) {
+                iframe = document.createElement('iframe');
+                iframe.style.width = '100%';
+                iframe.style.border = 'none';
+                iframe.style.minHeight = '400px';
+                iframe.style.background = 'white';
+                previewDiv.innerHTML = '';
+                previewDiv.appendChild(iframe);
+            }
+            try {
+                var iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                iframeDoc.open();
+                iframeDoc.write(template.content || '');
+                iframeDoc.close();
+            } catch (e) {
+                previewDiv.innerHTML = '<div style="padding: 20px; max-height: 400px; overflow-y: auto;">' + (template.content || '') + '</div>';
+            }
+        } else {
+            messageTextarea.style.display = 'block';
+            messageTextarea.value = template.content || '';
+            if (previewDiv) previewDiv.style.display = 'none';
+        }
+    } else {
+        messageTextarea.style.display = 'block';
+        messageTextarea.value = '';
+        if (previewDiv) previewDiv.style.display = 'none';
     }
 }
 
@@ -502,6 +497,10 @@ function showCampagneStep(stepNum) {
     if (btnPrev) btnPrev.style.display = stepNum === 1 ? 'none' : 'inline-block';
     if (btnNext) btnNext.style.display = stepNum === 3 ? 'none' : 'inline-block';
     if (btnSubmit) btnSubmit.style.display = stepNum === 3 ? 'inline-block' : 'none';
+    if (stepNum === 3) {
+        loadTemplates();
+        setScheduleDateTimeToNow();
+    }
 }
 
 // Clic sur l'en-tête d'étape (rond + label)
@@ -591,6 +590,204 @@ function initCiblageModeSwitch() {
     radios.forEach(function(r) { r.addEventListener('change', updateBlocks); });
     document.getElementById('ciblage-objectif').addEventListener('change', updateBlocks);
     updateBlocks();
+}
+
+/** Met les champs date et heure d'envoi à la date et l'heure actuelles (locale). */
+function setScheduleDateTimeToNow() {
+    const dateInput = document.getElementById('campagne-schedule-date');
+    const timeInput = document.getElementById('campagne-schedule-time');
+    if (!dateInput || !timeInput) return;
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const min = String(now.getMinutes()).padStart(2, '0');
+    dateInput.value = yyyy + '-' + mm + '-' + dd;
+    timeInput.value = hh + ':' + min;
+}
+
+/** Jours fériés en France (métropole). Retourne des chaînes "YYYY-MM-DD". */
+function getFrenchHolidays(year) {
+    const pad = function(n) { return String(n).padStart(2, '0'); };
+    const fixed = [
+        year + '-01-01',
+        year + '-05-01',
+        year + '-05-08',
+        year + '-07-14',
+        year + '-08-15',
+        year + '-11-01',
+        year + '-11-11',
+        year + '-12-25'
+    ];
+    // Pâques (algorithme anonyme grégorien)
+    const a = year % 19;
+    const b = Math.floor(year / 100);
+    const c = year % 100;
+    const d = Math.floor(b / 4);
+    const e = b % 4;
+    const f = Math.floor((b + 8) / 25);
+    const g = Math.floor((b - f + 1) / 3);
+    const h = (19 * a + b - d - g + 15) % 30;
+    const i = Math.floor(c / 4);
+    const k = c % 4;
+    const l = (32 + 2 * e + 2 * i - h - k) % 7;
+    const m = Math.floor((a + 11 * h + 22 * l) / 451);
+    const month = Math.floor((h + l - 7 * m + 114) / 31);
+    const day = ((h + l - 7 * m + 114) % 31) + 1;
+    const easterStr = year + '-' + pad(month) + '-' + pad(day);
+    const easter = new Date(easterStr);
+    const addDays = function(d, n) {
+        const x = new Date(d);
+        x.setDate(x.getDate() + n);
+        return x.getFullYear() + '-' + pad(x.getMonth() + 1) + '-' + pad(x.getDate());
+    };
+    return fixed.concat([
+        addDays(easter, 1),
+        addDays(easter, 39),
+        addDays(easter, 50)
+    ]);
+}
+
+/** Indique si une date (Date ou string YYYY-MM-DD) est un jour ouvré en France (pas week-end, pas férié). */
+function isBusinessDay(date) {
+    const d = typeof date === 'string' ? new Date(date + 'T12:00:00') : new Date(date);
+    const day = d.getDay();
+    if (day === 0 || day === 6) return false;
+    const y = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const key = y + '-' + mm + '-' + dd;
+    const holidays = getFrenchHolidays(y).concat(getFrenchHolidays(y + 1));
+    return holidays.indexOf(key) === -1;
+}
+
+/** Prochain jour ouvré à partir de fromDate (inclut fromDate si déjà ouvré). Heures d'ouverture type 9h et 14h. */
+function getNextBusinessDay(fromDate) {
+    const d = new Date(fromDate);
+    d.setHours(0, 0, 0, 0);
+    for (var i = 0; i < 14; i++) {
+        const y = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        if (isBusinessDay(y + '-' + mm + '-' + dd)) return d;
+        d.setDate(d.getDate() + 1);
+    }
+    return d;
+}
+
+/**
+ * Calcule un créneau d'envoi suggéré (jour ouvré, heures type bureau FR : 9h matin, 14h après-midi).
+ * @param {string} type - 'tomorrow-morning' | 'tomorrow-afternoon' | 'monday-morning'
+ * @returns {{ date: Date, hour: number, minute: number, label: string, timeLabel: string }}
+ */
+function getSuggestedScheduleSlot(type) {
+    const now = new Date();
+    const pad = function(n) { return String(n).padStart(2, '0'); };
+    let start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    let hour = 9;
+    let minute = 0;
+    let label = '';
+    let timeLabel = '09:00';
+
+    if (type === 'tomorrow-morning') {
+        start.setDate(start.getDate() + 1);
+        start = getNextBusinessDay(start);
+        hour = 9;
+        minute = 0;
+        timeLabel = '09:00';
+        label = start.getDate() === now.getDate() + 1 ? 'Demain matin' : 'Prochain jour ouvré matin';
+    } else if (type === 'tomorrow-afternoon') {
+        start.setDate(start.getDate() + 1);
+        start = getNextBusinessDay(start);
+        hour = 14;
+        minute = 0;
+        timeLabel = '14:00';
+        label = start.getDate() === now.getDate() + 1 ? 'Demain après-midi' : 'Prochain jour ouvré 14h';
+    } else if (type === 'monday-morning') {
+        const day = now.getDay();
+        const daysUntilMonday = (1 - day + 7) % 7;
+        if (daysUntilMonday === 0) start.setDate(now.getDate() + 7);
+        else start.setDate(now.getDate() + daysUntilMonday);
+        start = getNextBusinessDay(start);
+        hour = 9;
+        minute = 0;
+        timeLabel = '09:00';
+        label = 'Lundi matin';
+    }
+
+    return {
+        date: start,
+        hour: hour,
+        minute: minute,
+        label: label,
+        timeLabel: timeLabel
+    };
+}
+
+/** Met à jour les libellés des boutons de suggestion (date/heure calculées selon now). */
+function updateScheduleSuggestionLabels() {
+    const list = document.querySelector('.schedule-suggestions-list');
+    if (!list) return;
+    ['tomorrow-morning', 'tomorrow-afternoon', 'monday-morning'].forEach(function(type) {
+        const btn = list.querySelector('.schedule-suggestion[data-suggestion="' + type + '"]');
+        if (!btn) return;
+        const slot = getSuggestedScheduleSlot(type);
+        const labelEl = btn.querySelector('.schedule-suggestion-label');
+        const timeEl = btn.querySelector('.schedule-suggestion-time');
+        if (labelEl) labelEl.textContent = slot.label;
+        if (timeEl) timeEl.textContent = slot.timeLabel;
+    });
+}
+
+// Afficher/masquer le bloc programmation ; initialiser date/heure seulement quand l'utilisateur choisit "Programmer"
+function initScheduleFields() {
+    const radios = document.querySelectorAll('input[name="send_mode"]');
+    const scheduleBlock = document.getElementById('schedule-block');
+    const suggestions = document.querySelectorAll('.schedule-suggestion');
+    if (!radios.length || !scheduleBlock) return;
+
+    function updateScheduleVisibility() {
+        const checked = document.querySelector('input[name="send_mode"]:checked');
+        const mode = checked ? checked.value : 'now';
+        const isScheduled = mode === 'scheduled';
+        scheduleBlock.style.display = isScheduled ? 'block' : 'none';
+        scheduleBlock.setAttribute('aria-hidden', isScheduled ? 'false' : 'true');
+        if (isScheduled) updateScheduleSuggestionLabels();
+    }
+
+    radios.forEach(function(radio) {
+        radio.addEventListener('change', function() {
+            updateScheduleVisibility();
+            if (document.querySelector('input[name="send_mode"]:checked').value === 'scheduled') {
+                setScheduleDateTimeToNow();
+            }
+        });
+    });
+
+    suggestions.forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const type = btn.getAttribute('data-suggestion');
+            const dateInput = document.getElementById('campagne-schedule-date');
+            const timeInput = document.getElementById('campagne-schedule-time');
+            if (!dateInput || !timeInput) return;
+
+            const slot = getSuggestedScheduleSlot(type);
+            const d = slot.date;
+            const yyyy = d.getFullYear();
+            const mm = String(d.getMonth() + 1).padStart(2, '0');
+            const dd = String(d.getDate()).padStart(2, '0');
+            dateInput.value = yyyy + '-' + mm + '-' + dd;
+            timeInput.value = String(slot.hour).padStart(2, '0') + ':' + String(slot.minute).padStart(2, '0');
+
+            const scheduledRadio = document.querySelector('input[name="send_mode"][value="scheduled"]');
+            if (scheduledRadio) scheduledRadio.checked = true;
+            updateScheduleVisibility();
+        });
+    });
+
+    updateScheduleVisibility();
 }
 
 // Charger les prospects selon l'objectif sélectionné
@@ -943,9 +1140,43 @@ function openNewCampagneModal() {
     loadEntreprises();
 }
 
-// Fermer le modal
+/**
+ * Remet le formulaire campagne à l'état initial (étape 1, champs par défaut, bloc programmation masqué,
+ * sélection entreprises et destinataires vidée).
+ * Appelé à la fermeture du modal (annuler ou après envoi) pour que la prochaine ouverture soit propre.
+ */
+function resetCampagneForm() {
+    var form = document.getElementById('campagne-form');
+    if (form) form.reset();
+    campagneModalStep = 1;
+    showCampagneStep(1);
+    var scheduleBlock = document.getElementById('schedule-block');
+    if (scheduleBlock) {
+        scheduleBlock.style.display = 'none';
+        scheduleBlock.setAttribute('aria-hidden', 'true');
+    }
+    var nowRadio = document.querySelector('input[name="send_mode"][value="now"]');
+    if (nowRadio) nowRadio.checked = true;
+
+    selectedRecipients = [];
+    selectedEntrepriseIds = [];
+    var step1Container = document.getElementById('entreprises-selector');
+    if (step1Container) {
+        step1Container.querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
+            cb.checked = false;
+        });
+        step1Container.querySelectorAll('.step1-ent-item').forEach(function(el) {
+            el.classList.remove('selected');
+        });
+    }
+    updateSelectedCount();
+}
+
+// Fermer le modal et réinitialiser le formulaire
 function closeModal() {
-    document.getElementById('campagne-modal').style.display = 'none';
+    var modal = document.getElementById('campagne-modal');
+    if (modal) modal.style.display = 'none';
+    resetCampagneForm();
 }
 
 // Soumettre la campagne
@@ -1015,10 +1246,29 @@ async function submitCampagne() {
     const sujet = formData.get('sujet');
     const customMessage = formData.get('custom_message') || null;
     const delay = parseInt(formData.get('delay')) || 2;
+    const sendMode = formData.get('send_mode') || 'now';
+    const scheduleDate = formData.get('schedule_date') || null;
+    const scheduleTime = formData.get('schedule_time') || null;
+    let scheduledAtIso = null;
 
     if (!sujet) {
         alert('Veuillez remplir le sujet de l\'email');
         return;
+    }
+
+    if (sendMode === 'scheduled') {
+        if (!scheduleDate || !scheduleTime) {
+            alert('Choisis une date et une heure pour programmer l\'envoi.');
+            return;
+        }
+        // Interpréter date/heure en heure locale, puis convertir en ISO UTC pour le serveur
+        const planned = new Date(scheduleDate + 'T' + scheduleTime);
+        const now = new Date();
+        if (planned.getTime() <= now.getTime()) {
+            alert('La date/heure d\'envoi doit être dans le futur.');
+            return;
+        }
+        scheduledAtIso = planned.toISOString();
     }
 
     // Générer automatiquement le nom de la campagne (en tenant compte du secteur / nom)
@@ -1092,7 +1342,9 @@ async function submitCampagne() {
                 sujet,
                 recipients: selectedRecipients,
                 custom_message: customMessage,
-                delay
+                delay,
+                send_mode: sendMode,
+                scheduled_at_iso: scheduledAtIso
             })
         });
 
@@ -1102,15 +1354,13 @@ async function submitCampagne() {
             closeModal();
             loadCampagnes();
 
-            // Démarrer le monitoring WebSocket
-            if (socket && socket.connected) {
+            // Démarrer le monitoring WebSocket uniquement pour envoi immédiat (task_id présent)
+            if (data.task_id && socket && socket.connected) {
                 socket.emit('monitor_campagne', {
                     task_id: data.task_id,
                     campagne_id: data.campagne_id
                 });
             }
-
-            // alert('Campagne créée avec succès ! L\'envoi est en cours...');
         } else {
             alert('Erreur: ' + (data.error || 'Erreur inconnue'));
         }
@@ -1645,13 +1895,19 @@ function escapeHtml(text) {
 
 function formatDate(dateString) {
     if (!dateString) return '-';
-    const date = new Date(dateString);
+    let toParse = String(dateString).trim().replace(' ', 'T');
+    if (!/Z$|[+-]\d{2}:?\d{2}$/.test(toParse) && /^\d{4}-\d{2}-\d{2}/.test(toParse)) {
+        toParse = toParse;
+    }
+    const date = new Date(toParse);
+    if (Number.isNaN(date.getTime())) return dateString;
     return date.toLocaleDateString('fr-FR', {
         year: 'numeric',
         month: 'long',
         day: 'numeric',
         hour: '2-digit',
-        minute: '2-digit'
+        minute: '2-digit',
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
     });
 }
 

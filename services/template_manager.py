@@ -23,9 +23,14 @@ class TemplateManager:
             app_dir = Path(__file__).parent.parent
             self.templates_file = app_dir / 'templates_data.json'
         
-        # Créer le fichier s'il n'existe pas
+        # Créer le fichier s'il n'existe pas (copie du fichier par défaut complet si présent)
         if not self.templates_file.exists():
-            self._init_templates_file()
+            default_file = self.templates_file.parent / 'templates_data.default.json'
+            if default_file.exists():
+                import shutil
+                shutil.copy(default_file, self.templates_file)
+            else:
+                self._init_templates_file()
         
         self.templates = self._load_templates()
     
@@ -109,7 +114,8 @@ danielcraft.fr""",
     
     def list_templates(self, category=None) -> List[Dict]:
         """
-        Liste tous les templates
+        Liste tous les templates.
+        Recharge le fichier à chaque appel pour afficher les modèles ajoutés ou modifiés.
         
         Args:
             category: Filtrer par catégorie (optionnel)
@@ -117,16 +123,19 @@ danielcraft.fr""",
         Returns:
             Liste de templates
         """
-        templates = self.templates.copy()
+        self.templates = self._load_templates()
+        templates = [dict(t) for t in self.templates]
         
         if category:
             templates = [t for t in templates if t.get('category') == category]
         
-        # Retirer le contenu complet pour la liste (garder juste un aperçu)
         for template in templates:
             if 'content' in template:
                 content = template['content']
-                template['preview'] = content[:100] + '...' if len(content) > 100 else content
+                if template.get('is_html'):
+                    template['preview'] = 'Modèle HTML avec variables dynamiques (nom, entreprise, email, blocs conditionnels). Voir la liste des variables ci-dessous.'
+                else:
+                    template['preview'] = content[:100] + '...' if len(content) > 100 else content
         
         return templates
     
@@ -166,6 +175,7 @@ danielcraft.fr""",
             'category': category,
             'subject': subject,
             'content': content,
+            'is_html': category == 'html_email',
             'created_at': datetime.now().isoformat(),
             'updated_at': datetime.now().isoformat()
         }
@@ -175,17 +185,18 @@ danielcraft.fr""",
         
         return template
     
-    def update_template(self, template_id: str, name: str = None, subject: str = None, 
-                        content: str = None) -> Optional[Dict]:
+    def update_template(self, template_id: str, name: str = None, subject: str = None,
+                        content: str = None, category: str = None) -> Optional[Dict]:
         """
-        Met à jour un template existant
-        
+        Met à jour un template existant.
+
         Args:
             template_id: ID du template
             name: Nouveau nom (optionnel)
             subject: Nouveau sujet (optionnel)
             content: Nouveau contenu (optionnel)
-        
+            category: Nouvelle catégorie (optionnel) ; si 'html_email', is_html est mis à True.
+
         Returns:
             Template mis à jour ou None
         """
@@ -197,12 +208,12 @@ danielcraft.fr""",
                     template['subject'] = subject
                 if content is not None:
                     template['content'] = content
-                
+                if category is not None:
+                    template['category'] = category
+                    template['is_html'] = category == 'html_email'
                 template['updated_at'] = datetime.now().isoformat()
                 self._save_templates()
-                
                 return template.copy()
-        
         return None
     
     def delete_template(self, template_id: str) -> bool:

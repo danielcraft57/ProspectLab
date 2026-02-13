@@ -439,9 +439,22 @@ def get_template_5_html():
 </html>"""
 
 if __name__ == "__main__":
+    import sys
+    root = Path(__file__).parent.parent
+    templates_file = root / 'templates_data.json'
+    default_file = root / 'templates_data.default.json'
+
+    # Option --restore : recopie le fichier par defaut (tous les modeles) sur templates_data.json
+    if '--restore' in sys.argv or '-r' in sys.argv:
+        if not default_file.exists():
+            print("Erreur: templates_data.default.json introuvable.")
+            sys.exit(1)
+        import shutil
+        shutil.copy(default_file, templates_file)
+        print("Restauration OK: templates_data.json recree avec tous les modeles (2 Cold Email + 5 HTML).")
+        sys.exit(0)
+
     # Charger les templates existants
-    templates_file = Path(__file__).parent.parent / 'templates_data.json'
-    
     if templates_file.exists():
         with open(templates_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -504,16 +517,18 @@ if __name__ == "__main__":
     
     # Vérifier si les templates existent déjà
     existing_ids = {t.get('id') for t in data.get('templates', [])}
+    added = 0
     for template in new_templates:
         if template['id'] not in existing_ids:
             data['templates'].append(template)
-            print(f"✓ Ajouté : {template['name']}")
+            added += 1
+            print("Ajoute : " + template['name'])
         else:
-            print(f"⚠ Déjà présent : {template['name']}")
+            print("Deja present : " + template['name'])
     
     # Sauvegarder
     with open(templates_file, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     
-    print(f"\n✓ {len(new_templates)} modèles HTML générés dans {templates_file}")
+    print("\n" + str(len(new_templates)) + " modeles HTML (ajoutes: " + str(added) + ") dans " + str(templates_file))
 

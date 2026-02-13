@@ -2,10 +2,6 @@
 
 {% block title %}Campagnes Email - ProspectLab{% endblock %}
 
-{% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/campagnes.css') }}">
-{% endblock %}
-
 {% block content %}
 <div class="campagnes-container">
     <div class="page-header">
@@ -18,7 +14,7 @@
     <div class="campagnes-filters">
         <div class="campagnes-filters-main">
             <label for="campagnes-search" class="filter-label">Recherche</label>
-            <div class="campagnes-search-input">
+            <div class="campagnes-search-input search-field">
                 <i class="fa-solid fa-magnifying-glass"></i>
                 <input type="text" id="campagnes-search" placeholder="Nom de campagne, sujet, secteur..." autocomplete="off">
             </div>
@@ -153,7 +149,7 @@
                         <div id="step1-results-count" class="results-count" style="display: none;"></div>
                         <div class="form-group entreprise-search-row">
                             <label for="entreprise-search">Rechercher une entreprise</label>
-                            <div class="entreprise-search-input">
+                            <div class="entreprise-search-input search-field">
                                 <i class="fa-solid fa-magnifying-glass"></i>
                                 <input type="text" id="entreprise-search" placeholder="Nom, secteur, email..." autocomplete="off">
                                 <button type="button" id="entreprise-search-clear">Effacer</button>
@@ -222,9 +218,55 @@
                             <div id="template-preview" style="display: none;"></div>
                             <div class="form-hint">Les modèles HTML sont affichés en aperçu. Le contenu sera utilisé lors de l'envoi.</div>
                         </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="form-section-title">Paramètres d'envoi</div>
                         <div class="form-group">
                             <label for="campagne-delay">Délai entre envois (secondes)</label>
                             <input type="number" id="campagne-delay" name="delay" value="2" min="1" max="10">
+                            <small class="form-hint">Permet d'étaler l'envoi pour éviter les pics et rester plus naturel.</small>
+                        </div>
+                        <div class="form-group">
+                            <label class="send-mode-label">Mode d'envoi</label>
+                            <div class="send-mode-toggle" role="group" aria-label="Mode d'envoi">
+                                <label class="send-mode-option">
+                                    <input type="radio" name="send_mode" value="now" checked> <span>Envoyer maintenant</span>
+                                </label>
+                                <label class="send-mode-option">
+                                    <input type="radio" name="send_mode" value="scheduled"> <span>Programmer l'envoi</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div id="schedule-block" class="schedule-block" style="display: none;" aria-hidden="true">
+                            <div id="schedule-fields" class="schedule-fields-row">
+                                <div class="form-group">
+                                    <label for="campagne-schedule-date">Date d'envoi</label>
+                                    <input type="date" id="campagne-schedule-date" name="schedule_date">
+                                </div>
+                                <div class="form-group">
+                                    <label for="campagne-schedule-time">Heure d'envoi</label>
+                                    <input type="time" id="campagne-schedule-time" name="schedule_time">
+                                </div>
+                            </div>
+                            <div class="schedule-suggestions">
+                                <span class="schedule-suggestions-title">Suggestions rapides</span>
+                                <div class="schedule-suggestions-list">
+                                    <button type="button" class="schedule-suggestion" data-suggestion="tomorrow-morning" title="Demain à 08:00">
+                                        <span class="schedule-suggestion-label">Demain matin</span>
+                                        <span class="schedule-suggestion-time">08:00</span>
+                                    </button>
+                                    <button type="button" class="schedule-suggestion" data-suggestion="tomorrow-afternoon" title="Demain à 13:00">
+                                        <span class="schedule-suggestion-label">Demain après-midi</span>
+                                        <span class="schedule-suggestion-time">13:00</span>
+                                    </button>
+                                    <button type="button" class="schedule-suggestion" data-suggestion="monday-morning" title="Lundi prochain à 08:00">
+                                        <span class="schedule-suggestion-label">Lundi matin</span>
+                                        <span class="schedule-suggestion-time">08:00</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <p class="schedule-block-hint">Les emails partiront à cette date et heure en respectant le délai entre envois.</p>
                         </div>
                     </div>
                 </div>

@@ -1,5 +1,6 @@
 /* ProspectLab - CSS modulaire */
-/* Ce fichier importe tous les modules CSS pour une organisation optimale */
+/* style.css : entrée globale (base.html). */
+/* pages.css importe les sous-modules : common, dashboard, entreprises, entreprise-detail, analyses, campagnes. */
 
 @import url('modules/base.css');
 @import url('modules/components.css');

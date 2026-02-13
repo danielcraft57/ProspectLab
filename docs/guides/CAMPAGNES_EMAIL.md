@@ -8,10 +8,17 @@ Le système de campagnes email permet d'envoyer des emails en masse à des entre
 
 ### 1. Création de campagne
 
-- **Nom automatique** : Le nom de la campagne est généré automatiquement avec un format concis et original :
-  - Format : `📧 JJ.MM HHhMM - CodeTemplate (NbDestinataires)`
-  - Exemple : `📧 22.01 15h30 - Mod (2)`
-  - Le nom inclut un emoji aléatoire, la date/heure, un code du template et le nombre de destinataires
+- **Nom automatique** : Le nom de la campagne est généré automatiquement (format lisible sans emoji, ex. "Présence en ligne - Technologie").
+
+- **Paramètres d'envoi** :
+  - **Mode** : "Envoyer maintenant" ou "Programmer l'envoi" (segmented control).
+  - **Délai entre envois** : En secondes, pour étaler les envois et rester naturel.
+  - **Date et heure d'envoi** : Visibles uniquement en mode "Programmer l'envoi", initialisées à la date/heure actuelle.
+  - **Suggestions rapides** : Affichées uniquement en mode programmé ; calcul intelligent selon la date du jour :
+    - Jours ouvrés uniquement (week-ends exclus).
+    - Jours fériés français exclus (1er janv., Pâques, 1er mai, 8 mai, Ascension, Pentecôte, 14 juil., 15 août, Toussaint, 11 nov., Noël).
+    - Heures type bureau : 9h (matin) et 14h (après-midi).
+    - Exemples : "Demain matin" (prochain jour ouvré 9h), "Demain après-midi" (14h), "Lundi matin" (prochain lundi 9h).
 
 - **Templates HTML** : Support de templates HTML professionnels avec :
   - Données dynamiques (nom, entreprise, données techniques, OSINT, pentest, scraping)
@@ -82,9 +89,9 @@ Le système de campagnes email permet d'envoyer des emails en masse à des entre
 - **`routes/other.py`** : Routes API et tracking
 
 #### Frontend
-- **`static/js/campagnes.js`** : Gestion de l'interface, WebSocket, génération de noms
-- **`static/css/campagnes.css`** : Styles pour les cartes de campagne, barre de progression
-- **`templates/campagnes.html`** : Interface de gestion des campagnes
+- **`static/js/campagnes.js`** : Gestion de l'interface, WebSocket, génération de noms, paramètres d'envoi (programmation, suggestions intelligentes, reset formulaire)
+- **`static/css/modules/pages/campagnes.css`** : Styles des campagnes (cartes, barre de progression, mode d'envoi, bloc programmation, suggestions, dark mode)
+- **`templates/pages/campagnes.html`** : Interface de gestion des campagnes
 
 ### Base de données
 
@@ -105,10 +112,13 @@ Le système utilise `utils/name_formatter.py` pour formater les noms de contacts
 ### Créer une campagne
 
 1. Cliquer sur "+ Nouvelle campagne"
-2. Sélectionner un template HTML (optionnel)
-3. Remplir le sujet de l'email (peut contenir `{entreprise}`)
-4. Sélectionner les destinataires (entreprises ou emails individuels)
-5. Cliquer sur "Lancer la campagne"
+2. Étape 1 : Cibler les entreprises (toutes, objectif, critères ou segment) puis sélectionner les entreprises
+3. Étape 2 : Choisir les emails par destinataire (ou tout sélectionner par entreprise)
+4. Étape 3 : Sélectionner un template HTML (optionnel), sujet, message personnalisé
+5. **Paramètres d'envoi** : Délai entre envois ; mode "Envoyer maintenant" ou "Programmer l'envoi" (date/heure, suggestions rapides)
+6. Cliquer sur "Lancer la campagne"
+
+À la fermeture du modal (Annuler ou après envoi réussi), le formulaire et la sélection des entreprises sont réinitialisés.
 
 ### Suivre une campagne
 
@@ -171,7 +181,6 @@ Les logs des campagnes sont enregistrés dans `logs/email_tasks.log` avec :
 
 - [ ] Statistiques avancées (taux d'ouverture, taux de clic)
 - [ ] A/B testing de templates
-- [ ] Planification de campagnes
 - [ ] Templates personnalisables par l'utilisateur
 - [ ] Export des résultats en CSV/Excel
 
