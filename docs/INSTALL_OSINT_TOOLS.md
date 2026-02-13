@@ -1,30 +1,67 @@
 # Installation des outils OSINT pour ProspectLab
 
-Ce guide explique comment installer les outils OSINT nécessaires dans votre environnement WSL Kali Linux.
+Ce guide explique comment installer les outils OSINT selon l'environnement :
+
+- **En production (serveur Linux)** : pas de WSL. Les outils sont exécutés **directement** sur le système (apt, pip, etc. sur le serveur).
+- **En développement (Windows)** : on utilise **WSL** (ex. Kali) et on installe les outils **dans** la distro WSL.
+
+## Versions Debian / Kali supportées
+
+Les scripts sont organisés par environnement :
+
+- **Debian 13 (Trixie)** : `scripts/linux/trixie/*`
+- **Debian 12 (Bookworm)** : `scripts/linux/bookworm/*`
+- **Kali Linux (WSL / desktop)** : `scripts/linux/kali/*`
+
+Les scripts dispatcher (`install_all_tools.sh`, `test_all_tools.sh`) détectent automatiquement votre version (Debian ou Kali) et utilisent les bons scripts.
 
 ## Prérequis
 
-- WSL (Windows Subsystem for Linux) installé
-- Distribution Kali Linux configurée dans WSL
-- Accès root ou sudo
+**Production (Linux)** : accès root ou sudo sur le serveur.
+
+**Développement (Windows)** : WSL installé, distro Kali (ou autre), accès root/sudo dans la distro.
 
 ## Installation automatique
 
-Le script d'installation automatique installe tous les outils nécessaires :
+### Scripts dispatcher (recommandé)
+
+Les scripts `install_all_tools.sh` et `test_all_tools.sh` détectent automatiquement votre version Debian et utilisent les bons scripts :
 
 ```bash
-# Depuis Windows PowerShell ou CMD
-wsl -d kali-linux bash scripts/linux/install_osint_tools_kali.sh
-
-# Ou depuis WSL Kali Linux directement
-cd /chemin/vers/ProspectLab
-bash scripts/linux/install_osint_tools_kali.sh
+# En production (Linux) : détection automatique de la version
+cd /opt/prospectlab
+bash scripts/linux/install_all_tools.sh
+bash scripts/linux/test_all_tools.sh
 ```
 
-## Debian Bookworm / RPi
+Ces scripts lisent `/etc/os-release` et utilisent :
+- **Debian 13 (Trixie)** → `scripts/linux/trixie/*`
+- **Debian 12 (Bookworm)** → `scripts/linux/bookworm/*`
 
+### Installation par environnement spécifique
+
+Si vous préférez installer manuellement pour un environnement précis :
+
+**Debian 13 (Trixie)** :
 ```bash
-bash scripts/linux/install_osint_tools_bookworm.sh
+cd /opt/prospectlab
+bash scripts/linux/trixie/install_all_tools_trixie.sh
+bash scripts/linux/trixie/test_all_tools_trixie.sh
+```
+
+**Debian 12 (Bookworm) / RPi** :
+```bash
+cd /opt/prospectlab
+bash scripts/linux/bookworm/install_all_tools_bookworm.sh
+bash scripts/linux/bookworm/test_all_tools_bookworm.sh
+```
+
+**Kali Linux (WSL / desktop)** :
+```bash
+# Dans la session Kali (WSL ou machine Kali directe)
+cd /chemin/vers/ProspectLab
+bash scripts/linux/kali/install_all_tools_kali.sh
+bash scripts/linux/kali/test_all_tools_kali.sh
 ```
 
 ## Installation manuelle
@@ -179,6 +216,84 @@ chmod +x ~/.local/bin/*
 ### PhoneInfoga
 - **Usage** : Analyse de numéros de téléphone
 - **Commande** : `phoneinfoga scan --number +33123456789`
+
+## Pourquoi OSINT / Pentest ne fonctionnent pas
+
+**En production (Linux)** : il n’y a pas de WSL. Les outils sont exécutés **en natif** : le serveur cherche chaque outil dans le `PATH` (`which whatweb`, etc.). Si les outils ne sont pas installés sur le serveur (apt, pip, scripts d’install), les étapes correspondantes restent vides. Installer les outils directement sur le serveur (voir scripts `install_osint_tools_*.sh` adaptés à la distro, ou installation manuelle).
+
+**En développement (Windows)** : le code utilise WSL si disponible, sinon il tente le `PATH` Windows (souvent vide pour ces outils). Si rien ne se passe :
+
+1. **WSL installé et démarré**  
+   Depuis PowerShell : `wsl -l -v`. La distro doit être « Running ».
+
+2. **Nom de distro et utilisateur**  
+   Dans `.env` ou `config.py` :  
+   - `WSL_DISTRO` = le nom exact (ex. `kali-linux`).  
+   - `WSL_USER` = l’utilisateur (ex. `loupix`).  
+   Test : `wsl -d kali-linux -u loupix whoami`.
+
+3. **Outils installés dans WSL**  
+   Les outils sont cherchés **dans** la distro. Depuis WSL :  
+   `wsl -d kali-linux -u loupix bash -c "which whatweb; which sherlock"`.  
+   Si « not found », installer dans WSL (scripts `install_osint_tools_*.sh`).
+
+4. **Timeouts**  
+   `OSINT_TOOL_TIMEOUT=90`, `PENTEST_TOOL_TIMEOUT=180` dans `.env` si besoin.
+
+5. **Logs**  
+   `logs/osint_tasks.log`, `logs/pentest_tasks.log`, `logs/celery.log`.
+
+**Diagnostic** : `GET /api/osint/diagnostic` et `GET /api/pentest/diagnostic` renvoient `execution_mode` (`native` en prod, `wsl` en dev Windows avec WSL), plus la liste des outils détectés (disponibles / manquants).
+
+## Nouveaux outils (ranking, SEO, réseaux sociaux)
+
+### Ranking / SEO (Linux, open source)
+
+| Outil | Rôle | Installation |
+|-------|------|--------------|
+| **Serposcope** | Suivi de positionnement Google (mots-clés, positions, concurrence). CRON, proxys, captchas. | Java requis. Téléchargement sur serphacker.com. Tourne en local ou VPS. |
+| **Lighthouse** | Audit SEO (perfs, accessibilité, bonnes pratiques). Score + recommandations. | `npm i -g lighthouse` ou `npx lighthouse https://... --output=json` |
+| **Screaming Frog** | Crawler SEO (URLs, titres, meta). Version gratuite limitée (500 URLs). | App desktop (Linux possible), pas pur CLI. |
+
+En pratique : Serposcope pour le suivi de positions, Lighthouse pour l’audit technique SEO.
+
+### Présence sur les réseaux sociaux (Linux / CLI)
+
+| Outil | Rôle | Installation |
+|-------|------|--------------|
+| **Social Analyzer** | OSINT : vérifier si un pseudo existe sur des centaines de réseaux, score de confiance, métadonnées. | `pip3 install social-analyzer` ou interface web (port 9005). |
+| **Sherlock** | Recherche d’un username sur de nombreux sites (déjà utilisé dans ProspectLab). | `pipx install sherlock-project` ou `sudo apt install sherlock` (Kali). |
+| **Maigret** | Même idée : un pseudo → profils trouvés sur plein de plateformes. | `pipx install maigret`. |
+| **Tinfoleak** | Spécialisé X/Twitter : tweets, abonnés, hashtags, géo (OSINT/SOCMINT). | Souvent inclus dans Kali ; sinon installation manuelle. |
+
+Sherlock et Maigret sont déjà dans la liste des outils OSINT du projet. Social Analyzer et Lighthouse sont inclus dans les scripts d'installation (`install_social_tools_*.sh`, `install_seo_tools_*.sh`).
+
+## Structure des scripts
+
+Les scripts sont organisés dans `scripts/linux/` :
+
+```
+scripts/linux/
+├── install_all_tools.sh          # Dispatcher (détection auto)
+├── test_all_tools.sh             # Dispatcher (détection auto)
+├── upgrade_python_venv.sh       # Mise à jour venv Python
+├── bookworm/                     # Scripts pour Debian 12
+│   ├── install_osint_tools_bookworm.sh
+│   ├── install_pentest_tools_bookworm.sh
+│   ├── install_seo_tools_bookworm.sh
+│   ├── install_social_tools_bookworm.sh
+│   ├── install_all_tools_bookworm.sh
+│   └── test_*_tools_prod.sh
+└── trixie/                       # Scripts pour Debian 13
+    ├── install_osint_tools_trixie.sh
+    ├── install_pentest_tools_trixie.sh
+    ├── install_seo_tools_trixie.sh
+    ├── install_social_tools_trixie.sh
+    ├── install_all_tools_trixie.sh
+    └── test_*_tools_prod.sh
+```
+
+**Utilisation recommandée** : utilisez les dispatchers `install_all_tools.sh` et `test_all_tools.sh` qui détectent automatiquement votre version Debian.
 
 ## Dépannage
 

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}Analyses SEO - ProspectLab{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Analyses SEO</h1>
+    <p>Analyse de l'optimisation pour les moteurs de recherche</p>
+</div>
+
+<div class="new-analysis-section">
+    <div class="card">
+        <div class="card-header">
+            <h2>Nouvelle analyse SEO</h2>
+        </div>
+        <div class="card-body">
+            <form id="form-new-seo" class="form-inline">
+                <div class="form-group">
+                    <label for="seo-url">URL</label>
+                    <input type="text" id="seo-url" class="form-input" placeholder="https://example.com" required>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="seo-use-lighthouse" checked>
+                        Utiliser Lighthouse (audit SEO/perfs)
+                    </label>
+                </div>
+                <div class="form-group">
+                    <button type="submit" id="btn-start-seo" class="btn btn-primary">
+                        <span id="btn-text">Lancer l'analyse SEO</span>
+                        <span id="btn-loading" style="display: none;">Analyse en cours...</span>
+                    </button>
+                </div>
+            </form>
+            
+            <div id="seo-progress" style="display: none;" class="progress-section">
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="seo-progress-bar" style="width: 0%"></div>
+                </div>
+                <p id="seo-progress-message" class="progress-message">Initialisation...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="results-section">
+    <div class="results-header">
+        <h3 id="results-count">Chargement...</h3>
+    </div>
+    
+    <div id="analyses-container" class="analyses-techniques-grid">
+        <p>Chargement des analyses...</p>
+    </div>
+</div>
+
+<!-- Modale pour les détails de l'analyse SEO -->
+<div id="seo-modal" class="modal">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 id="seo-modal-title">Détails de l'analyse SEO</h2>
+            <button class="modal-close" id="seo-modal-close" aria-label="Fermer"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body" id="seo-modal-body">
+            <div class="loading">Chargement des détails...</div>
+        </div>
+        <div class="modal-footer" id="seo-modal-footer">
+            <!-- Les boutons seront ajoutés dynamiquement -->
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/analyses_seo.js') }}" defer></script>
+{% endblock %}

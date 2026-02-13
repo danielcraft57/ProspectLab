@@ -2,6 +2,20 @@
 
 Ce document résume les changements techniques importants pour la maintenance et le déploiement.
 
+## Tables BDD : quand sont-elles remplies ?
+
+Beaucoup de tables restent à 0 enregistrement tant que l’usage ou les outils ne les alimentent pas. Résumé utile :
+
+- **users (0)** : Aucun utilisateur créé. Pour pouvoir se connecter, créer un admin : `python scripts/create_admin_user.py` (puis suivre les questions).
+- **segments_ciblage (0)** : Remplie quand on crée un segment depuis l’interface Campagnes (étape 1, mode Ciblage par segment, puis « Enregistrer ce segment »).
+- **email_tracking_events (0)** : Remplie quand un destinataire ouvre un email (pixel) ou clique sur un lien. Reste à 0 tant qu’aucun ouvert/clic. Vérifier que `BASE_URL` pointe vers une URL accessible depuis l’extérieur.
+- **api_tokens (0)** : Remplie quand un utilisateur crée un token API depuis l’interface.
+- **analysis_technique_security_headers (0)** : Les security headers étaient dans chaque `page` et pas à la racine du résultat. Corrigé : la sauvegarde agrège désormais les headers de la première page (ou des pages) pour remplir cette table. Les **nouvelles** analyses techniques la rempliront.
+- **analysis_osint_technologies**, **analysis_pentest_vulnerabilities**, etc. : Remplies uniquement si les analyseurs (OSINT, Pentest) retournent ces données (ex. WhatWeb pour technologies, vulnérabilités trouvées). 0 peut être normal si l’outil n’a rien trouvé ou n’est pas disponible (WSL, Kali, etc.).
+- **personnes_*** (professional_history, hobbies, photos, …) : Données enrichies OSINT ; souvent vides si les sources ne fournissent pas ces infos.
+
+En résumé : plusieurs tables sont « à la demande » (users, segments, tokens, tracking) ; d’autres dépendent des résultats des tâches (technique, OSINT, pentest). La correction sur **analysis_technique_security_headers** permet de remplir cette table à partir des prochaines analyses techniques.
+
 ## Modèles de messages : page Gestion + restauration (fév. 2026)
 
 - **Page Gestion des modèles** : Bloc "Variables disponibles" (nom, entreprise, email, blocs conditionnels, variables générées) ; catégorie "Email HTML" ; badge et preview pour les modèles HTML ; formulaire avec rappel des variables.
@@ -37,6 +51,13 @@ Sans cela, en production avec PostgreSQL, les tables `scrapers`, `images`, `entr
 - Les pages HTML sont centralisées dans `templates/pages/` ; les doublons à la racine de `templates/` ont été supprimés. Le helper `render_page('nom.html')` charge d'abord `pages/nom.html`.
 - Scripts de déploiement (`deploy_production.ps1`, `deploy_production.sh`) : le dossier `scripts/` est inclus ; après le transfert principal, chaque dossier (routes, services, tasks, templates, static, utils, scripts) est envoyé explicitement via `scp -r` pour éviter les problèmes d'archive (tar sous Windows). Script optionnel `sync_templates_static.ps1` pour ne synchroniser que templates et static.
 - Correction du nettoyage dans le script PowerShell : les motifs d'exclusion `deploy`, `logs`, `logs_server` s'appliquent au nom du dossier uniquement, pas au chemin, pour ne pas supprimer le contenu du dossier de déploiement.
+
+## OSINT / Pentest : dépannage, prod sans WSL, nouveaux outils (fév. 2026)
+
+- **Prod = exécution native** : En production (serveur Linux) il n’y a pas de WSL ; les outils sont exécutés directement sur le système (`shutil.which`). La doc et les messages de diagnostic distinguent clairement « natif » (prod) et « WSL » (dev Windows).
+- **Diagnostic** : `get_diagnostic()` renvoie désormais `execution_mode` (`native` ou `wsl`) et des messages adaptés : en l’absence de WSL, on affiche « Exécution native (pas de WSL). X outil(s) disponible(s)... » au lieu de « WSL non disponible, rien ne sera exécuté ».
+- **Doc** : `INSTALL_OSINT_TOOLS.md` précise en tête que prod = installation directe sur le serveur, dev = WSL + outils dans la distro. Section dépannage mise à jour en conséquence. Rappel des routes `/api/osint/diagnostic` et `/api/pentest/diagnostic`.
+- **Nouveaux outils documentés** : Serposcope, Lighthouse, Screaming Frog (SEO) ; Social Analyzer, Sherlock, Maigret, Tinfoleak (réseaux sociaux).
 
 ## Documentation et confidentialité
 
