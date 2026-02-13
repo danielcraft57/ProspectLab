@@ -16,7 +16,7 @@ class CampagneManager(DatabaseBase):
         """Initialise le module campagnes"""
         super().__init__(*args, **kwargs)
     
-    def create_campagne(self, nom, template_id=None, sujet=None, total_destinataires=0, statut='draft'):
+    def create_campagne(self, nom, template_id=None, sujet=None, total_destinataires=0, statut='draft', scheduled_at=None, campaign_params_json=None):
         """
         Crée une nouvelle campagne email.
 
@@ -26,6 +26,8 @@ class CampagneManager(DatabaseBase):
             sujet (str|None): Sujet de l'email (optionnel)
             total_destinataires (int): Nombre total de destinataires
             statut (str): Statut ('draft', 'scheduled', 'running', 'completed', 'failed')
+            scheduled_at (str|None): Date/heure d'envoi programmé (ISO UTC)
+            campaign_params_json (str|None): Paramètres d'envoi sérialisés (recipients, template_id, etc.)
 
         Returns:
             int: ID de la campagne créée
@@ -33,25 +35,24 @@ class CampagneManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
 
-        # Gestion SQLite / PostgreSQL pour récupérer proprement l'ID
         if self.is_postgresql():
             self.execute_sql(cursor,
                 '''
-                INSERT INTO campagnes_email (nom, template_id, sujet, total_destinataires, total_envoyes, total_reussis, statut)
-                VALUES (?, ?, ?, ?, 0, 0, ?)
+                INSERT INTO campagnes_email (nom, template_id, sujet, total_destinataires, total_envoyes, total_reussis, statut, scheduled_at, campaign_params_json)
+                VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?)
                 RETURNING id
                 ''',
-                (nom, template_id, sujet, total_destinataires, statut)
+                (nom, template_id, sujet, total_destinataires, statut, scheduled_at, campaign_params_json)
             )
             row = cursor.fetchone()
             campagne_id = row.get('id') if isinstance(row, dict) else (row[0] if row else None)
         else:
             self.execute_sql(cursor,
                 '''
-                INSERT INTO campagnes_email (nom, template_id, sujet, total_destinataires, total_envoyes, total_reussis, statut)
-                VALUES (?, ?, ?, ?, 0, 0, ?)
+                INSERT INTO campagnes_email (nom, template_id, sujet, total_destinataires, total_envoyes, total_reussis, statut, scheduled_at, campaign_params_json)
+                VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?)
                 ''',
-                (nom, template_id, sujet, total_destinataires, statut)
+                (nom, template_id, sujet, total_destinataires, statut, scheduled_at, campaign_params_json)
             )
             campagne_id = cursor.lastrowid
 
@@ -68,7 +69,9 @@ class CampagneManager(DatabaseBase):
         total_destinataires=None,
         total_envoyes=None,
         total_reussis=None,
-        statut=None
+        statut=None,
+        scheduled_at=None,
+        campaign_params_json=None
     ):
         """
         Met à jour une campagne email.
@@ -82,6 +85,8 @@ class CampagneManager(DatabaseBase):
             total_envoyes (int|None): Nouveau total envoyés (optionnel)
             total_reussis (int|None): Nouveau total réussis (optionnel)
             statut (str|None): Nouveau statut (optionnel)
+            scheduled_at (str|None): Date d'envoi programmé (optionnel)
+            campaign_params_json (str|None): Paramètres sérialisés (optionnel)
 
         Returns:
             bool: True si mis à jour, False sinon
@@ -113,6 +118,12 @@ class CampagneManager(DatabaseBase):
         if statut is not None:
             updates.append('statut = ?')
             values.append(statut)
+        if scheduled_at is not None:
+            updates.append('scheduled_at = ?')
+            values.append(scheduled_at)
+        if campaign_params_json is not None:
+            updates.append('campaign_params_json = ?')
+            values.append(campaign_params_json)
 
         if not updates:
             conn.close()
@@ -185,6 +196,29 @@ class CampagneManager(DatabaseBase):
                 (limit, offset)
             )
 
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def get_campagnes_due_for_send(self, now_utc_iso):
+        """
+        Retourne les campagnes programmées dont l'heure d'envoi est dépassée (UTC).
+
+        Args:
+            now_utc_iso (str): Date/heure UTC au format ISO (ex: 2025-02-12T07:00:00.000Z)
+
+        Returns:
+            list[dict]: Liste des campagnes avec id, campaign_params_json
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self.execute_sql(cursor,
+            '''
+            SELECT id, campaign_params_json FROM campagnes_email
+            WHERE statut = ? AND scheduled_at IS NOT NULL AND scheduled_at <= ?
+            ''',
+            ('scheduled', now_utc_iso)
+        )
         rows = cursor.fetchall()
         conn.close()
         return [dict(row) for row in rows]

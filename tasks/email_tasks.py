@@ -329,3 +329,48 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
         campagne_manager.update_campagne(campagne_id, statut='failed')
         raise
 
+
+@celery.task
+def start_scheduled_campagnes():
+    """
+    Tâche périodique (Celery Beat) : lance les campagnes dont l'heure d'envoi programmée est atteinte (UTC).
+    À exécuter toutes les minutes.
+    """
+    from datetime import datetime, timezone
+    from services.database.campagnes import CampagneManager
+    import json
+
+    now_utc = datetime.now(timezone.utc)
+    now_utc_iso = now_utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+
+    campagne_manager = CampagneManager()
+    due = campagne_manager.get_campagnes_due_for_send(now_utc_iso)
+
+    for row in due:
+        campagne_id = row.get('id')
+        params_json = row.get('campaign_params_json')
+        if not campagne_id or not params_json:
+            continue
+        try:
+            params = json.loads(params_json)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning(f'[Beat] Campagne {campagne_id}: campaign_params_json invalide')
+            continue
+
+        recipients = params.get('recipients', [])
+        if not recipients:
+            continue
+
+        # Marquer comme en cours pour que le beat ne la reprenne pas
+        campagne_manager.update_campagne(campagne_id, statut='running')
+
+        send_campagne_task.delay(
+            campagne_id=campagne_id,
+            recipients=recipients,
+            template_id=params.get('template_id'),
+            subject=params.get('subject'),
+            custom_message=params.get('custom_message'),
+            delay=params.get('delay', 2),
+        )
+        logger.info(f'[Beat] Campagne {campagne_id} programmée démarrée ({len(recipients)} destinataires)')
+

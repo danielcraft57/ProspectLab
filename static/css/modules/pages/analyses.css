@@ -1,0 +1,187 @@
+/* Analyses techniques et formulaire nouvelle analyse */
+
+.analyses-techniques-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: 1.5rem;
+}
+
+.analysis-tech-card {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    overflow: hidden;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.analysis-tech-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.analysis-tech-card .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.analysis-tech-card .card-header h3 {
+    margin: 0;
+    font-size: 1.2rem;
+}
+
+.date-badge {
+    background: rgba(255,255,255,0.2);
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.85rem;
+}
+
+.analysis-tech-card .card-body {
+    padding: 1.5rem;
+}
+
+.analysis-tech-card .card-body p {
+    margin: 0.5rem 0;
+    color: #555;
+}
+
+.badges-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+.badge-error {
+    background: #fee;
+    color: #c33;
+}
+
+.analyse-technique-detail {
+    margin-top: 2rem;
+}
+
+/* Nouvelle analyse technique */
+.new-analysis-section {
+    margin-bottom: 2rem;
+}
+
+.new-analysis-section .card {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    overflow: hidden;
+}
+
+.new-analysis-section .card-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 1.5rem;
+}
+
+.new-analysis-section .card-header h2 {
+    margin: 0;
+    font-size: 1.5rem;
+}
+
+.new-analysis-section .card-body {
+    padding: 2rem;
+}
+
+.form-inline {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    align-items: flex-end;
+}
+
+.form-inline .form-group {
+    flex: 1;
+    min-width: 200px;
+}
+
+.form-inline .form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+    color: #333;
+}
+
+.form-inline .form-group input[type="url"] {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 1rem;
+}
+
+.form-inline .form-group input[type="checkbox"] {
+    margin-right: 0.5rem;
+    width: auto;
+}
+
+.form-checkbox {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+}
+
+.progress-section {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid #eee;
+}
+
+.progress-bar-container {
+    width: 100%;
+    height: 24px;
+    background-color: #e0e0e0;
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 0.5rem;
+    position: relative;
+}
+
+.progress-bar-container .progress-bar {
+    height: 24px;
+    min-height: 24px;
+    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    transition: width 0.3s ease;
+    border-radius: 0;
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    margin: 0;
+    padding: 0;
+}
+
+.progress-bar.success {
+    background: linear-gradient(90deg, #56ab2f 0%, #a8e063 100%);
+}
+
+.progress-message {
+    font-size: 0.9rem;
+    color: #666;
+    margin: 0;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.progress-message.error {
+    color: #e74c3c;
+    font-weight: 500;
+}

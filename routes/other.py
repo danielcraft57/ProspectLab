@@ -180,7 +180,8 @@ def manage_templates():
                 template_id=data.get('template_id'),
                 name=data.get('name'),
                 subject=data.get('subject'),
-                content=data.get('content')
+                content=data.get('content'),
+                category=data.get('category')
             )
             return jsonify({'success': True, 'template': template})
         
@@ -280,9 +281,7 @@ def list_campagnes():
 def api_list_campagnes():
     """
     API: Liste des campagnes.
-
-    Returns:
-        JSON: Liste des campagnes
+    date_creation est renvoyé tel quel (serveur déjà en Europe/Paris).
     """
     from services.database.campagnes import CampagneManager
     campagne_manager = CampagneManager()
@@ -295,31 +294,32 @@ def api_list_campagnes():
 @login_required
 def api_create_campagne():
     """
-    API: Crée une nouvelle campagne et lance l'envoi via Celery.
+    API: Crée une nouvelle campagne. Envoi immédiat via Celery ou programmé (stocké en BDD, déclenché par Celery Beat).
 
     Returns:
-        JSON: Campagne créée + task_id
+        JSON: Campagne créée + task_id (null si programmé)
     """
+    from datetime import datetime, timezone
     from tasks.email_tasks import send_campagne_task
     from services.database.campagnes import CampagneManager
+    import json
 
     data = request.get_json() or {}
 
-    nom = data.get('nom')  # Peut être None, sera généré si absent
+    nom = data.get('nom')
     template_id = data.get('template_id')
     recipients = data.get('recipients', [])
     sujet = data.get('sujet')
     custom_message = data.get('custom_message')
     delay = data.get('delay', 2)
+    send_mode = data.get('send_mode', 'now')
+    scheduled_at_iso = data.get('scheduled_at_iso')
 
-    # Générer un nom automatique si non fourni
     if not nom:
-        from datetime import datetime
         now = datetime.now()
         date_str = now.strftime('%d.%m')
         time_str = now.strftime('%Hh%M')
         template_name = template_id or 'Campagne email'
-        # Nom simple, sans icônes ni compteur (le volume est déjà affiché dans la carte)
         nom = f'{template_name[:40]} - {date_str} {time_str}'
 
     if not recipients:
@@ -329,26 +329,56 @@ def api_create_campagne():
 
     campagne_manager = CampagneManager()
 
-    campagne_id = campagne_manager.create_campagne(
-        nom=nom,
-        template_id=template_id,
-        sujet=sujet,
-        total_destinataires=len(recipients),
-        statut='draft'
-    )
+    if send_mode == 'scheduled' and scheduled_at_iso:
+        # Envoi programmé : stocker en BDD, ne pas lancer la tâche tout de suite (Beat s'en charge)
+        try:
+            # scheduled_at_iso est en UTC (envoyé par le front en toISOString())
+            parsed = datetime.fromisoformat(scheduled_at_iso.replace('Z', '+00:00'))
+            now_utc = datetime.now(timezone.utc)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            scheduled_at_str = parsed.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Date/heure programmée invalide'}), 400
 
-    task = send_campagne_task.delay(
-        campagne_id=campagne_id,
-        recipients=recipients,
-        template_id=template_id,
-        subject=sujet,
-        custom_message=custom_message,
-        delay=delay
-    )
+        campaign_params = {
+            'recipients': recipients,
+            'template_id': template_id,
+            'subject': sujet,
+            'custom_message': custom_message,
+            'delay': delay,
+        }
+        params_json = json.dumps(campaign_params)
 
-    campagne_manager.update_campagne(campagne_id, statut='scheduled')
-
-    return jsonify({'success': True, 'campagne_id': campagne_id, 'task_id': task.id})
+        campagne_id = campagne_manager.create_campagne(
+            nom=nom,
+            template_id=template_id,
+            sujet=sujet,
+            total_destinataires=len(recipients),
+            statut='scheduled',
+            scheduled_at=scheduled_at_str,
+            campaign_params_json=params_json,
+        )
+        return jsonify({'success': True, 'campagne_id': campagne_id, 'task_id': None, 'scheduled_at': scheduled_at_str})
+    else:
+        # Envoi immédiat
+        campagne_id = campagne_manager.create_campagne(
+            nom=nom,
+            template_id=template_id,
+            sujet=sujet,
+            total_destinataires=len(recipients),
+            statut='draft',
+        )
+        task = send_campagne_task.delay(
+            campagne_id=campagne_id,
+            recipients=recipients,
+            template_id=template_id,
+            subject=sujet,
+            custom_message=custom_message,
+            delay=delay,
+        )
+        campagne_manager.update_campagne(campagne_id, statut='scheduled')
+        return jsonify({'success': True, 'campagne_id': campagne_id, 'task_id': task.id})
 
 
 @other_bp.route('/api/campagnes/<int:campagne_id>', methods=['GET'])

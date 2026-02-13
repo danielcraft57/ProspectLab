@@ -69,6 +69,10 @@ celery.conf.update(
             'schedule': 3600.0,  # Toutes les heures
             'args': (6,)  # Supprimer les fichiers de plus de 6 heures
         },
+        'start-scheduled-campagnes': {
+            'task': 'tasks.email_tasks.start_scheduled_campagnes',
+            'schedule': 60.0,  # Toutes les minutes : lance les campagnes dont l'heure programmée est atteinte (UTC)
+        },
     },
 )
 

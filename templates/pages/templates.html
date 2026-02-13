@@ -8,15 +8,54 @@
     <p>Créez et gérez vos modèles de prospection réutilisables</p>
 </div>
 
+<div class="templates-variables-doc">
+    <h2>Variables disponibles dans les modèles</h2>
+    <p>Utilisez ces variables dans le sujet et le contenu (texte ou HTML). Elles sont remplacées à l'envoi par les données du destinataire et de l'entreprise.</p>
+    <div class="variables-grid">
+        <div class="variables-block">
+            <h3>Variables de base</h3>
+            <ul>
+                <li><code>{nom}</code> – Nom du contact (formaté depuis les données scraping)</li>
+                <li><code>{entreprise}</code> – Nom de l'entreprise</li>
+                <li><code>{email}</code> – Adresse email du destinataire</li>
+            </ul>
+        </div>
+        <div class="variables-block">
+            <h3>Blocs conditionnels (HTML)</h3>
+            <p>Affichés uniquement si les données existent pour l'entreprise.</p>
+            <ul>
+                <li><code>{#if_tech_data}</code> … <code>{#endif}</code> – Données techniques (framework, CMS, hébergeur, performance)</li>
+                <li><code>{#if_performance}</code> … <code>{#endif}</code> – Score de performance</li>
+                <li><code>{#if_security}</code> … <code>{#endif}</code> – Score de sécurité</li>
+                <li><code>{#if_scraping_data}</code> … <code>{#endif}</code> – Données scraping (contacts, réseaux, site)</li>
+                <li><code>{#if_all_data}</code> … <code>{#endif}</code> – Synthèse complète (tableau récap)</li>
+            </ul>
+        </div>
+        <div class="variables-block">
+            <h3>Variables générées (dans les blocs)</h3>
+            <ul>
+                <li><code>{framework_info}</code>, <code>{cms_info}</code>, <code>{hosting_info}</code>, <code>{performance_info}</code></li>
+                <li><code>{performance_score}</code>, <code>{security_score}</code></li>
+                <li><code>{scraping_info}</code> – Liste des infos scraping</li>
+                <li><code>{analysis_summary}</code> – Tableau synthèse (dans {#if_all_data})</li>
+                <li><code>{website}</code>, <code>{secteur}</code>, <code>{framework}</code>, <code>{hosting_provider}</code></li>
+            </ul>
+        </div>
+    </div>
+</div>
+
 <div class="templates-section">
     <button id="new-template-btn" class="btn btn-primary">Nouveau modèle</button>
     
     <div id="templates-list" class="templates-list">
         {% for template in templates %}
-        <div class="template-card" data-template-id="{{ template.id }}">
+        <div class="template-card" data-template-id="{{ template.id }}" data-is-html="{{ template.get('is_html') | lower }}">
             <h3>{{ template.name }}</h3>
-            <p class="template-category">{{ template.category }}</p>
-            <p class="template-preview">{{ template.preview or template.content[:100] }}...</p>
+            <p class="template-category">
+                {% if template.get('is_html') %}<span class="template-badge template-badge-html">Email HTML</span>{% endif %}
+                {{ template.category }}
+            </p>
+            <p class="template-preview">{{ template.preview or (template.content[:150] + '...' if template.content|length > 150 else template.content) }}</p>
             <div class="template-actions">
                 <button class="btn btn-small btn-edit" onclick="editTemplate('{{ template.id }}')">Modifier</button>
                 <button class="btn btn-small btn-delete" onclick="deleteTemplate('{{ template.id }}')">Supprimer</button>
@@ -43,6 +82,7 @@
                 <label for="template-category">Catégorie</label>
                 <select id="template-category" name="category">
                     <option value="cold_email">Cold Email</option>
+                    <option value="html_email">Email HTML</option>
                     <option value="linkedin">LinkedIn</option>
                     <option value="malt">Malt</option>
                     <option value="other">Autre</option>
@@ -51,12 +91,13 @@
             
             <div class="form-group">
                 <label for="template-subject">Sujet</label>
-                <input type="text" id="template-subject" name="subject" required>
+                <input type="text" id="template-subject" name="subject" required placeholder="Ex. Modernisation de votre site - {entreprise}">
             </div>
             
             <div class="form-group">
-                <label for="template-content">Contenu (peut contenir {nom}, {entreprise}, {email})</label>
-                <textarea id="template-content" name="content" rows="15" required></textarea>
+                <label for="template-content">Contenu (texte ou HTML)</label>
+                <p class="form-hint">Variables : {nom}, {entreprise}, {email}. Modèles HTML : blocs {#if_tech_data}, {#if_performance}, {#if_security}, {#if_scraping_data}, {#if_all_data} et variables générées. Voir la liste complète ci-dessus.</p>
+                <textarea id="template-content" name="content" rows="18" required placeholder="Bonjour {nom}, ..."></textarea>
             </div>
             
             <div class="form-actions">

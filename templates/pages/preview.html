@@ -2,10 +2,6 @@
 
 {% block title %}Prévisualisation - ProspectLab{% endblock %}
 
-{% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/campagnes.css') }}">
-{% endblock %}
-
 {% block content %}
 <div class="preview-page">
 <div class="page-header preview-page-header" data-filename="{{ filename }}" data-download-file-url="{{ url_for('other.download_file', filename='') }}" data-celery-workers="{{ celery_workers|default(4) }}">
