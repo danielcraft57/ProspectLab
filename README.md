@@ -10,6 +10,8 @@ Application Flask professionnelle pour la prospection et l'analyse approfondie d
 - **Analyse technique avancée** : Détection de frameworks, serveurs, hébergeurs, versions et vulnérabilités
 - **Analyse OSINT** : Recherche approfondie sur les responsables (LinkedIn, réseaux sociaux, actualités)
 - **Analyse Pentest** : Scan de sécurité et détection de vulnérabilités (nécessite outils externes)
+- **Analyse SEO** : Audit SEO détaillé (meta, structure, Lighthouse) intégré au score d'opportunité
+- **Listes d'entreprises (groupes)** : Création de groupes d'entreprises (listes sauvegardées) et gestion directe depuis chaque carte (ajout/retrait, compteur, badge \"Dans le groupe\")
 - **Envoi d'emails de prospection** : Campagnes personnalisées avec modèles réutilisables, programmation d'envoi (date/heure) et suggestions intelligentes (jours ouvrés, fériés FR, heures bureau)
 - **Suivi en temps réel** : WebSocket pour suivre la progression des analyses et scraping
 - **Base de données normalisée** : Stockage structuré avec OpenGraph, images, et métadonnées

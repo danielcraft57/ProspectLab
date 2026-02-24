@@ -2041,6 +2041,31 @@ body[data-theme="dark"] .preview-page .analyze-section.analyze-card.analyze-acti
     box-shadow: 0 8px 32px rgba(99, 102, 241, 0.2);
 }
 
+/* Prévisualisation - cartes de progression détaillées (scraping / technique / OSINT / Pentest) en dark mode */
+body[data-theme="dark"] #scraping-progress-container,
+body[data-theme="dark"] #technical-progress-container,
+body[data-theme="dark"] #osint-progress-container,
+body[data-theme="dark"] #pentest-progress-container {
+    background: #020617; /* un peu plus clair que le fond global pour ressortir dans la carte */
+    border-color: #1e293b;
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.8);
+}
+
+body[data-theme="dark"] #scraping-progress-text,
+body[data-theme="dark"] #technical-progress-text,
+body[data-theme="dark"] #osint-current-info,
+body[data-theme="dark"] #osint-total-info,
+body[data-theme="dark"] #pentest-current-info,
+body[data-theme="dark"] #pentest-total-info {
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] #osint-cumulative-box,
+body[data-theme="dark"] #pentest-cumulative-box {
+    background: #022c22;
+    border-color: #064e3b;
+}
+
 /* Bloc résumé du fichier (nombre d'entreprises, website, etc.) */
 .preview-stats-block {
     background: #f8fafc;

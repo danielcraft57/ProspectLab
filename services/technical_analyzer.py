@@ -11,7 +11,12 @@ import socket
 import subprocess
 import shutil
 import json
+import os
+import tempfile
+import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 try:
     import whois
 except ImportError:
@@ -161,6 +166,57 @@ class TechnicalAnalyzer:
         # Aucune méthode disponible
         self.nmap_method = None
         self.nmap_cmd_base = None
+    
+    def _run_lighthouse_audit(self, url: str, timeout: int = 120) -> dict:
+        """
+        Lance un audit Lighthouse (SEO, performance, accessibilité).
+        Nécessite Node.js et npx (pas WSL). Retourne les scores ou un dict vide en cas d'échec.
+        
+        Args:
+            url: URL à auditer
+            timeout: Délai max en secondes
+            
+        Returns:
+            dict: scores (performance, seo, accessibility) et éventuellement categories
+        """
+        result = {'performance': None, 'seo': None, 'accessibility': None}
+        if not url.startswith(('http://', 'https://')):
+            url = 'https://' + url
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.json', delete=False) as f:
+                out_path = f.name
+            cmd = [
+                'npx', '--yes', 'lighthouse',
+                url,
+                '--output=json',
+                '--output-path=' + out_path,
+                '--quiet',
+                '--chrome-flags=--headless --no-sandbox --disable-dev-shm-usage',
+            ]
+            subprocess.run(cmd, capture_output=True, timeout=timeout, check=False)
+            try:
+                with open(out_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    data = json.load(f)
+                categories = data.get('categories') or {}
+                for cat_id, cat in categories.items():
+                    if isinstance(cat, dict) and 'score' in cat:
+                        score = cat['score']
+                        if cat_id == 'performance':
+                            result['performance'] = round(score * 100) if score is not None else None
+                        elif cat_id == 'seo':
+                            result['seo'] = round(score * 100) if score is not None else None
+                        elif cat_id == 'accessibility':
+                            result['accessibility'] = round(score * 100) if score is not None else None
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.debug('Lighthouse: parse JSON %s', e)
+            finally:
+                try:
+                    os.unlink(out_path)
+                except OSError:
+                    pass
+        except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
+            logger.debug('Lighthouse non disponible ou erreur: %s', e)
+        return result
     
     def get_server_headers(self, url):
         """Récupère les headers HTTP du serveur"""
@@ -934,6 +990,14 @@ class TechnicalAnalyzer:
         Analyse complète: page principale + multi-pages léger, avec scoring global.
         """
         base_results = self.analyze_technical_details(url, enable_nmap=enable_nmap)
+        # Audit Lighthouse (SEO, performance, accessibilité) si Node/npx disponible
+        try:
+            lighthouse_result = self._run_lighthouse_audit(url)
+            if any(lighthouse_result.get(k) is not None for k in ('performance', 'seo', 'accessibility')):
+                base_results['lighthouse'] = lighthouse_result
+        except Exception as e:
+            logger.debug('Lighthouse: %s', e)
+        
         multipage = self.analyze_site_multipage(url, max_pages=max_pages, max_depth=max_depth)
 
         summary = multipage.get('summary', {})

@@ -14,6 +14,7 @@ from tasks.scraping_tasks import scrape_emails_task, scrape_analysis_task
 from tasks.technical_analysis_tasks import technical_analysis_task
 from tasks.pentest_tasks import pentest_analysis_task
 from tasks.osint_tasks import osint_analysis_task
+from tasks.seo_tasks import seo_analysis_task
 import os
 import threading
 import logging
@@ -1362,6 +1363,119 @@ def register_websocket_handlers(socketio, app):
             try:
                 safe_emit(socketio, 'pentest_analysis_error', {
                     'error': f'Erreur lors du démarrage de l\'analyse Pentest: {str(e)}'
+                }, room=request.sid)
+            except:
+                pass
+    
+    @socketio.on('start_seo_analysis')
+    def handle_start_seo_analysis(data):
+        """
+        Démarre une analyse SEO via Celery
+        
+        Args:
+            data (dict): Paramètres de l'analyse (url, entreprise_id, use_lighthouse)
+        """
+        try:
+            url = data.get('url')
+            entreprise_id = data.get('entreprise_id')
+            use_lighthouse = data.get('use_lighthouse', True)
+            session_id = request.sid
+            
+            if not url:
+                safe_emit(socketio, 'seo_analysis_error', {'error': 'URL requise'}, room=session_id)
+                return
+            
+            # Vérifier que Celery/Redis est disponible
+            try:
+                from celery_app import celery
+                celery.control.inspect().active()
+            except Exception as e:
+                error_msg = 'Celery worker non disponible. '
+                error_msg += 'Démarre Celery avec: .\\scripts\\windows\\start-celery.ps1'
+                safe_emit(socketio, 'seo_analysis_error', {
+                    'error': error_msg
+                }, room=session_id)
+                return
+            
+            # Lancer la tâche Celery
+            try:
+                task = seo_analysis_task.delay(
+                    url=url,
+                    entreprise_id=entreprise_id,
+                    use_lighthouse=use_lighthouse
+                )
+            except Exception as e:
+                safe_emit(socketio, 'seo_analysis_error', {
+                    'error': f'Erreur lors du démarrage de la tâche: {str(e)}'
+                }, room=session_id)
+                return
+            
+            # Stocker la tâche
+            with tasks_lock:
+                active_tasks[session_id] = {'task_id': task.id, 'type': 'seo', 'url': url}
+            
+            safe_emit(socketio, 'seo_analysis_started', {'message': 'Analyse SEO démarrée...', 'task_id': task.id}, room=session_id)
+            
+            # Surveiller la progression
+            def monitor_task():
+                try:
+                    last_meta = None
+                    while True:
+                        try:
+                            task_result = celery.AsyncResult(task.id)
+                            current_state = task_result.state
+                            
+                            if current_state == 'PROGRESS':
+                                meta = task_result.info
+                                if meta != last_meta:
+                                    safe_emit(socketio, 'seo_analysis_progress', {
+                                        'progress': meta.get('progress', 0),
+                                        'message': meta.get('message', '')
+                                    }, room=session_id)
+                                    last_meta = meta
+                            elif current_state == 'SUCCESS':
+                                result = task_result.result
+                                safe_emit(socketio, 'seo_analysis_complete', {
+                                    'success': True,
+                                    'analysis_id': result.get('analysis_id'),
+                                    'url': url,
+                                    'summary': result.get('summary', {}),
+                                    'score': result.get('score', 0),
+                                    'updated': result.get('updated', False)
+                                }, room=session_id)
+                                with tasks_lock:
+                                    if session_id in active_tasks:
+                                        del active_tasks[session_id]
+                                break
+                            elif current_state == 'FAILURE':
+                                safe_emit(socketio, 'seo_analysis_error', {
+                                    'error': str(task_result.info)
+                                }, room=session_id)
+                                with tasks_lock:
+                                    if session_id in active_tasks:
+                                        del active_tasks[session_id]
+                                break
+                        except Exception as e:
+                            safe_emit(socketio, 'seo_analysis_error', {
+                                'error': f'Erreur lors du suivi de la tâche: {str(e)}'
+                            }, room=session_id)
+                            with tasks_lock:
+                                if session_id in active_tasks:
+                                    del active_tasks[session_id]
+                            break
+                        threading.Event().wait(0.5)
+                except Exception as e:
+                    safe_emit(socketio, 'seo_analysis_error', {
+                        'error': f'Erreur dans le suivi: {str(e)}'
+                    }, room=session_id)
+            
+            thread = threading.Thread(target=monitor_task)
+            thread.daemon = True
+            thread.start()
+        except Exception as e:
+            try:
+                safe_emit(socketio, 'seo_analysis_error', {
+                    'error': f'Erreur lors du démarrage de l\'analyse SEO: {str(e)}'
                 }, room=request.sid)
             except:
                 pass

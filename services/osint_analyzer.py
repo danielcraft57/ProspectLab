@@ -89,6 +89,68 @@ class OSINTAnalyzer:
             # APIs CLI
             'shodan': self._check_tool('shodan'),
             'censys': self._check_tool('censys'),
+            'social_analyzer': self._check_social_analyzer(),
+        }
+    
+    def _check_social_analyzer(self) -> bool:
+        """Vérifie si Social Analyzer est disponible (python3 -m social-analyzer)."""
+        for cmd in (['python3', '-m', 'social-analyzer', '--help'], ['python', '-m', 'social-analyzer', '--help']):
+            try:
+                if self.wsl_available:
+                    r = subprocess.run(
+                        self.wsl_cmd_base + cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=8,
+                    )
+                else:
+                    r = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+                if r.returncode == 0 or 'username' in (r.stdout or '') + (r.stderr or ''):
+                    return True
+            except Exception:
+                pass
+        return False
+    
+    def get_diagnostic(self) -> Dict:
+        """
+        Retourne un résumé de l'environnement OSINT (WSL + outils) pour expliquer
+        pourquoi une analyse peut échouer ou être partielle.
+        
+        Returns:
+            dict: wsl_available, wsl_distro, wsl_user, tools_available (liste),
+                  tools_missing (liste), message (explicatif)
+        """
+        try:
+            from config import WSL_DISTRO, WSL_USER
+        except ImportError:
+            WSL_DISTRO = os.environ.get('WSL_DISTRO', 'kali-linux')
+            WSL_USER = os.environ.get('WSL_USER', 'loupix')
+        available = [k for k, v in self.tools.items() if v]
+        missing = [k for k, v in self.tools.items() if not v]
+        # En prod (Linux) : pas de WSL, les outils sont exécutés en natif (shutil.which)
+        if not self.wsl_available:
+            if len(available) == 0:
+                message = (
+                    'Exécution native (pas de WSL). Aucun outil OSINT détecté sur le système. '
+                    'Installez-les (apt, pip, scripts dans docs/INSTALL_OSINT_TOOLS.md).'
+                )
+            else:
+                message = f'Exécution native (pas de WSL). {len(available)} outil(s) disponible(s), {len(missing)} manquant(s).'
+        elif len(available) == 0:
+            message = (
+                'Aucun outil OSINT détecté dans WSL. Exécutez le script d\'installation dans votre '
+                f'distro WSL: wsl -d {WSL_DISTRO} bash scripts/linux/install_osint_tools_kali.sh'
+            )
+        else:
+            message = f'{len(available)} outil(s) disponible(s), {len(missing)} manquant(s).'
+        return {
+            'wsl_available': self.wsl_available,
+            'execution_mode': 'wsl' if self.wsl_available else 'native',
+            'wsl_distro': WSL_DISTRO,
+            'wsl_user': WSL_USER,
+            'tools_available': available,
+            'tools_missing': missing,
+            'message': message,
         }
     
     def _check_tool(self, tool_name: str) -> bool:
@@ -518,14 +580,71 @@ class OSINTAnalyzer:
         
         return people
     
+    def _run_social_analyzer(self, username: str, timeout: int = 90) -> Dict:
+        """Exécute Social Analyzer pour un pseudo (WSL ou local). Retourne le résultat subprocess."""
+        if self.wsl_available:
+            return self._run_wsl_command(
+                ['python3', '-m', 'social-analyzer', '--username', username, '--output', 'json'],
+                timeout=timeout
+            )
+        try:
+            r = subprocess.run(
+                ['python', '-m', 'social-analyzer', '--username', username, '--output', 'json'],
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='ignore',
+                timeout=timeout,
+            )
+            return {
+                'success': r.returncode == 0,
+                'stdout': r.stdout,
+                'stderr': r.stderr,
+                'returncode': r.returncode,
+            }
+        except Exception as e:
+            return {'error': str(e)}
+    
     def search_social_media_profiles(self, usernames: List[str], progress_callback=None) -> Dict[str, List[Dict]]:
         """
         Recherche des profils sur les réseaux sociaux pour une liste d'utilisateurs
-        Utilise Sherlock ou Maigret si disponibles
+        Utilise Social Analyzer, Maigret ou Sherlock si disponibles
         """
         profiles = {}
         
-        # Essayer d'abord Maigret (plus moderne)
+        # Social Analyzer (1000+ sites, priorité si disponible)
+        if self.tools.get('social_analyzer'):
+            for username in usernames[:5]:
+                if progress_callback:
+                    progress_callback(f'Recherche de profils pour {username} (Social Analyzer)...')
+                result = self._run_social_analyzer(username, timeout=90)
+                if result.get('success') and result.get('stdout'):
+                    try:
+                        data = json.loads(result['stdout'])
+                        found_profiles = []
+                        if isinstance(data, list):
+                            for item in data:
+                                if not isinstance(item, dict):
+                                    continue
+                                url = item.get('url') or item.get('link') or item.get('profile_url')
+                                if url and item.get('found', True):
+                                    found_profiles.append({'url': url, 'source': 'social_analyzer'})
+                        elif isinstance(data, dict):
+                            for key, val in data.items():
+                                if isinstance(val, dict) and (val.get('url') or val.get('link')):
+                                    found_profiles.append({
+                                        'url': val.get('url') or val.get('link'),
+                                        'source': 'social_analyzer'
+                                    })
+                        if found_profiles:
+                            profiles[username] = found_profiles
+                    except (json.JSONDecodeError, TypeError):
+                        for url_match in re.finditer(r'https?://[^\s"\'<>]+', result['stdout']):
+                            if username not in profiles:
+                                profiles[username] = []
+                            profiles[username].append({'url': url_match.group(0), 'source': 'social_analyzer'})
+        
+        # Maigret (si pas déjà rempli par Social Analyzer ou en complément)
         if self.tools['maigret']:
             for username in usernames[:5]:  # Limiter pour éviter les timeouts
                 if progress_callback:
@@ -551,13 +670,15 @@ class OSINTAnalyzer:
                                         'source': 'maigret'
                                     })
                     if found_profiles:
-                        profiles[username] = found_profiles
+                        existing = profiles.get(username, [])
+                        existing.extend(found_profiles)
+                        profiles[username] = existing
         
-        # Sinon essayer Sherlock
-        elif self.tools['sherlock']:
+        # Sherlock (en complément)
+        if self.tools['sherlock']:
             for username in usernames[:5]:
                 if progress_callback:
-                    progress_callback(f'Recherche de profils pour {username}...')
+                    progress_callback(f'Recherche de profils pour {username} (Sherlock)...')
                 
                 result = self._run_wsl_command([
                     'sherlock',
@@ -577,7 +698,9 @@ class OSINTAnalyzer:
                                     'source': 'sherlock'
                                 })
                     if found_profiles:
-                        profiles[username] = found_profiles
+                        existing = profiles.get(username, [])
+                        existing.extend(found_profiles)
+                        profiles[username] = existing
         
         return profiles
     
@@ -2058,6 +2181,15 @@ class OSINTAnalyzer:
             results['technologies'] = self.detect_technologies(url)
         except Exception as e:
             results['tech_error'] = str(e)
+        
+        # Diagnostic (pour expliquer pourquoi l'analyse peut être partielle)
+        try:
+            results['diagnostic'] = self.get_diagnostic()
+            diag = results['diagnostic']
+            if not diag['wsl_available'] or len(diag['tools_available']) == 0:
+                results['summary_warning'] = diag['message']
+        except Exception as e:
+            logger.debug(f'Diagnostic OSINT: {e}')
         
         # Résumé
         people_count = results.get('people', {}).get('summary', {}).get('total_people', 0)

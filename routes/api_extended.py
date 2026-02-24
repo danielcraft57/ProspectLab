@@ -206,6 +206,67 @@ def analyse_pentest_detail(analysis_id):
             return jsonify({'error': str(e)}), 500
 
 
+@api_extended_bp.route('/analyses-seo')
+@login_required
+def analyses_seo():
+    """
+    API: Liste toutes les analyses SEO
+    
+    Returns:
+        JSON: Liste des analyses SEO
+    """
+    try:
+        analyses = database.get_all_seo_analyses()
+        return jsonify(analyses)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_extended_bp.route('/analyse-seo/<int:analysis_id>', methods=['GET', 'DELETE'])
+@login_required
+def analyse_seo_detail(analysis_id):
+    """
+    API: Détails ou suppression d'une analyse SEO
+    
+    Args:
+        analysis_id (int): ID de l'analyse SEO
+        
+    Methods:
+        GET: Retourne les détails
+        DELETE: Supprime l'analyse
+        
+    Returns:
+        JSON: Détails ou confirmation de suppression
+    """
+    if request.method == 'DELETE':
+        try:
+            # Supprimer l'analyse (les tables normalisées seront supprimées via CASCADE)
+            conn = database.get_connection()
+            cursor = conn.cursor()
+            database.execute_sql(cursor, 'DELETE FROM analyses_seo WHERE id = ?', (analysis_id,))
+            conn.commit()
+            conn.close()
+            return jsonify({'success': True, 'message': 'Analyse SEO supprimée avec succès'})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    else:
+        try:
+            analysis = database.get_seo_analysis_by_id(analysis_id)
+            if analysis:
+                return jsonify(analysis)
+            else:
+                return jsonify({'error': 'Analyse SEO introuvable'}), 404
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+            analysis = database.get_pentest_analysis(analysis_id)
+            if analysis:
+                return jsonify(analysis)
+            else:
+                return jsonify({'error': 'Analyse Pentest introuvable'}), 404
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+
 @api_extended_bp.route('/entreprise/<int:entreprise_id>/analyse-technique')
 @login_required
 def entreprise_technical_analysis(entreprise_id):
@@ -268,6 +329,29 @@ def entreprise_pentest_analysis(entreprise_id):
             return jsonify(analysis)
         else:
             return jsonify({'error': 'Aucune analyse Pentest trouvée'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_extended_bp.route('/entreprise/<int:entreprise_id>/analyse-seo')
+@login_required
+def entreprise_seo_analysis(entreprise_id):
+    """
+    API: Analyse SEO d'une entreprise
+    
+    Args:
+        entreprise_id (int): ID de l'entreprise
+        
+    Returns:
+        JSON: Analyse SEO la plus récente de l'entreprise
+    """
+    try:
+        analyses = database.get_seo_analyses_by_entreprise(entreprise_id, limit=1)
+        if analyses:
+            # Retourner l'analyse la plus récente
+            return jsonify(analyses[0])
+        else:
+            return jsonify({'error': 'Aucune analyse SEO trouvée'}), 404
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

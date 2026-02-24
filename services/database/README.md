@@ -10,31 +10,50 @@ services/database/
 ├── base.py              # Connexion et méthodes de base
 ├── schema.py            # Création des tables et migrations
 ├── entreprises.py       # Gestion des entreprises
+├── groupes.py           # Groupes d'entreprises (listes sauvegardées)
 ├── analyses.py          # Analyses générales
 ├── scrapers.py          # Gestion des scrapers
 ├── personnes.py         # Gestion des personnes
 ├── campagnes.py         # Campagnes email
 ├── osint.py             # Analyses OSINT
 ├── technical.py         # Analyses techniques
-└── pentest.py          # Analyses Pentest
+├── pentest.py           # Analyses Pentest
+└── seo.py               # Analyses SEO
 ```
 
 ## Architecture
 
-La classe `Database` utilise l'héritage multiple (mixins) pour combiner toutes les fonctionnalités :
+La classe `Database` utilise l'héritage multiple (mixins) pour combiner toutes les fonctionnalités.  
+L'implémentation actuelle correspond à :
 
 ```python
+from .base import DatabaseBase
+from .schema import DatabaseSchema
+from .entreprises import EntrepriseManager
+from .groupes import GroupeEntrepriseManager
+from .analyses import DatabaseAnalyses
+from .scrapers import ScraperManager
+from .personnes import PersonneManager
+from .campagnes import CampagneManager
+from .osint import OSINTManager
+from .technical import TechnicalManager
+from .pentest import PentestManager
+from .seo import SEOManager
+
+
 class Database(
-    DatabaseBase,        # Connexion
-    DatabaseSchema,      # Schéma
-    DatabaseEntreprises, # Entreprises
-    DatabaseAnalyses,    # Analyses
-    DatabaseScrapers,    # Scrapers
-    DatabasePersonnes,   # Personnes
-    DatabaseCampagnes,   # Campagnes
-    DatabaseOSINT,       # OSINT
-    DatabaseTechnical,   # Techniques
-    DatabasePentest      # Pentest
+    DatabaseSchema,          # Schéma + migrations
+    EntrepriseManager,       # Entreprises
+    GroupeEntrepriseManager, # Groupes d'entreprises (listes sauvegardées)
+    DatabaseAnalyses,        # Analyses globales
+    ScraperManager,          # Scrapers et données associées
+    PersonneManager,         # Personnes
+    CampagneManager,         # Campagnes email
+    OSINTManager,            # Analyses OSINT
+    TechnicalManager,        # Analyses techniques
+    PentestManager,          # Analyses Pentest
+    SEOManager,              # Analyses SEO
+    DatabaseBase             # Connexion (en dernier pour le MRO)
 ):
     pass
 ```

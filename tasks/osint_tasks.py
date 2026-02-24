@@ -63,6 +63,11 @@ def osint_analysis_task(self, url, entreprise_id=None, people_from_scrapers=None
         )
         
         analyzer = OSINTAnalyzer()
+        try:
+            diag = analyzer.get_diagnostic()
+            logger.info(f'Diagnostic OSINT: {diag.get("message", "")} (WSL={diag.get("wsl_available")}, outils={len(diag.get("tools_available", []))})')
+        except Exception as e:
+            logger.debug(f'Diagnostic OSINT: {e}')
         
         # Callback pour mettre à jour la progression
         current_progress = 5

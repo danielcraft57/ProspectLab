@@ -20,6 +20,7 @@ Architecture :
 from .base import DatabaseBase
 from .schema import DatabaseSchema
 from .entreprises import EntrepriseManager
+from .groupes import GroupeEntrepriseManager
 from .analyses import DatabaseAnalyses
 from .scrapers import ScraperManager
 from .personnes import PersonneManager
@@ -27,11 +28,13 @@ from .campagnes import CampagneManager
 from .osint import OSINTManager
 from .technical import TechnicalManager
 from .pentest import PentestManager
+from .seo import SEOManager
 
 
 class Database(
     DatabaseSchema,
     EntrepriseManager,
+    GroupeEntrepriseManager,
     DatabaseAnalyses,
     ScraperManager,
     PersonneManager,
@@ -39,6 +42,7 @@ class Database(
     OSINTManager,
     TechnicalManager,
     PentestManager,
+    SEOManager,
     DatabaseBase  # DatabaseBase en dernier pour résoudre le MRO
 ):
     """

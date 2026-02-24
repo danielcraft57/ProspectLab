@@ -162,7 +162,14 @@ class TechnicalManager(DatabaseBase):
                             ''', (analysis_id, plugin_name, plugin_version))
         
         # Sauvegarder les headers de sécurité dans la table normalisée
-        security_headers = tech_data.get('security_headers', {})
+        # L'analyse technique met les security_headers dans chaque page, pas à la racine : les agréger si besoin
+        security_headers = tech_data.get('security_headers') or {}
+        if not security_headers and pages:
+            for p in pages:
+                ph = p.get('security_headers') if isinstance(p, dict) else None
+                if ph and isinstance(ph, dict):
+                    security_headers.update(ph)
+                    break
         if security_headers:
             if isinstance(security_headers, str):
                 try:

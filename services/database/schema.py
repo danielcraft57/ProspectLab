@@ -104,6 +104,32 @@ class DatabaseSchema(DatabaseBase):
         ]
         for col_name, col_type in icon_columns:
             self.safe_execute_sql(cursor, f'ALTER TABLE entreprises ADD COLUMN {col_name} {col_type}')
+
+        # Table des groupes d'entreprises
+        self.execute_sql(cursor, '''
+            CREATE TABLE IF NOT EXISTS groupes_entreprises (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nom TEXT NOT NULL,
+                description TEXT,
+                couleur TEXT,
+                date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                date_modification TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # Table de liaison entreprises <-> groupes
+        self.execute_sql(cursor, '''
+            CREATE TABLE IF NOT EXISTS entreprise_groupes (
+                entreprise_id INTEGER NOT NULL,
+                groupe_id INTEGER NOT NULL,
+                date_ajout TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (entreprise_id, groupe_id),
+                FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE,
+                FOREIGN KEY (groupe_id) REFERENCES groupes_entreprises(id) ON DELETE CASCADE
+            )
+        ''')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_entreprise_groupes_entreprise ON entreprise_groupes(entreprise_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_entreprise_groupes_groupe ON entreprise_groupes(groupe_id)')
         
         # Table des données OpenGraph (normalisée selon ogp.me)
         self.execute_sql(cursor, '''
@@ -755,6 +781,72 @@ class DatabaseSchema(DatabaseBase):
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_pentest_security_headers_analysis_id ON analysis_pentest_security_headers(analysis_id)')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_pentest_cms_vuln_analysis_id ON analysis_pentest_cms_vulnerabilities(analysis_id)')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_pentest_ports_analysis_id ON analysis_pentest_open_ports(analysis_id)')
+        
+        # Table des analyses SEO
+        self.execute_sql(cursor,'''
+            CREATE TABLE IF NOT EXISTS analyses_seo (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entreprise_id INTEGER,
+                url TEXT NOT NULL,
+                domain TEXT,
+                meta_tags_json TEXT,
+                headers_json TEXT,
+                structure_json TEXT,
+                sitemap_json TEXT,
+                robots_json TEXT,
+                lighthouse_json TEXT,
+                issues_json TEXT,
+                score INTEGER,
+                seo_details TEXT,
+                date_analyse TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE
+            )
+        ''')
+        
+        # Tables normalisées pour les analyses SEO
+        self.execute_sql(cursor,'''
+            CREATE TABLE IF NOT EXISTS analysis_seo_meta_tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                analysis_id INTEGER NOT NULL,
+                tag_name TEXT NOT NULL,
+                tag_value TEXT,
+                tag_type TEXT,
+                date_found TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (analysis_id) REFERENCES analyses_seo(id) ON DELETE CASCADE
+            )
+        ''')
+        
+        self.execute_sql(cursor,'''
+            CREATE TABLE IF NOT EXISTS analysis_seo_headers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                analysis_id INTEGER NOT NULL,
+                header_name TEXT NOT NULL,
+                header_value TEXT,
+                date_found TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (analysis_id) REFERENCES analyses_seo(id) ON DELETE CASCADE,
+                UNIQUE(analysis_id, header_name)
+            )
+        ''')
+        
+        self.execute_sql(cursor,'''
+            CREATE TABLE IF NOT EXISTS analysis_seo_issues (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                analysis_id INTEGER NOT NULL,
+                issue_type TEXT NOT NULL,
+                category TEXT,
+                message TEXT,
+                impact TEXT,
+                date_found TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (analysis_id) REFERENCES analyses_seo(id) ON DELETE CASCADE
+            )
+        ''')
+        
+        # Index pour les analyses SEO
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_seo_meta_tags_analysis_id ON analysis_seo_meta_tags(analysis_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_seo_headers_analysis_id ON analysis_seo_headers(analysis_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_seo_issues_analysis_id ON analysis_seo_issues(analysis_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_seo_entreprise ON analyses_seo(entreprise_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_seo_url ON analyses_seo(url)')
         
         # Table des scrapers
         self.execute_sql(cursor,'''

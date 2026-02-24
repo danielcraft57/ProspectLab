@@ -2134,6 +2134,14 @@
                     auto_start: 'true'
                 });
                 window.location.href = `/analyses-pentest?${params.toString()}`;
+            } else if (analysisType === 'seo') {
+                // Rediriger vers la page d'analyses SEO avec les paramètres dans l'URL
+                const params = new URLSearchParams({
+                    url: url,
+                    entreprise_id: entrepriseId || '',
+                    auto_start: 'true'
+                });
+                window.location.href = `/analyses-seo?${params.toString()}`;
             }
             
             showNotification(`Analyse ${analysisType} lancée. Redirection...`, 'success');

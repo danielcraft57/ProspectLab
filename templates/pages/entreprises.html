@@ -10,23 +10,40 @@
 
 <div class="filters-section">
     <div class="filters-card">
-        <h3>Filtres et recherche</h3>
-        
-        <div class="filters-grid">
-            <div class="filter-group">
-                <label for="search-input">Recherche</label>
-                <div class="search-field">
-                    <input type="text" id="search-input" placeholder="Nom, secteur, email..." autocomplete="off">
-                </div>
+        <div class="filters-header">
+            <div class="filters-title">
+                <h3>Recherche d'entreprises</h3>
+                <p class="filters-subtitle">Filtrage en temps réel, sans bouton Appliquer.</p>
             </div>
-            
+            <button id="btn-toggle-advanced-filters" type="button" class="btn filters-toggle">
+                <i class="fas fa-sliders-h" aria-hidden="true"></i>
+                <span>Filtres avancés</span>
+                <span id="active-filters-count" class="filters-toggle-badge" style="display: none;">0</span>
+            </button>
+        </div>
+
+        <div class="filters-main-search">
+            <label for="search-input" class="filters-main-label">Recherche</label>
+            <div class="search-field search-field-large">
+                <i class="fas fa-search search-icon" aria-hidden="true"></i>
+                <input
+                    type="text"
+                    id="search-input"
+                    class="form-input"
+                    placeholder="Nom, secteur, email..."
+                    autocomplete="off"
+                >
+            </div>
+        </div>
+
+        <div id="advanced-filters" class="filters-grid filters-advanced collapsed">
             <div class="filter-group">
                 <label for="filter-secteur">Secteur</label>
                 <select id="filter-secteur" class="form-select">
                     <option value="">Tous les secteurs</option>
                 </select>
             </div>
-            
+
             <div class="filter-group">
                 <label for="filter-statut">Statut</label>
                 <select id="filter-statut" class="form-select">
@@ -37,7 +54,7 @@
                     <option value="Clos">Clos</option>
                 </select>
             </div>
-            
+
             <div class="filter-group">
                 <label for="filter-opportunite">Opportunité</label>
                 <select id="filter-opportunite" class="form-select">
@@ -49,19 +66,57 @@
                     <option value="Très faible">Très faible</option>
                 </select>
             </div>
-            
+
             <div class="filter-group">
                 <label>
                     <input type="checkbox" id="filter-favori">
                     Favoris uniquement
                 </label>
             </div>
+            <div class="filter-group">
+                <label for="filter-security-min">Sécurité (min)</label>
+                <select id="filter-security-min" class="form-select" title="Score sécurité minimal (0-100)">
+                    <option value="">Toute</option>
+                    <option value="0">0 - 24</option>
+                    <option value="25">25 - 49</option>
+                    <option value="50">50 - 74</option>
+                    <option value="75">75 - 100</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="filter-security-max">Sécurité (max)</label>
+                <select id="filter-security-max" class="form-select" title="Score sécurité maximal (0-100)">
+                    <option value="">Toute</option>
+                    <option value="24">0 - 24</option>
+                    <option value="49">25 - 49</option>
+                    <option value="74">50 - 74</option>
+                    <option value="100">75 - 100</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="filter-pentest-min">Pentest (min)</label>
+                <select id="filter-pentest-min" class="form-select" title="Score pentest (risque) minimal (0-100)">
+                    <option value="">Toute</option>
+                    <option value="0">0 - 24</option>
+                    <option value="25">25 - 49</option>
+                    <option value="50">50 - 74</option>
+                    <option value="75">75 - 100</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="filter-pentest-max">Pentest (max)</label>
+                <select id="filter-pentest-max" class="form-select" title="Score pentest (risque) maximal (0-100)">
+                    <option value="">Toute</option>
+                    <option value="24">0 - 24</option>
+                    <option value="49">25 - 49</option>
+                    <option value="74">50 - 74</option>
+                    <option value="100">75 - 100</option>
+                </select>
+            </div>
         </div>
-        
+
         <div class="filters-actions">
-            <button id="btn-apply-filters" class="btn btn-primary">Appliquer</button>
-            <button id="btn-reset-filters" class="btn btn-secondary">Réinitialiser</button>
-            <button id="btn-export" class="btn btn-success">Exporter</button>
+            <span class="filters-hint">Les filtres sont appliqués automatiquement.</span>
         </div>
     </div>
 </div>
