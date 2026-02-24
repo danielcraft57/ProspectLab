@@ -98,6 +98,18 @@ def liste_analyses_pentest():
     return render_page('analyses_pentest.html')
 
 
+@main_bp.route('/analyses-seo')
+@login_required
+def liste_analyses_seo():
+    """
+    Page de liste des analyses SEO
+    
+    Returns:
+        str: Template HTML de la liste des analyses SEO
+    """
+    return render_page('analyses_seo.html')
+
+
 @main_bp.route('/carte-entreprises')
 @login_required
 def carte_entreprises():

@@ -15,6 +15,60 @@ api_bp = Blueprint('api', __name__, url_prefix='/api')
 database = Database()
 
 
+@api_bp.route('/osint/diagnostic')
+@login_required
+def osint_diagnostic():
+    """
+    API: Diagnostic de l'environnement OSINT (WSL + outils).
+    Permet de comprendre pourquoi les analyses OSINT peuvent être vides ou partielles.
+    
+    Returns:
+        JSON: wsl_available, wsl_distro, wsl_user, tools_available, tools_missing, message
+    """
+    try:
+        from services.osint_analyzer import OSINTAnalyzer
+        analyzer = OSINTAnalyzer()
+        return jsonify(analyzer.get_diagnostic())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/pentest/diagnostic')
+@login_required
+def pentest_diagnostic():
+    """
+    API: Diagnostic de l'environnement Pentest (WSL + outils).
+    Permet de comprendre pourquoi les analyses Pentest peuvent être vides ou partielles.
+    
+    Returns:
+        JSON: wsl_available, wsl_distro, wsl_user, tools_available, tools_missing, message
+    """
+    try:
+        from services.pentest_analyzer import PentestAnalyzer
+        analyzer = PentestAnalyzer()
+        return jsonify(analyzer.get_diagnostic())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/seo/diagnostic')
+@login_required
+def seo_diagnostic():
+    """
+    API: Diagnostic de l'environnement SEO (outils disponibles).
+    Permet de comprendre pourquoi les analyses SEO peuvent être limitées.
+    
+    Returns:
+        JSON: execution_mode, tools_available, tools_missing, message
+    """
+    try:
+        from services.seo_analyzer import SEOAnalyzer
+        analyzer = SEOAnalyzer()
+        return jsonify(analyzer.get_diagnostic())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @api_bp.route('/statistics')
 @login_required
 def statistics():
@@ -64,7 +118,11 @@ def entreprises():
         opportunite (str): Filtrer par opportunité
         favori (bool): Filtrer les favoris
         search (str): Recherche textuelle
-        
+        security_min (int): Score sécurité minimal (0-100)
+        security_max (int): Score sécurité maximal (0-100)
+        pentest_min (int): Score pentest (risk_score) minimal (0-100)
+        pentest_max (int): Score pentest (risk_score) maximal (0-100)
+
     Returns:
         JSON: Liste des entreprises
     """
@@ -75,9 +133,19 @@ def entreprises():
             'statut': request.args.get('statut'),
             'opportunite': request.args.get('opportunite'),
             'favori': request.args.get('favori') == 'true',
-            'search': request.args.get('search')
+            'search': request.args.get('search'),
+            'security_min': request.args.get('security_min', type=int),
+            'security_max': request.args.get('security_max', type=int),
+            'pentest_min': request.args.get('pentest_min', type=int),
+            'pentest_max': request.args.get('pentest_max', type=int),
         }
-        filters = {k: v for k, v in filters.items() if v}
+        # Ne pas retirer les entiers 0 (valides pour min/max)
+        def keep_filter(k, v):
+            if v is None: return False
+            if k in ('security_min', 'security_max', 'pentest_min', 'pentest_max'):
+                return 0 <= v <= 100
+            return v != ''
+        filters = {k: v for k, v in filters.items() if keep_filter(k, v)}
         
         entreprises_list = database.get_entreprises(
             analyse_id=analyse_id, 
@@ -88,6 +156,60 @@ def entreprises():
         from utils.helpers import clean_json_dict
         entreprises_list = clean_json_dict(entreprises_list)
         return jsonify(entreprises_list)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/groupes-entreprises', methods=['GET', 'POST'])
+@login_required
+def groupes_entreprises():
+    """
+    API: Gestion de base des groupes d'entreprises.
+
+    GET:
+        Query params:
+            entreprise_id (int, optionnel): si fourni, ajoute is_member pour cette entreprise.
+        Retourne la liste des groupes.
+
+    POST:
+        Crée un groupe.
+        Corps JSON:
+            - nom (str, requis)
+            - description (str, optionnel)
+            - couleur (str, optionnel)
+    """
+    try:
+        if request.method == 'GET':
+            entreprise_id = request.args.get('entreprise_id', type=int)
+            groupes = database.get_groupes_entreprises(entreprise_id=entreprise_id)
+            return jsonify(groupes)
+
+        data = request.get_json() or {}
+        nom = (data.get('nom') or '').strip()
+        description = (data.get('description') or '').strip() or None
+        couleur = (data.get('couleur') or '').strip() or None
+
+        if not nom:
+            return jsonify({'error': 'Le nom du groupe est requis.'}), 400
+
+        groupe = database.create_groupe_entreprise(nom=nom, description=description, couleur=couleur)
+        return jsonify(groupe), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/groupes-entreprises/<int:groupe_id>', methods=['DELETE'])
+@login_required
+def delete_groupe_entreprise(groupe_id):
+    """
+    API: Supprime un groupe d'entreprises.
+
+    Args:
+        groupe_id (int): ID du groupe.
+    """
+    try:
+        database.delete_groupe_entreprise(groupe_id)
+        return jsonify({'success': True})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -177,6 +299,46 @@ def entreprise_detail(entreprise_id):
         import traceback
         logging.getLogger(__name__).error(f'Erreur dans entreprise_detail pour entreprise {entreprise_id}: {e}\n{traceback.format_exc()}')
         return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/entreprise/<int:entreprise_id>/groupes', methods=['POST'])
+@login_required
+def add_entreprise_to_groupe(entreprise_id):
+    """
+    API: Ajoute une entreprise à un groupe.
+
+    Corps JSON:
+        - groupe_id (int): ID du groupe cible.
+    """
+    try:
+        data = request.get_json() or {}
+        groupe_id = data.get('groupe_id')
+        if not groupe_id:
+            return jsonify({'error': 'groupe_id est requis'}), 400
+
+        added = database.add_entreprise_to_groupe(entreprise_id, int(groupe_id))
+        return jsonify({'success': True, 'added': added})
+    except Exception as e:
+        import logging
+        import traceback
+        logging.getLogger(__name__).error(f'Erreur dans add_entreprise_to_groupe pour entreprise {entreprise_id}: {e}\n{traceback.format_exc()}')
+        return jsonify({'error': 'Erreur lors de l\'ajout au groupe'}), 500
+
+
+@api_bp.route('/entreprise/<int:entreprise_id>/groupes/<int:groupe_id>', methods=['DELETE'])
+@login_required
+def remove_entreprise_from_groupe(entreprise_id, groupe_id):
+    """
+    API: Retire une entreprise d'un groupe.
+    """
+    try:
+        database.remove_entreprise_from_groupe(entreprise_id, groupe_id)
+        return jsonify({'success': True})
+    except Exception as e:
+        import logging
+        import traceback
+        logging.getLogger(__name__).error(f'Erreur dans remove_entreprise_from_groupe pour entreprise {entreprise_id}: {e}\n{traceback.format_exc()}')
+        return jsonify({'error': 'Erreur lors du retrait du groupe'}), 500
 
 
 @api_bp.route('/entreprise/<int:entreprise_id>/recalculate-opportunity', methods=['POST'])

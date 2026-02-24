@@ -31,6 +31,7 @@
         let currentModalEntrepriseId = null;
         let currentModalEntrepriseData = null;
         let currentModalPentestScore = null;
+        const entrepriseGroupsCache = {};
         
         // Charger les secteurs pour le filtre
         async function loadSecteurs() {
@@ -48,50 +49,48 @@
             }
         }
         
-        // Charger les entreprises
-        async function loadEntreprises() {
-            try {
-                allEntreprises = await EntreprisesAPI.loadAll();
-                filteredEntreprises = [...allEntreprises];
-                applyFilters();
-            } catch (error) {
-                console.error('Erreur lors du chargement des entreprises:', error);
-                document.getElementById('entreprises-container').innerHTML = 
-                    '<p class="error">Erreur lors du chargement des entreprises</p>';
-            }
-        }
-        
-        // Appliquer les filtres
-        function applyFilters() {
-            const search = document.getElementById('search-input').value.toLowerCase();
+        /** Construit l'objet de filtres à partir du formulaire (pour l'API). */
+        function getCurrentFilters() {
+            const search = document.getElementById('search-input').value.trim();
             const secteur = document.getElementById('filter-secteur').value;
             const statut = document.getElementById('filter-statut').value;
             const opportunite = document.getElementById('filter-opportunite').value;
             const favori = document.getElementById('filter-favori').checked;
-            
-            filteredEntreprises = allEntreprises.filter(entreprise => {
-                if (search && !matchesSearch(entreprise, search)) return false;
-                if (secteur && entreprise.secteur !== secteur) return false;
-                if (statut && entreprise.statut !== statut) return false;
-                if (opportunite && entreprise.opportunite !== opportunite) return false;
-                if (favori && !entreprise.favori) return false;
-                return true;
-            });
-            
-            currentPage = 1;
-            renderEntreprises();
+            const securityMin = document.getElementById('filter-security-min').value;
+            const securityMax = document.getElementById('filter-security-max').value;
+            const pentestMin = document.getElementById('filter-pentest-min').value;
+            const pentestMax = document.getElementById('filter-pentest-max').value;
+            const filters = {};
+            if (search) filters.search = search;
+            if (secteur) filters.secteur = secteur;
+            if (statut) filters.statut = statut;
+            if (opportunite) filters.opportunite = opportunite;
+            if (favori) filters.favori = 'true';
+            if (securityMin !== '') filters.security_min = securityMin;
+            if (securityMax !== '') filters.security_max = securityMax;
+            if (pentestMin !== '') filters.pentest_min = pentestMin;
+            if (pentestMax !== '') filters.pentest_max = pentestMax;
+            return filters;
         }
-        
-        function matchesSearch(entreprise, search) {
-            const searchFields = [
-                entreprise.nom,
-                entreprise.secteur,
-                entreprise.email_principal,
-                entreprise.responsable,
-                entreprise.website
-            ].filter(f => f).map(f => f.toLowerCase());
-            
-            return searchFields.some(field => field.includes(search));
+
+        /** Charge les entreprises avec les filtres courants (côté serveur). */
+        async function loadEntreprises() {
+            try {
+                const filters = getCurrentFilters();
+                allEntreprises = await EntreprisesAPI.loadAll(filters);
+                filteredEntreprises = [...allEntreprises];
+                currentPage = 1;
+                renderEntreprises();
+            } catch (error) {
+                console.error('Erreur lors du chargement des entreprises:', error);
+                document.getElementById('entreprises-container').innerHTML =
+                    '<p class="error">Erreur lors du chargement des entreprises</p>';
+            }
+        }
+
+        /** Réapplique les filtres (recharge depuis l'API avec les critères du formulaire). */
+        async function applyFilters() {
+            await loadEntreprises();
         }
         
         // Rendre les entreprises
@@ -167,10 +166,10 @@
                                     ${typeof entreprise.score_pentest !== 'undefined' && entreprise.score_pentest !== null && entreprise.score_pentest >= 40 ? `
                                     <i class="fas fa-exclamation-triangle" style="color: ${entreprise.score_pentest >= 70 ? '#e74c3c' : '#f39c12'}; font-size: 1.2rem;" title="Score Pentest: ${entreprise.score_pentest}/100"></i>
                                     ` : ''}
-                                <button class="btn-favori ${entreprise.favori ? 'active' : ''}" data-id="${entreprise.id}" title="Favori">
+                                    <button class="btn-favori ${entreprise.favori ? 'active' : ''}" data-id="${entreprise.id}" title="Favori">
                                         <i class="fas fa-star"></i>
-                                </button>
-                            </div>
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -199,9 +198,15 @@
                         ${tagsHtml ? `<div class="tags-container">${tagsHtml}</div>` : ''}
                     </div>
                     <div class="card-footer">
-                        <button class="btn btn-small btn-primary btn-view-details" data-id="${entreprise.id}">Voir détails</button>
-                        <button class="btn btn-small btn-secondary btn-edit-tags" data-id="${entreprise.id}">Tags</button>
-                        <button class="btn btn-small btn-danger btn-delete-entreprise" data-id="${entreprise.id}" data-name="${Formatters.escapeHtml(entreprise.nom || 'Sans nom')}" title="Supprimer"><i class="fas fa-trash"></i></button>
+                        <div class="card-footer-left">
+                            <button class="btn-icon btn-groups" data-id="${entreprise.id}" title="Gérer les groupes">
+                                <i class="fas fa-layer-group"></i>
+                            </button>
+                        </div>
+                        <div class="card-footer-right">
+                            <button class="btn btn-small btn-primary btn-view-details" data-id="${entreprise.id}" title="Voir détails"><i class="fas fa-eye"></i> Voir détails</button>
+                            <button class="btn btn-small btn-danger btn-delete-entreprise" data-id="${entreprise.id}" data-name="${Formatters.escapeHtml(entreprise.nom || 'Sans nom')}" title="Supprimer"><i class="fas fa-trash"></i></button>
+                        </div>
                     </div>
                 </div>
             `;
@@ -237,9 +242,9 @@
                         </div>
                     </div>
                     <div class="row-actions">
+                        <button class="btn-icon btn-groups" data-id="${entreprise.id}" title="Gérer les groupes"><i class="fas fa-layer-group"></i></button>
                         <button class="btn-favori ${entreprise.favori ? 'active' : ''}" data-id="${entreprise.id}" title="Favori"><i class="fas fa-star"></i></button>
-                        <button class="btn btn-small btn-secondary btn-edit-tags" data-id="${entreprise.id}">Tags</button>
-                        <button class="btn btn-small btn-primary btn-view-details" data-id="${entreprise.id}">Détails</button>
+                        <button class="btn btn-small btn-primary btn-view-details" data-id="${entreprise.id}" title="Voir détails"><i class="fas fa-eye"></i> Détails</button>
                         <button class="btn btn-small btn-danger btn-delete-entreprise" data-id="${entreprise.id}" data-name="${Formatters.escapeHtml(entreprise.nom || 'Sans nom')}" title="Supprimer"><i class="fas fa-trash"></i></button>
                     </div>
                 </div>
@@ -316,6 +321,13 @@
         }
         
         function setupEntrepriseActions(entrepriseId) {
+            const groupsBtn = document.querySelector(`.btn-groups[data-id="${entrepriseId}"]`);
+            if (groupsBtn) {
+                groupsBtn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    await openGroupsDropdown(entrepriseId, groupsBtn);
+                });
+            }
             const favoriBtn = document.querySelector(`.btn-favori[data-id="${entrepriseId}"]`);
             if (favoriBtn) {
                 favoriBtn.addEventListener('click', async (e) => {
@@ -340,8 +352,7 @@
                     if (confirm(`Êtes-vous sûr de vouloir supprimer "${name}" ?`)) {
                         try {
                             await EntreprisesAPI.delete(entrepriseId);
-                            allEntreprises = allEntreprises.filter(e => e.id !== entrepriseId);
-                            applyFilters();
+                            await applyFilters();
                             Notifications.show('Entreprise supprimée', 'success');
                         } catch (error) {
                             console.error('Erreur:', error);
@@ -351,23 +362,270 @@
                 });
             }
         }
+
+        async function openGroupsDropdown(entrepriseId, anchorEl) {
+            // Fermer un éventuel menu déjà ouvert
+            document.querySelectorAll('.group-dropdown').forEach(el => {
+                try {
+                    if (typeof el.__cleanup === 'function') {
+                        el.__cleanup();
+                    }
+                } catch (e) {
+                    // ignore
+                }
+                el.remove();
+            });
+
+            const rect = anchorEl.getBoundingClientRect();
+            const dropdown = document.createElement('div');
+            dropdown.className = 'group-dropdown';
+            dropdown.dataset.entrepriseId = String(entrepriseId);
+            dropdown.innerHTML = `
+                <div class="group-dropdown-inner">
+                    <div class="group-dropdown-header">
+                        <span class="group-dropdown-title">Groupes de l'entreprise</span>
+                        <button type="button" class="group-dropdown-close" aria-label="Fermer">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div class="group-dropdown-section">
+                        <p class="group-dropdown-label">Ajouter / retirer des groupes</p>
+                        <div class="group-list" data-role="group-list">
+                            <div class="group-list-empty">Chargement des groupes...</div>
+                        </div>
+                    </div>
+                    <div class="group-dropdown-section group-dropdown-section-create">
+                        <p class="group-dropdown-label">Créer un nouveau groupe</p>
+                        <form class="group-create-form">
+                            <input type="text" name="nom" class="form-input group-create-input" placeholder="Nom du groupe" autocomplete="off">
+                            <button type="submit" class="btn btn-small btn-primary group-create-btn">Créer</button>
+                        </form>
+                    </div>
+                </div>
+            `;
+
+            document.body.appendChild(dropdown);
+
+            const top = window.scrollY + rect.bottom + 8;
+            const left = Math.min(window.scrollX + rect.left, window.innerWidth - 280);
+            dropdown.style.top = `${top}px`;
+            dropdown.style.left = `${left}px`;
+
+            const cleanup = () => {
+                document.removeEventListener('pointerdown', onPointerDown, true);
+                document.removeEventListener('keydown', onKeyDown, true);
+            };
+
+            const closeDropdown = () => {
+                cleanup();
+                dropdown.remove();
+            };
+
+            const onPointerDown = (e) => {
+                const target = e.target;
+                if (!dropdown.contains(target) && !(anchorEl && anchorEl.contains(target))) {
+                    closeDropdown();
+                }
+            };
+
+            const onKeyDown = (e) => {
+                if (e.key === 'Escape') {
+                    closeDropdown();
+                }
+            };
+
+            // Permet de nettoyer quand on ferme en ouvrant un autre dropdown
+            dropdown.__cleanup = cleanup;
+
+            // Fermer au clic en dehors + touche Échap
+            setTimeout(() => {
+                document.addEventListener('pointerdown', onPointerDown, true);
+            }, 0);
+            document.addEventListener('keydown', onKeyDown, true);
+
+            const closeBtn = dropdown.querySelector('.group-dropdown-close');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', () => closeDropdown());
+            }
+
+            const createForm = dropdown.querySelector('.group-create-form');
+            if (createForm) {
+                createForm.addEventListener('submit', async (event) => {
+                    event.preventDefault();
+                    const input = createForm.querySelector('.group-create-input');
+                    const nom = input.value.trim();
+                    if (!nom) {
+                        Notifications.show('Le nom du groupe est requis', 'warning');
+                        return;
+                    }
+                    try {
+                        const groupe = await EntreprisesAPI.createGroupe({ nom });
+                        // Invalider le cache pour toutes les entreprises :
+                        Object.keys(entrepriseGroupsCache).forEach(k => {
+                            entrepriseGroupsCache[k] = null;
+                        });
+                        let addOk = false;
+                        try {
+                            const addResult = await EntreprisesAPI.addEntrepriseToGroupe(entrepriseId, groupe.id);
+                            addOk = addResult.added;
+                        } catch (addErr) {
+                            console.error(addErr);
+                        }
+                        await loadGroupsIntoDropdown(entrepriseId, dropdown, true);
+                        if (addOk) {
+                            Notifications.show('Groupe créé et entreprise ajoutée', 'success');
+                        } else {
+                            Notifications.show('Groupe créé. L\'entreprise n\'a pas été ajoutée au groupe.', 'warning');
+                        }
+                        input.value = '';
+                    } catch (error) {
+                        console.error(error);
+                        Notifications.show('Erreur lors de la création du groupe', 'error');
+                        await loadGroupsIntoDropdown(entrepriseId, dropdown, true);
+                    }
+                });
+            }
+
+            await loadGroupsIntoDropdown(entrepriseId, dropdown);
+        }
+
+        async function loadGroupsIntoDropdown(entrepriseId, dropdown, forceRefresh) {
+            const listEl = dropdown && dropdown.querySelector ? dropdown.querySelector('[data-role="group-list"]') : null;
+            if (!listEl) return;
+
+            try {
+                if (forceRefresh) {
+                    entrepriseGroupsCache[entrepriseId] = null;
+                }
+                let groupes = entrepriseGroupsCache[entrepriseId];
+                if (!groupes) {
+                    groupes = await EntreprisesAPI.loadGroupes(entrepriseId);
+                    entrepriseGroupsCache[entrepriseId] = groupes;
+                }
+
+                if (!groupes || groupes.length === 0) {
+                    listEl.innerHTML = '<div class="group-list-empty">Aucun groupe pour le moment.</div>';
+                    return;
+                }
+
+                listEl.innerHTML = groupes.map(g => `
+                    <div class="group-item ${g.is_member ? 'active' : ''}" data-group-id="${g.id}">
+                        <div class="group-item-main">
+                            <span class="group-dot" style="background-color:${g.couleur || '#4b5563'};"></span>
+                            <span class="group-name">${Formatters.escapeHtml(g.nom || '')}</span>
+                            ${typeof g.entreprises_count !== 'undefined' ? `<span class="group-count">${g.entreprises_count}</span>` : ''}
+                        </div>
+                        <div class="group-item-actions">
+                            ${g.is_member ? '<span class="group-badge">Dans le groupe</span>' : ''}
+                            <button type="button" class="group-delete-btn" title="Supprimer le groupe"><i class="fas fa-trash"></i></button>
+                        </div>
+                    </div>
+                `).join('');
+
+                // Clic sur toute la ligne pour ajouter / retirer
+                listEl.querySelectorAll('.group-item').forEach(item => {
+                    item.addEventListener('click', async (e) => {
+                        // Ne pas interpréter le clic sur le bouton poubelle
+                        if (e.target.closest('.group-delete-btn')) {
+                            return;
+                        }
+                        const groupId = parseInt(item.dataset.groupId, 10);
+                        const isActive = item.classList.contains('active');
+                        try {
+                            if (isActive) {
+                                await EntreprisesAPI.removeEntrepriseFromGroupe(entrepriseId, groupId);
+                                Notifications.show('Entreprise retirée du groupe', 'success');
+                            } else {
+                                await EntreprisesAPI.addEntrepriseToGroupe(entrepriseId, groupId);
+                                Notifications.show('Entreprise ajoutée au groupe', 'success');
+                            }
+                            // Invalider le cache pour toutes les entreprises
+                            Object.keys(entrepriseGroupsCache).forEach(k => {
+                                entrepriseGroupsCache[k] = null;
+                            });
+                            await loadGroupsIntoDropdown(entrepriseId, dropdown);
+                        } catch (error) {
+                            console.error(error);
+                            Notifications.show('Erreur lors de la mise à jour du groupe', 'error');
+                        }
+                    });
+                });
+
+                listEl.querySelectorAll('.group-delete-btn').forEach(btn => {
+                    btn.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        const item = btn.closest('.group-item');
+                        if (!item) return;
+                        const groupId = parseInt(item.dataset.groupId, 10);
+                        if (!confirm('Supprimer ce groupe pour toutes les entreprises ?')) {
+                            return;
+                        }
+                        try {
+                            await EntreprisesAPI.deleteGroupe(groupId);
+                            Object.keys(entrepriseGroupsCache).forEach(k => {
+                                entrepriseGroupsCache[k] = null;
+                            });
+                            Notifications.show('Groupe supprimé', 'success');
+                            await loadGroupsIntoDropdown(entrepriseId, dropdown);
+                        } catch (error) {
+                            console.error(error);
+                            Notifications.show('Erreur lors de la suppression du groupe', 'error');
+                        }
+                    });
+                });
+            } catch (error) {
+                console.error(error);
+                listEl.innerHTML = '<div class="group-list-empty error">Erreur lors du chargement des groupes.</div>';
+            }
+        }
         
         function setupEventListeners() {
-            document.getElementById('btn-apply-filters').addEventListener('click', applyFilters);
-            document.getElementById('btn-reset-filters').addEventListener('click', () => {
-                document.getElementById('search-input').value = '';
-                document.getElementById('filter-secteur').value = '';
-                document.getElementById('filter-statut').value = '';
-                document.getElementById('filter-opportunite').value = '';
-                document.getElementById('filter-favori').checked = false;
-                applyFilters();
+            const debouncedApplyFilters = debounceFn(applyFilters, 300);
+
+            // Recherche texte en temps réel
+            const searchInput = document.getElementById('search-input');
+            if (searchInput) {
+                searchInput.addEventListener('input', () => debouncedApplyFilters());
+            }
+
+            // Changement des filtres avancés => rafraîchissement auto
+            const advancedFilterIds = [
+                'filter-secteur',
+                'filter-statut',
+                'filter-opportunite',
+                'filter-security-min',
+                'filter-security-max',
+                'filter-pentest-min',
+                'filter-pentest-max'
+            ];
+
+            advancedFilterIds.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.addEventListener('change', () => {
+                        updateAdvancedFiltersBadge();
+                        debouncedApplyFilters();
+                    });
+                }
             });
+
+            const favoriCheckbox = document.getElementById('filter-favori');
+            if (favoriCheckbox) {
+                favoriCheckbox.addEventListener('change', () => {
+                    updateAdvancedFiltersBadge();
+                    debouncedApplyFilters();
+                });
+            }
             
-            document.getElementById('search-input').addEventListener('input', debounceFn(applyFilters, 300));
-            
-            document.getElementById('btn-export').addEventListener('click', async () => {
-                await exportCSV();
-            });
+            // Ouverture / fermeture des filtres avancés
+            const advancedFiltersEl = document.getElementById('advanced-filters');
+            const toggleBtn = document.getElementById('btn-toggle-advanced-filters');
+            if (advancedFiltersEl && toggleBtn) {
+                toggleBtn.addEventListener('click', () => {
+                    advancedFiltersEl.classList.toggle('collapsed');
+                    toggleBtn.classList.toggle('filters-toggle-open');
+                });
+            }
             
             document.getElementById('btn-view-grid').addEventListener('click', () => {
                 currentView = 'grid';
@@ -382,6 +640,43 @@
                 document.getElementById('btn-view-grid').classList.remove('active');
                 renderEntreprises();
             });
+        }
+
+        /** Met à jour le badge qui indique le nombre de filtres avancés actifs. */
+        function updateAdvancedFiltersBadge() {
+            const badge = document.getElementById('active-filters-count');
+            const toggleBtn = document.getElementById('btn-toggle-advanced-filters');
+            if (!badge || !toggleBtn) {
+                return;
+            }
+
+            let count = 0;
+            const secteur = document.getElementById('filter-secteur')?.value;
+            const statut = document.getElementById('filter-statut')?.value;
+            const opportunite = document.getElementById('filter-opportunite')?.value;
+            const favori = document.getElementById('filter-favori')?.checked;
+            const securityMin = document.getElementById('filter-security-min')?.value;
+            const securityMax = document.getElementById('filter-security-max')?.value;
+            const pentestMin = document.getElementById('filter-pentest-min')?.value;
+            const pentestMax = document.getElementById('filter-pentest-max')?.value;
+
+            if (secteur) count += 1;
+            if (statut) count += 1;
+            if (opportunite) count += 1;
+            if (favori) count += 1;
+            if (securityMin) count += 1;
+            if (securityMax) count += 1;
+            if (pentestMin) count += 1;
+            if (pentestMax) count += 1;
+
+            if (count > 0) {
+                badge.textContent = String(count);
+                badge.style.display = 'inline-flex';
+                toggleBtn.classList.add('filters-toggle-open');
+            } else {
+                badge.style.display = 'none';
+                toggleBtn.classList.remove('filters-toggle-open');
+            }
         }
         
         // Ouvrir la modal d'entreprise
@@ -455,6 +750,7 @@
                         <button class="tab-btn" data-tab="pages">Pages (${nbPages})</button>
                         <button class="tab-btn" data-tab="scraping">Résultats scraping</button>
                         <button class="tab-btn" data-tab="technique">Analyse technique</button>
+                        <button class="tab-btn" data-tab="seo">Analyse SEO</button>
                         <button class="tab-btn" data-tab="osint">Analyse OSINT</button>
                         <button class="tab-btn" data-tab="pentest">Analyse Pentest</button>
                     </div>
@@ -631,6 +927,12 @@
                         <div class="tab-panel" id="tab-technique">
                             <div id="technique-results" class="analysis-results">
                                 <div id="technique-results-content">Chargement de l'analyse technique...</div>
+                            </div>
+                        </div>
+
+                        <div class="tab-panel" id="tab-seo">
+                            <div id="seo-results" class="analysis-results">
+                                <div id="seo-results-content">Chargement de l'analyse SEO...</div>
                             </div>
                         </div>
                         
@@ -934,6 +1236,15 @@
                     }
                 });
             }
+
+            const seoTab = document.querySelector('.tab-btn[data-tab="seo"]');
+            if (seoTab) {
+                seoTab.addEventListener('click', () => {
+                    if (currentModalEntrepriseId) {
+                        loadSEOAnalysis(currentModalEntrepriseId);
+                    }
+                });
+            }
             
             const osintTab = document.querySelector('.tab-btn[data-tab="osint"]');
             if (osintTab) {
@@ -1002,6 +1313,168 @@
                 resultsContent.innerHTML = '<p class="error">Erreur lors du chargement de l\'analyse technique</p>';
             }
         }
+
+        /**
+         * Charge et affiche l'analyse SEO détaillée pour une entreprise dans la modale.
+         * @param {number} entrepriseId
+         */
+        async function loadSEOAnalysis(entrepriseId) {
+            const resultsContent = document.getElementById('seo-results-content');
+            if (!resultsContent) return;
+            
+            try {
+                resultsContent.innerHTML = 'Chargement...';
+                const response = await fetch(`/api/entreprise/${entrepriseId}/analyse-seo`);
+                if (!response.ok) {
+                    if (response.status === 404) {
+                        resultsContent.innerHTML = '<p class="empty-state">Aucune analyse SEO disponible pour le moment.</p>';
+                    } else {
+                        resultsContent.innerHTML = '<p class="error">Erreur lors du chargement de l\'analyse SEO</p>';
+                    }
+                    return;
+                }
+                
+                const analysis = await response.json();
+                resultsContent.innerHTML = renderSEOExpertise(analysis);
+            } catch (error) {
+                console.error('Erreur lors du chargement de l\'analyse SEO:', error);
+                resultsContent.innerHTML = '<p class="error">Erreur lors du chargement de l\'analyse SEO</p>';
+            }
+        }
+        /**
+         * Génère le HTML de l'expertise SEO détaillée pour une analyse.
+         * Reprend la logique principale de rendu de la page d'analyses SEO,
+         * mais adaptée à l'affichage dans la modale entreprise.
+         * @param {Object} analysis
+         * @returns {string}
+         */
+        function renderSEOExpertise(analysis) {
+            let metaTags = {};
+            let headers = {};
+            let structure = {};
+            let sitemap = null;
+            let robots = null;
+            let lighthouse = null;
+            let issues = [];
+            let summary = {};
+            
+            try {
+                if (analysis.meta_tags_json) {
+                    metaTags = typeof analysis.meta_tags_json === 'string'
+                        ? JSON.parse(analysis.meta_tags_json)
+                        : analysis.meta_tags_json;
+                }
+                if (analysis.headers_json) {
+                    headers = typeof analysis.headers_json === 'string'
+                        ? JSON.parse(analysis.headers_json)
+                        : analysis.headers_json;
+                }
+                if (analysis.structure_json) {
+                    structure = typeof analysis.structure_json === 'string'
+                        ? JSON.parse(analysis.structure_json)
+                        : analysis.structure_json;
+                }
+                if (analysis.sitemap_json) {
+                    sitemap = typeof analysis.sitemap_json === 'string'
+                        ? JSON.parse(analysis.sitemap_json)
+                        : analysis.sitemap_json;
+                }
+                if (analysis.robots_json) {
+                    robots = typeof analysis.robots_json === 'string'
+                        ? JSON.parse(analysis.robots_json)
+                        : analysis.robots_json;
+                }
+                if (analysis.lighthouse_json) {
+                    lighthouse = typeof analysis.lighthouse_json === 'string'
+                        ? JSON.parse(analysis.lighthouse_json)
+                        : analysis.lighthouse_json;
+                }
+                if (analysis.issues_json) {
+                    issues = typeof analysis.issues_json === 'string'
+                        ? JSON.parse(analysis.issues_json)
+                        : analysis.issues_json;
+                    if (!Array.isArray(issues)) {
+                        issues = [];
+                    }
+                }
+                if (analysis.seo_details) {
+                    const details = typeof analysis.seo_details === 'string'
+                        ? JSON.parse(analysis.seo_details)
+                        : analysis.seo_details;
+                    summary = details.summary || {};
+                }
+            } catch (e) {
+                console.error('Erreur parsing JSON SEO:', e);
+            }
+            
+            const score = analysis.score || 0;
+            const scoreClass = score >= 80 ? 'score-excellent' : score >= 60 ? 'score-good' : score >= 40 ? 'score-medium' : 'score-low';
+            
+            return `
+                <div class="seo-details">
+                    <div class="seo-score-section">
+                        <h3>Score SEO global</h3>
+                        <div class="score-display ${scoreClass}">
+                            <span class="score-value">${score}/100</span>
+                        </div>
+                        ${summary.main_message ? `<p class="seo-summary-main">${Formatters.escapeHtml(summary.main_message)}</p>` : ''}
+                    </div>
+                    
+                    ${Object.keys(metaTags).length > 0 ? `
+                    <div class="seo-section">
+                        <h3>Meta tags principaux</h3>
+                        <dl class="meta-tags-list">
+                            ${Object.entries(metaTags).map(([key, value]) => `
+                                <dt>${Formatters.escapeHtml(key)}</dt>
+                                <dd>${Formatters.escapeHtml(String(value))}</dd>
+                            `).join('')}
+                        </dl>
+                    </div>
+                    ` : ''}
+                    
+                    ${Object.keys(structure).length > 0 ? `
+                    <div class="seo-section">
+                        <h3>Structure de la page</h3>
+                        <ul class="structure-list">
+                            ${structure.h1_count !== undefined ? `<li><strong>H1:</strong> ${structure.h1_count}</li>` : ''}
+                            ${structure.h2_count !== undefined ? `<li><strong>H2:</strong> ${structure.h2_count}</li>` : ''}
+                            ${structure.h3_count !== undefined ? `<li><strong>H3:</strong> ${structure.h3_count}</li>` : ''}
+                            ${structure.images_total !== undefined ? `<li><strong>Images:</strong> ${structure.images_total} (dont ${structure.images_without_alt || 0} sans attribut alt)</li>` : ''}
+                            ${structure.internal_links_count !== undefined ? `<li><strong>Liens internes:</strong> ${structure.internal_links_count}</li>` : ''}
+                            ${structure.external_links_count !== undefined ? `<li><strong>Liens externes:</strong> ${structure.external_links_count}</li>` : ''}
+                        </ul>
+                    </div>
+                    ` : ''}
+                    
+                    ${lighthouse ? `
+                    <div class="seo-section">
+                        <h3>Scores Lighthouse</h3>
+                        <ul class="lighthouse-scores">
+                            ${lighthouse.score !== undefined ? `<li><strong>Score SEO:</strong> ${Math.round(lighthouse.score * 100)}/100</li>` : ''}
+                            ${lighthouse.performance_score !== undefined ? `<li><strong>Performance:</strong> ${Math.round(lighthouse.performance_score * 100)}/100</li>` : ''}
+                            ${lighthouse.accessibility_score !== undefined ? `<li><strong>Accessibilité:</strong> ${Math.round(lighthouse.accessibility_score * 100)}/100</li>` : ''}
+                        </ul>
+                    </div>
+                    ` : ''}
+                    
+                    ${issues.length > 0 ? `
+                    <div class="seo-section">
+                        <h3>Problèmes SEO clés</h3>
+                        <ul class="issues-list">
+                            ${issues.map(issue => `
+                                <li class="issue-${issue.type || 'info'}">
+                                    <strong>${Formatters.escapeHtml(issue.category || 'Général')}:</strong>
+                                    ${Formatters.escapeHtml(issue.message || '')}
+                                    ${issue.impact ? `<span class="impact-${issue.impact}">(${Formatters.escapeHtml(issue.impact)})</span>` : ''}
+                                </li>
+                            `).join('')}
+                        </ul>
+                    </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+
         async function loadOSINTAnalysis(entrepriseId) {
             const resultsContent = document.getElementById('osint-results-content');
             if (!resultsContent) return;

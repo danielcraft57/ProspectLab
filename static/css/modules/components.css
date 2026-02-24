@@ -665,7 +665,8 @@ body[data-theme="dark"] .progress-bar {
 }
 
 body[data-theme="dark"] .progress-text {
-    color: #94a3b8;
+    /* Texte plus lisible sur fond sombre */
+    color: #e5e7eb;
 }
 
 body[data-theme="dark"] .notification.error {

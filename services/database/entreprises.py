@@ -546,60 +546,82 @@ class EntrepriseManager(DatabaseBase):
         
         Args:
             analyse_id: ID de l'analyse (optionnel)
-            filters: Dictionnaire de filtres (secteur, statut, opportunite, favori, search)
+            filters: Dictionnaire de filtres (secteur, statut, opportunite, favori, search,
+                     security_min, security_max, pentest_min, pentest_max)
             limit: Nombre maximum de résultats (optionnel)
             offset: Offset pour la pagination (optionnel)
-        
+
         Returns:
             Liste des entreprises avec leurs données OG et score pentest (dernier score disponible)
         """
         conn = self.get_connection()
         cursor = conn.cursor()
-        
-        # Récupérer le dernier score pentest pour chaque entreprise via une sous-requête
-        query = '''
-            SELECT e.*, 
-                   (SELECT risk_score 
-                    FROM analyses_pentest 
-                    WHERE entreprise_id = e.id 
-                    ORDER BY date_analyse DESC 
+
+        has_security_filters = filters and any(filters.get(k) is not None for k in ('security_min', 'security_max'))
+        has_pentest_filters = filters and any(filters.get(k) is not None for k in ('pentest_min', 'pentest_max'))
+        wrap_subquery = has_security_filters or has_pentest_filters
+
+        inner_query = '''
+            SELECT e.*,
+                   (SELECT risk_score
+                    FROM analyses_pentest
+                    WHERE entreprise_id = e.id
+                    ORDER BY date_analyse DESC
                     LIMIT 1) as score_pentest
             FROM entreprises e
             WHERE 1=1
         '''
         params = []
-        
+
         if analyse_id:
-            query += ' AND e.analyse_id = ?'
+            inner_query += ' AND e.analyse_id = ?'
             params.append(analyse_id)
-        
+
         if filters:
             if filters.get('secteur'):
-                query += ' AND e.secteur = ?'
+                inner_query += ' AND e.secteur = ?'
                 params.append(filters['secteur'])
             if filters.get('statut'):
-                query += ' AND e.statut = ?'
+                inner_query += ' AND e.statut = ?'
                 params.append(filters['statut'])
             if filters.get('opportunite'):
-                query += ' AND e.opportunite = ?'
+                inner_query += ' AND e.opportunite = ?'
                 params.append(filters['opportunite'])
             if filters.get('favori'):
-                query += ' AND e.favori = 1'
+                inner_query += ' AND e.favori = 1'
             if filters.get('search'):
                 search_term = f"%{filters['search']}%"
-                query += ' AND (e.nom LIKE ? OR e.secteur LIKE ? OR e.email_principal LIKE ? OR e.responsable LIKE ?)'
+                inner_query += ' AND (e.nom LIKE ? OR e.secteur LIKE ? OR e.email_principal LIKE ? OR e.responsable LIKE ?)'
                 params.extend([search_term, search_term, search_term, search_term])
-        
-        query += ' ORDER BY e.favori DESC, e.date_analyse DESC'
-        
+
+        if wrap_subquery:
+            query = 'SELECT sub.* FROM (' + inner_query + ') sub WHERE 1=1'
+            if has_security_filters:
+                if filters.get('security_min') is not None:
+                    query += ' AND (sub.score_securite IS NOT NULL AND sub.score_securite >= ?)'
+                    params.append(filters['security_min'])
+                if filters.get('security_max') is not None:
+                    query += ' AND (sub.score_securite IS NOT NULL AND sub.score_securite <= ?)'
+                    params.append(filters['security_max'])
+            if has_pentest_filters:
+                if filters.get('pentest_min') is not None:
+                    query += ' AND (sub.score_pentest IS NOT NULL AND sub.score_pentest >= ?)'
+                    params.append(filters['pentest_min'])
+                if filters.get('pentest_max') is not None:
+                    query += ' AND (sub.score_pentest IS NOT NULL AND sub.score_pentest <= ?)'
+                    params.append(filters['pentest_max'])
+            query += ' ORDER BY sub.favori DESC, sub.date_analyse DESC'
+        else:
+            query = inner_query + ' ORDER BY e.favori DESC, e.date_analyse DESC'
+
         if limit:
             query += ' LIMIT ?'
             params.append(limit)
         if offset:
             query += ' OFFSET ?'
             params.append(offset)
-        
-        self.execute_sql(cursor,query, params)
+
+        self.execute_sql(cursor, query, params)
         rows = cursor.fetchall()
         conn.close()
         

@@ -529,6 +529,7 @@
                 
                 // Construire l'affichage HTML avec des balises stylisées
                 let htmlContent = '';
+                const isDark = document.body && (document.body.getAttribute('data-theme') === 'dark');
                 
                 // Message de base avec entreprise et domaine
                 if (baseMessage) {
@@ -544,17 +545,27 @@
                 
                 // Stats de l'entreprise courante dans une balise stylisée (contraste renforcé)
                 if (currentStats) {
-                    htmlContent += `<div style="background: #e6f0ff; padding: 0.85rem 1rem; border-radius: 8px; border: 1px solid #b6d4fe; border-left: 4px solid #1f6feb; margin-bottom: 0.75rem;">`;
-                    htmlContent += `<div style="font-size: 0.78rem; color: #0b5bd3; font-weight: 800; margin-bottom: 0.35rem; text-transform: uppercase; letter-spacing: 0.6px;">Entreprise actuelle</div>`;
-                    htmlContent += `<div style="color: #111827; font-size: 0.95rem; font-weight: 600;">${currentStats}</div>`;
+                    const boxBg = isDark ? '#0f172a' : '#e6f0ff';
+                    const boxBorder = isDark ? '#1d4ed8' : '#b6d4fe';
+                    const boxBorderLeft = isDark ? '#60a5fa' : '#1f6feb';
+                    const labelColor = isDark ? '#bfdbfe' : '#0b5bd3';
+                    const valueColor = isDark ? '#e5e7eb' : '#111827';
+                    htmlContent += `<div style="background: ${boxBg}; padding: 0.85rem 1rem; border-radius: 8px; border: 1px solid ${boxBorder}; border-left: 4px solid ${boxBorderLeft}; margin-bottom: 0.75rem;">`;
+                    htmlContent += `<div style="font-size: 0.78rem; color: ${labelColor}; font-weight: 800; margin-bottom: 0.35rem; text-transform: uppercase; letter-spacing: 0.6px;">Entreprise actuelle</div>`;
+                    htmlContent += `<div style="color: ${valueColor}; font-size: 0.95rem; font-weight: 600;">${currentStats}</div>`;
                     htmlContent += `</div>`;
                 }
                 
                 // Total cumulé dans une balise stylisée différente (contraste renforcé)
                 if (totalStats) {
-                    htmlContent += `<div style="background: #e9fbf1; padding: 0.85rem 1rem; border-radius: 8px; border: 1px solid #a7f3d0; border-left: 4px solid #16a34a;">`;
-                    htmlContent += `<div style="font-size: 0.78rem; color: #166534; font-weight: 800; margin-bottom: 0.35rem; text-transform: uppercase; letter-spacing: 0.6px;">Total cumulé</div>`;
-                    htmlContent += `<div style="color: #111827; font-size: 0.95rem; font-weight: 700;">${totalStats}</div>`;
+                    const boxBg = isDark ? '#022c22' : '#e9fbf1';
+                    const boxBorder = isDark ? '#059669' : '#a7f3d0';
+                    const boxBorderLeft = isDark ? '#22c55e' : '#16a34a';
+                    const labelColor = isDark ? '#bbf7d0' : '#166534';
+                    const valueColor = isDark ? '#e5e7eb' : '#111827';
+                    htmlContent += `<div style="background: ${boxBg}; padding: 0.85rem 1rem; border-radius: 8px; border: 1px solid ${boxBorder}; border-left: 4px solid ${boxBorderLeft};">`;
+                    htmlContent += `<div style="font-size: 0.78rem; color: ${labelColor}; font-weight: 800; margin-bottom: 0.35rem; text-transform: uppercase; letter-spacing: 0.6px;">Total cumulé</div>`;
+                    htmlContent += `<div style="color: ${valueColor}; font-size: 0.95rem; font-weight: 700;">${totalStats}</div>`;
                     htmlContent += `</div>`;
                 } else if (typeof data.total_emails === 'number' || typeof data.total_phones === 'number') {
                     // Fallback: utiliser les données individuelles si le parsing échoue
@@ -567,9 +578,14 @@
                     if (typeof data.total_images === 'number') counters.push(`${data.total_images} images`);
                     
                     if (counters.length > 0) {
-                        htmlContent += `<div style="background: #e9fbf1; padding: 0.85rem 1rem; border-radius: 8px; border: 1px solid #a7f3d0; border-left: 4px solid #16a34a;">`;
-                        htmlContent += `<div style="font-size: 0.78rem; color: #166534; font-weight: 800; margin-bottom: 0.35rem; text-transform: uppercase; letter-spacing: 0.6px;">Total cumulé</div>`;
-                        htmlContent += `<div style="color: #111827; font-size: 0.95rem; font-weight: 700;">${counters.join(', ')}</div>`;
+                        const boxBg = isDark ? '#022c22' : '#e9fbf1';
+                        const boxBorder = isDark ? '#059669' : '#a7f3d0';
+                        const boxBorderLeft = isDark ? '#22c55e' : '#16a34a';
+                        const labelColor = isDark ? '#bbf7d0' : '#166534';
+                        const valueColor = isDark ? '#e5e7eb' : '#111827';
+                        htmlContent += `<div style="background: ${boxBg}; padding: 0.85rem 1rem; border-radius: 8px; border: 1px solid ${boxBorder}; border-left: 4px solid ${boxBorderLeft};">`;
+                        htmlContent += `<div style="font-size: 0.78rem; color: ${labelColor}; font-weight: 800; margin-bottom: 0.35rem; text-transform: uppercase; letter-spacing: 0.6px;">Total cumulé</div>`;
+                        htmlContent += `<div style="color: ${valueColor}; font-size: 0.95rem; font-weight: 700;">${counters.join(', ')}</div>`;
                         htmlContent += `</div>`;
                     }
                 }
@@ -610,13 +626,19 @@
                     counters.push(`${data.total_images} images`);
                 }
 
-                // Afficher le résumé final avec le même style
-                let htmlContent = '<div style="background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); padding: 1rem; border-radius: 6px; border-left: 3px solid #27ae60;">';
-                htmlContent += '<div style="font-size: 0.9rem; color: #229954; font-weight: 600; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px;"><i class="fas fa-check"></i> Scraping terminé</div>';
+                // Afficher le résumé final avec un style adapté au thème
+                const isDark = document.body && (document.body.getAttribute('data-theme') === 'dark');
+                const summaryBg = isDark ? '#022c22' : 'linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%)';
+                const summaryBorderLeft = isDark ? '#22c55e' : '#27ae60';
+                const titleColor = isDark ? '#bbf7d0' : '#229954';
+                const textColor = isDark ? '#e5e7eb' : '#2c3e50';
+                
+                let htmlContent = `<div style="background: ${summaryBg}; padding: 1rem; border-radius: 6px; border-left: 3px solid ${summaryBorderLeft};">`;
+                htmlContent += `<div style="font-size: 0.9rem; color: ${titleColor}; font-weight: 600; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px;"><i class="fas fa-check"></i> Scraping terminé</div>`;
                 if (counters.length > 0) {
-                    htmlContent += `<div style="color: #2c3e50; font-size: 0.95rem; font-weight: 500;">${counters.join(', ')}</div>`;
+                    htmlContent += `<div style="color: ${textColor}; font-size: 0.95rem; font-weight: 500;">${counters.join(', ')}</div>`;
                 } else {
-                    htmlContent += '<div style="color: #2c3e50; font-size: 0.95rem;">Scraping terminé avec succès</div>';
+                    htmlContent += `<div style="color: ${textColor}; font-size: 0.95rem;">Scraping terminé avec succès</div>`;
                 }
                 htmlContent += '</div>';
                 
@@ -664,7 +686,8 @@
     
     const technicalProgressTitle = document.createElement('div');
     technicalProgressTitle.style.cssText = 'font-weight: 700; color: #111827;';
-    technicalProgressTitle.textContent = 'Analyse technique en cours...';
+    // Mettre en avant que cette analyse inclut aussi SEO (Lighthouse)
+    technicalProgressTitle.textContent = 'Analyse technique + SEO en cours...';
     
     const technicalProgressCountBadge = document.createElement('div');
     technicalProgressCountBadge.id = 'technical-progress-count';
@@ -718,7 +741,7 @@
                 }
                 technicalProgressContainer.style.display = 'block';
                 
-                const message = data.message || 'Analyse technique en cours...';
+                const message = data.message || 'Analyse technique + SEO en cours...';
                 
                 // Compteur X/Y entreprises (analyse technique)
                 if (typeof data.current === 'number' && typeof data.total === 'number' && data.total > 0) {
@@ -750,7 +773,7 @@
                 }
                 technicalProgressContainer.style.display = 'block';
                 
-                const message = data.message || 'Analyse technique en cours...';
+                const message = data.message || 'Analyse technique + SEO en cours...';
                 const percent = typeof data.progress === 'number' ? Math.min(100, Math.max(0, data.progress)) : null;
                 
                 // Compteur X/Y entreprises (analyse technique)
@@ -837,16 +860,16 @@
                 
                 if (current !== null && total !== null && total > 0) {
                     technicalProgressCountBadge.textContent = `${current} / ${total} entreprises`;
-                    technicalProgressText.textContent = `Analyses techniques terminées pour ${current}/${total} entreprises.`;
+                    technicalProgressText.textContent = `Analyses techniques + SEO terminées pour ${current}/${total} entreprises.`;
                     // Ne marquer comme terminé que si toutes les analyses sont vraiment terminées
                     if (current >= total) {
                         technicalDone = true;
-                        technicalProgressText.textContent = `Analyses techniques terminées pour ${total}/${total} entreprises.`;
+                        technicalProgressText.textContent = `Analyses techniques + SEO terminées pour ${total}/${total} entreprises.`;
                     }
                 } else {
                     // Si pas de compteur, considérer comme terminé
                     technicalDone = true;
-                    technicalProgressText.textContent = data.message || 'Analyse technique terminée';
+                    technicalProgressText.textContent = data.message || 'Analyse technique + SEO terminée';
                 }
                 
                 if (data.analysis_id && (!lastScrapingResult || !lastScrapingResult.analysis_id)) {
@@ -864,7 +887,7 @@
                 technicalProgressFill.style.background = '#e74c3c';
                 technicalProgressFill.style.width = '100%';
                 technicalProgressLabel.textContent = 'Erreur';
-                technicalProgressText.textContent = data.error || 'Erreur lors de l\'analyse technique';
+                technicalProgressText.textContent = data.error || 'Erreur lors de l\'analyse technique / SEO';
             });
         }
     }

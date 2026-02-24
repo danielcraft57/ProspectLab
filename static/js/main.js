@@ -77,5 +77,29 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+
+    // Menu burger (tablette & mobile)
+    const navbar = document.querySelector('.navbar');
+    const navToggle = document.querySelector('.nav-toggle-btn');
+    const navBackdrop = document.querySelector('.nav-backdrop');
+    const navLinks = document.querySelectorAll('.nav-links a');
+
+    if (navbar && navToggle) {
+        const closeMenu = () => {
+            navbar.classList.remove('navbar--open');
+        };
+
+        navToggle.addEventListener('click', () => {
+            navbar.classList.toggle('navbar--open');
+        });
+
+        if (navBackdrop) {
+            navBackdrop.addEventListener('click', closeMenu);
+        }
+
+        navLinks.forEach(link => {
+            link.addEventListener('click', closeMenu);
+        });
+    }
 });
 

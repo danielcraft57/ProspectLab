@@ -12,7 +12,7 @@
    - Envoi via `fetch()` avec feedback en temps réel
    - ✅ Bien fait, affichage des résultats sans rechargement
 
-3. **Actions sur entreprises** (`entreprises.js`, `entreprise_detail.js`)
+3. **Actions sur entreprises** (`entreprises.refactored.js`, `entreprise_detail.js`)
    - Toggle favori via `fetch()`
    - Ajout/suppression de tags via `fetch()`
    - Sauvegarde de notes via `fetch()`
@@ -22,7 +22,7 @@
    - Suppression via `fetch()` avec confirmation
    - ✅ Bien fait, redirection après succès
 
-5. **Chargement de données** (`entreprises.js`, `analyses_techniques.js`)
+5. **Chargement de données** (`entreprises.refactored.js`, `analyses_techniques.js`)
    - Chargement des entreprises via `fetch()`
    - Chargement des analyses via `fetch()`
    - ✅ Bien fait, pas de rechargement de page

@@ -108,12 +108,134 @@
 }
 
 .card-footer {
-    padding: 1rem 1.5rem;
+    padding: 0.75rem 1.5rem 1rem;
     background: #f8f9fa;
     border-top: 1px solid #e9ecef;
     display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.card-footer-left,
+.card-footer-right {
+    display: flex;
+    align-items: center;
     gap: 0.5rem;
-    justify-content: flex-end;
+}
+
+/* Style unifié pour tous les boutons du footer (groupes, voir détails, supprimer) */
+.card-footer .btn,
+.card-footer .btn-icon {
+    /* Même base pour tous */
+    min-height: 2rem;
+    padding: 0.45rem 0.9rem;
+    border-radius: 999px;
+    border: 1px solid;
+    font-size: 0.85rem;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    line-height: 1.1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+        background-color 0.2s ease,
+        color 0.2s ease,
+        border-color 0.2s ease,
+        box-shadow 0.2s ease,
+        transform 0.15s ease;
+}
+
+.card-footer .btn i,
+.card-footer .btn-icon i {
+    font-size: 0.9rem;
+}
+
+/* Bouton Groupes (icône seule) */
+.card-footer .btn-icon.btn-groups {
+    min-width: 2rem;
+    background: #f8fafc;
+    border-color: #cbd5e1;
+    color: #475569;
+}
+
+.card-footer .btn-icon.btn-groups:hover {
+    background: #e2e8f0;
+    border-color: #94a3b8;
+    color: #334155;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+/* Bouton Voir détails (primary) */
+.card-footer .btn-primary {
+    background: #f8fafc;
+    border-color: #2563eb;
+    color: #2563eb;
+}
+
+.card-footer .btn-primary:hover {
+    background: #2563eb;
+    color: #fff;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
+}
+
+/* Bouton Supprimer (danger) */
+.card-footer .btn-danger {
+    background: #f8fafc;
+    border-color: #dc2626;
+    color: #dc2626;
+}
+
+.card-footer .btn-danger:hover {
+    background: #dc2626;
+    color: #fff;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(220, 38, 38, 0.35);
+}
+
+/* Dark mode – boutons du footer */
+body[data-theme="dark"] .card-footer .btn-icon.btn-groups {
+    background: #1e293b;
+    border-color: #475569;
+    color: #94a3b8;
+}
+
+body[data-theme="dark"] .card-footer .btn-icon.btn-groups:hover {
+    background: #334155;
+    border-color: #64748b;
+    color: #e2e8f0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+body[data-theme="dark"] .card-footer .btn-primary {
+    background: #1e293b;
+    border-color: #3b82f6;
+    color: #93c5fd;
+}
+
+body[data-theme="dark"] .card-footer .btn-primary:hover {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
+}
+
+body[data-theme="dark"] .card-footer .btn-danger {
+    background: #1e293b;
+    border-color: #ef4444;
+    color: #fca5a5;
+}
+
+body[data-theme="dark"] .card-footer .btn-danger:hover {
+    background: #dc2626;
+    border-color: #dc2626;
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(220, 38, 38, 0.4);
 }
 
 .entreprise-row {

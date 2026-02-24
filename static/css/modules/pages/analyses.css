@@ -185,3 +185,63 @@
     color: #e74c3c;
     font-weight: 500;
 }
+
+/* Thème sombre pour les pages d'analyses (techniques + SEO) */
+body[data-theme="dark"] .new-analysis-section .card {
+    background: #020617;
+    box-shadow: 0 2px 8px rgba(15,23,42,0.8);
+}
+
+body[data-theme="dark"] .new-analysis-section .card-header {
+    background: linear-gradient(135deg, #1d4ed8 0%, #7c3aed 100%);
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] .new-analysis-section .card-body {
+    background: transparent;
+}
+
+body[data-theme="dark"] .form-inline .form-group label {
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] .form-inline .form-group input[type="url"],
+body[data-theme="dark"] .form-inline .form-group input[type="text"] {
+    background-color: #020617;
+    border-color: #1e293b;
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] .form-inline .form-group input::placeholder {
+    color: #64748b;
+}
+
+body[data-theme="dark"] .progress-section {
+    border-top-color: #1e293b;
+}
+
+body[data-theme="dark"] .progress-bar-container {
+    background-color: #0f172a;
+}
+
+body[data-theme="dark"] .progress-message {
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] .analyses-techniques-grid .analysis-tech-card {
+    background: #020617;
+    box-shadow: 0 2px 8px rgba(15,23,42,0.8);
+}
+
+body[data-theme="dark"] .analysis-tech-card .card-body p {
+    color: #cbd5f5;
+}
+
+body[data-theme="dark"] .analysis-tech-card .card-header {
+    background: linear-gradient(135deg, #1d4ed8 0%, #7c3aed 100%);
+}
+
+body[data-theme="dark"] .badge-error {
+    background: #450a0a;
+    color: #fecaca;
+}

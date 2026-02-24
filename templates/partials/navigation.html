@@ -1,8 +1,15 @@
 <nav class="navbar">
     <div class="container">
-        <h1 class="logo"><a href="{{ url_for('main.dashboard') }}" style="color: white; text-decoration: none;">ProspectLab</a></h1>
+        <div class="nav-header">
+            <h1 class="logo">
+                <a href="{{ url_for('main.dashboard') }}">ProspectLab</a>
+            </h1>
+            <button type="button" class="nav-toggle-btn" aria-label="Ouvrir le menu principal">
+                <span class="nav-toggle-label">Menu</span>
+                <i class="fa-solid fa-chevron-down"></i>
+            </button>
+        </div>
         <ul class="nav-links">
-            <li><a href="{{ url_for('main.home') }}">Accueil</a></li>
             <li><a href="{{ url_for('main.dashboard') }}">Dashboard</a></li>
             <li class="nav-dropdown">
                 <a href="#" class="dropdown-toggle">Entreprises <span class="dropdown-arrow">▼</span></a>
@@ -12,17 +19,13 @@
                     <li><a href="{{ url_for('main.carte_entreprises') }}">Carte des entreprises</a></li>
                 </ul>
             </li>
-            <li class="nav-theme-toggle">
-                <button type="button" class="theme-toggle-btn" aria-label="Basculer le thème clair/sombre">
-                    <i class="fa-solid fa-moon"></i>
-                </button>
-            </li>
             <li class="nav-dropdown">
                 <a href="#" class="dropdown-toggle">Analyses <span class="dropdown-arrow">▼</span></a>
                 <ul class="dropdown-menu">
                     <li><a href="{{ url_for('main.liste_analyses_techniques') }}">Analyses techniques</a></li>
                     <li><a href="{{ url_for('main.liste_analyses_osint') }}">Analyses OSINT</a></li>
                     <li><a href="{{ url_for('main.liste_analyses_pentest') }}">Analyses Pentest</a></li>
+                    <li><a href="{{ url_for('main.liste_analyses_seo') }}">Analyses SEO</a></li>
                     <li><a href="{{ url_for('other.analyse_scraping_page') }}">Scraping Web</a></li>
                 </ul>
             </li>
@@ -39,6 +42,12 @@
                 <ul class="dropdown-menu">
                     <li><a href="{{ url_for('other.api_tokens_page') }}">Tokens API</a></li>
                 </ul>
+            </li>
+            <li><a href="{{ url_for('main.home') }}">Accueil</a></li>
+            <li class="nav-theme-toggle">
+                <button type="button" class="theme-toggle-btn" aria-label="Basculer le thème clair/sombre">
+                    <i class="fa-solid fa-moon"></i>
+                </button>
             </li>
             <!-- <li class="nav-user">
                 <a href="{{ url_for('auth.logout') }}" class="logout-btn">
