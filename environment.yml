@@ -1,0 +1,33 @@
+name: prospectlab
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - openssl
+  - ca-certificates
+  - libffi
+  - zlib
+  - sqlite
+  - pip:
+      - Flask==3.0.0
+      - Flask-SocketIO==5.3.6
+      - pandas==2.1.3
+      - openpyxl==3.1.2
+      - requests==2.31.0
+      - beautifulsoup4==4.12.2
+      - lxml==4.9.3
+      - python-whois==0.8.0
+      - dnspython==2.4.2
+      - python-nmap==0.7.1
+      - cryptography==41.0.7
+      - eventlet==0.33.3
+      - reportlab==4.0.7
+      - python-dotenv==1.0.0
+      - celery==5.3.4
+      - redis==5.0.1
+      - probablepeople>=0.5.4
+      - nameparser>=1.1.1
+      - bcrypt==4.1.2
+      - psycopg2-binary==2.9.9
