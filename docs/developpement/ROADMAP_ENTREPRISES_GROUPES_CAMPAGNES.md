@@ -133,6 +133,20 @@ But : permettre à l'utilisateur de créer des groupes d'entreprises (segments),
 
 But : permettre de cibler directement un ou plusieurs groupes d'entreprises lors de la création d'une campagne.
 
+### 4.0 État actuel (février 2026)
+
+- ✅ Backend :
+  - L'endpoint `/api/ciblage/entreprises` accepte un paramètre `groupe_ids` (liste d'IDs séparés par des virgules).
+  - `EntrepriseManager.get_entreprises_for_campagne()` supporte un filtre `groupe_ids` et ne retourne que les entreprises appartenant à au moins un des groupes sélectionnés.
+- ✅ Frontend :
+  - Étape 1 du wizard de campagne : ajout du mode de ciblage **« Par groupes »** avec des pills animées par groupe (nom + compteur d'entreprises, tooltip détaillé).
+  - Sélection/désélection d'un ou plusieurs groupes met à jour dynamiquement la liste des entreprises cibles via l'API de ciblage.
+  - Sélection des entreprises facilitée avec des actions rapides **Tout / Aucun / Inverser** et recherche instantanée.
+  - Étape 2 : bloc **Filtres emails** repliable (filtres avancés) et actions rapides **Tout / Aucun / Inverser** sur les destinataires.
+- ⏳ Restant à faire :
+  - Persister explicitement les `group_ids` choisis dans le modèle de campagne (stockage et affichage a posteriori).
+  - Afficher, dans le récapitulatif de campagne, un résumé clair des groupes utilisés pour le ciblage.
+
 ### 4.1 Backend
 
 - Étendre le modèle de campagne pour référencer des `group_ids`.

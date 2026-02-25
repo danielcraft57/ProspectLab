@@ -93,6 +93,7 @@
                             <label class="ciblage-radio"><input type="radio" name="ciblage_mode" value="toutes" checked> Toutes avec email</label>
                             <label class="ciblage-radio"><input type="radio" name="ciblage_mode" value="objectif"> Par objectif</label>
                             <label class="ciblage-radio"><input type="radio" name="ciblage_mode" value="criteres"> Par critères</label>
+                            <label class="ciblage-radio"><input type="radio" name="ciblage_mode" value="groupes"> Par groupes</label>
                             <label class="ciblage-radio"><input type="radio" name="ciblage_mode" value="segment"> Segment sauvegardé</label>
                         </div>
                         <div id="ciblage-objectif-block" class="ciblage-block" style="display: none;">
@@ -134,6 +135,20 @@
                             </div>
                             <p class="ciblage-auto-hint">Les résultats se mettent à jour automatiquement.</p>
                         </div>
+                        <div id="ciblage-groupes-block" class="ciblage-block" style="display: none;">
+                            <div class="form-group">
+                                <div class="ciblage-groupes-header">
+                                    <div class="ciblage-groupes-header-left">
+                                        <label>Groupes d'entreprises</label>
+                                        <span id="ciblage-groupes-count" class="ciblage-groupes-count" aria-live="polite"></span>
+                                    </div>
+                                </div>
+                                <div id="ciblage-groupes-pills" class="ciblage-groupes-pills" role="group" aria-label="Sélection de groupes">
+                                    <div class="ciblage-groupes-loading">Chargement des groupes...</div>
+                                </div>
+                                <p class="ciblage-desc">Cliquez sur un ou plusieurs groupes. Les entreprises de ces groupes seront incluses dans la campagne.</p>
+                            </div>
+                        </div>
                         <div id="ciblage-segment-block" class="ciblage-block" style="display: none;">
                             <div class="form-group">
                                 <label for="ciblage-segment">Segment</label>
@@ -144,15 +159,26 @@
                         </div>
                     </div>
                     <div class="form-section">
-                        <div class="form-section-title">Sélection des entreprises</div>
+                        <div class="form-section-title-row step1-header-row">
+                            <div class="step1-header-left">
+                                <div class="form-section-title">Sélection des entreprises</div>
+                                <div id="step1-results-count" class="results-count" style="display: none;"></div>
+                            </div>
+                        </div>
                         <p class="form-hint">Choisissez les entreprises à contacter. À l&apos;étape 2 vous filtrerez les emails.</p>
-                        <div id="step1-results-count" class="results-count" style="display: none;"></div>
                         <div class="form-group entreprise-search-row">
                             <label for="entreprise-search">Rechercher une entreprise</label>
                             <div class="entreprise-search-input search-field">
                                 <i class="fa-solid fa-magnifying-glass"></i>
                                 <input type="text" id="entreprise-search" placeholder="Nom, secteur, email..." autocomplete="off">
                                 <button type="button" id="entreprise-search-clear">Effacer</button>
+                            </div>
+                        </div>
+                        <div class="step1-quick-actions-row">
+                            <div class="step1-quick-actions" aria-label="Actions de sélection entreprises" role="group">
+                                <button type="button" class="recipients-action-btn" onclick="entreprisesStep1QuickSelect('all')">Tout</button>
+                                <button type="button" class="recipients-action-btn" onclick="entreprisesStep1QuickSelect('none')">Aucun</button>
+                                <button type="button" class="recipients-action-btn" onclick="entreprisesStep1QuickSelect('invert')">Inverser</button>
                             </div>
                         </div>
                         <div class="form-group">
@@ -166,7 +192,12 @@
                 <!-- Étape 2 : Filtrage des emails + sélection des destinataires -->
                 <div id="campagne-step-2" class="campagne-step" role="tabpanel" aria-labelledby="step-indicator-2" style="display: none;">
                     <div class="form-section form-section-email-filters">
-                        <div class="form-section-title">Filtrage des emails</div>
+                        <div class="form-section-title-row email-filters-header-row">
+                            <div class="form-section-title">Filtrage des emails</div>
+                            <button type="button" id="email-filters-toggle" class="email-filters-toggle" aria-expanded="false">
+                                Filtres avancés
+                            </button>
+                        </div>
                         <p class="form-hint">Affinez les emails affichés pour éviter doublons et adresses techniques.</p>
                         <div class="email-filters-row">
                             <div class="form-group ciblage-checkbox">
@@ -186,8 +217,17 @@
                         </div>
                     </div>
                     <div class="form-section">
-                        <div class="form-section-title">Sélection des destinataires</div>
-                        <div id="ciblage-results-count" class="results-count" style="display: none;"></div>
+                        <div class="form-section-title-row recipients-header-row">
+                            <div class="recipients-header-left">
+                                <div class="form-section-title">Sélection des destinataires</div>
+                                <div id="ciblage-results-count" class="results-count" style="display: none;"></div>
+                            </div>
+                            <div class="recipients-quick-actions" aria-label="Actions de sélection" role="group">
+                                <button type="button" class="recipients-action-btn" onclick="recipientsQuickSelect('all')">Tout</button>
+                                <button type="button" class="recipients-action-btn" onclick="recipientsQuickSelect('none')">Aucun</button>
+                                <button type="button" class="recipients-action-btn" onclick="recipientsQuickSelect('invert')">Inverser</button>
+                            </div>
+                        </div>
                         <div class="form-group">
                             <div id="recipients-selector" class="recipients-selector">
                             </div>

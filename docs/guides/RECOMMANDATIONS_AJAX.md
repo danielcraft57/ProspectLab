@@ -22,8 +22,8 @@
    - Suppression via `fetch()` avec confirmation
    - ✅ Bien fait, redirection après succès
 
-5. **Chargement de données** (`entreprises.refactored.js`, `analyses_techniques.js`)
-   - Chargement des entreprises via `fetch()`
+5. **Chargement de données** (`entreprises.refactored.js`, `analyses_techniques.js`, `campagnes.js`)
+   - Chargement des entreprises via `fetch()` (liste, filtres avancés et ciblage par groupes dans l'assistant de campagne)
    - Chargement des analyses via `fetch()`
    - ✅ Bien fait, pas de rechargement de page
 

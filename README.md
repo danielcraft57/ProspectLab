@@ -12,7 +12,7 @@ Application Flask professionnelle pour la prospection et l'analyse approfondie d
 - **Analyse Pentest** : Scan de sécurité et détection de vulnérabilités (nécessite outils externes)
 - **Analyse SEO** : Audit SEO détaillé (meta, structure, Lighthouse) intégré au score d'opportunité
 - **Listes d'entreprises (groupes)** : Création de groupes d'entreprises (listes sauvegardées) et gestion directe depuis chaque carte (ajout/retrait, compteur, badge \"Dans le groupe\")
-- **Envoi d'emails de prospection** : Campagnes personnalisées avec modèles réutilisables, programmation d'envoi (date/heure) et suggestions intelligentes (jours ouvrés, fériés FR, heures bureau)
+- **Envoi d'emails de prospection** : Campagnes personnalisées avec modèles réutilisables, programmation d'envoi (date/heure) et suggestions intelligentes (jours ouvrés, fériés FR, heures bureau), ciblage multi-modes (toutes, par objectifs métier, par critères, par groupes, par segments sauvegardés)
 - **Suivi en temps réel** : WebSocket pour suivre la progression des analyses et scraping
 - **Base de données normalisée** : Stockage structuré avec OpenGraph, images, et métadonnées
 - **Nettoyage automatique** : Suppression automatique des fichiers uploads/exports anciens (via Celery Beat)

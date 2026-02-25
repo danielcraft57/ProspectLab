@@ -5,6 +5,7 @@ let entreprisesData = [];
 let templatesData = [];
 let objectifsCiblage = [];
 let segmentsCiblage = [];
+let groupesCiblage = [];
 let socket = null;
 /** ID de la campagne actuellement affichée dans la modale de résultats. */
 let currentResultsCampagneId = null;
@@ -32,9 +33,11 @@ document.addEventListener('DOMContentLoaded', function() {
     loadEntreprises();
     loadObjectifsCiblage();
     loadSegmentsCiblage();
+    loadGroupesCiblage();
     loadCiblageSuggestionsWithCounts();
     initCiblageModeSwitch();
     initCiblageAutoLoad();
+    initEmailFiltersToggle();
     initEmailFiltersListeners();
     initScheduleFields();
     initStep1Search();
@@ -355,6 +358,72 @@ async function loadSegmentsCiblage() {
     } catch (e) {}
 }
 
+// Charger les groupes d'entreprises pour le ciblage (affichage en pills cliquables)
+async function loadGroupesCiblage() {
+    try {
+        const response = await fetch('/api/groupes-entreprises');
+        groupesCiblage = await response.json();
+        const container = document.getElementById('ciblage-groupes-pills');
+        if (!container) return;
+        container.innerHTML = '';
+        if (!groupesCiblage || groupesCiblage.length === 0) {
+            container.innerHTML = '<div class="ciblage-groupes-empty">Aucun groupe disponible</div>';
+            updateCiblageGroupesCount();
+            return;
+        }
+        groupesCiblage.forEach(function(groupe, index) {
+            const pill = document.createElement('button');
+            pill.type = 'button';
+            pill.className = 'ciblage-groupe-pill';
+            pill.dataset.groupeId = groupe.id;
+            pill.setAttribute('role', 'checkbox');
+            pill.setAttribute('aria-checked', 'false');
+            const count = groupe.entreprises_count || 0;
+            pill.title = (groupe.nom || '') + (count ? ' · ' + count + ' entreprise' + (count > 1 ? 's' : '') : '');
+            pill.innerHTML = '<span class="ciblage-groupe-pill-name">' + escapeHtml(groupe.nom) + '</span>' +
+                '<span class="ciblage-groupe-pill-count">' + count + '</span>' +
+                '<i class="fas fa-check ciblage-groupe-pill-check" aria-hidden="true"></i>';
+            pill.style.animationDelay = (index * 45) + 'ms';
+            pill.addEventListener('click', function() {
+                pill.classList.toggle('is-selected');
+                pill.setAttribute('aria-checked', pill.classList.contains('is-selected'));
+                loadByGroupes();
+            });
+            container.appendChild(pill);
+        });
+        updateCiblageGroupesCount();
+    } catch (e) {
+        console.error('Erreur lors du chargement des groupes:', e);
+        const container = document.getElementById('ciblage-groupes-pills');
+        if (container) container.innerHTML = '<div class="ciblage-groupes-empty ciblage-groupes-error">Erreur lors du chargement</div>';
+    }
+}
+
+function escapeHtml(s) {
+    if (!s) return '';
+    var div = document.createElement('div');
+    div.textContent = s;
+    return div.innerHTML;
+}
+
+function getSelectedGroupIds() {
+    var pills = document.querySelectorAll('.ciblage-groupe-pill.is-selected');
+    return Array.from(pills).map(function(p) { return parseInt(p.dataset.groupeId, 10); }).filter(function(id) { return !isNaN(id) && id > 0; });
+}
+
+function updateCiblageGroupesCount() {
+    var countEl = document.getElementById('ciblage-groupes-count');
+    if (!countEl) return;
+    var ids = getSelectedGroupIds();
+    if (ids.length === 0) {
+        countEl.textContent = '';
+        countEl.classList.remove('has-selection');
+    } else {
+        countEl.textContent = ids.length + ' groupe' + (ids.length > 1 ? 's' : '') + ' sélectionné' + (ids.length > 1 ? 's' : '');
+        countEl.classList.add('has-selection');
+    }
+}
+
 // Retire le suffixe " (123)" des valeurs d'autocomplétion pour l'API
 function stripCountSuffix(val) {
     if (!val || typeof val !== 'string') return val;
@@ -388,7 +457,7 @@ function fillDatalistWithCounts(id, items) {
     });
 }
 
-// Chargement automatique : objectif/segment au change, critères en debounce
+// Chargement automatique : objectif/groupes/segment au change, critères en debounce
 function initCiblageAutoLoad() {
     var objSel = document.getElementById('ciblage-objectif');
     var segSel = document.getElementById('ciblage-segment');
@@ -418,6 +487,25 @@ function initEmailFiltersListeners() {
         var el = document.getElementById(id);
         if (el) el.addEventListener('change', applyEmailFiltersAndDisplay);
         if (el) el.addEventListener('input', applyEmailFiltersAndDisplay);
+    });
+}
+
+// Repli / dépli des filtres emails (pour réduire la hauteur du bloc)
+function initEmailFiltersToggle() {
+    var section = document.querySelector('.form-section-email-filters');
+    if (!section) return;
+    var row = section.querySelector('.email-filters-row');
+    var btn = document.getElementById('email-filters-toggle');
+    if (!row || !btn) return;
+
+    // État initial : replié pour réduire la hauteur
+    section.classList.add('is-collapsed');
+    btn.setAttribute('aria-expanded', 'false');
+
+    btn.addEventListener('click', function() {
+        var collapsed = section.classList.toggle('is-collapsed');
+        btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        btn.textContent = collapsed ? 'Filtres avancés' : 'Masquer les filtres';
     });
 }
 
@@ -572,13 +660,15 @@ function initCiblageModeSwitch() {
     const radios = document.querySelectorAll('input[name="ciblage_mode"]');
     const blockObjectif = document.getElementById('ciblage-objectif-block');
     const blockCriteres = document.getElementById('ciblage-criteres-block');
+    const blockGroupes = document.getElementById('ciblage-groupes-block');
     const blockSegment = document.getElementById('ciblage-segment-block');
-    if (!blockObjectif || !blockCriteres || !blockSegment) return;
+    if (!blockObjectif || !blockCriteres || !blockGroupes || !blockSegment) return;
     function updateBlocks() {
         const mode = document.querySelector('input[name="ciblage_mode"]:checked');
         const v = mode ? mode.value : 'toutes';
         blockObjectif.style.display = v === 'objectif' ? 'block' : 'none';
         blockCriteres.style.display = v === 'criteres' ? 'block' : 'none';
+        blockGroupes.style.display = v === 'groupes' ? 'block' : 'none';
         blockSegment.style.display = v === 'segment' ? 'block' : 'none';
         if (v === 'objectif') {
             const sel = document.getElementById('ciblage-objectif');
@@ -586,9 +676,13 @@ function initCiblageModeSwitch() {
             const obj = objectifsCiblage.find(function(o) { return o.id === sel.value; });
             desc.textContent = obj ? obj.description : '';
         }
+        if (v === 'groupes') {
+            loadByGroupes();
+        }
     }
     radios.forEach(function(r) { r.addEventListener('change', updateBlocks); });
-    document.getElementById('ciblage-objectif').addEventListener('change', updateBlocks);
+    const objSel = document.getElementById('ciblage-objectif');
+    if (objSel) objSel.addEventListener('change', updateBlocks);
     updateBlocks();
 }
 
@@ -817,6 +911,18 @@ async function loadByCriteres() {
     await loadEntreprisesWithFilters(filters);
 }
 
+// Charger les prospects selon les groupes sélectionnés
+async function loadByGroupes() {
+    var groupeIds = getSelectedGroupIds();
+    updateCiblageGroupesCount();
+    if (groupeIds.length === 0) {
+        var container = getStep1Container();
+        if (container) container.innerHTML = '<div class="empty-state"><p>Sélectionnez au moins un groupe</p></div>';
+        return;
+    }
+    await loadEntreprisesWithFilters({ groupe_ids: groupeIds });
+}
+
 // Charger les prospects selon le segment sauvegardé
 async function loadBySegment() {
     const select = document.getElementById('ciblage-segment');
@@ -847,6 +953,9 @@ function loadEntreprisesWithFilters(filters) {
     if (filters.search) params.set('search', filters.search);
     if (filters.score_securite_max != null) params.set('score_securite_max', String(filters.score_securite_max));
     if (filters.exclude_already_contacted) params.set('exclude_already_contacted', '1');
+    if (filters.groupe_ids && Array.isArray(filters.groupe_ids) && filters.groupe_ids.length > 0) {
+        params.set('groupe_ids', filters.groupe_ids.join(','));
+    }
     const url = '/api/ciblage/entreprises?' + params.toString();
     return fetch(url)
         .then(function(r) { return r.json(); })
@@ -1114,6 +1223,63 @@ function updateSelectedCount() {
     } else {
         countDiv.style.display = 'none';
     }
+}
+
+// Actions rapides sur la sélection d'entreprises (étape 1)
+function entreprisesStep1QuickSelect(mode) {
+    var container = getStep1Container();
+    if (!container) return;
+    var items = container.querySelectorAll('.step1-ent-item[data-entreprise-id]');
+    if (!items.length) return;
+
+    items.forEach(function(item) {
+        var idAttr = item.getAttribute('data-entreprise-id');
+        var entrepriseId = parseInt(idAttr, 10);
+        if (!entrepriseId || isNaN(entrepriseId)) return;
+        var cb = document.getElementById('ent-' + entrepriseId);
+        if (!cb) return;
+
+        var newChecked;
+        if (mode === 'all') {
+            newChecked = true;
+        } else if (mode === 'none') {
+            newChecked = false;
+        } else if (mode === 'invert') {
+            newChecked = !cb.checked;
+        } else {
+            return;
+        }
+
+        cb.checked = newChecked;
+        toggleEntrepriseStep1(entrepriseId, newChecked);
+    });
+}
+
+// Actions rapides sur les destinataires (étape 2)
+function recipientsQuickSelect(mode) {
+    if (campagneModalStep !== 2) return;
+    if (!Array.isArray(displayedEntreprisesData) || displayedEntreprisesData.length === 0) return;
+
+    if (mode === 'all' || mode === 'none') {
+        var checked = (mode === 'all');
+        displayedEntreprisesData.forEach(function(ent) {
+            toggleEntreprise(ent.id, checked);
+        });
+    } else if (mode === 'invert') {
+        displayedEntreprisesData.forEach(function(ent) {
+            var emails = ent.emails || [];
+            emails.forEach(function(email, idx) {
+                var cb = document.getElementById('email-' + ent.id + '-' + idx);
+                if (!cb) return;
+                var newChecked = !cb.checked;
+                cb.checked = newChecked;
+                toggleEmail(ent.id, idx, newChecked);
+            });
+            updateEntrepriseItemStyle(ent.id);
+        });
+    }
+
+    updateSelectedCount();
 }
 
 // Ouvrir le modal de nouvelle campagne (toujours à l'étape 1)
