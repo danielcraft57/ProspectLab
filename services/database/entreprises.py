@@ -1213,13 +1213,17 @@ class EntrepriseManager(DatabaseBase):
             # Éviter les doublons (même email pour une entreprise) en gardant le premier (prioritaire)
             emails_list = entreprises_dict[entreprise_id]['emails']
             if not any(em['email'] == row['email'] for em in emails_list):
+                is_person = bool(row['is_person']) if 'is_person' in row.keys() else False
+                domain = row['domain'] if 'domain' in row.keys() and row['domain'] else None
+                if not domain and row['email']:
+                    domain = row['email'].split('@')[-1] if '@' in row['email'] else None
                 emails_list.append({
                     'email': row['email'],
                     'nom': email_nom,
                     'source': source,
                     'entreprise_id': row['entreprise_id'],
-                    'is_person': bool(row.get('is_person')),
-                    'domain': row.get('domain') or (row['email'].split('@')[-1] if row.get('email') else None)
+                    'is_person': is_person,
+                    'domain': domain
                 })
 
         result = list(entreprises_dict.values())
@@ -1245,6 +1249,7 @@ class EntrepriseManager(DatabaseBase):
                 - search: recherche dans nom, secteur, email_principal, responsable
                 - score_securite_max: score sécurité <= cette valeur
                 - exclude_already_contacted: True pour exclure les entreprises déjà contactées
+                - groupe_ids: liste d'IDs de groupes d'entreprises (filtre par appartenance à au moins un groupe)
         
         Returns:
             list[dict]: Même format que get_entreprises_with_emails (id, nom, secteur, emails)
@@ -1271,6 +1276,11 @@ class EntrepriseManager(DatabaseBase):
         params = []
         
         if filters:
+            # Filtre par groupes d'entreprises (si groupe_ids fourni)
+            if filters.get('groupe_ids') and isinstance(filters['groupe_ids'], list) and len(filters['groupe_ids']) > 0:
+                placeholders = ','.join(['?' for _ in filters['groupe_ids']])
+                base_sql += f' AND e.id IN (SELECT entreprise_id FROM entreprise_groupes WHERE groupe_id IN ({placeholders}))'
+                params.extend(filters['groupe_ids'])
             if filters.get('secteur'):
                 base_sql += ' AND e.secteur = ?'
                 params.append(filters['secteur'])

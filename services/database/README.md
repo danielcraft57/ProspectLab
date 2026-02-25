@@ -56,6 +56,27 @@ class Database(
     DatabaseBase             # Connexion (en dernier pour le MRO)
 ):
     pass
+
+## Exemple : ciblage des campagnes email
+
+Le module `entreprises.py` expose une méthode dédiée au ciblage des campagnes :
+
+```python
+def get_entreprises_for_campagne(self, filters: dict | None = None) -> list[dict]:
+    ...
+```
+
+Les principaux filtres supportés sont :
+
+- `secteur`, `secteur_contains`
+- `opportunite` (valeur ou liste de valeurs)
+- `statut`, `tags_contains`
+- `favori`, `search`
+- `score_securite_max`
+- `exclude_already_contacted`
+- `groupe_ids` : **liste d'IDs de groupes d'entreprises** (via la table de liaison `entreprise_groupes`)
+
+Ce filtre `groupe_ids` est utilisé par l'endpoint `/api/ciblage/entreprises` pour permettre le mode de ciblage **« Par groupes »** dans l'assistant de création de campagne.
 ```
 
 ## Migration depuis database.py

@@ -478,7 +478,8 @@ def api_ciblage_entreprises():
     """
     API: Entreprises avec emails pour campagne, avec filtres de ciblage.
     Query params: secteur, secteur_contains, opportunite (virgule), statut, tags_contains,
-    favori (1/0), search, score_securite_max, exclude_already_contacted (1/true).
+    favori (1/0), search, score_securite_max, exclude_already_contacted (1/true),
+    groupe_ids (virgule) : liste d'IDs de groupes d'entreprises.
     """
     from services.database.entreprises import EntrepriseManager
     from utils.helpers import clean_json_dict
@@ -504,6 +505,12 @@ def api_ciblage_entreprises():
             pass
     if request.args.get('exclude_already_contacted') in ('1', 'true', 'True'):
         filters['exclude_already_contacted'] = True
+    if request.args.get('groupe_ids'):
+        try:
+            groupe_ids = [int(s.strip()) for s in request.args.get('groupe_ids').split(',') if s.strip()]
+            filters['groupe_ids'] = groupe_ids
+        except ValueError:
+            pass
     entreprise_manager = EntrepriseManager()
     entreprises = entreprise_manager.get_entreprises_for_campagne(filters)
     return jsonify(clean_json_dict(entreprises))

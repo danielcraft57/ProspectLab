@@ -94,3 +94,6 @@ cursor_*.md
 # OS
 Thumbs.db
 .DS_Store
+
+# Déploiement local (non versionné)
+deploy/

@@ -85,35 +85,39 @@ body {
 
 .nav-toggle-btn {
     display: none;
-    background: rgba(15, 23, 42, 0.7);
-    border: 1px solid rgba(148, 163, 184, 0.75);
-    padding: 0.3rem 0.75rem;
+    background: transparent;
+    border: none;
+    padding: 0;
     border-radius: 999px;
     cursor: pointer;
     align-items: center;
     justify-content: center;
-    gap: 0.35rem;
     color: #e5e7eb;
-    font-size: 0.85rem;
-    font-weight: 500;
-    transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.15s ease, box-shadow 0.15s ease;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 .nav-toggle-btn:hover {
-    background: rgba(30, 64, 175, 0.9);
-    border-color: rgba(191, 219, 254, 0.9);
-    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.45);
-    transform: translateY(-1px);
+    transform: translateY(-1px) scale(1.02);
 }
 
-.nav-toggle-label {
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: 0.75rem;
+.nav-toggle-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 23, 42, 0.75);
+    border: 1px solid rgba(148, 163, 184, 0.8);
+    font-size: 0.95rem;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.6);
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
 }
 
-.nav-toggle-btn i {
-    font-size: 0.8rem;
+.nav-toggle-btn:hover .nav-toggle-icon {
+    background: rgba(30, 64, 175, 0.95);
+    border-color: rgba(191, 219, 254, 0.95);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.85);
 }
 
 .nav-links {
@@ -340,6 +344,11 @@ body[data-theme="dark"] .dropdown-menu a:hover {
 
     .nav-toggle-btn {
         display: inline-flex;
+    }
+
+    .nav-header {
+        flex: 1;
+        justify-content: space-between;
     }
 
     .nav-links {
