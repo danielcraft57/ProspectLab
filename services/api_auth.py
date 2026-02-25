@@ -5,7 +5,7 @@ Gère les tokens API pour l'accès aux données depuis des applications externes
 
 import secrets
 from functools import wraps
-from typing import Optional
+from typing import Optional, Dict, Any
 from flask import request, jsonify
 from services.database import Database
 
@@ -232,6 +232,68 @@ class APITokenManager:
         
         return deleted
 
+class ClientAppManager:
+    """
+    Gère les applications clientes internes (Facturio, MailPilot, VocalGuard, etc.)
+    authentifiées via une clé d'API transmise dans le header `x-api-key`.
+    """
+
+    def __init__(self):
+        self.db = Database()
+
+    def validate_api_key(self, api_key: str, request_obj=None) -> Optional[Dict[str, Any]]:
+        """
+        Valide une clé API d'application cliente et met à jour les métadonnées d'usage.
+
+        Args:
+            api_key: Clé API reçue (header ou query)
+            request_obj: Objet Flask request (optionnel, pour logger IP / endpoint)
+
+        Returns:
+            dict|None: Informations de l'application cliente si valide, None sinon
+        """
+        conn = self.db.get_connection()
+        # row_factory déjà configuré dans get_connection()
+        cursor = conn.cursor()
+
+        self.db.execute_sql(cursor, '''
+            SELECT id, name, api_key, active, description, created_at, last_used, last_ip, last_endpoint, last_status
+            FROM application_clients
+            WHERE api_key = ? AND active = 1
+        ''', (api_key,))
+
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return None
+
+        # Supporter à la fois sqlite3.Row et RealDictRow
+        app_data = dict(row)
+
+        # Mettre à jour les métadonnées d'usage (logging minimal des appels)
+        try:
+            client_ip = None
+            endpoint = None
+            if request_obj is not None:
+                client_ip = request_obj.headers.get('X-Forwarded-For') or request_obj.headers.get('X-Real-IP') or request_obj.remote_addr
+                endpoint = request_obj.path
+
+            self.db.execute_sql(cursor, '''
+                UPDATE application_clients
+                SET last_used = CURRENT_TIMESTAMP,
+                    last_ip = ?,
+                    last_endpoint = ?
+                WHERE id = ?
+            ''', (client_ip, endpoint, app_data.get('id')))
+            conn.commit()
+        except Exception:
+            # En cas d'erreur de logging, ne pas bloquer l'authentification
+            conn.rollback()
+        finally:
+            conn.close()
+
+        return app_data
+
 
 def api_token_required(f):
     """
@@ -250,36 +312,77 @@ def api_token_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         token_manager = APITokenManager()
-        
+
         # Chercher le token dans le header Authorization
         token = None
         auth_header = request.headers.get('Authorization', '')
         if auth_header.startswith('Bearer '):
             token = auth_header[7:].strip()
-        
+
         # Sinon, chercher dans les paramètres de requête
         if not token:
             token = request.args.get('api_token') or request.form.get('api_token')
-        
+
         if not token:
             return jsonify({
                 'error': 'Token API requis',
                 'message': 'Fournissez un token API dans le header Authorization: Bearer <token> ou en paramètre ?api_token=<token>'
             }), 401
-        
+
         # Valider le token
         token_data = token_manager.validate_token(token)
-        
+
         if not token_data:
             return jsonify({
                 'error': 'Token API invalide ou révoqué',
                 'message': 'Le token fourni n\'est pas valide ou a été révoqué'
             }), 401
-        
+
         # Ajouter les infos du token au contexte de la requête
         request.api_token = token_data
-        
+
         return f(*args, **kwargs)
     
+    return decorated_function
+
+
+def client_api_key_required(f):
+    """
+    Decorator pour protéger une route d'intégration interne (applications clientes).
+
+    L'application doit fournir une clé API dans :
+    - Header : `x-api-key: <clé>`
+    - Ou paramètre : `?api_key=<clé>`
+    """
+
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        manager = ClientAppManager()
+
+        # Chercher la clé dans le header x-api-key en priorité
+        api_key = request.headers.get('x-api-key')
+
+        # Fallback éventuel via paramètre de requête
+        if not api_key:
+            api_key = request.args.get('api_key') or request.form.get('api_key')
+
+        if not api_key:
+            return jsonify({
+                'error': 'Clé API requise',
+                'message': 'Fournissez une clé dans le header x-api-key ou le paramètre ?api_key='
+            }), 401
+
+        app_data = manager.validate_api_key(api_key, request_obj=request)
+        if not app_data:
+            return jsonify({
+                'error': 'Clé API invalide ou désactivée',
+                'message': 'La clé fournie ne correspond à aucune application active'
+            }), 401
+
+        # Ajouter l'application cliente au contexte de la requête
+        request.client_app = app_data
+
+        return f(*args, **kwargs)
+
     return decorated_function
 

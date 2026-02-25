@@ -22,9 +22,9 @@
    - Suppression via `fetch()` avec confirmation
    - ✅ Bien fait, redirection après succès
 
-5. **Chargement de données** (`entreprises.refactored.js`, `analyses_techniques.js`, `campagnes.js`)
+5. **Chargement de données** (`entreprises.refactored.js`, `analyses_techniques.js`, `analyses_seo.js`, `campagnes.js`)
    - Chargement des entreprises via `fetch()` (liste, filtres avancés et ciblage par groupes dans l'assistant de campagne)
-   - Chargement des analyses via `fetch()`
+   - Chargement des analyses via `fetch()` : listes d'analyses techniques/OSINT/Pentest/SEO, détail d'une analyse (`/api/analyse-.../<id>`) et vues intégrées dans la modale entreprise (`/api/entreprise/<id>/analyse-technique`, `/analyse-osint`, `/analyse-pentest`, `/analyse-seo`)
    - ✅ Bien fait, pas de rechargement de page
 
 ### ⚠️ Points à améliorer avec AJAX

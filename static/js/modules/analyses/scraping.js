@@ -40,17 +40,33 @@
             { icon: 'fa-code', label: 'Technologies', value: stats.technologies, color: '#ef4444', tab: 'technologies' },
             { icon: 'fa-info-circle', label: 'Métadonnées', value: stats.metadata, color: '#64748b', tab: 'metadata' }
         ];
-        
-        statsContainer.innerHTML = statCards.map(stat => {
+
+        // Vider le conteneur puis ajouter de vraies cartes DOM pour conserver les handlers
+        statsContainer.innerHTML = '';
+        statCards.forEach(stat => {
             const card = document.createElement('div');
             card.className = 'scraping-stat-card';
             card.setAttribute('data-tab', stat.tab);
-            card.style.cssText = 'background: white; border-radius: 12px; padding: 1rem; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border-left: 4px solid ' + stat.color + '; cursor: pointer; transition: all 0.2s;';
-            card.onmouseover = function() { this.style.transform = 'translateY(-2px)'; this.style.boxShadow = '0 4px 12px rgba(0,0,0,0.12)'; };
-            card.onmouseout = function() { this.style.transform = 'translateY(0)'; this.style.boxShadow = '0 2px 8px rgba(0,0,0,0.08)'; };
             card.onclick = function() {
-                const btn = document.querySelector('.tab-button[data-tab="' + stat.tab + '"]');
-                if (btn) btn.click();
+                const tabName = stat.tab;
+                const panels = document.querySelectorAll('#scraping-results .tab-content');
+                panels.forEach(p => {
+                    p.classList.remove('active');
+                    p.style.display = 'none';
+                });
+                const targetPanel = document.getElementById(`tab-${tabName}-modal`);
+                if (targetPanel) {
+                    targetPanel.classList.add('active');
+                    targetPanel.style.display = 'block';
+                }
+                const searchContainer = document.getElementById('scraping-search-container');
+                if (searchContainer) {
+                    if (['emails', 'people', 'phones', 'social', 'technologies'].includes(tabName)) {
+                        searchContainer.style.display = 'block';
+                    } else {
+                        searchContainer.style.display = 'none';
+                    }
+                }
             };
             card.innerHTML = `
                 <div style="display: flex; align-items: center; gap: 0.75rem;">
@@ -64,8 +80,8 @@
                     ${stat.value > 0 ? '<i class="fas fa-chevron-right" style="color: #cbd5e1; font-size: 0.875rem;"></i>' : ''}
                 </div>
             `;
-            return card.outerHTML;
-        }).join('');
+            statsContainer.appendChild(card);
+        });
     }
     
     /**

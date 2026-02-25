@@ -153,6 +153,19 @@
     color: white;
 }
 
+/* Mode dark - bouton outline (ex: Ajouter aux favoris dans la modale entreprise) */
+body[data-theme="dark"] .btn-outline {
+    background: transparent;
+    border-color: #4b5563;
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] .btn-outline.active {
+    background: #f59e0b;
+    border-color: #f59e0b;
+    color: #0f172a;
+}
+
 .error {
     background: #fee;
     color: #c33;

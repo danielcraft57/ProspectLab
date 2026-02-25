@@ -281,7 +281,7 @@ class DatabaseSchema(DatabaseBase):
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)')
         
-        # Table des tokens API
+        # Table des tokens API (API publique)
         self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS api_tokens (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -308,6 +308,24 @@ class DatabaseSchema(DatabaseBase):
         self.safe_execute_sql(cursor, 'ALTER TABLE api_tokens ADD COLUMN can_read_emails INTEGER DEFAULT 1')
         self.safe_execute_sql(cursor, 'ALTER TABLE api_tokens ADD COLUMN can_read_statistics INTEGER DEFAULT 1')
         self.safe_execute_sql(cursor, 'ALTER TABLE api_tokens ADD COLUMN can_read_campagnes INTEGER DEFAULT 1')
+
+        # Table des applications clientes internes (Facturio, MailPilot, VocalGuard, etc.)
+        self.execute_sql(cursor, '''
+            CREATE TABLE IF NOT EXISTS application_clients (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                api_key TEXT UNIQUE NOT NULL,
+                active INTEGER DEFAULT 1,
+                description TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_used TIMESTAMP,
+                last_ip TEXT,
+                last_endpoint TEXT,
+                last_status INTEGER
+            )
+        ''')
+        self.execute_sql(cursor, 'CREATE INDEX IF NOT EXISTS idx_application_clients_api_key ON application_clients(api_key)')
+        self.execute_sql(cursor, 'CREATE INDEX IF NOT EXISTS idx_application_clients_name ON application_clients(name)')
         
         # Table des événements de tracking email
         self.execute_sql(cursor,'''

@@ -753,14 +753,22 @@
             return `
                 <div class="entreprise-modal-tabs">
                     <div class="tabs-header">
-                        <button class="tab-btn active" data-tab="info">Info</button>
-                        <button class="tab-btn" data-tab="images">Images (${nbImages})</button>
-                        <button class="tab-btn" data-tab="pages">Pages (${nbPages})</button>
-                        <button class="tab-btn" data-tab="scraping">Résultats scraping</button>
-                        <button class="tab-btn" data-tab="technique">Analyse technique</button>
-                        <button class="tab-btn" data-tab="seo">Analyse SEO</button>
-                        <button class="tab-btn" data-tab="osint">Analyse OSINT</button>
-                        <button class="tab-btn" data-tab="pentest">Analyse Pentest</button>
+                        <button class="tabs-arrow tabs-arrow-left" type="button" aria-label="Onglets précédents">
+                            <i class="fas fa-chevron-left"></i>
+                        </button>
+                        <div class="tabs-header-scroll">
+                            <button class="tab-btn active" data-tab="info">Info</button>
+                            <button class="tab-btn" data-tab="images">Images (${nbImages})</button>
+                            <button class="tab-btn" data-tab="pages">Pages (${nbPages})</button>
+                            <button class="tab-btn" data-tab="scraping">Résultats scraping</button>
+                            <button class="tab-btn" data-tab="technique">Analyse technique</button>
+                            <button class="tab-btn" data-tab="seo">Analyse SEO</button>
+                            <button class="tab-btn" data-tab="osint">Analyse OSINT</button>
+                            <button class="tab-btn" data-tab="pentest">Analyse Pentest</button>
+                        </div>
+                        <button class="tabs-arrow tabs-arrow-right" type="button" aria-label="Onglets suivants">
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
                     </div>
                     
                     <div class="tabs-content">
@@ -857,48 +865,16 @@
                         
                         <div class="tab-panel" id="tab-scraping">
                             <div id="scraping-results" class="scraping-results" style="display: block;">
-                                <div style="margin-bottom: 1.5rem;">
-                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                                        <h3 style="margin: 0; color: #1e293b; font-size: 1.5rem; font-weight: 600;">
-                                            <i class="fas fa-spider" style="margin-right: 0.5rem; color: #667eea;"></i>
+                                <div class="scraping-results-header">
+                                    <div class="scraping-results-title-row">
+                                        <h3 class="scraping-results-title">
+                                            <i class="fas fa-spider"></i>
                                             Résultats du scraping
                                         </h3>
-                                        <div style="display: flex; gap: 0.5rem;">
-                                            <button id="scraping-export-btn" class="btn btn-small" style="padding: 0.5rem 1rem; font-size: 0.875rem;" title="Exporter les résultats">
-                                                <i class="fas fa-download" style="margin-right: 0.5rem;"></i>
-                                                Exporter
-                                            </button>
-                                        </div>
                                     </div>
-                                    <div id="scraping-stats" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+                                    <div id="scraping-stats" class="scraping-stats-summary">
                                         <!-- Les statistiques seront injectées ici -->
                                     </div>
-                                </div>
-                                <div class="results-tabs" style="display: flex; gap: 0.5rem; margin-bottom: 1rem; border-bottom: 2px solid #e2e8f0; flex-wrap: wrap; overflow-x: auto;">
-                                    <button class="tab-button active" data-tab="emails" style="padding: 0.75rem 1.25rem; border: none; background: transparent; color: #64748b; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; white-space: nowrap; position: relative;">
-                                        <i class="fas fa-envelope" style="margin-right: 0.5rem;"></i>
-                                        Emails (<span id="count-emails-modal">0</span>)
-                                    </button>
-                                    <button class="tab-button" data-tab="people" style="padding: 0.75rem 1.25rem; border: none; background: transparent; color: #64748b; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; white-space: nowrap;">
-                                        <i class="fas fa-users" style="margin-right: 0.5rem;"></i>
-                                        Personnes (<span id="count-people-modal">0</span>)
-                                    </button>
-                                    <button class="tab-button" data-tab="phones" style="padding: 0.75rem 1.25rem; border: none; background: transparent; color: #64748b; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; white-space: nowrap;">
-                                        <i class="fas fa-phone" style="margin-right: 0.5rem;"></i>
-                                        Téléphones (<span id="count-phones-modal">0</span>)
-                                    </button>
-                                    <button class="tab-button" data-tab="social" style="padding: 0.75rem 1.25rem; border: none; background: transparent; color: #64748b; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; white-space: nowrap;">
-                                        <i class="fas fa-share-alt" style="margin-right: 0.5rem;"></i>
-                                        Réseaux sociaux (<span id="count-social-modal">0</span>)
-                                    </button>
-                                    <button class="tab-button" data-tab="technologies" style="padding: 0.75rem 1.25rem; border: none; background: transparent; color: #64748b; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; white-space: nowrap;">
-                                        <i class="fas fa-code" style="margin-right: 0.5rem;"></i>
-                                        Technologies (<span id="count-tech-modal">0</span>)
-                                    </button>
-                                    <button class="tab-button" data-tab="metadata" style="padding: 0.75rem 1.25rem; border: none; background: transparent; color: #64748b; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; white-space: nowrap;">
-                                        <i class="fas fa-info-circle" style="margin-right: 0.5rem;"></i>
-                                        Métadonnées
-                                    </button>
                                 </div>
                                 <div id="scraping-search-container" style="margin-bottom: 1rem; display: none;">
                                     <div style="position: relative;">
@@ -992,6 +968,7 @@
             const closeBtn = document.getElementById('modal-close-btn');
             const closeFooterBtn = document.getElementById('modal-close-footer-btn');
             const modal = document.getElementById('entreprise-modal');
+            const modalBody = document.getElementById('modal-entreprise-body');
             
             if (closeBtn) {
                 closeBtn.onclick = (e) => {
@@ -1055,10 +1032,45 @@
                     }
                 });
             }
+
+            // Initialiser l'état des flèches d'onglets (visible/caché selon le scroll possible)
+            if (modalBody) {
+                const scrollContainer = modalBody.querySelector('.tabs-header-scroll');
+                const leftArrowEl = modalBody.querySelector('.tabs-arrow-left');
+                const rightArrowEl = modalBody.querySelector('.tabs-arrow-right');
+
+                const updateTabArrows = () => {
+                    if (!scrollContainer || !leftArrowEl || !rightArrowEl) return;
+                    const maxScroll = scrollContainer.scrollWidth - scrollContainer.clientWidth - 1;
+                    const atStart = scrollContainer.scrollLeft <= 1;
+                    const atEnd = scrollContainer.scrollLeft >= maxScroll;
+                    const noScroll = maxScroll <= 0;
+                    leftArrowEl.classList.toggle('tabs-arrow-hidden', atStart || noScroll);
+                    rightArrowEl.classList.toggle('tabs-arrow-hidden', atEnd || noScroll);
+                };
+
+                if (scrollContainer) {
+                    scrollContainer.addEventListener('scroll', updateTabArrows);
+                    window.addEventListener('resize', updateTabArrows);
+                    setTimeout(updateTabArrows, 0);
+                }
+            }
             
-            const modalBody = document.getElementById('modal-entreprise-body');
             if (modalBody) {
                 modalBody.addEventListener('click', async (e) => {
+                    // Flèches de défilement des onglets
+                    const leftArrow = e.target.closest('.tabs-arrow-left');
+                    const rightArrow = e.target.closest('.tabs-arrow-right');
+                    if (leftArrow || rightArrow) {
+                        const scrollContainer = modalBody.querySelector('.tabs-header-scroll');
+                        if (scrollContainer) {
+                            const delta = 160;
+                            const direction = rightArrow ? 1 : -1;
+                            scrollContainer.scrollBy({ left: direction * delta, behavior: 'smooth' });
+                        }
+                        return;
+                    }
+
                     // Gestion des onglets principaux de la modale
                     if (e.target.closest('.tab-btn')) {
                         const tabBtn = e.target.closest('.tab-btn');
@@ -1127,9 +1139,9 @@
                 scrapingSearchInput.addEventListener('input', function() {
                     const scrapingResults = document.getElementById('scraping-results');
                     if (!scrapingResults) return;
-                    const activeTab = scrapingResults.querySelector('.tab-button.active[data-tab]');
-                    if (activeTab) {
-                        const tabName = activeTab.getAttribute('data-tab');
+                    const activePanel = scrapingResults.querySelector('.tab-content.active[id^="tab-"][id$="-modal"]');
+                    const tabName = activePanel ? activePanel.id.replace('tab-','').replace('-modal','') : null;
+                    if (tabName) {
                         filterScrapingResults(tabName, this.value);
                         const clearBtn = document.getElementById('scraping-search-clear');
                         if (clearBtn) {
@@ -1148,9 +1160,10 @@
                         this.style.display = 'none';
                         const scrapingResults = document.getElementById('scraping-results');
                         if (scrapingResults) {
-                            const activeTab = scrapingResults.querySelector('.tab-button.active[data-tab]');
-                            if (activeTab) {
-                                filterScrapingResults(activeTab.getAttribute('data-tab'), '');
+                            const activePanel = scrapingResults.querySelector('.tab-content.active[id^="tab-"][id$="-modal"]');
+                            const tabName = activePanel ? activePanel.id.replace('tab-','').replace('-modal','') : null;
+                            if (tabName) {
+                                filterScrapingResults(tabName, '');
                             }
                         }
                     }
@@ -1669,7 +1682,7 @@
                 validOgData.forEach((ogData, idx) => {
                     const hasImage = ogData.images && ogData.images.length > 0 && ogData.images[0].image_url;
                     html += `
-                        <div class="page-card" style="background: white; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-left: 4px solid #667eea;">
+                        <div class="page-card page-card-og">
                             <div style="display: flex; gap: 1.5rem; align-items: flex-start;">
                                 ${hasImage ? `
                                 <div style="flex: 0 0 200px;">

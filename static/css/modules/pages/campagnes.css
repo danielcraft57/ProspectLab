@@ -2277,8 +2277,9 @@ body[data-theme="dark"] #scraping-progress-container,
 body[data-theme="dark"] #technical-progress-container,
 body[data-theme="dark"] #osint-progress-container,
 body[data-theme="dark"] #pentest-progress-container {
-    background: #020617; /* un peu plus clair que le fond global pour ressortir dans la carte */
-    border-color: #1e293b;
+    /* Forcer le fond sombre même si le JS a mis un background inline clair */
+    background: #020617 !important; /* un peu plus clair que le fond global pour ressortir dans la carte */
+    border-color: #1e293b !important;
     box-shadow: 0 4px 16px rgba(15, 23, 42, 0.8);
 }
 
@@ -2288,7 +2289,15 @@ body[data-theme="dark"] #osint-current-info,
 body[data-theme="dark"] #osint-total-info,
 body[data-theme="dark"] #pentest-current-info,
 body[data-theme="dark"] #pentest-total-info {
-    color: #e5e7eb;
+    color: #e5e7eb !important;
+}
+
+/* Titres et badges des blocs de progression en dark */
+body[data-theme="dark"] #scraping-progress-container div,
+body[data-theme="dark"] #technical-progress-container div,
+body[data-theme="dark"] #osint-progress-container div,
+body[data-theme="dark"] #pentest-progress-container div {
+    color: #e5e7eb !important;
 }
 
 body[data-theme="dark"] #osint-cumulative-box,
