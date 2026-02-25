@@ -41,10 +41,13 @@ En PostgreSQL, `cursor.lastrowid` n'existe pas ou n'est pas fiable. Les insertio
 
 Sans cela, en production avec PostgreSQL, les tables `scrapers`, `images`, `entreprise_og_data` et `entreprise_og_images` restaient vides ou mal liées.
 
-## Modale entreprise : compteurs Images et Pages
+## Modale entreprise : compteurs Images/Pages, analyses et dark mode (fév. 2026)
 
 - L'API `get_entreprise` renvoie désormais `images_count` et `pages_count` (calculés côté serveur à partir des tables `images`, `entreprise_og_data`, etc.).
 - La modale affiche « Images (n) » et « Pages (n) » sur les onglets ; le nombre est mis à jour après chargement des images si besoin (`updateModalTabCount`).
+- Les onglets de la modale sont désormais **scrollables** avec un ruban horizontal et des **flèches de navigation** gauche/droite (desktop + mobile), ce qui garantit l'accès à tous les onglets (« Résultats scraping », « Analyse technique », « Analyse SEO », « Analyse OSINT », « Analyse Pentest ») même sur petits écrans.
+- Les blocs de résultats (OSINT, Pentest, technique, SEO, scraping) ont été harmonisés en **mode sombre** : cartes résumées, badges, tags, tableaux et blocs de détail n'utilisent plus de fonds clairs fixes (inline styles), le CSS dark override force un rendu cohérent.
+- L'onglet « Analyse SEO » de la modale consomme maintenant l'API `/api/entreprise/<id>/analyse-seo` et réutilise le rendu détaillé de la page d'analyses SEO (`renderSEOExpertise`) directement dans la modale entreprise.
 
 ## Templates et déploiement
 

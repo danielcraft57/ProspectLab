@@ -6,12 +6,13 @@ Application Flask professionnelle pour la prospection et l'analyse approfondie d
 
 - **Import et analyse d'entreprises** : Importez un fichier Excel et analysez automatiquement les sites web des entreprises
 - **Scraping complet et unifié** : Extraction automatique d'emails, personnes, téléphones, réseaux sociaux, technologies et images
-- **Données OpenGraph multi-pages** : Collecte des métadonnées OG de toutes les pages visitées, affichées dans l'onglet "Pages"
+- **Données OpenGraph multi-pages** : Collecte des métadonnées OG de toutes les pages visitées, affichées dans l'onglet « Pages »
 - **Analyse technique avancée** : Détection de frameworks, serveurs, hébergeurs, versions et vulnérabilités
 - **Analyse OSINT** : Recherche approfondie sur les responsables (LinkedIn, réseaux sociaux, actualités)
 - **Analyse Pentest** : Scan de sécurité et détection de vulnérabilités (nécessite outils externes)
-- **Analyse SEO** : Audit SEO détaillé (meta, structure, Lighthouse) intégré au score d'opportunité
-- **Listes d'entreprises (groupes)** : Création de groupes d'entreprises (listes sauvegardées) et gestion directe depuis chaque carte (ajout/retrait, compteur, badge \"Dans le groupe\")
+- **Analyse SEO** : Audit SEO détaillé (meta, structure, Lighthouse) intégré au score d'opportunité, consultable depuis la page d’analyses SEO **et** l’onglet « Analyse SEO » de la modale entreprise
+- **Vue détail entreprise enrichie** : Modale avec onglets « Info / Images / Pages / Résultats scraping / Analyses (technique, SEO, OSINT, Pentest) » ; navigation horizontale avec ruban scrollable + flèches, entièrement compatible mode sombre
+- **Listes d'entreprises (groupes)** : Création de groupes d'entreprises (listes sauvegardées) et gestion directe depuis chaque carte (ajout/retrait, compteur, badge « Dans le groupe »)
 - **Envoi d'emails de prospection** : Campagnes personnalisées avec modèles réutilisables, programmation d'envoi (date/heure) et suggestions intelligentes (jours ouvrés, fériés FR, heures bureau), ciblage multi-modes (toutes, par objectifs métier, par critères, par groupes, par segments sauvegardés)
 - **Suivi en temps réel** : WebSocket pour suivre la progression des analyses et scraping
 - **Base de données normalisée** : Stockage structuré avec OpenGraph, images, et métadonnées
