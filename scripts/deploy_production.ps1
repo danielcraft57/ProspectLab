@@ -154,11 +154,12 @@ Write-Host ""
 Write-Host "[5/9] Transfert des fichiers vers le serveur..." -ForegroundColor Yellow
 Write-Host "   Cela peut prendre quelques instants..." -ForegroundColor Gray
 
-# Utiliser rsync si disponible, sinon tar+scp pour éviter les problèmes de chemins Windows
+# Utiliser rsync si disponible (sauf sous Windows), sinon tar+scp pour éviter les problèmes de chemins
 $useRsync = $false
 try {
     $null = rsync --version 2>&1
-    if ($LASTEXITCODE -eq 0) {
+    # On n'active rsync que si la commande existe ET que l'on n'est pas sur Windows
+    if ($LASTEXITCODE -eq 0 -and $env:OS -ne 'Windows_NT') {
         $useRsync = $true
     }
 } catch {

@@ -459,20 +459,28 @@
                         return;
                     }
                     try {
-                        const groupe = await EntreprisesAPI.createGroupe({ nom });
+                        // Création du groupe (la réponse peut varier entre dev/prod, on ne dépend pas de groupe.id ici)
+                        await EntreprisesAPI.createGroupe({ nom });
                         // Invalider le cache pour toutes les entreprises :
                         Object.keys(entrepriseGroupsCache).forEach(k => {
                             entrepriseGroupsCache[k] = null;
                         });
-                        let addOk = false;
-                        try {
-                            const addResult = await EntreprisesAPI.addEntrepriseToGroupe(entrepriseId, groupe.id);
-                            addOk = addResult.added;
-                        } catch (addErr) {
-                            console.error(addErr);
-                        }
+                        // Recharger la liste puis essayer d'attacher automatiquement l'entreprise
                         await loadGroupsIntoDropdown(entrepriseId, dropdown, true);
-                        if (addOk) {
+                        let autoAttached = false;
+                        const items = dropdown.querySelectorAll('.group-item');
+                        items.forEach((item) => {
+                            if (autoAttached) return;
+                            const nameEl = item.querySelector('.group-name');
+                            if (nameEl && nameEl.textContent.trim() === nom.trim()) {
+                                // Si pas déjà actif, on déclenche le clic pour utiliser la logique existante
+                                if (!item.classList.contains('active')) {
+                                    item.click();
+                                }
+                                autoAttached = true;
+                            }
+                        });
+                        if (autoAttached) {
                             Notifications.show('Groupe créé et entreprise ajoutée', 'success');
                         } else {
                             Notifications.show('Groupe créé. L\'entreprise n\'a pas été ajoutée au groupe.', 'warning');
