@@ -20,7 +20,10 @@
     transition: transform 0.3s ease, box-shadow 0.3s ease;
     border: 1px solid #e9ecef;
     position: relative;
-    margin-top: 40px;
+    margin-top: 32px;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
 }
 
 .entreprise-card:hover {
@@ -30,7 +33,7 @@
 
 .card-header-with-logo {
     position: relative;
-    padding-top: 3rem;
+    padding-top: 2.5rem;
 }
 
 .card-logo-container {
@@ -96,11 +99,24 @@
 
 .card-body {
     padding: 1.5rem;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
 }
 
 .card-body p {
     margin: 0.5rem 0;
     color: #555;
+}
+
+.card-body .resume-preview {
+    /* Même hauteur visuelle pour toutes les cartes (3 lignes max) */
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    overflow: hidden;
+    max-height: 3.6em;
+    min-height: 3.6em;
 }
 
 .card-body strong {
@@ -115,6 +131,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 0.75rem;
+    border-radius: 0 0 16px 16px;
 }
 
 .card-footer-left,
@@ -330,6 +347,7 @@ body[data-theme="dark"] .card-body div[style*="border-top"] {
 body[data-theme="dark"] .card-footer {
     background: #1e293b;
     border-top-color: #334155;
+    border-radius: 0 0 16px 16px;
 }
 
 body[data-theme="dark"] .entreprise-row {
@@ -344,4 +362,114 @@ body[data-theme="dark"] .row-name h3 {
 
 body[data-theme="dark"] .row-info {
     color: #94a3b8;
+}
+
+/* Section des scores avec graphiques circulaires */
+.card-scores-section {
+    display: flex;
+    gap: 1.25rem;
+    justify-content: center;
+    align-items: center;
+    margin: 0.75rem 0;
+    padding: 0.6rem 0;
+    border-top: 1px solid #e5e7eb;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.score-chart-item {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: fadeInScale 0.5s ease-out;
+}
+
+@keyframes fadeInScale {
+    from {
+        opacity: 0;
+        transform: scale(0.8);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.circular-chart-container {
+    position: relative;
+    animation: fadeInScale 0.6s ease-out;
+}
+
+.circular-chart-progress {
+    animation: drawCircle 1.2s ease-out;
+}
+
+@keyframes drawCircle {
+    from {
+        stroke-dashoffset: 100%;
+    }
+}
+
+.circular-chart-label {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    pointer-events: none;
+    transition: color 0.3s ease;
+}
+
+.circular-chart-value {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #111827;
+    line-height: 1.2;
+    transition: color 0.3s ease;
+}
+
+.circular-chart-text {
+    font-size: 0.65rem;
+    color: #6b7280;
+    margin-top: 2px;
+    transition: color 0.3s ease;
+}
+
+.circular-chart-na {
+    color: #9ca3af;
+    font-weight: 500;
+}
+
+.circular-chart-svg {
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+}
+
+.circular-chart-container:hover .circular-chart-progress {
+    filter: brightness(1.1);
+    transition: stroke-dashoffset 1.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.3s ease;
+}
+
+/* Dark mode - Section scores */
+body[data-theme="dark"] .card-scores-section {
+    border-top-color: #334155;
+    border-bottom-color: #334155;
+}
+
+body[data-theme="dark"] .circular-chart-value {
+    color: #e5e7eb !important;
+}
+
+body[data-theme="dark"] .circular-chart-text {
+    color: #94a3b8 !important;
+}
+
+body[data-theme="dark"] .circular-chart-bg {
+    stroke: rgba(148, 163, 184, 0.2) !important;
+}
+
+body[data-theme="dark"] .circular-chart-na {
+    color: #64748b;
+}
+
+body[data-theme="dark"] .circular-chart-svg {
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
 }

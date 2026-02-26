@@ -123,6 +123,76 @@
             pageEntreprises.forEach(entreprise => {
                 setupEntrepriseActions(entreprise.id);
             });
+            
+            // Animer les graphiques circulaires après le rendu
+            setTimeout(() => {
+                const charts = document.querySelectorAll('.circular-chart-progress');
+                charts.forEach((chart, index) => {
+                    setTimeout(() => {
+                        const targetOffset = chart.getAttribute('data-target-offset');
+                        if (targetOffset) {
+                            chart.style.strokeDashoffset = targetOffset;
+                        }
+                    }, index * 150);
+                });
+            }, 200);
+        }
+        
+        // Fonction pour générer un graphique circulaire SVG
+        function createCircularChart(score, label, color, size = 60) {
+            if (score === null || score === undefined) {
+                return `<div class="circular-chart-container circular-chart-na" style="width: ${size}px; height: ${size}px; display: flex; align-items: center; justify-content: center; color: #999; font-size: 0.75rem;">N/A</div>`;
+            }
+            
+            const normalizedScore = Math.max(0, Math.min(100, score));
+            const circumference = 2 * Math.PI * (size / 2 - 4);
+            const offset = circumference - (normalizedScore / 100) * circumference;
+            
+            // Déterminer la couleur selon le score
+            let strokeColor = color;
+            if (!color) {
+                if (normalizedScore >= 75) strokeColor = '#22c55e'; // vert
+                else if (normalizedScore >= 50) strokeColor = '#3b82f6'; // bleu
+                else if (normalizedScore >= 25) strokeColor = '#eab308'; // jaune
+                else strokeColor = '#ef4444'; // rouge
+            }
+            
+            const chartId = `chart-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            
+            return `
+                <div class="circular-chart-container" style="position: relative; width: ${size}px; height: ${size}px;">
+                    <svg width="${size}" height="${size}" style="transform: rotate(-90deg);" class="circular-chart-svg">
+                        <circle
+                            cx="${size/2}"
+                            cy="${size/2}"
+                            r="${size/2 - 4}"
+                            fill="none"
+                            stroke="rgba(229, 231, 235, 0.3)"
+                            stroke-width="6"
+                            class="circular-chart-bg"
+                        />
+                        <circle
+                            cx="${size/2}"
+                            cy="${size/2}"
+                            r="${size/2 - 4}"
+                            fill="none"
+                            stroke="${strokeColor}"
+                            stroke-width="6"
+                            stroke-dasharray="${circumference}"
+                            stroke-dashoffset="${circumference}"
+                            stroke-linecap="round"
+                            class="circular-chart-progress"
+                            data-chart-id="${chartId}"
+                            data-target-offset="${offset}"
+                            style="transition: stroke-dashoffset 1.2s cubic-bezier(0.4, 0, 0.2, 1);"
+                        />
+                    </svg>
+                    <div class="circular-chart-label">
+                        <div class="circular-chart-value">${normalizedScore}</div>
+                        <div class="circular-chart-text">${label}</div>
+                    </div>
+                </div>
+            `;
         }
         
         function createEntrepriseCard(entreprise) {
@@ -151,6 +221,24 @@
                 }
             }
             
+            // Générer les graphiques circulaires pour Sécurité et SEO
+            const hasSecurityScore = typeof entreprise.score_securite !== 'undefined' && entreprise.score_securite !== null;
+            const hasSeoScore = typeof entreprise.score_seo !== 'undefined' && entreprise.score_seo !== null;
+            const scoresSection = (hasSecurityScore || hasSeoScore) ? `
+                <div class="card-scores-section">
+                    ${hasSecurityScore ? `
+                    <div class="score-chart-item">
+                        ${createCircularChart(entreprise.score_securite, 'Sécurité', null, 60)}
+                    </div>
+                    ` : ''}
+                    ${hasSeoScore ? `
+                    <div class="score-chart-item">
+                        ${createCircularChart(entreprise.score_seo, 'SEO', null, 60)}
+                    </div>
+                    ` : ''}
+                </div>
+            ` : '';
+            
             return `
                 <div class="entreprise-card" data-id="${entreprise.id}">
                     <div class="card-header-with-logo">
@@ -160,41 +248,22 @@
                         </div>
                         ` : ''}
                         <div class="card-header">
-                            <div style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem;">
-                                <h3>${Formatters.escapeHtml(entreprise.nom || 'Sans nom')}</h3>
-                                <div style="display:flex; align-items:center; gap:0.5rem;">
-                                    ${typeof entreprise.score_pentest !== 'undefined' && entreprise.score_pentest !== null && entreprise.score_pentest >= 40 ? `
-                                    <i class="fas fa-exclamation-triangle" style="color: ${entreprise.score_pentest >= 70 ? '#e74c3c' : '#f39c12'}; font-size: 1.2rem;" title="Score Pentest: ${entreprise.score_pentest}/100"></i>
-                                    ` : ''}
-                                    <button class="btn-favori ${entreprise.favori ? 'active' : ''}" data-id="${entreprise.id}" title="Favori">
-                                        <i class="fas fa-star"></i>
-                                    </button>
-                                </div>
+                            <div style="display:flex; align-items:center; gap:0.4rem; min-width:0;">
+                                ${typeof entreprise.score_pentest !== 'undefined' && entreprise.score_pentest !== null && entreprise.score_pentest >= 40 ? `
+                                <i class="fas fa-exclamation-triangle" style="color: ${entreprise.score_pentest >= 70 ? '#e74c3c' : '#f39c12'}; font-size: 1.1rem;" title="Score Pentest: ${entreprise.score_pentest}/100"></i>
+                                ` : ''}
+                                <h3 style="white-space:nowrap; text-overflow:ellipsis; overflow:hidden;">${Formatters.escapeHtml(entreprise.nom || 'Sans nom')}</h3>
                             </div>
+                            <button class="btn-favori ${entreprise.favori ? 'active' : ''}" data-id="${entreprise.id}" title="Favori">
+                                <i class="fas fa-star"></i>
+                            </button>
                         </div>
                     </div>
                     <div class="card-body">
                         ${resumePreview ? `<p class="resume-preview" style="color: #666; font-size: 0.9rem; margin-bottom: 0.75rem; font-style: italic;">${Formatters.escapeHtml(resumePreview)}</p>` : ''}
                         ${entreprise.website ? `<p><strong>Site:</strong> <a href="${entreprise.website}" target="_blank">${Formatters.escapeHtml(entreprise.website)}</a></p>` : ''}
                         ${entreprise.secteur ? `<p><strong>Secteur:</strong> ${Formatters.escapeHtml(entreprise.secteur)}</p>` : ''}
-                        ${entreprise.statut ? `<p><strong>Statut:</strong> ${Badges.getStatusBadge(entreprise.statut)}</p>` : ''}
-                        ${(typeof entreprise.score_securite !== 'undefined' && entreprise.score_securite !== null) || (typeof entreprise.score_pentest !== 'undefined' && entreprise.score_pentest !== null) ? `
-                        <div style="margin-top:0.5rem; padding-top:0.5rem; border-top:1px solid #e5e7eb;">
-                            ${typeof entreprise.score_securite !== 'undefined' && entreprise.score_securite !== null ? `
-                            <p style="margin:0.25rem 0;">
-                                <strong>Sécurité:</strong> ${Badges.getSecurityScoreBadge(entreprise.score_securite)}
-                            </p>
-                            ` : ''}
-                            ${typeof entreprise.score_pentest !== 'undefined' && entreprise.score_pentest !== null ? `
-                            <p style="margin:0.25rem 0;">
-                                <strong>Pentest:</strong> 
-                                <span class="badge badge-${entreprise.score_pentest >= 70 ? 'danger' : entreprise.score_pentest >= 40 ? 'warning' : 'success'}">${entreprise.score_pentest}/100</span>
-                            </p>
-                            ` : ''}
-                        </div>
-                        ` : ''}
-                        ${entreprise.email_principal ? `<p><strong>Email:</strong> ${Formatters.escapeHtml(entreprise.email_principal)}</p>` : ''}
-                        ${entreprise.responsable ? `<p><strong>Responsable:</strong> ${Formatters.escapeHtml(entreprise.responsable)}</p>` : ''}
+                        ${scoresSection}
                         ${tagsHtml ? `<div class="tags-container">${tagsHtml}</div>` : ''}
                     </div>
                     <div class="card-footer">

@@ -357,10 +357,11 @@
 }
 
 .group-dropdown-inner {
-    background: #0b1120;
-    color: #e5e7eb;
+    /* Mode clair par défaut : panneau clair */
+    background: #ffffff;
+    color: #111827;
     border-radius: 0.75rem;
-    box-shadow: 0 22px 45px rgba(15, 23, 42, 0.6);
+    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.20);
     padding: 0.75rem 0.9rem 0.85rem;
     transform-origin: top right;
     animation: groupDropdownIn 0.16s ease-out;
@@ -387,13 +388,13 @@
 .group-dropdown-title {
     font-size: 0.9rem;
     font-weight: 600;
-    color: #f9fafb;
+    color: #111827;
 }
 
 .group-dropdown-close {
     border: none;
     background: transparent;
-    color: #9ca3af;
+    color: #6b7280;
     cursor: pointer;
     padding: 0.15rem;
     border-radius: 999px;
@@ -418,7 +419,7 @@
 .group-dropdown-label {
     margin: 0 0 0.4rem;
     font-size: 0.8rem;
-    color: #9ca3af;
+    color: #6b7280;
 }
 
 .group-list {
@@ -428,7 +429,7 @@
 
 .group-list-empty {
     font-size: 0.8rem;
-    color: #9ca3af;
+    color: #6b7280;
     padding: 0.25rem 0;
 }
 
@@ -448,12 +449,12 @@
 }
 
 .group-item:hover {
-    background: rgba(55, 65, 81, 0.7);
+    background: rgba(229, 231, 235, 0.7);
     transform: translateY(-1px);
 }
 
 .group-item.active {
-    background: rgba(16, 185, 129, 0.18);
+    background: rgba(16, 185, 129, 0.12);
 }
 
 .group-item-main {
@@ -472,7 +473,7 @@
 
 .group-name {
     font-size: 0.85rem;
-    color: #e5e7eb;
+    color: #111827;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
@@ -480,7 +481,7 @@
 
 .group-count {
     font-size: 0.75rem;
-    color: #9ca3af;
+    color: #6b7280;
     margin-left: 0.25rem;
 }
 
@@ -494,8 +495,8 @@
     font-size: 0.7rem;
     padding: 0.1rem 0.35rem;
     border-radius: 999px;
-    background: rgba(16, 185, 129, 0.18);
-    color: #6ee7b7;
+    background: rgba(16, 185, 129, 0.12);
+    color: #059669;
 }
 
 .group-toggle-btn {
@@ -544,9 +545,9 @@
     flex: 1;
     font-size: 0.85rem;
     padding: 0.4rem 0.6rem;
-    background: #020617;
-    border-color: #1f2937;
-    color: #e5e7eb;
+    background: #f9fafb;
+    border-color: #e5e7eb;
+    color: #111827;
 }
 
 .group-dropdown-section-create .group-create-input::placeholder {
@@ -556,6 +557,46 @@
 .group-dropdown-section-create .group-create-btn {
     font-size: 0.8rem;
     padding: 0.3rem 0.7rem;
+}
+
+/* Mode dark - dropdown groupes (on garde le look sombre d'origine) */
+body[data-theme="dark"] .group-dropdown-inner {
+    background: #0b1120;
+    color: #e5e7eb;
+    box-shadow: 0 22px 45px rgba(15, 23, 42, 0.6);
+}
+
+body[data-theme="dark"] .group-dropdown-title {
+    color: #f9fafb;
+}
+
+body[data-theme="dark"] .group-dropdown-label,
+body[data-theme="dark"] .group-list-empty,
+body[data-theme="dark"] .group-count {
+    color: #9ca3af;
+}
+
+body[data-theme="dark"] .group-name {
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] .group-item:hover {
+    background: rgba(55, 65, 81, 0.7);
+}
+
+body[data-theme="dark"] .group-item.active {
+    background: rgba(16, 185, 129, 0.18);
+}
+
+body[data-theme="dark"] .group-badge {
+    background: rgba(16, 185, 129, 0.18);
+    color: #6ee7b7;
+}
+
+body[data-theme="dark"] .group-dropdown-section-create .group-create-input {
+    background: #020617;
+    border-color: #1f2937;
+    color: #e5e7eb;
 }
 
 /* Tag générique */
