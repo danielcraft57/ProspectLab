@@ -61,7 +61,7 @@
         
         let html = `
             <div class="analysis-details" style="display: flex; flex-direction: column; gap: 1.5rem;">
-                <div style="background: linear-gradient(135deg, #9333ea 0%, #7c3aed 100%); color: white; padding: 1.5rem; border-radius: 12px; box-shadow: 0 4px 6px rgba(147, 51, 234, 0.2);">
+                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(103, 116, 222, 0.35);">
                     <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1.5rem;">
                         <div>
                             <h3 style="margin: 0 0 0.5rem 0; color: white; font-size: 1.5rem; font-weight: 700;">Analyse OSINT</h3>

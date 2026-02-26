@@ -54,22 +54,40 @@
             const search = document.getElementById('search-input').value.trim();
             const secteur = document.getElementById('filter-secteur').value;
             const statut = document.getElementById('filter-statut').value;
-            const opportunite = document.getElementById('filter-opportunite').value;
-            const favori = document.getElementById('filter-favori').checked;
-            const securityMin = document.getElementById('filter-security-min').value;
-            const securityMax = document.getElementById('filter-security-max').value;
-            const pentestMin = document.getElementById('filter-pentest-min').value;
-            const pentestMax = document.getElementById('filter-pentest-max').value;
+            const securityMinRaw = document.getElementById('filter-security-min').value;
+            const securityMaxRaw = document.getElementById('filter-security-max').value;
+            const seoMinRaw = document.getElementById('filter-seo-min').value;
+            const seoMaxRaw = document.getElementById('filter-seo-max').value;
+
+            let securityMin = parseInt(securityMinRaw, 10);
+            let securityMax = parseInt(securityMaxRaw, 10);
+            let seoMin = parseInt(seoMinRaw, 10);
+            let seoMax = parseInt(seoMaxRaw, 10);
+
+            // Corriger si min > max (on swap pour éviter des requêtes vides)
+            if (!Number.isNaN(securityMin) && !Number.isNaN(securityMax) && securityMin > securityMax) {
+                [securityMin, securityMax] = [securityMax, securityMin];
+            }
+            if (!Number.isNaN(seoMin) && !Number.isNaN(seoMax) && seoMin > seoMax) {
+                [seoMin, seoMax] = [seoMax, seoMin];
+            }
+
             const filters = {};
             if (search) filters.search = search;
             if (secteur) filters.secteur = secteur;
             if (statut) filters.statut = statut;
-            if (opportunite) filters.opportunite = opportunite;
-            if (favori) filters.favori = 'true';
-            if (securityMin !== '') filters.security_min = securityMin;
-            if (securityMax !== '') filters.security_max = securityMax;
-            if (pentestMin !== '') filters.pentest_min = pentestMin;
-            if (pentestMax !== '') filters.pentest_max = pentestMax;
+            if (!Number.isNaN(securityMin) && securityMin > 0) {
+                filters.security_min = securityMin;
+            }
+            if (!Number.isNaN(securityMax) && securityMax < 100) {
+                filters.security_max = securityMax;
+            }
+            if (!Number.isNaN(seoMin) && seoMin > 0) {
+                filters.seo_min = seoMin;
+            }
+            if (!Number.isNaN(seoMax) && seoMax < 100) {
+                filters.seo_max = seoMax;
+            }
             return filters;
         }
 
@@ -669,11 +687,10 @@
             const advancedFilterIds = [
                 'filter-secteur',
                 'filter-statut',
-                'filter-opportunite',
                 'filter-security-min',
                 'filter-security-max',
-                'filter-pentest-min',
-                'filter-pentest-max'
+                'filter-seo-min',
+                'filter-seo-max'
             ];
 
             advancedFilterIds.forEach(id => {
@@ -686,11 +703,80 @@
                 }
             });
 
-            const favoriCheckbox = document.getElementById('filter-favori');
-            if (favoriCheckbox) {
-                favoriCheckbox.addEventListener('change', () => {
+            // Pills de statut
+            const statutPills = document.querySelectorAll('#filter-statut-pills .pill');
+            if (statutPills.length) {
+                statutPills.forEach(pill => {
+                    pill.addEventListener('click', () => {
+                        const value = pill.dataset.value || '';
+                        const hiddenInput = document.getElementById('filter-statut');
+                        if (hiddenInput) {
+                            hiddenInput.value = value;
+                        }
+                        statutPills.forEach(p => p.classList.remove('active'));
+                        pill.classList.add('active');
+                        updateAdvancedFiltersBadge();
+                        debouncedApplyFilters();
+                    });
+                });
+            }
+
+            // Mise à jour des labels des jauges
+            const securitySliderMin = document.getElementById('filter-security-min');
+            const securitySliderMax = document.getElementById('filter-security-max');
+            const seoSliderMin = document.getElementById('filter-seo-min');
+            const seoSliderMax = document.getElementById('filter-seo-max');
+            const securityLabelMin = document.getElementById('filter-security-min-value');
+            const securityLabelMax = document.getElementById('filter-security-max-value');
+            const seoLabelMin = document.getElementById('filter-seo-min-value');
+            const seoLabelMax = document.getElementById('filter-seo-max-value');
+
+            function formatScoreMinLabel(value) {
+                const v = parseInt(value, 10) || 0;
+                if (v <= 0) return '0 (tous)';
+                if (v >= 75) return `≥ ${v} (excellent)`;
+                if (v >= 50) return `≥ ${v} (bon)`;
+                if (v >= 25) return `≥ ${v} (moyen)`;
+                return `≥ ${v}`;
+            }
+
+            function formatScoreMaxLabel(value) {
+                const v = parseInt(value, 10) || 100;
+                if (v >= 100) return '100 (tous)';
+                if (v <= 25) return `≤ ${v} (risqué)`;
+                if (v <= 50) return `≤ ${v} (moyen)`;
+                return `≤ ${v}`;
+            }
+
+            if (securitySliderMin && securityLabelMin) {
+                securityLabelMin.textContent = formatScoreMinLabel(securitySliderMin.value);
+                securitySliderMin.addEventListener('input', () => {
+                    securityLabelMin.textContent = formatScoreMinLabel(securitySliderMin.value);
                     updateAdvancedFiltersBadge();
-                    debouncedApplyFilters();
+                });
+            }
+
+            if (securitySliderMax && securityLabelMax) {
+                securityLabelMax.textContent = formatScoreMaxLabel(securitySliderMax.value);
+                securitySliderMax.addEventListener('input', () => {
+                    securityLabelMax.textContent = formatScoreMaxLabel(securitySliderMax.value);
+                    updateAdvancedFiltersBadge();
+                });
+            }
+
+            if (seoSliderMin && seoLabelMin) {
+                seoLabelMin.textContent = formatScoreMinLabel(seoSliderMin.value);
+                seoSliderMin.addEventListener('input', () => {
+                    seoLabelMin.textContent = formatScoreMinLabel(seoSliderMin.value);
+                    updateAdvancedFiltersBadge();
+                });
+            }
+
+            if (seoSliderMax && seoLabelMax) {
+                seoLabelMax.textContent = formatScoreMaxLabel(seoSliderMax.value);
+                seoSliderMax.addEventListener('input', () => {
+                    seoLabelMax.textContent = formatScoreMaxLabel(seoSliderMax.value);
+                    updateAdvancedFiltersBadge();
                 });
             }
             
@@ -730,21 +816,17 @@
             let count = 0;
             const secteur = document.getElementById('filter-secteur')?.value;
             const statut = document.getElementById('filter-statut')?.value;
-            const opportunite = document.getElementById('filter-opportunite')?.value;
-            const favori = document.getElementById('filter-favori')?.checked;
             const securityMin = document.getElementById('filter-security-min')?.value;
             const securityMax = document.getElementById('filter-security-max')?.value;
-            const pentestMin = document.getElementById('filter-pentest-min')?.value;
-            const pentestMax = document.getElementById('filter-pentest-max')?.value;
+            const seoMin = document.getElementById('filter-seo-min')?.value;
+            const seoMax = document.getElementById('filter-seo-max')?.value;
 
             if (secteur) count += 1;
             if (statut) count += 1;
-            if (opportunite) count += 1;
-            if (favori) count += 1;
-            if (securityMin) count += 1;
-            if (securityMax) count += 1;
-            if (pentestMin) count += 1;
-            if (pentestMax) count += 1;
+            if (securityMin && parseInt(securityMin, 10) > 0) count += 1;
+            if (securityMax && parseInt(securityMax, 10) < 100) count += 1;
+            if (seoMin && parseInt(seoMin, 10) > 0) count += 1;
+            if (seoMax && parseInt(seoMax, 10) < 100) count += 1;
 
             if (count > 0) {
                 badge.textContent = String(count);
