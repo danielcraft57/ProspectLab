@@ -239,6 +239,33 @@ Analyse OSINT d'un site / organisation, avec enrichissement des personnes.
 
 **Note:** Les personnes enrichies sont automatiquement sauvegardées dans la table `personnes` avec les données OSINT.
 
+### seo_tasks.py
+
+#### seo_analysis_task
+Analyse SEO complète d'un site (meta tags, structure HTML, sitemap, robots.txt, Lighthouse).
+
+**Paramètres :**
+- `url` : URL du site
+- `entreprise_id` : ID entreprise (optionnel)
+- `use_lighthouse` : Utiliser Lighthouse si disponible (bool)
+
+**Retour :**
+```python
+{
+    'success': True,
+    'url': url,
+    'entreprise_id': entreprise_id,
+    'analysis_id': analysis_id,
+    'summary': {...},
+    'score': 0-100,
+    'updated': False
+}
+```
+
+**Notes :**
+- Les résultats sont sauvegardés dans `analyses_seo` + tables normalisées (`analysis_seo_meta_tags`, `analysis_seo_headers`, `analysis_seo_issues`, …) via `SEOManager`.
+- La modale entreprise consomme `/api/entreprise/<id>/analyse-seo` et réutilise ce résultat pour afficher le **Score SEO global**, la structure de la page et les problèmes SEO clés.
+
 ## Suivi temps reel (WebSocket + OSINT)
 
 ProspectLab expose la progression des taches Celery en temps reel via WebSocket, pour le scraping, l analyse technique et l OSINT.  

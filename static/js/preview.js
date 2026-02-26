@@ -107,18 +107,19 @@
     // Section pour l'avancement de l'analyse Pentest
     const pentestProgressContainer = document.createElement('div');
     pentestProgressContainer.id = 'pentest-progress-container';
-    pentestProgressContainer.style.cssText = 'margin-top: 1.5rem; padding: 1.25rem; background: #ffffff; border-radius: 10px; border: 1px solid #f8d7da; border-left: 5px solid #c0392b; display: none; box-shadow: 0 6px 16px rgba(17,24,39,0.08);';
+    // Style adapté au thème sombre (fond sombre + bordure rouge atténuée)
+    pentestProgressContainer.style.cssText = 'margin-top: 1.5rem; padding: 1.25rem; background: rgba(15,23,42,0.95); border-radius: 10px; border: 1px solid rgba(248,113,113,0.35); border-left: 5px solid #ef4444; display: none; box-shadow: 0 8px 20px rgba(15,23,42,0.9);';
 
     const pentestProgressTitleRow = document.createElement('div');
     pentestProgressTitleRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem;';
 
     const pentestProgressTitle = document.createElement('div');
-    pentestProgressTitle.style.cssText = 'font-weight: 700; color: #111827;';
+    pentestProgressTitle.style.cssText = 'font-weight: 700; color: #e5e7eb;';
     pentestProgressTitle.textContent = 'Analyse Pentest';
 
     const pentestProgressCountBadge = document.createElement('div');
     pentestProgressCountBadge.id = 'pentest-progress-count';
-    pentestProgressCountBadge.style.cssText = 'background: #fdecea; color: #c0392b; border: 1px solid #e6a1a1; padding: 0.25rem 0.6rem; border-radius: 999px; font-size: 0.85rem; font-weight: 700; white-space: nowrap;';
+    pentestProgressCountBadge.style.cssText = 'background: rgba(239,68,68,0.15); color: #fecaca; border: 1px solid rgba(248,113,113,0.6); padding: 0.25rem 0.6rem; border-radius: 999px; font-size: 0.85rem; font-weight: 700; white-space: nowrap;';
     pentestProgressCountBadge.textContent = '0 / 0 entreprises';
 
     pentestProgressTitleRow.appendChild(pentestProgressTitle);
@@ -128,19 +129,19 @@
     pentestCurrentLabelRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.5rem;';
 
     const pentestCurrentLabel = document.createElement('div');
-    pentestCurrentLabel.style.cssText = 'font-size: 0.85rem; color: #6b7280; font-weight: 600;';
+    pentestCurrentLabel.style.cssText = 'font-size: 0.85rem; color: #9ca3af; font-weight: 600;';
     pentestCurrentLabel.textContent = 'Entreprise en cours :';
 
     const pentestCurrentInfo = document.createElement('div');
     pentestCurrentInfo.id = 'pentest-current-info';
-    pentestCurrentInfo.style.cssText = 'font-size: 0.85rem; color: #111827; font-weight: 500; flex: 1; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+    pentestCurrentInfo.style.cssText = 'font-size: 0.85rem; color: #e5e7eb; font-weight: 500; flex: 1; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
     pentestCurrentInfo.textContent = '';
 
     pentestCurrentLabelRow.appendChild(pentestCurrentLabel);
     pentestCurrentLabelRow.appendChild(pentestCurrentInfo);
 
     const pentestCurrentBar = document.createElement('div');
-    pentestCurrentBar.style.cssText = 'width: 100%; height: 18px; background: #e5e7eb; border-radius: 10px; overflow: hidden; margin-bottom: 0.75rem; position: relative;';
+    pentestCurrentBar.style.cssText = 'width: 100%; height: 18px; background: rgba(15,23,42,0.8); border-radius: 10px; overflow: hidden; margin-bottom: 0.75rem; position: relative;';
 
     const pentestCurrentFill = document.createElement('div');
     pentestCurrentFill.id = 'pentest-current-fill';
@@ -158,19 +159,19 @@
     pentestTotalLabelRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.5rem;';
 
     const pentestTotalLabel = document.createElement('div');
-    pentestTotalLabel.style.cssText = 'font-size: 0.85rem; color: #6b7280; font-weight: 600;';
+    pentestTotalLabel.style.cssText = 'font-size: 0.85rem; color: #9ca3af; font-weight: 600;';
     pentestTotalLabel.textContent = 'Progression globale :';
 
     const pentestTotalInfo = document.createElement('div');
     pentestTotalInfo.id = 'pentest-total-info';
-    pentestTotalInfo.style.cssText = 'font-size: 0.85rem; color: #111827; font-weight: 500; flex: 1; text-align: right;';
+    pentestTotalInfo.style.cssText = 'font-size: 0.85rem; color: #e5e7eb; font-weight: 500; flex: 1; text-align: right;';
     pentestTotalInfo.textContent = '';
 
     pentestTotalLabelRow.appendChild(pentestTotalLabel);
     pentestTotalLabelRow.appendChild(pentestTotalInfo);
 
     const pentestTotalBar = document.createElement('div');
-    pentestTotalBar.style.cssText = 'width: 100%; height: 18px; background: #e5e7eb; border-radius: 10px; overflow: hidden; margin-bottom: 0.75rem; position: relative;';
+    pentestTotalBar.style.cssText = 'width: 100%; height: 18px; background: rgba(15,23,42,0.8); border-radius: 10px; overflow: hidden; margin-bottom: 0.75rem; position: relative;';
 
     const pentestTotalFill = document.createElement('div');
     pentestTotalFill.id = 'pentest-total-fill';
@@ -187,15 +188,15 @@
     // Section pour les totaux cumulés Pentest (similaire à OSINT)
     const pentestCumulativeBox = document.createElement('div');
     pentestCumulativeBox.id = 'pentest-cumulative-box';
-    pentestCumulativeBox.style.cssText = 'background: #fef2f2; padding: 0.85rem 1rem; border-radius: 8px; border: 1px solid #fecaca; border-left: 4px solid #dc2626; margin-top: 0.75rem;';
+    pentestCumulativeBox.style.cssText = 'background: rgba(30,64,175,0.12); padding: 0.85rem 1rem; border-radius: 8px; border: 1px solid rgba(59,130,246,0.4); border-left: 4px solid #3b82f6; margin-top: 0.75rem;';
     
     const pentestCumulativeLabel = document.createElement('div');
-    pentestCumulativeLabel.style.cssText = 'font-size: 0.78rem; color: #991b1b; font-weight: 800; margin-bottom: 0.35rem; text-transform: uppercase; letter-spacing: 0.6px;';
+    pentestCumulativeLabel.style.cssText = 'font-size: 0.78rem; color: #bfdbfe; font-weight: 800; margin-bottom: 0.35rem; text-transform: uppercase; letter-spacing: 0.6px;';
     pentestCumulativeLabel.textContent = 'Total cumulé';
     
     const pentestCumulativeContent = document.createElement('div');
     pentestCumulativeContent.id = 'pentest-cumulative-content';
-    pentestCumulativeContent.style.cssText = 'color: #111827; font-size: 0.95rem; font-weight: 700; line-height: 1.6; display: flex; flex-wrap: wrap; align-items: center;';
+    pentestCumulativeContent.style.cssText = 'color: #e5e7eb; font-size: 0.95rem; font-weight: 700; line-height: 1.6; display: flex; flex-wrap: wrap; align-items: center;';
     pentestCumulativeContent.textContent = '';
     
     pentestCumulativeBox.appendChild(pentestCumulativeLabel);
@@ -679,26 +680,27 @@
     // Section pour l'avancement de l'analyse technique
     const technicalProgressContainer = document.createElement('div');
     technicalProgressContainer.id = 'technical-progress-container';
-    technicalProgressContainer.style.cssText = 'margin-top: 1.5rem; padding: 1.25rem; background: #ffffff; border-radius: 10px; border: 1px solid #d1fae5; border-left: 5px solid #16a34a; display: none; box-shadow: 0 6px 16px rgba(17,24,39,0.08);';
+    // Fond sombre pour s'aligner avec le thème global
+    technicalProgressContainer.style.cssText = 'margin-top: 1.5rem; padding: 1.25rem; background: rgba(15,23,42,0.95); border-radius: 10px; border: 1px solid rgba(34,197,94,0.35); border-left: 5px solid #22c55e; display: none; box-shadow: 0 8px 20px rgba(15,23,42,0.9);';
     
     const technicalProgressTitleRow = document.createElement('div');
     technicalProgressTitleRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem;';
     
     const technicalProgressTitle = document.createElement('div');
-    technicalProgressTitle.style.cssText = 'font-weight: 700; color: #111827;';
+    technicalProgressTitle.style.cssText = 'font-weight: 700; color: #e5e7eb;';
     // Mettre en avant que cette analyse inclut aussi SEO (Lighthouse)
     technicalProgressTitle.textContent = 'Analyse technique + SEO en cours...';
     
     const technicalProgressCountBadge = document.createElement('div');
     technicalProgressCountBadge.id = 'technical-progress-count';
-    technicalProgressCountBadge.style.cssText = 'background: #dcfce7; color: #166534; border: 1px solid #86efac; padding: 0.25rem 0.6rem; border-radius: 999px; font-size: 0.85rem; font-weight: 700; white-space: nowrap;';
+    technicalProgressCountBadge.style.cssText = 'background: rgba(34,197,94,0.18); color: #bbf7d0; border: 1px solid rgba(74,222,128,0.7); padding: 0.25rem 0.6rem; border-radius: 999px; font-size: 0.85rem; font-weight: 700; white-space: nowrap;';
     technicalProgressCountBadge.textContent = '0 / 0 entreprises';
     
     technicalProgressTitleRow.appendChild(technicalProgressTitle);
     technicalProgressTitleRow.appendChild(technicalProgressCountBadge);
     
     const technicalProgressBar = document.createElement('div');
-    technicalProgressBar.style.cssText = 'width: 100%; height: 20px; background: #e5e7eb; border-radius: 12px; overflow: hidden; margin-bottom: 0.75rem; position: relative;';
+    technicalProgressBar.style.cssText = 'width: 100%; height: 20px; background: rgba(15,23,42,0.8); border-radius: 12px; overflow: hidden; margin-bottom: 0.75rem; position: relative;';
     
     const technicalProgressFill = document.createElement('div');
     technicalProgressFill.id = 'technical-progress-fill';
@@ -895,18 +897,19 @@
     // Section pour l'avancement de l'analyse OSINT
     const osintProgressContainer = document.createElement('div');
     osintProgressContainer.id = 'osint-progress-container';
-    osintProgressContainer.style.cssText = 'margin-top: 1.5rem; padding: 1.5rem; background: #ffffff; border-radius: 10px; border: 1px solid #d7e3f0; border-left: 5px solid #9333ea; display: none; box-shadow: 0 6px 16px rgba(17,24,39,0.08);';
+    // Fond et bordures adaptés au dark mode
+    osintProgressContainer.style.cssText = 'margin-top: 1.5rem; padding: 1.5rem; background: rgba(15,23,42,0.95); border-radius: 10px; border: 1px solid rgba(129,140,248,0.45); border-left: 5px solid #8b5cf6; display: none; box-shadow: 0 8px 20px rgba(15,23,42,0.9);';
     
     const osintProgressTitleRow = document.createElement('div');
     osintProgressTitleRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem;';
     
     const osintProgressTitle = document.createElement('div');
-    osintProgressTitle.style.cssText = 'font-weight: 700; color: #111827;';
+    osintProgressTitle.style.cssText = 'font-weight: 700; color: #e5e7eb;';
     osintProgressTitle.textContent = 'Analyse OSINT en cours...';
     
     const osintProgressCountBadge = document.createElement('div');
     osintProgressCountBadge.id = 'osint-progress-count';
-    osintProgressCountBadge.style.cssText = 'background: #f3e8ff; color: #6b21a8; border: 1px solid #c084fc; padding: 0.25rem 0.6rem; border-radius: 999px; font-size: 0.85rem; font-weight: 700; white-space: nowrap;';
+    osintProgressCountBadge.style.cssText = 'background: rgba(129,140,248,0.18); color: #ede9fe; border: 1px solid rgba(167,139,250,0.7); padding: 0.25rem 0.6rem; border-radius: 999px; font-size: 0.85rem; font-weight: 700; white-space: nowrap;';
     osintProgressCountBadge.textContent = '0 / 0 entreprises';
     
     osintProgressTitleRow.appendChild(osintProgressTitle);
@@ -917,19 +920,19 @@
     osintCurrentLabelRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.5rem;';
     
     const osintCurrentLabel = document.createElement('div');
-    osintCurrentLabel.style.cssText = 'font-size: 0.85rem; color: #6b7280; font-weight: 600;';
+    osintCurrentLabel.style.cssText = 'font-size: 0.85rem; color: #9ca3af; font-weight: 600;';
     osintCurrentLabel.textContent = 'Entreprise en cours :';
     
     const osintCurrentInfo = document.createElement('div');
     osintCurrentInfo.id = 'osint-current-info';
-    osintCurrentInfo.style.cssText = 'font-size: 0.85rem; color: #111827; font-weight: 500; flex: 1; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+    osintCurrentInfo.style.cssText = 'font-size: 0.85rem; color: #e5e7eb; font-weight: 500; flex: 1; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
     osintCurrentInfo.textContent = '';
     
     osintCurrentLabelRow.appendChild(osintCurrentLabel);
     osintCurrentLabelRow.appendChild(osintCurrentInfo);
     
     const osintCurrentBar = document.createElement('div');
-    osintCurrentBar.style.cssText = 'width: 100%; height: 18px; background: #e5e7eb; border-radius: 10px; overflow: hidden; margin-bottom: 0.75rem; position: relative;';
+    osintCurrentBar.style.cssText = 'width: 100%; height: 18px; background: rgba(15,23,42,0.8); border-radius: 10px; overflow: hidden; margin-bottom: 0.75rem; position: relative;';
     
     const osintCurrentFill = document.createElement('div');
     osintCurrentFill.id = 'osint-current-fill';
@@ -948,19 +951,19 @@
     osintTotalLabelRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.5rem;';
     
     const osintTotalLabel = document.createElement('div');
-    osintTotalLabel.style.cssText = 'font-size: 0.85rem; color: #6b7280; font-weight: 600;';
+    osintTotalLabel.style.cssText = 'font-size: 0.85rem; color: #9ca3af; font-weight: 600;';
     osintTotalLabel.textContent = 'Progression globale :';
     
     const osintTotalInfo = document.createElement('div');
     osintTotalInfo.id = 'osint-total-info';
-    osintTotalInfo.style.cssText = 'font-size: 0.85rem; color: #111827; font-weight: 500; flex: 1; text-align: right;';
+    osintTotalInfo.style.cssText = 'font-size: 0.85rem; color: #e5e7eb; font-weight: 500; flex: 1; text-align: right;';
     osintTotalInfo.textContent = '';
     
     osintTotalLabelRow.appendChild(osintTotalLabel);
     osintTotalLabelRow.appendChild(osintTotalInfo);
     
     const osintTotalBar = document.createElement('div');
-    osintTotalBar.style.cssText = 'width: 100%; height: 18px; background: #e5e7eb; border-radius: 10px; overflow: hidden; margin-bottom: 0.75rem; position: relative;';
+    osintTotalBar.style.cssText = 'width: 100%; height: 18px; background: rgba(15,23,42,0.8); border-radius: 10px; overflow: hidden; margin-bottom: 0.75rem; position: relative;';
     
     const osintTotalFill = document.createElement('div');
     osintTotalFill.id = 'osint-total-fill';
@@ -977,15 +980,15 @@
     // Section pour les totaux cumulés OSINT (similaire au scraping)
     const osintCumulativeBox = document.createElement('div');
     osintCumulativeBox.id = 'osint-cumulative-box';
-    osintCumulativeBox.style.cssText = 'background: #e9fbf1; padding: 0.85rem 1rem; border-radius: 8px; border: 1px solid #a7f3d0; border-left: 4px solid #16a34a; margin-top: 0.75rem;';
+    osintCumulativeBox.style.cssText = 'background: rgba(15,118,110,0.18); padding: 0.85rem 1rem; border-radius: 8px; border: 1px solid rgba(45,212,191,0.6); border-left: 4px solid #14b8a6; margin-top: 0.75rem;';
     
     const osintCumulativeLabel = document.createElement('div');
-    osintCumulativeLabel.style.cssText = 'font-size: 0.78rem; color: #166534; font-weight: 800; margin-bottom: 0.35rem; text-transform: uppercase; letter-spacing: 0.6px;';
+    osintCumulativeLabel.style.cssText = 'font-size: 0.78rem; color: #ccfbf1; font-weight: 800; margin-bottom: 0.35rem; text-transform: uppercase; letter-spacing: 0.6px;';
     osintCumulativeLabel.textContent = 'Total cumulé';
     
     const osintCumulativeContent = document.createElement('div');
     osintCumulativeContent.id = 'osint-cumulative-content';
-    osintCumulativeContent.style.cssText = 'color: #111827; font-size: 0.95rem; font-weight: 700; line-height: 1.6; display: flex; flex-wrap: wrap; align-items: center;';
+    osintCumulativeContent.style.cssText = 'color: #e5e7eb; font-size: 0.95rem; font-weight: 700; line-height: 1.6; display: flex; flex-wrap: wrap; align-items: center;';
     osintCumulativeContent.textContent = '';
     
     osintCumulativeBox.appendChild(osintCumulativeLabel);
