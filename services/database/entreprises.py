@@ -567,7 +567,12 @@ class EntrepriseManager(DatabaseBase):
                     FROM analyses_pentest
                     WHERE entreprise_id = e.id
                     ORDER BY date_analyse DESC
-                    LIMIT 1) as score_pentest
+                    LIMIT 1) as score_pentest,
+                   (SELECT score
+                    FROM analyses_seo
+                    WHERE entreprise_id = e.id
+                    ORDER BY date_analyse DESC
+                    LIMIT 1) as score_seo
             FROM entreprises e
             WHERE 1=1
         '''
@@ -679,7 +684,12 @@ class EntrepriseManager(DatabaseBase):
                     FROM analyses_pentest 
                     WHERE entreprise_id = e.id 
                     ORDER BY date_analyse DESC 
-                    LIMIT 1) as score_pentest
+                    LIMIT 1) as score_pentest,
+                   (SELECT score
+                    FROM analyses_seo
+                    WHERE entreprise_id = e.id
+                    ORDER BY date_analyse DESC
+                    LIMIT 1) as score_seo
             FROM entreprises e
             WHERE e.id = ?
         ''', (entreprise_id,))
