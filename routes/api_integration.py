@@ -312,7 +312,8 @@ def create_or_update_company_from_website():
     if not name:
         name = domain
 
-    # Statut normalisé
+    # Statut normalisé (nouvelle échelle : Nouveau, À qualifier, Relance, Gagné, Perdu)
+    # À la création, on force toujours "Nouveau". Les anciennes valeurs API (prospect/concurrent) ne sont plus utilisées.
     if status in ("prospect", "prospects"):
         statut_value = "Prospect"
     elif status in ("concurrent", "concurrents", "competition"):
@@ -328,10 +329,11 @@ def create_or_update_company_from_website():
         if existing_id:
             entreprise_id = existing_id
         else:
+            # Nouvelle entreprise : forcer statut = "Nouveau" (aucun email envoyé)
             entreprise_data = {
                 "name": name,
                 "website": website,
-                "statut": statut_value,
+                "statut": "Nouveau",
             }
             entreprise_id = database.save_entreprise(
                 analyse_id=None,
@@ -340,8 +342,8 @@ def create_or_update_company_from_website():
             )
             created = True
 
-        # Mettre à jour le statut et les tags si fournis
-        if statut_value:
+        # Mettre à jour le statut uniquement pour une entreprise existante (si le payload envoie une valeur reconnue)
+        if not created and statut_value:
             conn = database.get_connection()
             cursor = conn.cursor()
             database.execute_sql(

@@ -315,6 +315,15 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
             total_reussis=total_sent
         )
 
+        # En fin de campagne : passer en "Perdu" les entreprises restées Nouveau/À qualifier sans open ni clic
+        if final_statut == 'completed':
+            try:
+                marked_lost = campagne_manager.mark_campaign_lost_entreprises(campagne_id)
+                if marked_lost:
+                    logger.info(f'[Campagne {campagne_id}] {marked_lost} entreprise(s) passée(s) en statut Perdu (0 open, 0 clic)')
+            except Exception as e:
+                logger.warning(f'[Campagne {campagne_id}] mark_campaign_lost_entreprises: {e}')
+
         return {
             'success': True,
             'campagne_id': campagne_id,

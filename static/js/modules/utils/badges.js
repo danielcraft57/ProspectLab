@@ -70,11 +70,11 @@
         getStatusBadge(statut) {
             if (!statut) return '';
             const classes = {
-                'Prospect intéressant': 'success',
-                'À contacter': 'warning',
-                'En cours': 'info',
-                'Contacté': 'primary',
-                'Non intéressant': 'secondary'
+                'Nouveau': 'primary',
+                'À qualifier': 'warning',
+                'Relance': 'relance',
+                'Gagné': 'success',
+                'Perdu': 'danger'
             };
             const className = classes[statut] || 'secondary';
             return `<span class="badge badge-${className}">${statut}</span>`;
@@ -88,13 +88,13 @@
         getStatusClass(statut) {
             if (!statut) return '';
             const classes = {
-                'Prospect intéressant': 'status-success',
-                'À contacter': 'status-warning',
-                'En cours': 'status-info',
-                'Contacté': 'status-primary',
-                'Non intéressant': 'status-secondary'
+                'Nouveau': 'primary',
+                'À qualifier': 'warning',
+                'Relance': 'relance',
+                'Gagné': 'success',
+                'Perdu': 'danger'
             };
-            return classes[statut] || 'status-secondary';
+            return classes[statut] || 'secondary';
         }
     };
     

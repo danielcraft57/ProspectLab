@@ -44,7 +44,7 @@ http://votre-domaine.com/api/public
 - `limit` (int, optionnel) : Nombre maximum de résultats (défaut: 100, max: 1000)
 - `offset` (int, optionnel) : Offset pour la pagination (défaut: 0)
 - `secteur` (string, optionnel) : Filtrer par secteur
-- `statut` (string, optionnel) : Filtrer par statut
+- `statut` (string, optionnel) : Filtrer par statut commercial (`Nouveau`, `À qualifier`, `Relance`, `Gagné`, `Perdu`)
 - `search` (string, optionnel) : Recherche textuelle (nom, website)
 
 **Exemple de requête** :
@@ -66,7 +66,7 @@ curl -H "Authorization: Bearer votre_token" \
       "nom": "Entreprise Example",
       "website": "https://example.com",
       "secteur": "Informatique",
-      "statut": "Prospect intéressant",
+      "statut": "Nouveau",
       "email_principal": "contact@example.com",
       "telephone": "+33123456789",
       "address_1": "123 Rue Example",
@@ -101,7 +101,7 @@ curl -H "Authorization: Bearer votre_token" \
     "nom": "Entreprise Example",
     "website": "https://example.com",
     "secteur": "Informatique",
-    "statut": "Prospect intéressant",
+    "statut": "Nouveau",
     "email_principal": "contact@example.com",
     "telephone": "+33123456789",
     "address_1": "123 Rue Example",
@@ -325,13 +325,15 @@ curl -H "Authorization: Bearer votre_token" \
 
 **GET** `/api/public/statistics`
 
+Retourne un résumé global des données accessibles via l’API publique.
+
 **Exemple de requête** :
 ```bash
 curl -H "Authorization: Bearer votre_token" \
   "http://localhost:5000/api/public/statistics"
 ```
 
-**Réponse** :
+**Réponse** (exemple) :
 ```json
 {
   "success": true,
@@ -340,11 +342,14 @@ curl -H "Authorization: Bearer votre_token" \
     "total_entreprises": 250,
     "favoris": 15,
     "par_statut": {
-      "Prospect intéressant": 50,
-      "Client": 30
+      "Nouveau": 120,
+      "À qualifier": 60,
+      "Relance": 40,
+      "Gagné": 20,
+      "Perdu": 10
     },
     "par_secteur": {
-      "Informatique": 100,
+      "Technologie": 100,
       "Commerce": 50
     },
     "par_opportunite": {

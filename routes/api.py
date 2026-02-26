@@ -75,11 +75,25 @@ def statistics():
     """
     API: Statistiques globales
     
+    Query params:
+        days (int, optionnel): nombre de jours à considérer pour les stats temporelles
+            (emails, campagnes, prospects gagnés). Exemple: 7, 30, 90.
+    
     Returns:
         JSON: Statistiques de l'application
     """
     try:
-        stats = database.get_statistics()
+        days_param = request.args.get('days')
+        days = None
+        if days_param:
+            try:
+                days_val = int(days_param)
+                if days_val > 0:
+                    days = days_val
+            except ValueError:
+                days = None
+
+        stats = database.get_statistics(days=days)
         return jsonify(stats)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -432,16 +446,34 @@ def entreprise_notes(entreprise_id):
 def entreprise_favori(entreprise_id):
     """
     API: Basculer le statut favori d'une entreprise
-    
+
     Args:
         entreprise_id (int): ID de l'entreprise
-        
+
     Returns:
         JSON: Nouveau statut favori
     """
     try:
         is_favori = database.toggle_favori(entreprise_id)
         return jsonify({'success': True, 'favori': is_favori})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/entreprise/<int:entreprise_id>/statut', methods=['POST', 'PUT', 'PATCH'])
+@login_required
+def entreprise_statut(entreprise_id):
+    """
+    API: Met à jour le statut d'une entreprise (Gagné, Perdu, etc.)
+    Body: { "statut": "Gagné" } (Nouveau, À qualifier, Relance, Gagné, Perdu)
+    """
+    try:
+        data = request.get_json() or {}
+        statut = (data.get('statut') or '').strip()
+        if not statut:
+            return jsonify({'error': 'statut requis'}), 400
+        database.update_entreprise_statut(entreprise_id, statut)
+        return jsonify({'success': True, 'statut': statut})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

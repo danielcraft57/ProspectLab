@@ -81,7 +81,7 @@
                         ${createInfoRow('Nom', entrepriseData.nom)}
                         ${createInfoRow('Site web', entrepriseData.website, true)}
                         ${createInfoRow('Secteur', entrepriseData.secteur)}
-                        ${createInfoRow('Statut', entrepriseData.statut, false, getStatusBadge(entrepriseData.statut))}
+                        ${createInfoRow('Statut', entrepriseData.statut, false, getStatusBadge(entrepriseData.statut) + createStatutActionsHTML())}
                         ${createInfoRow('Opportunité', entrepriseData.opportunite)}
                         ${createInfoRow('Taille estimée', entrepriseData.taille_estimee)}
                     </div>
@@ -149,13 +149,23 @@
     function getStatusBadge(statut) {
         if (!statut) return '';
         const classes = {
-            'Prospect intéressant': 'success',
-            'À contacter': 'warning',
-            'En cours': 'info',
-            'Clos': 'secondary'
+            'Nouveau': 'primary',
+            'À qualifier': 'warning',
+            'Relance': 'relance',
+            'Gagné': 'success',
+            'Perdu': 'danger'
         };
         const class_name = classes[statut] || 'secondary';
         return `<span class="badge badge-${class_name}">${statut}</span>`;
+    }
+    
+    function createStatutActionsHTML() {
+        return `
+            <span class="statut-actions" style="margin-left:0.5rem;">
+                <button type="button" class="btn btn-small btn-success btn-statut" data-statut="Gagné" title="Prospect converti">Marquer comme gagné</button>
+                <button type="button" class="btn btn-small btn-secondary btn-statut" data-statut="Perdu" title="Prospect non converti">Marquer comme perdu</button>
+            </span>
+        `;
     }
     
     function createScrapersHTML(scrapers) {
@@ -327,6 +337,15 @@
             });
         }
         
+        // Statut (Marquer comme gagné / perdu)
+        document.getElementById('entreprise-detail').addEventListener('click', (e) => {
+            const btn = e.target.closest('.btn-statut');
+            if (btn) {
+                e.preventDefault();
+                updateStatut(btn.dataset.statut);
+            }
+        });
+        
         // Analyse technique
         const techBtn = document.getElementById('btn-load-tech-analysis');
         if (techBtn) {
@@ -349,6 +368,26 @@
         } catch (error) {
             console.error('Erreur lors du chargement de l\'analyse technique:', error);
             alert('Erreur lors du chargement de l\'analyse technique');
+        }
+    }
+    
+    async function updateStatut(statut) {
+        try {
+            const response = await fetch(`/api/entreprise/${entrepriseId}/statut`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ statut: statut })
+            });
+            const data = await response.json();
+            if (data.success) {
+                entrepriseData.statut = data.statut;
+                renderDetail();
+            } else {
+                alert(data.error || 'Erreur lors de la mise à jour du statut');
+            }
+        } catch (err) {
+            console.error(err);
+            alert('Erreur lors de la mise à jour du statut');
         }
     }
     

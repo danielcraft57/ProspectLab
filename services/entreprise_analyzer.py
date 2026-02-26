@@ -1027,13 +1027,9 @@ class EntrepriseAnalyzer:
             category
         )
         
-        if result.get('site_opportunity'):
-            if result['site_opportunity'] in ['Élevée', 'Moyenne']:
-                result['statut'] = 'Prospect intéressant'
-            else:
-                result['statut'] = 'À suivre'
-        else:
-            result['statut'] = 'À analyser'
+        # Statut initial de l'entreprise dans le pipeline commercial.
+        # Par défaut, toutes les nouvelles entreprises commencent en "Nouveau".
+        result['statut'] = 'Nouveau'
         
         return result
     

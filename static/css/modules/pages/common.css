@@ -438,6 +438,12 @@ body[data-theme="dark"] .score-range-input {
     color: #0c5460;
 }
 
+/* Statut Relance (orange) */
+.badge-relance {
+    background-color: #fd7e14;
+    color: white;
+}
+
 .badge-secondary {
     background: #e2e3e5;
     color: #383d41;
@@ -824,6 +830,11 @@ body[data-theme="dark"] .badge-danger {
 body[data-theme="dark"] .badge-info {
     background: #0c4a6e;
     color: #7dd3fc;
+}
+
+body[data-theme="dark"] .badge-relance {
+    background: #9a3412;
+    color: #fed7aa;
 }
 
 body[data-theme="dark"] .badge-secondary {

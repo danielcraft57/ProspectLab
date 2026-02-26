@@ -218,7 +218,7 @@ class EntrepriseManager(DatabaseBase):
             nom,
             website,
             secteur,
-            entreprise_data.get('statut'),
+            (entreprise_data.get('statut') or 'Nouveau'),
             entreprise_data.get('site_opportunity'),
             entreprise_data.get('email_principal'),
             entreprise_data.get('responsable'),
@@ -818,6 +818,23 @@ class EntrepriseManager(DatabaseBase):
         conn.commit()
         conn.close()
     
+    def update_entreprise_statut(self, entreprise_id, statut):
+        """
+        Met à jour le statut d'une entreprise (pipeline commercial).
+
+        Args:
+            entreprise_id: ID de l'entreprise
+            statut: Nouveau statut parmi Nouveau, À qualifier, Relance, Gagné, Perdu
+        """
+        allowed = {'Nouveau', 'À qualifier', 'Relance', 'Gagné', 'Perdu'}
+        if statut not in allowed:
+            return
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self.execute_sql(cursor, 'UPDATE entreprises SET statut = ? WHERE id = ?', (statut, entreprise_id))
+        conn.commit()
+        conn.close()
+
     def toggle_favori(self, entreprise_id):
         """
         Bascule le statut favori d'une entreprise
@@ -982,7 +999,7 @@ class EntrepriseManager(DatabaseBase):
         
         return stats
 
-    def get_statistics(self):
+    def get_statistics(self, days: int | None = None):
         """
         Récupère les statistiques globales de l'application.
         
@@ -994,6 +1011,17 @@ class EntrepriseManager(DatabaseBase):
         cursor = conn.cursor()
         
         stats = {}
+
+        # Calcul de la date minimale pour les statistiques temporelles (emails, campagnes, gagnés)
+        since = None
+        if days and days > 0:
+            try:
+                from datetime import datetime, timedelta
+                since_dt = datetime.utcnow() - timedelta(days=days)
+                # Format ISO compatible avec SQLite et PostgreSQL
+                since = since_dt.isoformat(sep=' ', timespec='seconds')
+            except Exception:
+                since = None
         
         # Total analyses
         try:
@@ -1053,6 +1081,171 @@ class EntrepriseManager(DatabaseBase):
             stats['par_opportunite'] = {row['opportunite']: row['count'] for row in cursor.fetchall()}
         except Exception:
             stats['par_opportunite'] = {}
+
+        # Secteurs les plus représentés parmi les prospects gagnés (optionnellement filtrés par période)
+        try:
+            base_sql = '''
+                SELECT secteur, COUNT(*) as count
+                FROM entreprises
+                WHERE statut = 'Gagné'
+                  AND secteur IS NOT NULL
+                  AND secteur != ''
+            '''
+            params = []
+            if since:
+                base_sql += ' AND date_analyse >= ?'
+                params.append(since)
+            base_sql += ' GROUP BY secteur ORDER BY count DESC LIMIT 5'
+
+            self.execute_sql(cursor, base_sql, params)
+            secteurs_gagnes = []
+            for row in cursor.fetchall():
+                d = dict(row)
+                secteurs_gagnes.append({
+                    'secteur': d.get('secteur'),
+                    'count': d.get('count', 0),
+                })
+            stats['secteurs_gagnes'] = secteurs_gagnes
+        except Exception:
+            stats['secteurs_gagnes'] = []
+
+        # Emails envoyés / ouverts / cliqués (toutes campagnes confondues, filtrables par période)
+        try:
+            sql = '''
+                SELECT COUNT(*) as count
+                FROM emails_envoyes
+                WHERE statut = 'sent'
+            '''
+            params: list[object] = []
+            if since:
+                sql += ' AND date_envoi >= ?'
+                params.append(since)
+
+            self.execute_sql(cursor, sql, params)
+            total_emails_sent = cursor.fetchone()['count']
+        except Exception:
+            total_emails_sent = 0
+
+        stats['emails_envoyes'] = total_emails_sent
+
+        total_emails_opened = 0
+        total_emails_clicked = 0
+        try:
+            # Emails qui ont au moins un open
+            sql_open = '''
+                SELECT COUNT(DISTINCT email_id) as count
+                FROM email_tracking_events
+                WHERE event_type = 'open'
+            '''
+            params_open: list[object] = []
+            if since:
+                sql_open += ' AND date_event >= ?'
+                params_open.append(since)
+
+            self.execute_sql(cursor, sql_open, params_open)
+            row = cursor.fetchone()
+            total_emails_opened = row['count'] if row and 'count' in row.keys() else 0
+        except Exception:
+            total_emails_opened = 0
+
+        try:
+            # Emails qui ont au moins un clic
+            sql_click = '''
+                SELECT COUNT(DISTINCT email_id) as count
+                FROM email_tracking_events
+                WHERE event_type = 'click'
+            '''
+            params_click: list[object] = []
+            if since:
+                sql_click += ' AND date_event >= ?'
+                params_click.append(since)
+
+            self.execute_sql(cursor, sql_click, params_click)
+            row = cursor.fetchone()
+            total_emails_clicked = row['count'] if row and 'count' in row.keys() else 0
+        except Exception:
+            total_emails_clicked = 0
+
+        stats['emails_ouverts'] = total_emails_opened
+        stats['emails_cliqués'] = total_emails_clicked
+
+        if total_emails_sent > 0:
+            stats['open_rate'] = round((total_emails_opened / total_emails_sent) * 100, 1)
+            stats['click_rate'] = round((total_emails_clicked / total_emails_sent) * 100, 1)
+        else:
+            stats['open_rate'] = 0.0
+            stats['click_rate'] = 0.0
+
+        # Campagnes email (optionnellement filtrées par période)
+        try:
+            sql_campagnes = 'SELECT COUNT(*) as count FROM campagnes_email'
+            params_campagnes: list[object] = []
+            if since:
+                sql_campagnes += ' WHERE date_creation >= ?'
+                params_campagnes.append(since)
+
+            self.execute_sql(cursor, sql_campagnes, params_campagnes)
+            stats['total_campagnes'] = cursor.fetchone()['count']
+        except Exception:
+            stats['total_campagnes'] = 0
+
+        # Dernières campagnes (vue synthétique)
+        try:
+            sql_recent_camp = '''
+                SELECT id, nom, statut, total_destinataires, total_envoyes, total_reussis, date_creation
+                FROM campagnes_email
+            '''
+            params_recent_camp: list[object] = []
+            if since:
+                sql_recent_camp += ' WHERE date_creation >= ?'
+                params_recent_camp.append(since)
+            sql_recent_camp += ' ORDER BY date_creation DESC LIMIT 5'
+
+            self.execute_sql(cursor, sql_recent_camp, params_recent_camp)
+            recent_campagnes = []
+            for row in cursor.fetchall():
+                d = dict(row)
+                recent_campagnes.append({
+                    'id': d.get('id'),
+                    'nom': d.get('nom'),
+                    'statut': d.get('statut'),
+                    'total_destinataires': d.get('total_destinataires'),
+                    'total_envoyes': d.get('total_envoyes'),
+                    'total_reussis': d.get('total_reussis'),
+                    'date_creation': d.get('date_creation'),
+                })
+            stats['recent_campagnes'] = recent_campagnes
+        except Exception:
+            stats['recent_campagnes'] = []
+
+        # Dernières entreprises gagnées (optionnellement filtrées par période)
+        try:
+            sql_recent_gagnes = '''
+                SELECT id, nom, secteur, website, statut, date_analyse
+                FROM entreprises
+                WHERE statut = 'Gagné'
+            '''
+            params_recent_gagnes: list[object] = []
+            if since:
+                sql_recent_gagnes += ' AND date_analyse >= ?'
+                params_recent_gagnes.append(since)
+            sql_recent_gagnes += ' ORDER BY date_analyse DESC LIMIT 5'
+
+            self.execute_sql(cursor, sql_recent_gagnes, params_recent_gagnes)
+            recent_gagnes = []
+            for row in cursor.fetchall():
+                d = dict(row)
+                recent_gagnes.append({
+                    'id': d.get('id'),
+                    'nom': d.get('nom'),
+                    'secteur': d.get('secteur'),
+                    'website': d.get('website'),
+                    'statut': d.get('statut'),
+                    'date_analyse': d.get('date_analyse'),
+                })
+            stats['recent_gagnes'] = recent_gagnes
+        except Exception:
+            stats['recent_gagnes'] = []
         
         conn.close()
         return stats
