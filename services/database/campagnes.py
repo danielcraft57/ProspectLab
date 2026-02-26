@@ -289,6 +289,20 @@ class CampagneManager(DatabaseBase):
         email_id = cursor.lastrowid
         conn.commit()
         conn.close()
+
+        # Mettre automatiquement à jour le statut de l'entreprise
+        # Pipeline: Nouveau -> À qualifier (au premier email envoyé)
+        try:
+            if entreprise_id:
+                self._update_entreprise_statut(
+                    entreprise_id,
+                    new_statut='À qualifier',
+                    allowed_previous={None, '', 'Nouveau'}
+                )
+        except Exception:
+            # Ne jamais casser l'envoi d'emails pour un problème de statut
+            pass
+
         return email_id
 
     def update_email_tracking_token(self, email_id, tracking_token):
@@ -383,7 +397,7 @@ class CampagneManager(DatabaseBase):
             conn.close()
             return None
 
-        self.execute_sql(cursor,'SELECT id FROM emails_envoyes WHERE tracking_token = ?', (tracking_token,))
+        self.execute_sql(cursor,'SELECT id, entreprise_id FROM emails_envoyes WHERE tracking_token = ?', (tracking_token,))
         row = cursor.fetchone()
         if not row:
             import logging
@@ -392,11 +406,15 @@ class CampagneManager(DatabaseBase):
             return None
 
         # Compatibilité SQLite (tuple) / PostgreSQL (dict-like)
+        email_id = None
+        entreprise_id = None
         try:
             if isinstance(row, dict):
                 email_id = row.get('id')
+                entreprise_id = row.get('entreprise_id')
             else:
                 email_id = row[0]
+                entreprise_id = row[1]
         except Exception:
             email_id = None
 
@@ -421,7 +439,162 @@ class CampagneManager(DatabaseBase):
         event_id = cursor.lastrowid
         conn.commit()
         conn.close()
+
+        # Mettre à jour automatiquement le statut de l'entreprise
+        try:
+            if entreprise_id:
+                if event_type == 'open':
+                    # Dès qu'un email est ouvert, passer en "Relance"
+                    self._update_entreprise_statut(
+                        entreprise_id,
+                        new_statut='Relance',
+                        allowed_previous={'Nouveau', 'À qualifier'}
+                    )
+                # Option 1 (prudente) : on ne passe pas automatiquement à Gagné sur clic.
+                # L'utilisateur marque manuellement "Marquer comme gagné" dans la fiche entreprise.
+                # elif event_type == 'click':
+                #     ...
+        except Exception:
+            # Ne pas impacter le tracking en cas de souci
+            pass
+
         return event_id
+
+    def _update_entreprise_statut(self, entreprise_id, new_statut, allowed_previous=None):
+        """
+        Met à jour le statut d'une entreprise si son statut courant
+        fait partie des valeurs autorisées.
+
+        Args:
+            entreprise_id (int): ID de l'entreprise
+            new_statut (str): Nouveau statut à appliquer
+            allowed_previous (set|None): Ensemble des statuts autorisés pour la transition.
+                Si None, le statut est toujours mis à jour.
+        """
+        if not entreprise_id:
+            return False
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        self.execute_sql(cursor, 'SELECT statut FROM entreprises WHERE id = ?', (entreprise_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return False
+
+        current = None
+        try:
+            if isinstance(row, dict):
+                current = row.get('statut')
+            else:
+                current = row[0]
+        except Exception:
+            current = None
+
+        if allowed_previous is not None and current not in allowed_previous:
+            conn.close()
+            return False
+
+        self.execute_sql(cursor, 'UPDATE entreprises SET statut = ? WHERE id = ?', (new_statut, entreprise_id))
+        conn.commit()
+        conn.close()
+        return True
+
+    def mark_campaign_lost_entreprises(self, campagne_id):
+        """
+        Pour toutes les entreprises de la campagne restées Nouveau ou À qualifier
+        avec 0 ouverture et 0 clic, met à jour le statut à "Perdu".
+        À appeler en fin de campagne (statut completed).
+
+        Args:
+            campagne_id (int): ID de la campagne
+
+        Returns:
+            int: Nombre d'entreprises passées en Perdu
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            self.execute_sql(cursor, "SELECT 1 FROM email_tracking_events LIMIT 1")
+        except Exception:
+            conn.close()
+            return 0
+
+        # Emails de la campagne avec leur entreprise_id
+        self.execute_sql(cursor, '''
+            SELECT id, entreprise_id FROM emails_envoyes
+            WHERE campagne_id = ? AND entreprise_id IS NOT NULL
+        ''', (campagne_id,))
+        rows = cursor.fetchall()
+        if not rows:
+            conn.close()
+            return 0
+
+        email_ids = []
+        entreprise_ids = set()
+        for row in rows:
+            eid = row['id'] if isinstance(row, dict) else row[0]
+            ent_id = row['entreprise_id'] if isinstance(row, dict) else row[1]
+            email_ids.append(eid)
+            if ent_id:
+                entreprise_ids.add(ent_id)
+
+        if not email_ids or not entreprise_ids:
+            conn.close()
+            return 0
+
+        placeholders = ','.join(['?'] * len(email_ids))
+
+        # Par email_id : compter les opens et clicks
+        self.execute_sql(cursor, f'''
+            SELECT email_id, event_type, COUNT(*) as cnt
+            FROM email_tracking_events
+            WHERE email_id IN ({placeholders}) AND event_type IN ('open', 'click')
+            GROUP BY email_id, event_type
+        ''', email_ids)
+        events = cursor.fetchall()
+
+        opens_by_email = {}
+        clicks_by_email = {}
+        for row in events:
+            eid = row['email_id'] if isinstance(row, dict) else row[0]
+            etype = row['event_type'] if isinstance(row, dict) else row[1]
+            cnt = row['cnt'] if isinstance(row, dict) else row[2]
+            if etype == 'open':
+                opens_by_email[eid] = opens_by_email.get(eid, 0) + cnt
+            else:
+                clicks_by_email[eid] = clicks_by_email.get(eid, 0) + cnt
+
+        # Par entreprise : somme des opens/clicks (tous les emails de cette campagne pour cette entreprise)
+        ent_opens = {}
+        ent_clicks = {}
+        for row in rows:
+            eid = row['id'] if isinstance(row, dict) else row[0]
+            ent_id = row['entreprise_id'] if isinstance(row, dict) else row[1]
+            if not ent_id:
+                continue
+            ent_opens[ent_id] = ent_opens.get(ent_id, 0) + opens_by_email.get(eid, 0)
+            ent_clicks[ent_id] = ent_clicks.get(ent_id, 0) + clicks_by_email.get(eid, 0)
+
+        # Entreprises dont le statut est Nouveau ou À qualifier et 0 open / 0 click
+        self.execute_sql(cursor, '''
+            SELECT id FROM entreprises
+            WHERE id IN (''' + ','.join(['?'] * len(entreprise_ids)) + ''')
+            AND statut IN ('Nouveau', 'À qualifier')
+        ''', list(entreprise_ids))
+        to_check = [row['id'] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
+
+        marked = 0
+        for ent_id in to_check:
+            if ent_opens.get(ent_id, 0) == 0 and ent_clicks.get(ent_id, 0) == 0:
+                self.execute_sql(cursor, 'UPDATE entreprises SET statut = ? WHERE id = ?', ('Perdu', ent_id))
+                marked += 1
+
+        conn.commit()
+        conn.close()
+        return marked
 
     def get_email_tracking_stats(self, email_id):
         """

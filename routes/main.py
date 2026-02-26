@@ -15,12 +15,13 @@ main_bp = Blueprint('main', __name__)
 @login_required
 def home():
     """
-    Page d'accueil après connexion
+    Page d'accueil après connexion.
+    Redirige vers le dashboard principal.
     
     Returns:
-        str: Template HTML de la page d'accueil
+        Response: Redirection vers le dashboard
     """
-    return render_page('home.html')
+    return redirect(url_for('main.dashboard'))
 
 
 @main_bp.route('/dashboard')

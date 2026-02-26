@@ -4,104 +4,99 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<style>
-    #map {
-        height: 600px;
-        width: 100%;
-        border-radius: 8px;
-        margin-top: 1rem;
-    }
-    
-    .map-controls {
-        background: white;
-        padding: 1rem;
-        border-radius: 8px;
-        margin-bottom: 1rem;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    
-    .controls-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 1rem;
-    }
-    
-    .info-popup {
-        max-width: 250px;
-    }
-    
-    .info-popup h4 {
-        margin: 0 0 0.5rem 0;
-        color: #2c3e50;
-    }
-    
-    .info-popup p {
-        margin: 0.25rem 0;
-        font-size: 0.9rem;
-    }
-    
-    .distance-badge {
-        background: #667eea;
-        color: white;
-        padding: 0.25rem 0.5rem;
-        border-radius: 4px;
-        font-size: 0.85rem;
-        display: inline-block;
-        margin-top: 0.5rem;
-    }
-</style>
 {% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <h1>Carte des entreprises</h1>
-    <p>Visualisation géographique et analyse de concurrence</p>
-</div>
+<div class="carte-page">
+    <div class="carte-page-header">
+        <h1>Carte des entreprises</h1>
+        <p>Visualisez vos prospects sur la carte, sélectionnez-les et regroupez-les pour vos campagnes</p>
+    </div>
 
-<div class="map-controls">
-    <div class="controls-grid">
+    <div class="carte-controls">
         <div class="form-group">
             <label for="filter-secteur">Secteur</label>
             <select id="filter-secteur" class="form-select">
                 <option value="">Tous les secteurs</option>
             </select>
         </div>
-        
         <div class="form-group">
-            <label for="search-radius">Rayon de recherche (km)</label>
-            <input type="number" id="search-radius" class="form-input" value="10" min="1" max="100" step="1">
+            <label for="search-radius">Rayon (km)</label>
+            <input type="number" id="search-radius" class="form-input" value="10" min="1" max="100" step="1" title="Rayon de recherche">
         </div>
-        
         <div class="form-group">
             <label for="search-lat">Latitude</label>
             <input type="number" id="search-lat" class="form-input" step="any" placeholder="Ex: 49.1193">
         </div>
-        
         <div class="form-group">
             <label for="search-lng">Longitude</label>
             <input type="number" id="search-lng" class="form-input" step="any" placeholder="Ex: 6.1757">
         </div>
-        
         <div class="form-group" style="display: flex; align-items: flex-end;">
-            <button id="btn-search-nearby" class="btn btn-primary">Rechercher les entreprises proches</button>
+            <button type="button" id="btn-search-nearby" class="btn btn-primary">
+                <i class="fas fa-search-location" aria-hidden="true"></i> Rechercher à proximité
+            </button>
         </div>
-        
         <div class="form-group" style="display: flex; align-items: flex-end;">
-            <button id="btn-load-all" class="btn btn-secondary">Charger toutes les entreprises</button>
+            <button type="button" id="btn-load-all" class="btn btn-secondary">
+                <i class="fas fa-map-marked-alt" aria-hidden="true"></i> Charger toutes
+            </button>
         </div>
     </div>
-</div>
 
-<div id="map"></div>
+    <div class="carte-main">
+        <div id="map"></div>
 
-<div id="results-info" style="margin-top: 1rem; padding: 1rem; background: #f8f9fa; border-radius: 8px; display: none;">
-    <h3 id="results-count">0 entreprise(s) trouvée(s)</h3>
-    <div id="results-list"></div>
+        <aside id="carte-sidebar" class="carte-sidebar" aria-label="Liste des entreprises">
+            <div class="carte-results-header">
+                <div class="carte-sidebar-header">
+                    <span id="results-count" class="carte-results-count"><span class="count-num">0</span> entreprise(s)</span>
+                    <button type="button" class="carte-sidebar-toggle" id="sidebar-toggle" aria-label="Réduire / agrandir le panneau">
+                        <i class="fas fa-chevron-right" aria-hidden="true"></i>
+                    </button>
+                </div>
+                <div class="carte-selection-toggle-wrap">
+                    <button type="button" class="carte-selection-toggle" id="selection-mode-toggle" aria-pressed="false">
+                        <i class="fas fa-check-double" aria-hidden="true"></i> Mode sélection
+                    </button>
+                </div>
+                <div id="selection-bar" class="carte-selection-bar" role="region" aria-label="Actions sur la sélection">
+                    <span class="selection-label" id="selection-label">0 sélectionnée(s)</span>
+                    <div class="carte-groups-dropdown">
+                        <button type="button" class="btn-add-to-group" id="btn-add-to-group" aria-haspopup="true" aria-expanded="false">
+                            <i class="fas fa-layer-group" aria-hidden="true"></i> Ajouter au groupe
+                        </button>
+                        <div id="groups-dropdown-panel" class="carte-groups-dropdown-panel" role="menu" hidden>
+                            <div id="groups-dropdown-list"></div>
+                            <div id="groups-dropdown-empty" class="carte-groups-dropdown-empty" style="display: none;">Aucun groupe. Créez-en un ci-dessous.</div>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-create-group" id="btn-create-group">
+                        <i class="fas fa-plus-circle" aria-hidden="true"></i> Créer un groupe
+                    </button>
+                    <button type="button" class="btn-clear-selection" id="btn-clear-selection">Tout désélectionner</button>
+                </div>
+            </div>
+            <div id="carte-create-group-inline" class="carte-create-group-form" style="display: none; padding: 0.5rem 1rem; border-bottom: 1px solid var(--carte-sidebar-border, #e2e8f0);">
+                <input type="text" id="new-group-name" class="form-input" placeholder="Nom du nouveau groupe" maxlength="120" autocomplete="off">
+                <button type="button" class="btn btn-primary" id="btn-confirm-create-group">Créer</button>
+                <button type="button" class="btn btn-secondary" id="btn-cancel-create-group">Annuler</button>
+            </div>
+            <div class="carte-sidebar-body">
+                <div id="results-list" class="carte-results-list"></div>
+                <div id="results-empty" class="carte-sidebar-empty">
+                    <i class="fas fa-map-marker-alt" aria-hidden="true"></i>
+                    <p>Cliquez sur « Charger toutes » ou définissez un point et « Rechercher à proximité » pour afficher les entreprises sur la carte.</p>
+                </div>
+            </div>
+        </aside>
+    </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="{{ url_for('static', filename='js/modules/utils/notifications.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/entreprises/api.js') }}"></script>
 <script src="{{ url_for('static', filename='js/carte_entreprises.js') }}" defer></script>
 {% endblock %}
-
