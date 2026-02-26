@@ -10,10 +10,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "[*] Wrapper Kali: installation des outils SEO..."
 
-if [ -f "$SCRIPT_DIR/../install_seo_tools_bookworm.sh" ]; then
-  bash "$SCRIPT_DIR/../install_seo_tools_bookworm.sh"
+if [ -f "$SCRIPT_DIR/../bookworm/install_seo_tools_bookworm.sh" ]; then
+  bash "$SCRIPT_DIR/../bookworm/install_seo_tools_bookworm.sh"
 else
-  echo "[✗] Script source introuvable: $SCRIPT_DIR/../install_seo_tools_bookworm.sh"
+  echo "[✗] Script source introuvable: $SCRIPT_DIR/../bookworm/install_seo_tools_bookworm.sh"
   exit 1
 fi
+
+echo "[*] Installation SEO terminée pour Kali."
 

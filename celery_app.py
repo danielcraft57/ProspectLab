@@ -44,11 +44,14 @@ celery.conf.update(
     task_time_limit=CELERY_TASK_TIME_LIMIT,
     task_soft_time_limit=CELERY_TASK_SOFT_TIME_LIMIT,
     # Importer automatiquement les tâches
+    # Important : inclure explicitement toutes les tâches spécialisées
     imports=(
         'tasks.analysis_tasks',
         'tasks.scraping_tasks',
         'tasks.technical_analysis_tasks',
         'tasks.osint_tasks',
+        'tasks.pentest_tasks',
+        'tasks.seo_tasks',
         'tasks.email_tasks',
         'tasks.cleanup_tasks',
     ),

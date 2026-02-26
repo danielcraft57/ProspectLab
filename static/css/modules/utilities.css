@@ -717,6 +717,154 @@
     }
 }
 
+/* ---------- Détails d'analyse SEO (modale entreprise + pages SEO) ---------- */
+
+.seo-details {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    font-size: 0.95rem;
+}
+
+.seo-score-section {
+    background: linear-gradient(135deg, #1d4ed8 0%, #7c3aed 100%);
+    border-radius: 12px;
+    padding: 1.5rem 1.75rem;
+    color: #e5e7eb;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.35);
+}
+
+.seo-score-section h3 {
+    margin: 0 0 0.75rem 0;
+    font-size: 1.1rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.seo-summary-main {
+    margin-top: 0.75rem;
+    font-size: 0.95rem;
+    opacity: 0.92;
+}
+
+.score-display {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.4rem 0.9rem;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 1rem;
+    background: rgba(15, 23, 42, 0.2);
+    border: 1px solid rgba(226, 232, 240, 0.35);
+}
+
+.score-display .score-value {
+    min-width: 70px;
+    text-align: center;
+}
+
+.score-display.score-excellent {
+    background: rgba(34, 197, 94, 0.16);
+    border-color: rgba(74, 222, 128, 0.6);
+}
+
+.score-display.score-good {
+    background: rgba(59, 130, 246, 0.16);
+    border-color: rgba(96, 165, 250, 0.6);
+}
+
+.score-display.score-medium {
+    background: rgba(234, 179, 8, 0.16);
+    border-color: rgba(250, 204, 21, 0.6);
+}
+
+.score-display.score-low {
+    background: rgba(248, 113, 113, 0.16);
+    border-color: rgba(248, 113, 113, 0.7);
+}
+
+.seo-section {
+    background: #f9fafb;
+    border-radius: 10px;
+    border: 1px solid #e5e7eb;
+    padding: 1.25rem 1.5rem;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+}
+
+.seo-section + .seo-section {
+    margin-top: 0.75rem;
+}
+
+.seo-section h3 {
+    margin: 0 0 0.75rem 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #111827;
+    border-bottom: 1px solid #e5e7eb;
+    padding-bottom: 0.25rem;
+}
+
+.meta-tags-list,
+.structure-list,
+.lighthouse-scores,
+.issues-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.meta-tags-list dt {
+    font-weight: 600;
+    margin-top: 0.5rem;
+    color: #374151;
+}
+
+.meta-tags-list dd {
+    margin: 0;
+    font-size: 0.92rem;
+    color: #4b5563;
+}
+
+.structure-list li,
+.lighthouse-scores li {
+    margin-bottom: 0.4rem;
+    font-size: 0.92rem;
+    color: #374151;
+}
+
+.issues-list li {
+    margin-bottom: 0.45rem;
+    padding: 0.45rem 0.6rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+}
+
+.issues-list li.issue-info {
+    background: #eff6ff;
+    color: #1d4ed8;
+}
+
+.issues-list li.issue-warning {
+    background: #fffbeb;
+    color: #92400e;
+}
+
+.issues-list li.issue-error {
+    background: #fef2f2;
+    color: #b91c1c;
+}
+
+.issues-list .impact-low {
+    color: #16a34a;
+}
+.issues-list .impact-medium {
+    color: #eab308;
+}
+.issues-list .impact-high {
+    color: #ef4444;
+}
+
 @keyframes tabs-scroll-hint {
     0% { transform: translateX(0); }
     20% { transform: translateX(-6px); }
@@ -1284,6 +1432,49 @@ body[data-theme="dark"] .entreprise-modal-tabs .entreprise-image-card {
     background: #020617 !important;
     border: 1px solid #1e293b !important;
     box-shadow: 0 4px 14px rgba(15, 23, 42, 0.7) !important;
+}
+
+/* Mode dark - détails SEO dans la modale entreprise */
+body[data-theme="dark"] .seo-details {
+    gap: 1.5rem;
+}
+
+body[data-theme="dark"] .seo-score-section {
+    background: linear-gradient(135deg, #1d4ed8 0%, #7c3aed 100%);
+    color: #e5e7eb;
+    box-shadow: 0 10px 28px rgba(15, 23, 42, 0.9);
+}
+
+body[data-theme="dark"] .seo-section {
+    background: #020617;
+    border-color: #1e293b;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.75);
+}
+
+body[data-theme="dark"] .seo-section h3 {
+    color: #e5e7eb;
+    border-bottom-color: #1e293b;
+}
+
+body[data-theme="dark"] .meta-tags-list dd,
+body[data-theme="dark"] .structure-list li,
+body[data-theme="dark"] .lighthouse-scores li {
+    color: #cbd5f5;
+}
+
+body[data-theme="dark"] .issues-list li.issue-info {
+    background: rgba(37, 99, 235, 0.18);
+    color: #bfdbfe;
+}
+
+body[data-theme="dark"] .issues-list li.issue-warning {
+    background: rgba(234, 179, 8, 0.18);
+    color: #facc15;
+}
+
+body[data-theme="dark"] .issues-list li.issue-error {
+    background: rgba(248, 113, 113, 0.18);
+    color: #fecaca;
 }
 
 /* Mode dark - contenu scraping / pages / résultats dans la modale entreprise */

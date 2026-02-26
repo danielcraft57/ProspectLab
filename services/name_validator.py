@@ -1,8 +1,12 @@
 """
-Module de validation des noms et prénoms humains
-Filtre les noms invalides (lieux, entreprises, etc.)
+Module de validation des noms et prénoms humains.
+Filtre les noms invalides (lieux, entreprises, tech, UI, etc.).
 
-Utilise probablepeople et nameparser si disponibles pour une meilleure détection.
+Dépendances optionnelles (pour une meilleure détection) :
+- probablepeople : détection Person vs Corporation
+- nameparser : parsing prénom / nom
+- gender-guesser : exige que le prénom soit un prénom connu (rejette "React", "Choisir", etc.)
+  Installer avec : pip install gender-guesser
 """
 
 import re
@@ -22,7 +26,7 @@ except ImportError:
     NAMEPARSER_AVAILABLE = False
 
 
-# Mots-clés à exclure (lieux, entreprises, fonctions, etc.)
+# Mots-clés à exclure (lieux, entreprises, fonctions, tech, UI, etc.)
 EXCLUDED_KEYWORDS = {
     # Lieux géographiques
     'nord', 'sud', 'est', 'ouest', 'centre', 'lorraine', 'metz', 'longwy', 'thionville',
@@ -30,38 +34,48 @@ EXCLUDED_KEYWORDS = {
     'bordeaux', 'lille', 'rennes', 'reims', 'saint', 'sainte', 'ville', 'rue', 'avenue',
     'boulevard', 'place', 'quartier', 'zone', 'region', 'departement', 'pays', 'france',
     'talange', 'jarny', 'carlo', 'chanzy', 'behren', 'ferry', 'magny', 'bar', 'mis',
-    
     # Types d'entreprises/organisations
     'greta', 'cfa', 'afpa', 'formation', 'academie', 'ecole', 'universite', 'institut',
     'centre', 'organisme', 'association', 'entreprise', 'societe', 'sarl', 'sas', 'sa',
-    'eurl', 'auto', 'entreprise', 'business', 'company', 'corp', 'ltd', 'inc', 'groupe',
-    
-    # Mots liés à la formation/éducation
-    'formation', 'adultes', 'jeune', 'particulier', 'publics', 'coiffure', 'tourisme',
-    'industrie', 'educatif', 'petite', 'routiers', 'retrouvez', 'bilan', 'orientation',
-    'humaines', 'titre', 'lieu', 'aucune', 'eiffel', 'zay', 'reiser', 'mondon', 'schuman',
+    'eurl', 'auto', 'business', 'company', 'corp', 'ltd', 'inc', 'groupe',
+    # Formation/éducation
+    'adultes', 'jeune', 'particulier', 'publics', 'coiffure', 'tourisme', 'industrie',
+    'educatif', 'petite', 'routiers', 'retrouvez', 'bilan', 'orientation', 'humaines',
+    'titre', 'lieu', 'aucune', 'eiffel', 'zay', 'reiser', 'mondon', 'schuman',
     'sergent', 'blandan', 'emile', 'levassor', 'bois', 'jules', 'lemagny',
-    
     # Fonctions/titres
     'directeur', 'directrice', 'manager', 'responsable', 'chef', 'secretaire', 'comptable',
-    'webmaster', 'community', 'manager', 'dessinateur', 'projeteur', 'formateur', 'formatrice',
+    'webmaster', 'community', 'dessinateur', 'projeteur', 'formateur', 'formatrice',
     'enseignant', 'enseignante', 'professeur', 'professeure', 'docteur', 'docteure',
     'madame', 'monsieur', 'mme', 'm.', 'mr', 'mrs', 'ms',
-    
-    # Mots techniques
+    # Tech / dev / UI (faux positifs fréquents dans les scrapers)
     'application', 'mobile', 'web', 'site', 'distanciel', 'hybride', 'presentiel',
     'nom', 'prenom', 'envoyer', 'envoyez', 'contact', 'info', 'information',
     'service', 'client', 'support', 'aide', 'help', 'assistance',
-    
-    # Couleurs (souvent utilisées dans les noms de produits/services)
+    'react', 'vue', 'angular', 'node', 'python', 'javascript', 'typescript', 'laravel',
+    'php', 'java', 'ruby', 'rails', 'django', 'flask', 'frontend', 'backend', 'dev',
+    'data', 'machine', 'learning', 'deep', 'engine', 'console', 'search', 'optimization',
+    'mesure', 'rate', 'policy', 'premiers', 'sain', 'choisir', 'des', 'dans', 'pas',
+    'lien', 'aller', 'sur', 'like', 'page', 'section', 'article', 'menu', 'nav',
+    'click', 'submit', 'button', 'input', 'form', 'login', 'signup', 'cookie',
+    'analytics', 'tracking', 'dashboard', 'api', 'sdk', 'framework', 'library',
+    # Couleurs
     'cyan', 'magenta', 'black', 'white', 'red', 'blue', 'green', 'yellow',
-    
-    # Autres mots invalides
+    # Autres
     'plan', 'plans', 'drem', 'autre', 'autres', 'divers', 'misc', 'general', 'generale',
     'admin', 'administrateur', 'administratrice', 'system', 'systeme', 'tech', 'technique',
     'test', 'demo', 'exemple', 'sample', 'default', 'defaut', 'null', 'none', 'vide',
     'espace', 'jean', 'pierre', 'marie', 'paul', 'sophie'
 }
+
+# Détection optionnelle des prénoms connus (pip install gender-guesser)
+try:
+    import gender_guesser.detector as gender_detector
+    _gender_detector = gender_detector.Detector()
+    GENDER_GUESSER_AVAILABLE = True
+except ImportError:
+    _gender_detector = None
+    GENDER_GUESSER_AVAILABLE = False
 
 
 def is_valid_human_name(name: str) -> bool:
@@ -168,9 +182,21 @@ def is_valid_human_name(name: str) -> bool:
                 if not parsed.first and not parsed.last:
                     return False
         except Exception:
-            # Si nameparser échoue, continuer avec les autres vérifications
             pass
-    
+
+    # Si gender_guesser est dispo et que le nom est un seul mot (prénom), exiger un prénom reconnu
+    if GENDER_GUESSER_AVAILABLE and _gender_detector:
+        words = name.split()
+        if len(words) == 1:
+            gender = _gender_detector.get_gender(words[0])
+            if gender == 'unknown':
+                return False
+        elif len(words) >= 2:
+            # Pour une paire prénom nom, le premier mot doit être un prénom connu
+            gender = _gender_detector.get_gender(words[0])
+            if gender == 'unknown':
+                return False
+
     return True
 
 

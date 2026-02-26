@@ -10,10 +10,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "[*] Wrapper Kali: installation des outils Social OSINT..."
 
-if [ -f "$SCRIPT_DIR/../install_social_tools_bookworm.sh" ]; then
-  bash "$SCRIPT_DIR/../install_social_tools_bookworm.sh"
+if [ -f "$SCRIPT_DIR/../bookworm/install_social_tools_bookworm.sh" ]; then
+  bash "$SCRIPT_DIR/../bookworm/install_social_tools_bookworm.sh"
 else
-  echo "[✗] Script source introuvable: $SCRIPT_DIR/../install_social_tools_bookworm.sh"
+  echo "[✗] Script source introuvable: $SCRIPT_DIR/../bookworm/install_social_tools_bookworm.sh"
   exit 1
 fi
+
+echo "[*] Installation Social OSINT terminée pour Kali."
 

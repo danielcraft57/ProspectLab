@@ -49,6 +49,14 @@ Sans cela, en production avec PostgreSQL, les tables `scrapers`, `images`, `entr
 - Les blocs de résultats (OSINT, Pentest, technique, SEO, scraping) ont été harmonisés en **mode sombre** : cartes résumées, badges, tags, tableaux et blocs de détail n'utilisent plus de fonds clairs fixes (inline styles), le CSS dark override force un rendu cohérent.
 - L'onglet « Analyse SEO » de la modale consomme maintenant l'API `/api/entreprise/<id>/analyse-seo` et réutilise le rendu détaillé de la page d'analyses SEO (`renderSEOExpertise`) directement dans la modale entreprise.
 
+## Validation des noms/prénoms et faux positifs (fév. 2026)
+
+- Le module `services/name_validator.py` a été renforcé :
+  - **Liste d'exclusion élargie** (`EXCLUDED_KEYWORDS`) pour filtrer les mots techniques / UI fréquents : `react`, `vue`, `node`, `python`, `frontend`, `backend`, `data`, `machine`, `console`, `search`, `optimization`, `premiers`, `sain`, `choisir`, `des`, `dans`, `page`, `section`, `menu`, `nav`, etc.
+  - Utilisation optionnelle de **gender-guesser** (si installé) pour rejeter les noms dont le premier mot **n'est pas un prénom connu** (évite par ex. `Choisir / Des`, `React / Frontend`, etc.).
+  - Toujours basé sur `probablepeople` (Person vs Corporation) et `nameparser` pour la structure prénom/nom quand ces bibliothèques sont disponibles.
+- Les extractions de personnes dans `services/unified_scraper.py`, `services/email_analyzer.py` et `tasks/scraping_tasks.py` s'appuient sur ces règles : beaucoup de faux positifs ne sont plus insérés dans `personnes` (meilleure qualité pour les filtres « prénom/nom » et pour les analyses OSINT).
+
 ## Templates et déploiement
 
 - Les pages HTML sont centralisées dans `templates/pages/` ; les doublons à la racine de `templates/` ont été supprimés. Le helper `render_page('nom.html')` charge d'abord `pages/nom.html`.
