@@ -28,6 +28,12 @@
     flex-direction: column;
 }
 
+.filter-label {
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+    color: #555;
+}
+
 .filter-group label {
     margin-bottom: 0.5rem;
     font-weight: 500;
@@ -169,6 +175,146 @@
     font-size: 0.85rem;
     color: #6b7280;
     align-self: center;
+}
+
+/* Pills de statut (statut entreprise) */
+.status-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.status-pills .pill {
+    padding: 0.35rem 0.85rem;
+    border-radius: 999px;
+    border: 1px solid #e5e7eb;
+    background: #f9fafb;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: #4b5563;
+    cursor: pointer;
+    transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+.status-pills .pill:hover {
+    background: #eef2ff;
+    border-color: #6366f1;
+    color: #111827;
+    transform: translateY(-1px);
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
+}
+
+.status-pills .pill.active {
+    background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+    border-color: #4f46e5;
+    color: #f9fafb;
+    box-shadow: 0 3px 10px rgba(79, 70, 229, 0.35);
+}
+
+/* Jauges de score (sécurité / SEO) */
+.score-slider {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.score-slider-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.score-slider-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.8rem;
+    color: #6b7280;
+}
+
+.score-slider-value {
+    font-weight: 600;
+    color: #111827;
+}
+
+.score-range-input {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 6px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #4ade80 0%, #22c55e 40%, #facc15 70%, #ef4444 100%);
+    outline: none;
+    cursor: pointer;
+    box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.35);
+}
+
+.score-range-input::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #ffffff;
+    border: 2px solid #4f46e5;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.4);
+    transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+
+.score-range-input::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #ffffff;
+    border: 2px solid #4f46e5;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.4);
+    transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+
+.score-range-input::-webkit-slider-thumb:hover,
+.score-range-input::-moz-range-thumb:hover {
+    transform: scale(1.05);
+    box-shadow: 0 3px 8px rgba(15, 23, 42, 0.5);
+    border-color: #6366f1;
+}
+
+.score-slider-scale {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.7rem;
+    color: #9ca3af;
+}
+
+/* Dark mode - filtres avancés (pills + jauges) */
+body[data-theme="dark"] .status-pills .pill {
+    background: #020617;
+    border-color: #1e293b;
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] .status-pills .pill:hover {
+    background: #1e293b;
+    border-color: #4f46e5;
+    color: #f9fafb;
+}
+
+body[data-theme="dark"] .status-pills .pill.active {
+    background: linear-gradient(135deg, #4f46e5 0%, #312e81 100%);
+    border-color: #4f46e5;
+    color: #f9fafb;
+    box-shadow: 0 3px 14px rgba(79, 70, 229, 0.6);
+}
+
+body[data-theme="dark"] .score-slider-value {
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] .score-slider-scale {
+    color: #9ca3af;
+}
+
+body[data-theme="dark"] .score-range-input {
+    box-shadow: inset 0 0 0 1px rgba(30, 64, 175, 0.6);
 }
 
 .results-section {

@@ -1377,12 +1377,15 @@
                 const labelText = data.entreprise || data.url || data.message || 'En cours...';
                 pentestCurrentInfo.textContent = labelText.length > 40 ? `${labelText.slice(0, 37)}...` : labelText;
                 
-                // Afficher les totaux cumulés Pentest
-                const cumulativeTotals = data.cumulative_totals || {};
+                // Afficher les totaux cumulés Pentest.
+                // Important : si un évènement de progression n'embarque pas à nouveau
+                // `cumulative_totals`, on NE touche pas à la box pour ne pas effacer
+                // les valeurs déjà affichées.
                 const pentestCumulativeContent = document.getElementById('pentest-cumulative-content');
                 const pentestCumulativeBox = document.getElementById('pentest-cumulative-box');
-                
-                if (pentestCumulativeContent && pentestCumulativeBox && cumulativeTotals) {
+
+                if (pentestCumulativeContent && pentestCumulativeBox && Object.prototype.hasOwnProperty.call(data, 'cumulative_totals')) {
+                    const cumulativeTotals = data.cumulative_totals || {};
                     const badges = [];
                     
                     if (cumulativeTotals.vulnerabilities > 0) {
@@ -1403,13 +1406,10 @@
                     
                     if (badges.length > 0) {
                         pentestCumulativeContent.innerHTML = badges.join('');
-                        pentestCumulativeBox.style.display = 'block';
                     } else {
                         pentestCumulativeContent.innerHTML = '<span style="color: #6b7280; font-size: 0.9rem; font-style: italic;">Aucune donnée collectée pour le moment</span>';
-                        pentestCumulativeBox.style.display = 'block';
                     }
-                } else if (pentestCumulativeBox) {
-                    pentestCumulativeBox.style.display = 'none';
+                    pentestCumulativeBox.style.display = 'block';
                 }
             });
 

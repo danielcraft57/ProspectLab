@@ -559,7 +559,8 @@ class EntrepriseManager(DatabaseBase):
 
         has_security_filters = filters and any(filters.get(k) is not None for k in ('security_min', 'security_max'))
         has_pentest_filters = filters and any(filters.get(k) is not None for k in ('pentest_min', 'pentest_max'))
-        wrap_subquery = has_security_filters or has_pentest_filters
+        has_seo_filters = filters and any(filters.get(k) is not None for k in ('seo_min', 'seo_max'))
+        wrap_subquery = has_security_filters or has_pentest_filters or has_seo_filters
 
         inner_query = '''
             SELECT e.*,
@@ -615,6 +616,13 @@ class EntrepriseManager(DatabaseBase):
                 if filters.get('pentest_max') is not None:
                     query += ' AND (sub.score_pentest IS NOT NULL AND sub.score_pentest <= ?)'
                     params.append(filters['pentest_max'])
+            if has_seo_filters:
+                if filters.get('seo_min') is not None:
+                    query += ' AND (sub.score_seo IS NOT NULL AND sub.score_seo >= ?)'
+                    params.append(filters['seo_min'])
+                if filters.get('seo_max') is not None:
+                    query += ' AND (sub.score_seo IS NOT NULL AND sub.score_seo <= ?)'
+                    params.append(filters['seo_max'])
             query += ' ORDER BY sub.favori DESC, sub.date_analyse DESC'
         else:
             query = inner_query + ' ORDER BY e.favori DESC, e.date_analyse DESC'

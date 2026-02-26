@@ -44,74 +44,106 @@
                 </select>
             </div>
 
+            <!-- Statut: pills interactifs plutôt qu'une simple liste déroulante -->
             <div class="filter-group">
-                <label for="filter-statut">Statut</label>
-                <select id="filter-statut" class="form-select">
-                    <option value="">Tous les statuts</option>
-                    <option value="Prospect intéressant">Prospect intéressant</option>
-                    <option value="À contacter">À contacter</option>
-                    <option value="En cours">En cours</option>
-                    <option value="Clos">Clos</option>
-                </select>
+                <label class="filter-label">Statut</label>
+                <div id="filter-statut-pills" class="status-pills">
+                    <button type="button" class="pill active" data-value="">Tous</button>
+                    <button type="button" class="pill" data-value="Prospect intéressant">Prospect intéressant</button>
+                    <button type="button" class="pill" data-value="À contacter">À contacter</button>
+                    <button type="button" class="pill" data-value="En cours">En cours</button>
+                    <button type="button" class="pill" data-value="Clos">Clos</button>
+                </div>
+                <!-- Champ caché utilisé par le JS pour construire les filtres -->
+                <input type="hidden" id="filter-statut" value="">
             </div>
 
+            <!-- Jauges de score sécurité (min / max) -->
             <div class="filter-group">
-                <label for="filter-opportunite">Opportunité</label>
-                <select id="filter-opportunite" class="form-select">
-                    <option value="">Toutes les opportunités</option>
-                    <option value="Très élevée">Très élevée</option>
-                    <option value="Élevée">Élevée</option>
-                    <option value="Moyenne">Moyenne</option>
-                    <option value="Faible">Faible</option>
-                    <option value="Très faible">Très faible</option>
-                </select>
+                <label class="filter-label" for="filter-security-min">Score sécurité</label>
+                <div class="score-slider">
+                    <div class="score-slider-row">
+                        <div class="score-slider-header">
+                            <span class="score-slider-label">À partir de</span>
+                            <span id="filter-security-min-value" class="score-slider-value">0 (tous)</span>
+                        </div>
+                        <input
+                            type="range"
+                            id="filter-security-min"
+                            min="0"
+                            max="100"
+                            step="5"
+                            value="0"
+                            class="score-range-input"
+                        >
+                    </div>
+                    <div class="score-slider-row">
+                        <div class="score-slider-header">
+                            <span class="score-slider-label">Jusqu'à</span>
+                            <span id="filter-security-max-value" class="score-slider-value">100 (tous)</span>
+                        </div>
+                        <input
+                            type="range"
+                            id="filter-security-max"
+                            min="0"
+                            max="100"
+                            step="5"
+                            value="100"
+                            class="score-range-input"
+                        >
+                    </div>
+                    <div class="score-slider-scale">
+                        <span>0</span>
+                        <span>25</span>
+                        <span>50</span>
+                        <span>75</span>
+                        <span>100</span>
+                    </div>
+                </div>
             </div>
 
+            <!-- Jauges de score SEO (min / max) -->
             <div class="filter-group">
-                <label>
-                    <input type="checkbox" id="filter-favori">
-                    Favoris uniquement
-                </label>
-            </div>
-            <div class="filter-group">
-                <label for="filter-security-min">Sécurité (min)</label>
-                <select id="filter-security-min" class="form-select" title="Score sécurité minimal (0-100)">
-                    <option value="">Toute</option>
-                    <option value="0">0 - 24</option>
-                    <option value="25">25 - 49</option>
-                    <option value="50">50 - 74</option>
-                    <option value="75">75 - 100</option>
-                </select>
-            </div>
-            <div class="filter-group">
-                <label for="filter-security-max">Sécurité (max)</label>
-                <select id="filter-security-max" class="form-select" title="Score sécurité maximal (0-100)">
-                    <option value="">Toute</option>
-                    <option value="24">0 - 24</option>
-                    <option value="49">25 - 49</option>
-                    <option value="74">50 - 74</option>
-                    <option value="100">75 - 100</option>
-                </select>
-            </div>
-            <div class="filter-group">
-                <label for="filter-pentest-min">Pentest (min)</label>
-                <select id="filter-pentest-min" class="form-select" title="Score pentest (risque) minimal (0-100)">
-                    <option value="">Toute</option>
-                    <option value="0">0 - 24</option>
-                    <option value="25">25 - 49</option>
-                    <option value="50">50 - 74</option>
-                    <option value="75">75 - 100</option>
-                </select>
-            </div>
-            <div class="filter-group">
-                <label for="filter-pentest-max">Pentest (max)</label>
-                <select id="filter-pentest-max" class="form-select" title="Score pentest (risque) maximal (0-100)">
-                    <option value="">Toute</option>
-                    <option value="24">0 - 24</option>
-                    <option value="49">25 - 49</option>
-                    <option value="74">50 - 74</option>
-                    <option value="100">75 - 100</option>
-                </select>
+                <label class="filter-label" for="filter-seo-min">Score SEO</label>
+                <div class="score-slider">
+                    <div class="score-slider-row">
+                        <div class="score-slider-header">
+                            <span class="score-slider-label">À partir de</span>
+                            <span id="filter-seo-min-value" class="score-slider-value">0 (tous)</span>
+                        </div>
+                        <input
+                            type="range"
+                            id="filter-seo-min"
+                            min="0"
+                            max="100"
+                            step="5"
+                            value="0"
+                            class="score-range-input"
+                        >
+                    </div>
+                    <div class="score-slider-row">
+                        <div class="score-slider-header">
+                            <span class="score-slider-label">Jusqu'à</span>
+                            <span id="filter-seo-max-value" class="score-slider-value">100 (tous)</span>
+                        </div>
+                        <input
+                            type="range"
+                            id="filter-seo-max"
+                            min="0"
+                            max="100"
+                            step="5"
+                            value="100"
+                            class="score-range-input"
+                        >
+                    </div>
+                    <div class="score-slider-scale">
+                        <span>0</span>
+                        <span>25</span>
+                        <span>50</span>
+                        <span>75</span>
+                        <span>100</span>
+                    </div>
+                </div>
             </div>
         </div>
 

@@ -122,7 +122,9 @@ def entreprises():
         security_max (int): Score sécurité maximal (0-100)
         pentest_min (int): Score pentest (risk_score) minimal (0-100)
         pentest_max (int): Score pentest (risk_score) maximal (0-100)
-
+        seo_min (int): Score SEO minimal (0-100)
+        seo_max (int): Score SEO maximal (0-100)
+    
     Returns:
         JSON: Liste des entreprises
     """
@@ -138,11 +140,14 @@ def entreprises():
             'security_max': request.args.get('security_max', type=int),
             'pentest_min': request.args.get('pentest_min', type=int),
             'pentest_max': request.args.get('pentest_max', type=int),
+            'seo_min': request.args.get('seo_min', type=int),
+            'seo_max': request.args.get('seo_max', type=int),
         }
         # Ne pas retirer les entiers 0 (valides pour min/max)
         def keep_filter(k, v):
-            if v is None: return False
-            if k in ('security_min', 'security_max', 'pentest_min', 'pentest_max'):
+            if v is None:
+                return False
+            if k in ('security_min', 'security_max', 'pentest_min', 'pentest_max', 'seo_min', 'seo_max'):
                 return 0 <= v <= 100
             return v != ''
         filters = {k: v for k, v in filters.items() if keep_filter(k, v)}
