@@ -1,6 +1,6 @@
 # Déploiement en production - ProspectLab
 
-Ce document décrit le déploiement complet de ProspectLab en production. Remplacez les exemples (nom de serveur, domaine, utilisateur) par vos propres valeurs.
+Ce document décrit le déploiement complet de ProspectLab en production. **Remplacez les noms de serveurs, domaines et utilisateurs (SERVEUR_APP, SERVEUR_PROXY, UTILISATEUR, etc.) par vos propres valeurs.**
 
 ## Architecture de production
 
@@ -24,13 +24,15 @@ PostgreSQL + Redis + Celery
 
 ## Étape 1 : Préparation du serveur application
 
-### 1.1. Installation des dépendances système
+### 1.1. Installation des dépendances système et Conda
+
+Conda (Miniconda ou Anaconda) est utilisé pour l'environnement Python en production.
 
 ```bash
 sudo apt update
-sudo apt install -y python3 python3-pip python3-venv python3-dev \
-    build-essential libpq-dev libssl-dev libffi-dev pkg-config \
+sudo apt install -y build-essential libpq-dev libssl-dev libffi-dev pkg-config \
     redis-server postgresql
+# Installer Miniconda pour l'utilisateur pi si besoin : https://docs.conda.io/en/latest/miniconda.html
 ```
 
 ### 1.2. Configuration PostgreSQL
@@ -72,13 +74,14 @@ cd /opt/prospectlab
 # Copier les fichiers du projet ici (via git clone, scp ou le script scripts/deploy_production.ps1 / .sh)
 ```
 
-Créer l'environnement virtuel :
+Créer l'environnement Conda (préfixe fixe pour systemd) :
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install --upgrade pip setuptools wheel
-pip install -r requirements.txt
+cd /opt/prospectlab
+source ~/miniconda3/etc/profile.d/conda.sh   # ou anaconda3
+conda create --prefix /opt/prospectlab/env python=3.11 -y
+/opt/prospectlab/env/bin/pip install --upgrade pip setuptools wheel
+/opt/prospectlab/env/bin/pip install -r requirements.txt
 ```
 
 ### 1.5. Configuration de l'environnement
@@ -112,8 +115,7 @@ python -c "import secrets; print(secrets.token_hex(32))"
 
 ```bash
 cd /opt/prospectlab
-source venv/bin/activate
-python -c "from services.database import Database; db = Database(); db.init_database(); print('Base initialisée')"
+/opt/prospectlab/env/bin/python -c "from services.database import Database; db = Database(); db.init_database(); print('Base initialisée')"
 ```
 
 ## Étape 2 : Configuration des services systemd
@@ -132,9 +134,9 @@ Type=simple
 User=pi
 Group=pi
 WorkingDirectory=/opt/prospectlab
-Environment=PATH=/opt/prospectlab/venv/bin
+Environment=PATH=/opt/prospectlab/env/bin
 EnvironmentFile=/opt/prospectlab/.env
-ExecStart=/opt/prospectlab/venv/bin/gunicorn -k eventlet -w 1 -b 0.0.0.0:5000 \
+ExecStart=/opt/prospectlab/env/bin/gunicorn -k eventlet -w 1 -b 0.0.0.0:5000 \
     --timeout 120 \
     --access-logfile /opt/prospectlab/logs/gunicorn_access.log \
     --error-logfile /opt/prospectlab/logs/gunicorn_error.log \
@@ -150,17 +152,7 @@ WantedBy=multi-user.target
 
 Créer le script `/opt/prospectlab/scripts/linux/start_celery_worker.sh` :
 
-```bash
-#!/bin/bash
-cd /opt/prospectlab
-source venv/bin/activate
-exec celery -A celery_app worker \
-    --loglevel=info \
-    --logfile=/opt/prospectlab/logs/celery_worker.log \
-    --pidfile=/opt/prospectlab/celery_worker.pid \
-    --pool=threads \
-    --concurrency=${CELERY_WORKERS:-6}
-```
+Le script `scripts/linux/start_celery_worker.sh` utilise déjà `/opt/prospectlab/env/bin/celery`. Aucune activation manuelle nécessaire.
 
 Rendre exécutable :
 
@@ -180,7 +172,7 @@ Type=simple
 User=pi
 Group=pi
 WorkingDirectory=/opt/prospectlab
-Environment=PATH=/opt/prospectlab/venv/bin
+Environment=PATH=/opt/prospectlab/env/bin
 EnvironmentFile=/opt/prospectlab/.env
 ExecStart=/opt/prospectlab/scripts/linux/start_celery_worker.sh
 Restart=always
@@ -204,9 +196,9 @@ Type=simple
 User=pi
 Group=pi
 WorkingDirectory=/opt/prospectlab
-Environment=PATH=/opt/prospectlab/venv/bin
+Environment=PATH=/opt/prospectlab/env/bin
 EnvironmentFile=/opt/prospectlab/.env
-ExecStart=/opt/prospectlab/venv/bin/celery -A celery_app beat \
+ExecStart=/opt/prospectlab/env/bin/celery -A celery_app beat \
     --loglevel=info \
     --logfile=/opt/prospectlab/logs/celery_beat.log \
     --pidfile=/opt/prospectlab/celery_beat.pid
@@ -217,7 +209,18 @@ RestartSec=10
 WantedBy=multi-user.target
 ```
 
-### 2.4. Activation des services
+### 2.4. Mise à jour des services (passage venv → Conda)
+
+Si les services pointaient encore vers `venv`, exécuter une fois sur le serveur :
+
+```bash
+cd /opt/prospectlab
+sudo bash scripts/linux/update_services_to_conda.sh --restart
+```
+
+Ce script réécrit les unités systemd avec les chemins `/opt/prospectlab/env` et recharge systemd. Le déploiement (`deploy_production.sh` / `.ps1`) l’appelle automatiquement à chaque déploiement.
+
+### 2.5. Activation des services
 
 ```bash
 sudo systemctl daemon-reload
@@ -431,8 +434,7 @@ sudo -u postgres psql prospectlab < /opt/prospectlab/backup_YYYYMMDD_HHMMSS.sql
 ```bash
 cd /opt/prospectlab
 git pull  # Si utilisation de git
-source venv/bin/activate
-pip install -r requirements.txt
+/opt/prospectlab/env/bin/pip install -r requirements.txt
 sudo systemctl restart prospectlab prospectlab-celery
 ```
 
@@ -497,6 +499,81 @@ sudo tail -f /var/log/nginx/error.log
 
 # Vérifier la résolution DNS
 ping <SERVEUR_APP>
+```
+
+### Problème : Erreur 502 Bad Gateway (Nginx sur SERVEUR_PROXY, app sur SERVEUR_APP)
+
+Une 502 signifie que Nginx ne peut pas joindre l’application. Vérifications dans l’ordre :
+
+**1. Sur le serveur application (SERVEUR_APP) : l’app écoute bien sur toutes les interfaces**
+
+```bash
+# Vérifier que Gunicorn écoute sur 0.0.0.0:5000 (pas seulement 127.0.0.1)
+ss -tlnp | grep 5000
+# Attendu : 0.0.0.0:5000
+
+# Vérifier le service et les logs
+sudo systemctl status prospectlab
+sudo journalctl -u prospectlab -n 30
+```
+
+Le service systemd doit lancer Gunicorn avec `-b 0.0.0.0:5000`. Si vous voyez `127.0.0.1:5000`, corrigez le fichier `/etc/systemd/system/prospectlab.service` (voir section 2.1 de ce document) puis `sudo systemctl daemon-reload && sudo systemctl restart prospectlab`.
+
+**2. Depuis le serveur proxy (SERVEUR_PROXY) : résolution et connectivité vers SERVEUR_APP**
+
+```bash
+# Sur le serveur proxy : résolution du nom du serveur app
+ping -c 1 SERVEUR_APP
+getent hosts SERVEUR_APP
+
+# Si le nom ne se résout pas, ajoutez dans /etc/hosts (sur le serveur proxy) :
+# IP_SERVEUR_APP  SERVEUR_APP
+
+# Test direct vers l'app (depuis le serveur proxy)
+curl -I http://SERVEUR_APP:5000/
+```
+
+**3. Pare-feu sur SERVEUR_APP**
+
+Le port 5000 doit être accepté depuis le serveur proxy (ou depuis tout le LAN). Exemple avec ufw :
+
+```bash
+# Sur le serveur application
+sudo ufw allow from IP_SERVEUR_PROXY to any port 5000
+# ou pour tout le réseau local
+sudo ufw allow from 192.168.0.0/16 to any port 5000
+sudo ufw reload
+```
+
+**4. Configuration Nginx sur SERVEUR_PROXY**
+
+`proxy_pass` doit pointer vers l’hôte et le port de l’app (ex. `http://SERVEUR_APP:5000`). Timeouts suffisants pour les longues requêtes :
+
+```nginx
+location / {
+    proxy_pass http://SERVEUR_APP:5000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_connect_timeout 300s;
+    proxy_send_timeout 300s;
+    proxy_read_timeout 300s;
+}
+```
+
+Après toute modification sur le serveur proxy : `sudo nginx -t && sudo systemctl reload nginx`.
+
+**5. Déploiement avec vérification et rechargement Nginx**
+
+Pour vérifier l’app après déploiement et recharger Nginx sur le proxy en une commande (remplacez SERVEUR_APP, UTILISATEUR, SERVEUR_PROXY, UTILISATEUR_PROXY par vos valeurs) :
+
+```bash
+# Bash (Linux / WSL)
+./scripts/deploy_production.sh SERVEUR_APP UTILISATEUR /opt/prospectlab SERVEUR_PROXY UTILISATEUR_PROXY
+
+# PowerShell (Windows)
+.\scripts\deploy_production.ps1 -Server SERVEUR_APP -User UTILISATEUR -RemotePath /opt/prospectlab -ProxyServer SERVEUR_PROXY -ProxyUser UTILISATEUR_PROXY
 ```
 
 ## Résumé de l'architecture finale

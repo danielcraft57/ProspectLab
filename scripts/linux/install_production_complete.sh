@@ -12,7 +12,7 @@ echo ""
 
 # Variables
 PROJECT_DIR="/opt/prospectlab"
-VENV_DIR="$PROJECT_DIR/venv"
+ENV_DIR="$PROJECT_DIR/env"
 SERVICE_USER="pi"
 
 echo "[*] Étape 1/7: Installation Redis avec plugins..."
@@ -73,12 +73,8 @@ fi
 echo ""
 echo "[*] Étape 2/7: Installation des dépendances système..."
 
-# Installation des dépendances système nécessaires
+# Dépendances système (conda fournit Python, mais build-essential etc. pour psycopg2/lxml)
 sudo apt-get install -y \
-    python3 \
-    python3-pip \
-    python3-venv \
-    python3-dev \
     build-essential \
     libpq-dev \
     libssl-dev \
@@ -88,32 +84,39 @@ sudo apt-get install -y \
 echo "[✓] Dépendances système installées"
 
 echo ""
-echo "[*] Étape 3/7: Création de l'environnement virtuel Python..."
+echo "[*] Étape 3/7: Environnement Conda (prefix=$ENV_DIR)..."
 
 cd "$PROJECT_DIR"
 
-# Créer le venv s'il n'existe pas
-if [ ! -d "$VENV_DIR" ]; then
-    python3 -m venv "$VENV_DIR"
-    echo "[✓] Environnement virtuel créé"
+# Sourcer Conda (miniconda3 ou anaconda3 dans le home de l'utilisateur)
+if [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
+    source "$HOME/miniconda3/etc/profile.d/conda.sh"
+elif [ -f "$HOME/anaconda3/etc/profile.d/conda.sh" ]; then
+    source "$HOME/anaconda3/etc/profile.d/conda.sh"
 else
-    echo "[✓] Environnement virtuel existe déjà"
+    echo "[!] Conda non trouvé. Installez Miniconda: https://docs.conda.io/en/latest/miniconda.html"
+    echo "    Puis relancez ce script."
+    exit 1
 fi
 
-# Activer le venv
-source "$VENV_DIR/bin/activate"
+# Créer l'environnement Conda avec préfixe fixe (conda-forge uniquement, évite CGU Anaconda)
+if [ ! -d "$ENV_DIR" ]; then
+    conda create --prefix "$ENV_DIR" python=3.11 -y --override-channels -c conda-forge
+    echo "[✓] Environnement Conda créé"
+else
+    echo "[✓] Environnement Conda existe déjà"
+fi
 
-# Mettre à jour pip
-pip install --upgrade pip setuptools wheel
+# Mettre à jour pip dans l'env
+"$ENV_DIR/bin/pip" install --upgrade pip setuptools wheel
 
-echo "[✓] Environnement virtuel configuré"
+echo "[✓] Environnement Conda configuré"
 
 echo ""
 echo "[*] Étape 4/7: Installation des dépendances Python..."
 
-# Installer les dépendances
 if [ -f "$PROJECT_DIR/requirements.txt" ]; then
-    pip install -r "$PROJECT_DIR/requirements.txt"
+    "$ENV_DIR/bin/pip" install -r "$PROJECT_DIR/requirements.txt"
     echo "[✓] Dépendances Python installées"
 else
     echo "[!] Erreur: requirements.txt introuvable"
@@ -252,9 +255,9 @@ Type=notify
 User=pi
 Group=pi
 WorkingDirectory=/opt/prospectlab
-Environment="PATH=/opt/prospectlab/venv/bin"
+Environment="PATH=/opt/prospectlab/env/bin"
 EnvironmentFile=/opt/prospectlab/.env
-ExecStart=/opt/prospectlab/venv/bin/gunicorn -k eventlet -w 1 -b 0.0.0.0:5000 --timeout 120 --access-logfile /opt/prospectlab/logs/gunicorn_access.log --error-logfile /opt/prospectlab/logs/gunicorn_error.log app:app
+ExecStart=/opt/prospectlab/env/bin/gunicorn -k eventlet -w 1 -b 0.0.0.0:5000 --timeout 120 --access-logfile /opt/prospectlab/logs/gunicorn_access.log --error-logfile /opt/prospectlab/logs/gunicorn_error.log app:app
 ExecReload=/bin/kill -s HUP $MAINPID
 Restart=always
 RestartSec=10
@@ -274,7 +277,7 @@ Type=forking
 User=pi
 Group=pi
 WorkingDirectory=/opt/prospectlab
-Environment="PATH=/opt/prospectlab/venv/bin"
+Environment="PATH=/opt/prospectlab/env/bin"
 EnvironmentFile=/opt/prospectlab/.env
 ExecStart=/opt/prospectlab/scripts/linux/start_celery_worker.sh
 ExecStop=/bin/kill -s TERM `cat /opt/prospectlab/celery_worker.pid 2>/dev/null` || true
@@ -296,8 +299,8 @@ Type=forking
 User=pi
 Group=pi
 WorkingDirectory=/opt/prospectlab
-Environment="PATH=/opt/prospectlab/venv/bin"
-ExecStart=/opt/prospectlab/venv/bin/celery -A celery_app beat --loglevel=info --logfile=/opt/prospectlab/logs/celery_beat.log --pidfile=/opt/prospectlab/celery_beat.pid --detach
+Environment="PATH=/opt/prospectlab/env/bin"
+ExecStart=/opt/prospectlab/env/bin/celery -A celery_app beat --loglevel=info --logfile=/opt/prospectlab/logs/celery_beat.log --pidfile=/opt/prospectlab/celery_beat.pid --detach
 ExecStop=/bin/kill -s TERM $MAINPID
 Restart=always
 RestartSec=10
@@ -342,6 +345,6 @@ echo "  sudo journalctl -u prospectlab -f"
 echo "  sudo journalctl -u prospectlab-celery -f"
 echo "  sudo journalctl -u prospectlab-celerybeat -f"
 echo ""
-echo "L'application sera accessible sur: http://node15.lan:5000"
+echo "L'application sera accessible sur: http://localhost:5000 (ou http://<hostname>:5000)"
 echo "=========================================="
 

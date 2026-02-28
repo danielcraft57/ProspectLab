@@ -6,6 +6,7 @@ Contient les méthodes pour la gestion des entreprises et leurs données OpenGra
 import json
 import math
 import logging
+from typing import Optional
 from urllib.parse import urljoin
 from .base import DatabaseBase
 

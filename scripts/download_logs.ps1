@@ -3,7 +3,7 @@
 
 param(
     [Parameter(Mandatory=$false)]
-    [string]$Server = 'node15.lan',
+    [string]$Server = 'serveur-app.lan',
     
     [Parameter(Mandatory=$false)]
     [string]$User = 'pi',

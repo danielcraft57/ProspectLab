@@ -1,12 +1,12 @@
 # Envoie uniquement templates/ et static/ vers le serveur (sans refaire tout le déploiement)
 # Usage: .\scripts\sync_templates_static.ps1 [serveur] [utilisateur]
-# Exemple: .\scripts\sync_templates_static.ps1 node15.lan pi
+# Exemple: .\scripts\sync_templates_static.ps1 serveur-app.lan deploy
 
 param(
     [Parameter(Mandatory=$false)]
-    [string]$Server = 'node15.lan',
+    [string]$Server = 'serveur-app.lan',
     [Parameter(Mandatory=$false)]
-    [string]$User = 'pi',
+    [string]$User = 'deploy',
     [Parameter(Mandatory=$false)]
     [string]$RemotePath = '/opt/prospectlab'
 )

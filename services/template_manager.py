@@ -45,7 +45,7 @@ class TemplateManager:
                     'subject': 'Développeur web freelance à Metz - Partenariat pour vos startups',
                     'content': """Bonjour,
 
-Je suis Loïc DANIEL, développeur web freelance basé à Metz, spécialisé en TypeScript, React et Node.js avec 10 ans d'expérience.
+Je suis {Votre nom}, développeur web freelance, spécialisé en TypeScript, React et Node.js.
 
 Je vois que {entreprise} accompagne de nombreuses startups et entreprises innovantes. Beaucoup d'entre elles ont besoin de sites web modernes, d'applications web ou d'optimisation de leurs outils numériques.
 
@@ -60,9 +60,9 @@ Pourriez-vous me mettre en relation avec des entreprises qui auraient des besoin
 Disponible pour un échange de 15 minutes cette semaine pour discuter d'un éventuel partenariat ?
 
 Cordialement,
-Loïc DANIEL
-Développeur web freelance
-danielcraft.fr""",
+{Votre nom}
+{Votre titre}
+{votre-site.example.com}""",
                     'created_at': datetime.now().isoformat(),
                     'updated_at': datetime.now().isoformat()
                 },
@@ -85,9 +85,9 @@ Je propose un audit gratuit de votre site actuel pour identifier les opportunit�
 Seriez-vous disponible pour un échange de 15 minutes cette semaine ?
 
 Cordialement,
-Loïc DANIEL
-Développeur web freelance
-danielcraft.fr""",
+{Votre nom}
+{Votre titre}
+{votre-site.example.com}""",
                     'created_at': datetime.now().isoformat(),
                     'updated_at': datetime.now().isoformat()
                 }

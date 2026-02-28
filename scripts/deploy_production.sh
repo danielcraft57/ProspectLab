@@ -4,9 +4,11 @@
 
 set -e
 
-# Configuration par défaut (modifiable via paramètres)
-SERVER="${1:-node15.lan}"
-USER="${2:-pi}"
+# Configuration par défaut (exemples — personnalisez en paramètres ou variables d'environnement)
+# Usage: ./deploy_production.sh [serveur_app] [utilisateur] [chemin] [serveur_proxy_nginx] [utilisateur_proxy]
+# Exemple: ./deploy_production.sh serveur-app.lan deploy /opt/prospectlab serveur-proxy.lan deploy
+SERVER="${1:-serveur-app.lan}"
+USER="${2:-deploy}"
 REMOTE_PATH="${3:-/opt/prospectlab}"
 
 # Obtenir le répertoire du projet ProspectLab (parent du dossier scripts)
@@ -105,14 +107,15 @@ find "$DEPLOY_DIR" -type d -name "logs_server" -exec rm -rf {} + 2>/dev/null || 
 echo "✅ Fichiers préparés"
 echo ""
 
-# Vérifier Python sur le serveur
-echo "[3/8] Vérification de Python..."
-PYTHON_VERSION=$(ssh "$USER@$SERVER" "python3 --version 2>&1 | head -1" || echo "")
-if [ -z "$PYTHON_VERSION" ]; then
-    echo "❌ Python3 n'est pas installé sur le serveur"
+# Vérifier Conda sur le serveur
+echo "[3/8] Vérification de Conda..."
+CONDA_CMD=$(ssh "$USER@$SERVER" "which conda 2>/dev/null || (source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null && which conda) || (source ~/anaconda3/etc/profile.d/conda.sh 2>/dev/null && which conda) || true" || echo "")
+if [ -z "$CONDA_CMD" ]; then
+    echo "❌ Conda n'est pas installé sur le serveur (miniconda3 ou anaconda3)"
+    echo "   Installez Miniconda puis relancez le déploiement."
     exit 1
 fi
-echo "✅ $PYTHON_VERSION détecté"
+echo "✅ Conda détecté"
 echo ""
 
 # Créer le répertoire sur le serveur
@@ -144,15 +147,14 @@ done
 echo "✅ Dossiers synchronisés"
 echo ""
 
-# Créer l'environnement virtuel sur le serveur
-echo "[6/8] Configuration de l'environnement virtuel..."
-ssh "$USER@$SERVER" "cd $REMOTE_PATH && if [ ! -d venv ]; then python3 -m venv venv; fi"
-ssh "$USER@$SERVER" "cd $REMOTE_PATH && source venv/bin/activate && pip install --upgrade pip setuptools wheel && pip install -r requirements.txt"
+# Créer ou mettre à jour l'environnement Conda sur le serveur (prefix = env)
+echo "[6/8] Configuration de l'environnement Conda..."
+ssh "$USER@$SERVER" "set -e; source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/anaconda3/etc/profile.d/conda.sh; cd $REMOTE_PATH; if [ ! -d env ]; then conda create --prefix $REMOTE_PATH/env python=3.11 -y --override-channels -c conda-forge; fi; $REMOTE_PATH/env/bin/pip install --upgrade pip setuptools wheel; $REMOTE_PATH/env/bin/pip install -r requirements.txt"
 if [ $? -ne 0 ]; then
-    echo "❌ Erreur lors de l'installation des dépendances"
+    echo "❌ Erreur lors de l'installation des dépendances Conda/pip"
     exit 1
 fi
-echo "✅ Environnement virtuel configuré"
+echo "✅ Environnement Conda configuré (prefix=$REMOTE_PATH/env)"
 echo ""
 
 # Créer les répertoires nécessaires
@@ -168,12 +170,48 @@ ssh "$USER@$SERVER" "cd $REMOTE_PATH && find scripts -name '*.sh' -type f -exec 
 echo "✅ Permissions des scripts configurées"
 echo ""
 
+# Mettre à jour les services systemd pour Conda (env) si le script existe
+echo "[7.6/9] Mise à jour des services systemd (Conda)..."
+if ssh "$USER@$SERVER" "test -x $REMOTE_PATH/scripts/linux/update_services_to_conda.sh" 2>/dev/null; then
+    ssh "$USER@$SERVER" "cd $REMOTE_PATH && sudo bash scripts/linux/update_services_to_conda.sh" 2>/dev/null && echo "✅ Services systemd mis à jour" || echo "⚠️  Mise à jour des services ignorée (vérifiez sudo)"
+else
+    echo "   (script update_services_to_conda.sh non trouvé, ignoré)"
+fi
+echo ""
+
 # Nettoyage du cache et redémarrage des services
 echo "[8/9] Nettoyage du cache et redémarrage des services..."
 ssh "$USER@$SERVER" "cd $REMOTE_PATH; if [ -x scripts/linux/clear-logs.sh ]; then ./scripts/linux/clear-logs.sh; fi"
 ssh "$USER@$SERVER" "sudo systemctl restart prospectlab prospectlab-celery prospectlab-celerybeat"
 echo "✅ Cache vidé et services redémarrés"
 echo ""
+
+# Vérification que l'application répond sur le serveur app (évite 502 côté Nginx)
+echo "[8.5/9] Vérification de l'application sur $SERVER..."
+sleep 3
+HTTP_CODE=$(ssh "$USER@$SERVER" "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 10 http://127.0.0.1:5000/" 2>/dev/null || echo "000")
+if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ] || [ "$HTTP_CODE" = "301" ]; then
+    echo "✅ Application répond sur $SERVER:5000 (HTTP $HTTP_CODE)"
+else
+    echo "⚠️  L'application ne répond pas correctement sur $SERVER:5000 (HTTP $HTTP_CODE)"
+    echo "   Sur le serveur app, vérifiez: sudo systemctl status prospectlab && curl -I http://127.0.0.1:5000/"
+    echo "   Si Nginx affiche 502, vérifiez sur le serveur proxy que <SERVEUR_APP> est résolu et que le port 5000 est joignable."
+    echo "   Voir: docs/configuration/DEPLOIEMENT_PRODUCTION.md (section Dépannage 502)"
+fi
+echo ""
+
+# Rechargement Nginx optionnel sur le serveur proxy pour prise en compte immédiate
+PROXY_SERVER="${4:-}"
+PROXY_USER="${5:-deploy}"
+if [ -n "$PROXY_SERVER" ]; then
+    echo "[8.6/9] Rechargement Nginx sur le serveur proxy $PROXY_SERVER..."
+    if ssh -o ConnectTimeout=5 "$PROXY_USER@$PROXY_SERVER" "sudo nginx -t && sudo systemctl reload nginx" 2>/dev/null; then
+        echo "✅ Nginx rechargé sur $PROXY_SERVER"
+    else
+        echo "⚠️  Impossible de recharger Nginx sur $PROXY_SERVER (vérifiez SSH et sudo)"
+    fi
+    echo ""
+fi
 
 # Instructions finales
 echo "[9/9] Déploiement terminé !"
@@ -182,7 +220,7 @@ echo "Prochaines étapes:"
 echo "1. Connectez-vous au serveur de production"
 echo "2. Allez dans le répertoire de déploiement"
 echo "3. Configurez le fichier .env avec vos paramètres de production"
-echo "4. Activez l'environnement virtuel: source venv/bin/activate"
+echo "4. Environnement Conda: $REMOTE_PATH/env (activer avec: source \$CONDA_PREFIX/etc/profile.d/conda.sh && conda activate $REMOTE_PATH/env)"
 echo "5. Initialisez la base de données si nécessaire"
 echo "6. Démarrez l'application avec Gunicorn ou vérifiez les services systemd"
 echo ""

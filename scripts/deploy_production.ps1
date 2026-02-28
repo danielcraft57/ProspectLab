@@ -3,14 +3,21 @@
 
 param(
     [Parameter(Mandatory=$false)]
-    [string]$Server = 'node15.lan',
+    [string]$Server = 'serveur-app.lan',
     
     [Parameter(Mandatory=$false)]
-    [string]$User = 'pi',
+    [string]$User = 'deploy',
     
     [Parameter(Mandatory=$false)]
-    [string]$RemotePath = '/opt/prospectlab'
+    [string]$RemotePath = '/opt/prospectlab',
+    
+    [Parameter(Mandatory=$false)]
+    [string]$ProxyServer = '',
+    
+    [Parameter(Mandatory=$false)]
+    [string]$ProxyUser = 'deploy'
 )
+# Usage: .\deploy_production.ps1 -Server serveur-app.lan -User deploy -ProxyServer serveur-proxy.lan -ProxyUser deploy
 
 $ErrorActionPreference = 'Stop'
 
@@ -107,6 +114,7 @@ $excludePatterns = @(
     '.git',
     'venv',
     'env',
+    'env',
     '.env',
     '*.db',
     '*.log',
@@ -134,14 +142,15 @@ Get-ChildItem -Path $deployDir -Recurse -Force | Where-Object {
 Write-Host "✅ Fichiers préparés" -ForegroundColor Green
 Write-Host ""
 
-# Vérifier Python sur le serveur
-Write-Host "[3/9] Vérification de Python..." -ForegroundColor Yellow
-$pythonVersion = ssh "$User@$Server" "python3 --version 2>&1" | Select-Object -First 1
-if (-not $pythonVersion) {
-    Write-Host "❌ Python3 n'est pas installé sur le serveur" -ForegroundColor Red
+# Vérifier Conda sur le serveur
+Write-Host "[3/9] Vérification de Conda..." -ForegroundColor Yellow
+$condaCheck = ssh "$User@$Server" "which conda 2>/dev/null || (source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null && which conda) || (source ~/anaconda3/etc/profile.d/conda.sh 2>/dev/null && which conda) || true" 2>$null
+if (-not $condaCheck) {
+    Write-Host "❌ Conda n'est pas installé sur le serveur (miniconda3 ou anaconda3)" -ForegroundColor Red
+    Write-Host "   Installez Miniconda puis relancez le déploiement." -ForegroundColor Yellow
     exit 1
 }
-Write-Host "✅ $pythonVersion détecté" -ForegroundColor Green
+Write-Host "✅ Conda détecté" -ForegroundColor Green
 Write-Host ""
 
 # Créer le répertoire sur le serveur
@@ -230,15 +239,15 @@ foreach ($dir in $dirsToSync) {
 Write-Host "✅ Dossiers synchronisés (routes, services, tasks, templates, static, utils, scripts)" -ForegroundColor Green
 Write-Host ""
 
-# Créer l'environnement virtuel sur le serveur
-Write-Host "[6/9] Configuration de l'environnement virtuel..." -ForegroundColor Yellow
-ssh "$User@$Server" "cd $RemotePath && if [ ! -d venv ]; then python3 -m venv venv; fi" | Out-Null
-ssh "$User@$Server" "cd $RemotePath && source venv/bin/activate && pip install --upgrade pip setuptools wheel && pip install -r requirements.txt" | Out-Null
+# Créer ou mettre à jour l'environnement Conda sur le serveur (prefix = env)
+Write-Host "[6/9] Configuration de l'environnement Conda..." -ForegroundColor Yellow
+$condaOutput = ssh "$User@$Server" "set -e; source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/anaconda3/etc/profile.d/conda.sh; cd $RemotePath; if [ ! -d env ]; then conda create --prefix $RemotePath/env python=3.11 -y --override-channels -c conda-forge; fi; $RemotePath/env/bin/pip install --upgrade pip setuptools wheel; $RemotePath/env/bin/pip install -r requirements.txt" 2>&1
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "❌ Erreur lors de l'installation des dépendances" -ForegroundColor Red
+    Write-Host "❌ Erreur lors de l'installation des dépendances Conda/pip" -ForegroundColor Red
+    Write-Host $condaOutput -ForegroundColor Gray
     exit 1
 }
-Write-Host "✅ Environnement virtuel configuré" -ForegroundColor Green
+Write-Host "✅ Environnement Conda configuré (prefix=$RemotePath/env)" -ForegroundColor Green
 Write-Host ""
 
 # Créer les répertoires nécessaires
@@ -254,12 +263,45 @@ ssh "$User@$Server" "cd $RemotePath && find scripts -name '*.sh' -type f -exec c
 Write-Host "✅ Permissions des scripts configurées" -ForegroundColor Green
 Write-Host ""
 
+# Mettre à jour les services systemd pour Conda (env)
+Write-Host "[7.6/9] Mise à jour des services systemd (Conda)..." -ForegroundColor Yellow
+$updateServices = ssh "$User@$Server" "test -x $RemotePath/scripts/linux/update_services_to_conda.sh && cd $RemotePath && sudo bash scripts/linux/update_services_to_conda.sh" 2>&1
+if ($LASTEXITCODE -eq 0) { Write-Host "✅ Services systemd mis à jour" -ForegroundColor Green } else { Write-Host "⚠️  Mise à jour des services ignorée (vérifiez sudo)" -ForegroundColor Yellow }
+Write-Host ""
+
 # Nettoyage du cache et redémarrage des services
 Write-Host "[8/9] Nettoyage du cache et redémarrage des services..." -ForegroundColor Yellow
 ssh "$User@$Server" "cd $RemotePath && if [ -x scripts/clear-cache.sh ]; then ./scripts/clear-cache.sh; fi" | Out-Null
 ssh "$User@$Server" "sudo systemctl restart prospectlab prospectlab-celery prospectlab-celerybeat" | Out-Null
 Write-Host "✅ Cache vidé et services redémarrés" -ForegroundColor Green
 Write-Host ""
+
+# Vérification que l'application répond sur le serveur app (évite 502 côté Nginx)
+Write-Host "[8.5/9] Vérification de l'application sur $Server..." -ForegroundColor Yellow
+Start-Sleep -Seconds 3
+$httpCode = ssh "$User@$Server" "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 10 http://127.0.0.1:5000/" 2>$null
+if (-not $httpCode) { $httpCode = '000' }
+if ($httpCode -eq '200' -or $httpCode -eq '302' -or $httpCode -eq '301') {
+    Write-Host "✅ Application répond sur ${Server}:5000 (HTTP $httpCode)" -ForegroundColor Green
+} else {
+    Write-Host "⚠️  L'application ne répond pas correctement sur ${Server}:5000 (HTTP $httpCode)" -ForegroundColor Yellow
+    Write-Host "   Sur le serveur app, vérifiez: sudo systemctl status prospectlab && curl -I http://127.0.0.1:5000/" -ForegroundColor Gray
+    Write-Host "   Si Nginx affiche 502, vérifiez sur le serveur proxy que le serveur app est résolu et que le port 5000 est joignable." -ForegroundColor Gray
+    Write-Host "   Voir: docs/configuration/DEPLOIEMENT_PRODUCTION.md (section Dépannage 502)" -ForegroundColor Gray
+}
+Write-Host ""
+
+# Rechargement Nginx optionnel sur le serveur proxy
+if ($ProxyServer) {
+    Write-Host "[8.6/9] Rechargement Nginx sur le serveur proxy $ProxyServer..." -ForegroundColor Yellow
+    $nginxReload = ssh -o ConnectTimeout=5 "$ProxyUser@$ProxyServer" "sudo nginx -t && sudo systemctl reload nginx" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "✅ Nginx rechargé sur $ProxyServer" -ForegroundColor Green
+    } else {
+        Write-Host "⚠️  Impossible de recharger Nginx sur $ProxyServer (vérifiez SSH et sudo)" -ForegroundColor Yellow
+    }
+    Write-Host ""
+}
 
 # Instructions finales
 Write-Host "[9/9] Déploiement terminé !" -ForegroundColor Green
@@ -268,9 +310,9 @@ Write-Host "Prochaines étapes:" -ForegroundColor Cyan
 Write-Host "1. Connectez-vous au serveur de production" -ForegroundColor Yellow
 Write-Host "2. Allez dans le répertoire de déploiement" -ForegroundColor Yellow
 Write-Host "3. Configurez le fichier .env avec vos paramètres de production" -ForegroundColor Yellow
-Write-Host "4. Activez l'environnement virtuel: source venv/bin/activate" -ForegroundColor Yellow
+Write-Host "4. Environnement Conda: $RemotePath/env" -ForegroundColor Yellow
 Write-Host "5. Initialisez la base de données si nécessaire" -ForegroundColor Yellow
-Write-Host "6. Démarrez l'application avec Gunicorn ou configurez un service systemd" -ForegroundColor Yellow
+Write-Host "6. Démarrez l'application (Gunicorn) ou vérifiez les services systemd" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "Pour plus d'informations, consultez:" -ForegroundColor Cyan
 Write-Host "  docs/configuration/DEPLOIEMENT_PRODUCTION.md" -ForegroundColor Gray
