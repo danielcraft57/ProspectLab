@@ -9,7 +9,7 @@ CELERY_WORKERS=${CELERY_WORKERS:-6}
 
 # Lancer Celery Worker avec la concurrency configurée
 # Pour systemd forking, on doit démarrer en arrière-plan et retourner immédiatement
-exec /opt/prospectlab/venv/bin/celery -A celery_app worker \
+exec /opt/prospectlab/env/bin/celery -A celery_app worker \
     --loglevel=info \
     --logfile=/opt/prospectlab/logs/celery_worker.log \
     --pidfile=/opt/prospectlab/celery_worker.pid \

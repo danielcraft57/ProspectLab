@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-# Couleurs de la charte graphique danielcraft.fr
+# Couleurs de la charte graphique (exemple)
 COLOR_PRIMARY = "#E53935"
 COLOR_BG = "#F8F8F8"
 COLOR_WHITE = "#FFFFFF"
@@ -69,9 +69,9 @@ def get_template_1_html():
                             </p>
                             <p style="margin: 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
                                 Cordialement,<br>
-                                <strong style="color: {COLOR_PRIMARY};">Loïc DANIEL</strong><br>
-                                Développeur web freelance<br>
-                                <a href="https://danielcraft.fr" style="color: {COLOR_PRIMARY}; text-decoration: none;">danielcraft.fr</a>
+                                <strong style="color: {COLOR_PRIMARY};">Votre nom</strong><br>
+                                Votre titre<br>
+                                <a href="https://example.com" style="color: {COLOR_PRIMARY}; text-decoration: none;">example.com</a>
                             </p>
                         </td>
                     </tr>
@@ -166,9 +166,9 @@ def get_template_2_html():
                             </p>
                             <p style="margin: 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
                                 Cordialement,<br>
-                                <strong style="color: {COLOR_PRIMARY};">Loïc DANIEL</strong><br>
-                                Développeur web freelance<br>
-                                <a href="https://danielcraft.fr" style="color: {COLOR_PRIMARY}; text-decoration: none;">danielcraft.fr</a>
+                                <strong style="color: {COLOR_PRIMARY};">Votre nom</strong><br>
+                                Votre titre<br>
+                                <a href="https://example.com" style="color: {COLOR_PRIMARY}; text-decoration: none;">example.com</a>
                             </p>
                         </td>
                     </tr>
@@ -246,9 +246,9 @@ def get_template_3_html():
                             </p>
                             <p style="margin: 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
                                 Cordialement,<br>
-                                <strong style="color: {COLOR_PRIMARY};">Loïc DANIEL</strong><br>
-                                Développeur web freelance<br>
-                                <a href="https://danielcraft.fr" style="color: {COLOR_PRIMARY}; text-decoration: none;">danielcraft.fr</a>
+                                <strong style="color: {COLOR_PRIMARY};">Votre nom</strong><br>
+                                Votre titre<br>
+                                <a href="https://example.com" style="color: {COLOR_PRIMARY}; text-decoration: none;">example.com</a>
                             </p>
                         </td>
                     </tr>
@@ -342,9 +342,9 @@ def get_template_4_html():
                             </p>
                             <p style="margin: 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
                                 Cordialement,<br>
-                                <strong style="color: {COLOR_PRIMARY};">Loïc DANIEL</strong><br>
-                                Développeur web freelance<br>
-                                <a href="https://danielcraft.fr" style="color: {COLOR_PRIMARY}; text-decoration: none;">danielcraft.fr</a>
+                                <strong style="color: {COLOR_PRIMARY};">Votre nom</strong><br>
+                                Votre titre<br>
+                                <a href="https://example.com" style="color: {COLOR_PRIMARY}; text-decoration: none;">example.com</a>
                             </p>
                         </td>
                     </tr>
@@ -418,9 +418,9 @@ def get_template_5_html():
                             </p>
                             <p style="margin: 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
                                 Cordialement,<br>
-                                <strong style="color: {COLOR_PRIMARY};">Loïc DANIEL</strong><br>
-                                Développeur web freelance<br>
-                                <a href="https://danielcraft.fr" style="color: {COLOR_PRIMARY}; text-decoration: none;">danielcraft.fr</a>
+                                <strong style="color: {COLOR_PRIMARY};">Votre nom</strong><br>
+                                Votre titre<br>
+                                <a href="https://example.com" style="color: {COLOR_PRIMARY}; text-decoration: none;">example.com</a>
                             </p>
                         </td>
                     </tr>

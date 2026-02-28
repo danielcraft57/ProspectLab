@@ -5,7 +5,7 @@
 set -e
 
 # Configuration par défaut
-SERVER="${1:-node15.lan}"
+SERVER="${1:-serveur-app.lan}"
 USER="${2:-pi}"
 REMOTE_PATH="${3:-/opt/prospectlab}"
 

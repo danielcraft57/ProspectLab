@@ -7,8 +7,8 @@ Ce document explique comment organiser ProspectLab en plusieurs environnements (
 L'objectif est que tu puisses:
 
 - travailler confortablement en local (Windows + WSL ou Linux natif) ;
-- déployer proprement sur un serveur Debian (`node15.lan`) ;
-- exposer l'application via un reverse proxy sur `node12.lan` avec les bons sous-domaines.
+- déployer proprement sur un serveur Debian (serveur app) ;
+- exposer l'application via un reverse proxy (serveur proxy) avec les bons sous-domaines.
 
 ---
 
@@ -60,7 +60,7 @@ PENTEST_TOOL_TIMEOUT=120
 RESTRICT_TO_LOCAL_NETWORK=false
 ```
 
-Exemple de `.env.prod` (serveur Debian ou node15.lan, sans WSL, SQLite/Postgres en prod):
+Exemple de `.env.prod` (serveur Debian, sans WSL, SQLite/Postgres en prod) :
 
 ```bash
 SECRET_KEY=ta-cle-ultra-secrete-en-prod
@@ -104,7 +104,7 @@ ProspectLab peut être protégé non pas par un système de login classique, mai
     - `/api/public/...` (API publique protégée par token) reste accessible pour les intégrations externes.
 
 La détection IP côté Flask utilise en priorité les en-têtes `X-Forwarded-For` / `X-Real-IP` envoyés par Nginx, puis `request.remote_addr`.  
-Assure-toi que ta conf Nginx sur `node12.lan` envoie bien ces en-têtes (voir `DEPLOIEMENT_PRODUCTION.md`).
+Assure-toi que ta conf Nginx sur le serveur proxy envoie bien ces en-têtes (voir `DEPLOIEMENT_PRODUCTION.md`).
 
 ### 1.3. Option: variable APP_ENV
 
@@ -187,7 +187,7 @@ DATABASE_URL=postgresql://user:password@host:port/database
 3. Les scripts de migration sont gérés automatiquement
 
 **En production** :
-- PostgreSQL est utilisé sur `node15.lan`
+- PostgreSQL est utilisé sur le serveur app
 - La base est initialisée automatiquement au premier démarrage
 - Voir [DEPLOIEMENT_PRODUCTION.md](DEPLOIEMENT_PRODUCTION.md) pour les détails complets
 
@@ -226,7 +226,7 @@ Le code lit `WSL_DISTRO` et `WSL_USER` dans `config.py` et les utilise pour lanc
 
 Sur une machine Debian (ou autre Linux), tu peux installer directement les outils OSINT / Pentest:
 
-1. Connecte-toi au serveur Linux (par exemple `node15.lan`).
+1. Connecte-toi au serveur Linux (serveur app).
 2. Suis les instructions de `docs/INSTALL_OSINT_TOOLS.md` côté Linux.
 3. Dans ton `.env` sur ce serveur:
 
@@ -249,26 +249,25 @@ Cela se gère simplement via les variables d'environnement (deux fichiers `.env`
 
 ---
 
-## 4. Déploiement sur node15.lan
+## 4. Déploiement sur le serveur application
 
-Hypothèse:
+Hypothèse :
 
-- `node15.lan` est une machine Debian qui fera tourner l'application Flask + Celery + Redis ;
-- `node12.lan` reçoit déjà le trafic HTTP/HTTPS sur les ports 80 et 443 et jouera le rôle de reverse proxy.
+- Le **serveur app** est une machine Debian qui fait tourner l'application Flask + Celery + Redis ;
+- Le **serveur proxy** reçoit le trafic HTTP/HTTPS sur les ports 80 et 443 et joue le rôle de reverse proxy.
 
-### 4.1. Préparation de node15.lan
+### 4.1. Préparation du serveur app
 
-Étapes typiques sur `node15.lan`:
+Étapes typiques sur le serveur app :
 
-1. Créer un utilisateur système dédié, par exemple `prospectlab`.
-2. Cloner le dépôt dans `/opt/prospectlab` (par exemple).
-3. Créer un environnement virtuel Python et installer les dépendances:
+1. Créer un utilisateur système dédié, par exemple `prospectlab` ou `deploy`.
+2. Cloner le dépôt dans `/opt/prospectlab` (ou utiliser le script de déploiement).
+3. Créer l'environnement Conda et installer les dépendances (voir [DEPLOIEMENT_PRODUCTION.md](DEPLOIEMENT_PRODUCTION.md)) :
 
    ```bash
    cd /opt/prospectlab
-   python3 -m venv venv
-   source venv/bin/activate
-   pip install -r requirements.txt
+   # Conda (recommandé en prod) : conda create --prefix /opt/prospectlab/env python=3.11 -y --override-channels -c conda-forge
+   # Puis : /opt/prospectlab/env/bin/pip install -r requirements.txt
    ```
 
 4. Créer un répertoire pour la base SQLite:
@@ -295,8 +294,7 @@ Exemple de commande (à adapter selon ton choix de worker):
 
 ```bash
 cd /opt/prospectlab
-source venv/bin/activate
-gunicorn -k eventlet -w 1 -b 0.0.0.0:5000 app:app
+/opt/prospectlab/env/bin/gunicorn -k eventlet -w 1 -b 0.0.0.0:5000 app:app
 ```
 
 Tu peux ensuite créer un service `systemd` `prospectlab.service` qui:
@@ -309,28 +307,28 @@ Même principe pour un service `celery.service` et éventuellement `celery-beat.
 
 L'important pour la suite:
 
-- l'application écoute sur `node15.lan:5000` (HTTP interne) ;
-- le reverse proxy sur `node12.lan` pointera vers cette adresse.
+- l'application écoute sur le serveur app (port 5000, HTTP interne) ;
+- le reverse proxy pointe vers cette adresse.
 
 ---
 
-## 5. Reverse proxy sur node12.lan et sous-domaines
+## 5. Reverse proxy et sous-domaines
 
-`node12.lan` reçoit déjà le trafic sur les ports 80 et 443. On peut donc y installer Nginx ou Apache et rediriger les sous-domaines vers `node15.lan`.
+Le serveur proxy reçoit le trafic sur les ports 80 et 443. On y installe Nginx (ou Apache) et on redirige les sous-domaines vers le serveur app.
 
-L'objectif:
+Objectif :
 
-- `https://prospectlab.danielcraft.fr` → backend sur `http://node15.lan:5000` ;
-- `https://campaigns.danielcraft.fr` → même backend (ou une instance dédiée) avec éventuellement une configuration ou des routes différentes.
+- `https://<VOTRE_DOMAINE_APP>` → backend sur `http://<SERVEUR_APP>:5000` ;
+- `https://<VOTRE_DOMAINE_CAMPAGNES>` → même backend (ou instance dédiée) selon la configuration.
 
-### 5.1. Exemple de configuration Nginx pour prospectlab.danielcraft.fr
+### 5.1. Exemple de configuration Nginx
 
-Sur `node12.lan`, dans un fichier de site Nginx, par exemple `/etc/nginx/sites-available/prospectlab.conf`:
+Sur le serveur proxy, dans un fichier de site Nginx, par exemple `/etc/nginx/sites-available/prospectlab.conf` :
 
 ```nginx
 server {
     listen 80;
-    server_name prospectlab.danielcraft.fr;
+    server_name <VOTRE_DOMAINE_APP>;
 
     # Option: redirection HTTP -> HTTPS si tu as un certificat
     # return 301 https://$host$request_uri;
@@ -338,13 +336,13 @@ server {
 
 server {
     listen 443 ssl;
-    server_name prospectlab.danielcraft.fr;
+    server_name <VOTRE_DOMAINE_APP>;
 
-    ssl_certificate /etc/letsencrypt/live/prospectlab.danielcraft.fr/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/prospectlab.danielcraft.fr/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/<VOTRE_DOMAINE_APP>/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/<VOTRE_DOMAINE_APP>/privkey.pem;
 
     location / {
-        proxy_pass http://node15.lan:5000;
+        proxy_pass http://<SERVEUR_APP>:5000;
 
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -356,30 +354,30 @@ server {
 
 Tu adaptes les chemins de certificats selon ta config (Let’s Encrypt ou autre).
 
-### 5.2. Exemple de configuration Nginx pour campaigns.danielcraft.fr
+### 5.2. Exemple pour un second sous-domaine (campagnes)
 
-Pour `campaigns.danielcraft.fr`, il y a deux options:
+Pour un second sous-domaine (ex. campagnes), deux options :
 
-1. **Même instance de ProspectLab**, mais tu utilises ce sous-domaine pour accéder à une partie "campagnes" de l'app (par exemple une page dédiée ou des endpoints spécifiques).
-2. **Instance séparée** (autre process, autre base, autre `.env`) sur un autre port, par exemple `node15.lan:5001`.
+1. **Même instance** : le sous-domaine pointe vers la même app (port 5000).
+2. **Instance séparée** (autre process, autre base, autre `.env`) sur un autre port (ex. `SERVEUR_APP:5001`).
 
-Exemple simple où `campaigns.danielcraft.fr` pointe aussi sur `node15.lan:5000`:
+Exemple où le second domaine pointe sur la même app (port 5000) :
 
 ```nginx
 server {
     listen 80;
-    server_name campaigns.danielcraft.fr;
+    server_name <VOTRE_DOMAINE_CAMPAGNES>;
 }
 
 server {
     listen 443 ssl;
-    server_name campaigns.danielcraft.fr;
+    server_name <VOTRE_DOMAINE_CAMPAGNES>;
 
-    ssl_certificate /etc/letsencrypt/live/campaigns.danielcraft.fr/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/campaigns.danielcraft.fr/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/<VOTRE_DOMAINE_CAMPAGNES>/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/<VOTRE_DOMAINE_CAMPAGNES>/privkey.pem;
 
     location / {
-        proxy_pass http://node15.lan:5000;
+        proxy_pass http://<SERVEUR_APP>:5000;
 
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -391,16 +389,16 @@ server {
 
 Si tu veux vraiment isoler la partie "campagnes":
 
-- tu peux lancer une seconde instance de l'app sur `node15.lan:5001` avec un `.env` différent (par exemple une autre base, d'autres limites) ;
-- et dans Nginx, tu mets `proxy_pass http://node15.lan:5001;` uniquement pour `campaigns.danielcraft.fr`.
+- tu peux lancer une seconde instance sur `SERVEUR_APP:5001` avec un `.env` différent ;
+- dans Nginx, `proxy_pass http://SERVEUR_APP:5001;` pour le second domaine uniquement.
 
 ### 5.3. DNS et résolution interne
 
-Pour que tout fonctionne:
+Pour que tout fonctionne :
 
-- les enregistrements DNS publics de `prospectlab.danielcraft.fr` et `campaigns.danielcraft.fr` doivent pointer vers l'IP publique de `node12.lan` ;
-- sur le réseau interne, `node12.lan` doit pouvoir résoudre `node15.lan` (via DNS interne ou `/etc/hosts`) ;
-- les ports internes (5000, 5001, etc.) doivent être accessibles depuis `node12.lan`.
+- les enregistrements DNS publics de vos domaines doivent pointer vers l’IP du serveur proxy ;
+- sur le réseau interne, le serveur proxy doit pouvoir résoudre le nom du serveur app (DNS ou `/etc/hosts`) ;
+- les ports 5000 (et 5001 si besoin) doivent être accessibles depuis le serveur proxy.
 
 ---
 
@@ -418,10 +416,10 @@ Pour résumer:
   - outils OSINT / Pentest installés directement sur Debian ;
   - application lancée sur un port interne (ex: 5000).
 
-- **Prod sur node15.lan derrière node12.lan**:
-  - application et Celery tournent sur `node15.lan` (Debian) ;
-  - Nginx sur `node12.lan` fait le reverse proxy vers `node15.lan:5000` (et éventuellement 5001 pour campaigns) ;
-  - `prospectlab.danielcraft.fr` et `campaigns.danielcraft.fr` pointent vers `node12.lan` au niveau DNS.
+- **Prod (serveur app + serveur proxy)** :
+  - application et Celery tournent sur le serveur app (Debian) ;
+  - Nginx sur le serveur proxy fait le reverse proxy vers SERVEUR_APP:5000 (et éventuellement 5001 pour un second domaine) ;
+  - vos domaines DNS pointent vers l’IP du serveur proxy.
 
 Cette organisation te permet:
 

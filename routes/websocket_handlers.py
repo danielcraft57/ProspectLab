@@ -67,18 +67,23 @@ def register_websocket_handlers(socketio, app):
             output_filename = f"analyzed_{filename}"
             output_path = os.path.join(app.config['EXPORT_FOLDER'], output_filename)
             
-            # Vérifier que Celery/Redis est disponible
+            # Vérifier que Celery/Redis est disponible (test léger, sans bloquer si un worker répond lentement)
             try:
-                # Test de connexion Redis
                 from celery_app import celery
-                celery.control.inspect().active()
+                inspector = celery.control.inspect()
+                # ping() retourne un dict ou None. Si None, on loggue seulement.
+                ping_result = inspector.ping()
+                if not ping_result:
+                    logger.warning('Inspecteur Celery ne retourne aucun worker (ping vide), mais on tente quand même de lancer la tâche.')
             except Exception as e:
-                error_msg = 'Celery worker non disponible. '
-                error_msg += 'Démarre Celery avec: .\\scripts\\windows\\start-celery.ps1'
-                error_msg += ' (ou: celery -A celery_app worker --loglevel=info)'
+                # Si on ne peut même pas contacter le broker, là on bloque vraiment.
+                error_msg = 'Celery/Redis indisponible. '
+                error_msg += 'Vérifiez que le broker et le worker Celery sont démarrés '
+                error_msg += '(ex: .\\scripts\\windows\\start-celery.ps1 ou celery -A celery_app worker --loglevel=info).'
                 safe_emit(socketio, 'analysis_error', {
                     'error': error_msg
                 }, room=session_id)
+                logger.warning(f'Start_analysis refusé (erreur connexion broker): {e}')
                 return
             
             # Lancer la tâche Celery

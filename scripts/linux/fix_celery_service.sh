@@ -11,7 +11,7 @@ Type=forking
 User=pi
 Group=pi
 WorkingDirectory=/opt/prospectlab
-Environment="PATH=/opt/prospectlab/venv/bin"
+Environment="PATH=/opt/prospectlab/env/bin"
 EnvironmentFile=/opt/prospectlab/.env
 ExecStart=/opt/prospectlab/scripts/linux/start_celery_worker.sh
 ExecStop=/bin/sh -c "kill -s TERM \$(cat /opt/prospectlab/celery_worker.pid 2>/dev/null) || true"
