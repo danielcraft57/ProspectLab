@@ -1385,6 +1385,7 @@ class EntrepriseManager(DatabaseBase):
                 e.id,
                 e.nom,
                 e.secteur,
+                e.responsable,
                 se.email,
                 se.name_info as email_nom,
                 se.page_url as source,
@@ -1410,6 +1411,7 @@ class EntrepriseManager(DatabaseBase):
                     'id': entreprise_id,
                     'nom': row['nom'],
                     'secteur': row['secteur'],
+                    'responsable': row['responsable'] or None,
                     'emails': []
                 }
 
@@ -1474,6 +1476,7 @@ class EntrepriseManager(DatabaseBase):
                 e.id,
                 e.nom,
                 e.secteur,
+                e.responsable,
                 se.email,
                 se.name_info as email_nom,
                 se.page_url as source,
@@ -1539,6 +1542,7 @@ class EntrepriseManager(DatabaseBase):
                     'id': entreprise_id,
                     'nom': r['nom'],
                     'secteur': r['secteur'],
+                    'responsable': r.get('responsable') or None,
                     'emails': []
                 }
             source = r['source'] if r['source'] else 'scraper'

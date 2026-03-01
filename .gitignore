@@ -97,3 +97,6 @@ Thumbs.db
 
 # Déploiement local (non versionné)
 deploy/
+
+# Données templates (personnalisations locales ; la référence est templates_data.default.json)
+templates_data.json

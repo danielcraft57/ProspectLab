@@ -38,7 +38,7 @@ def get_template_1_html():
                                 Bonjour {{nom}},
                             </p>
                             <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
-                                J'ai analysé le site web de <strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong> et j'ai identifié plusieurs opportunités d'amélioration pour moderniser votre présence digitale.
+                                {{#if_secteur}}Dans le secteur <strong>{{secteur}}</strong>, {{#endif}}j'ai analysé {{#if_website}}le site <strong>{{website}}</strong> de {{#endif}}<strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong> et j'ai identifié plusieurs opportunités d'amélioration pour moderniser votre présence digitale.
                             </p>
                             {{#if_tech_data}}
                             <div style="background-color: {COLOR_BG}; padding: 20px; border-radius: 6px; margin: 25px 0;">
@@ -71,7 +71,7 @@ def get_template_1_html():
                                 Cordialement,<br>
                                 <strong style="color: {COLOR_PRIMARY};">Votre nom</strong><br>
                                 Votre titre<br>
-                                <a href="https://example.com" style="color: {COLOR_PRIMARY}; text-decoration: none;">example.com</a>
+                                <a href="{{base_url}}" style="color: {COLOR_PRIMARY}; text-decoration: none;">{{base_url}}</a>
                             </p>
                         </td>
                     </tr>
@@ -114,7 +114,7 @@ def get_template_2_html():
                                 Bonjour {{nom}},
                             </p>
                             <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
-                                La performance de votre site web <strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong> a un impact direct sur l'expérience de vos visiteurs et votre positionnement dans les moteurs de recherche.
+                                La performance du site de <strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong>{{#if_website}} ({{website}}){{#endif}} a un impact direct sur l'expérience de vos visiteurs et votre positionnement dans les moteurs de recherche.
                             </p>
                             {{#if_performance}}
                             <div style="background-color: {COLOR_BG}; padding: 20px; border-radius: 6px; margin: 25px 0; border-left: 4px solid {COLOR_PRIMARY};">
@@ -168,7 +168,7 @@ def get_template_2_html():
                                 Cordialement,<br>
                                 <strong style="color: {COLOR_PRIMARY};">Votre nom</strong><br>
                                 Votre titre<br>
-                                <a href="https://example.com" style="color: {COLOR_PRIMARY}; text-decoration: none;">example.com</a>
+                                <a href="{{base_url}}" style="color: {COLOR_PRIMARY}; text-decoration: none;">{{base_url}}</a>
                             </p>
                         </td>
                     </tr>
@@ -211,7 +211,7 @@ def get_template_3_html():
                                 Bonjour {{nom}},
                             </p>
                             <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
-                                La sécurité et la conformité de votre site web <strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong> sont essentielles pour protéger vos données et celles de vos clients, ainsi que pour maintenir la confiance de vos visiteurs.
+                                La sécurité et la conformité du site de <strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong>{{#if_website}} ({{website}}){{#endif}} sont essentielles pour protéger vos données et celles de vos clients, ainsi que pour maintenir la confiance de vos visiteurs.
                             </p>
                             {{#if_security}}
                             <div style="background-color: #FFF3E0; padding: 20px; border-radius: 6px; margin: 25px 0; border-left: 4px solid {COLOR_PRIMARY};">
@@ -248,7 +248,7 @@ def get_template_3_html():
                                 Cordialement,<br>
                                 <strong style="color: {COLOR_PRIMARY};">Votre nom</strong><br>
                                 Votre titre<br>
-                                <a href="https://example.com" style="color: {COLOR_PRIMARY}; text-decoration: none;">example.com</a>
+                                <a href="{{base_url}}" style="color: {COLOR_PRIMARY}; text-decoration: none;">{{base_url}}</a>
                             </p>
                         </td>
                     </tr>
@@ -291,7 +291,7 @@ def get_template_4_html():
                                 Bonjour {{nom}},
                             </p>
                             <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
-                                J'ai analysé la présence digitale de <strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong> et j'ai identifié plusieurs opportunités pour renforcer votre visibilité en ligne et améliorer votre communication digitale.
+                                {{#if_secteur}}Dans le secteur <strong>{{secteur}}</strong>, {{#endif}}j'ai analysé la présence digitale de <strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong>{{#if_website}} ({{website}}){{#endif}} et j'ai identifié plusieurs opportunités pour renforcer votre visibilité en ligne et améliorer votre communication digitale.
                             </p>
                             {{#if_scraping_data}}
                             <div style="background-color: {COLOR_BG}; padding: 20px; border-radius: 6px; margin: 25px 0;">
@@ -344,7 +344,7 @@ def get_template_4_html():
                                 Cordialement,<br>
                                 <strong style="color: {COLOR_PRIMARY};">Votre nom</strong><br>
                                 Votre titre<br>
-                                <a href="https://example.com" style="color: {COLOR_PRIMARY}; text-decoration: none;">example.com</a>
+                                <a href="{{base_url}}" style="color: {COLOR_PRIMARY}; text-decoration: none;">{{base_url}}</a>
                             </p>
                         </td>
                     </tr>
@@ -387,7 +387,7 @@ def get_template_5_html():
                                 Bonjour {{nom}},
                             </p>
                             <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
-                                J'ai effectué une analyse complète de la présence digitale de <strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong> et j'ai identifié plusieurs axes d'amélioration pour optimiser votre visibilité et vos performances en ligne.
+                                {{#if_secteur}}Dans le secteur <strong>{{secteur}}</strong>, {{#endif}}j'ai effectué une analyse complète de la présence digitale de <strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong>{{#if_website}} ({{website}}){{#endif}} et j'ai identifié plusieurs axes d'amélioration pour optimiser votre visibilité et vos performances en ligne.
                             </p>
                             {{#if_all_data}}
                             <div style="background-color: {COLOR_BG}; padding: 25px; border-radius: 6px; margin: 25px 0;">
@@ -420,7 +420,7 @@ def get_template_5_html():
                                 Cordialement,<br>
                                 <strong style="color: {COLOR_PRIMARY};">Votre nom</strong><br>
                                 Votre titre<br>
-                                <a href="https://example.com" style="color: {COLOR_PRIMARY}; text-decoration: none;">example.com</a>
+                                <a href="{{base_url}}" style="color: {COLOR_PRIMARY}; text-decoration: none;">{{base_url}}</a>
                             </p>
                         </td>
                     </tr>
@@ -438,20 +438,516 @@ def get_template_5_html():
 </body>
 </html>"""
 
+
+def get_template_decouverte_hero_html():
+    """Découverte, UX moderne, données secteur/website (sans hero ni CTA)."""
+    return f"""<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Un mot pour {{entreprise}}</title>
+    <style type="text/css">
+        @media only screen and (max-width: 600px) {{ .mobile-pad {{ padding: 20px 16px !important; }} }}
+    </style>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: {COLOR_BG};">
+    <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: {COLOR_BG};">
+        <tr>
+            <td style="padding: 32px 20px;" class="mobile-pad">
+                <table role="presentation" style="max-width: 600px; margin: 0 auto; background-color: {COLOR_WHITE}; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); overflow: hidden;">
+                    <tr>
+                        <td style="padding: 24px 32px; background: linear-gradient(135deg, {COLOR_PRIMARY} 0%, #C62828 100%);">
+                            <p style="margin: 0; color: rgba(255,255,255,0.9); font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em;">Premier contact</p>
+                            <h1 style="margin: 8px 0 0; color: {COLOR_WHITE}; font-size: 22px; font-weight: 600;">Un mot pour {{entreprise}}</h1>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 36px 32px 28px;" class="mobile-pad">
+                            <h2 style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 20px; font-weight: 600;">Bonjour {{nom}},</h2>
+                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                                Je m'adresse à vous au nom de <strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong>.
+                                {{#if_secteur}}Vous évoluez dans le secteur <strong>{{secteur}}</strong>. {{#endif}}
+                                {{#if_website}}Votre site <strong>{{website}}</strong> {{#endif}}m'a donné envie de vous proposer un accompagnement sur mesure.
+                            </p>
+                            <p style="margin: 0 0 24px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                                <strong style="color: {COLOR_PRIMARY};">En 15 minutes</strong>, je peux vous présenter des pistes concrètes pour moderniser votre présence en ligne et gagner en visibilité.
+                            </p>
+                            <table role="presentation" style="margin: 28px 0;">
+                                <tr>
+                                    <td style="background: linear-gradient(135deg, {COLOR_PRIMARY}, #C62828); border-radius: 8px; padding: 16px 28px; text-align: center;">
+                                        <a href="{{base_url}}/contact" style="color: {COLOR_WHITE}; font-size: 16px; font-weight: 600; text-decoration: none;">Réserver un créneau</a>
+                                    </td>
+                                </tr>
+                            </table>
+                            <p style="margin: 28px 0 0; color: {COLOR_TEXT_MEDIUM}; font-size: 15px; line-height: 1.6;">
+                                Cordialement,<br>
+                                <strong style="color: {COLOR_PRIMARY};">Votre nom</strong><br>
+                                Votre titre · {{base_url}}{{#if_email}} · Répondre : {{email}}{{#endif}}
+                            </p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 20px 32px; background-color: {COLOR_BG}; border-radius: 0 0 12px 12px; text-align: center;">
+                            <p style="margin: 0; color: {COLOR_TEXT_MEDIUM}; font-size: 12px;">Vous recevez ce message car votre entreprise a été identifiée comme susceptible d'être intéressée par nos services.</p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>"""
+
+
+def get_template_relance_html():
+    """Relance courte et ergonomique."""
+    return f"""<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Relance - {{entreprise}}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: {COLOR_BG};">
+    <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: {COLOR_BG};">
+        <tr>
+            <td style="padding: 40px 20px;">
+                <table role="presentation" style="max-width: 560px; margin: 0 auto; background-color: {COLOR_WHITE}; border-radius: 12px; box-shadow: 0 2px 16px rgba(0,0,0,0.06);">
+                    <tr>
+                        <td style="padding: 32px 36px;">
+                            <p style="margin: 0 0 8px 0; color: {COLOR_TEXT_MEDIUM}; font-size: 13px;">Relance amicale</p>
+                            <h1 style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 22px; font-weight: 600;">Bonjour {{nom}},</h1>
+                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                                Je me permets de revenir vers vous concernant ma proposition pour <strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong>.
+                            </p>
+                            <p style="margin: 0 0 24px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                                Si le moment n'est pas le bon, pas de souci. Sinon, je reste disponible pour un échange de 15 minutes à votre convenance.
+                            </p>
+                            <p style="margin: 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                                Bien à vous,<br><strong style="color: {COLOR_PRIMARY};">Votre nom</strong>
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>"""
+
+
+def get_template_secteur_html():
+    """Personnalisé par secteur, avec données techniques si disponibles."""
+    return f"""<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Proposition pour le secteur {{secteur}} - {{entreprise}}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: {COLOR_BG};">
+    <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: {COLOR_BG};">
+        <tr>
+            <td style="padding: 40px 20px;">
+                <table role="presentation" style="max-width: 600px; margin: 0 auto; background-color: {COLOR_WHITE}; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08);">
+                    <tr>
+                        <td style="padding: 28px 32px; background: linear-gradient(135deg, {COLOR_PRIMARY}, #C62828); border-radius: 12px 12px 0 0;">
+                            <h1 style="margin: 0; color: {COLOR_WHITE}; font-size: 22px; font-weight: 600;">Proposition adaptée à votre secteur</h1>
+                            <p style="margin: 8px 0 0; color: rgba(255,255,255,0.9); font-size: 14px;">{{#if_secteur}}{{secteur}} · {{#endif}}{{entreprise}}</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 36px 32px;">
+                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                                Bonjour {{nom}},
+                            </p>
+                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                                {{#if_secteur}}Les entreprises du secteur <strong style="color: {COLOR_PRIMARY};">{{secteur}}</strong> comme {{#endif}}<strong>{{entreprise}}</strong> ont souvent les mêmes enjeux : visibilité, performance du site, et mise en conformité.
+                            </p>
+                            {{#if_tech_data}}
+                            <div style="background-color: {COLOR_BG}; padding: 20px; border-radius: 8px; margin: 24px 0; border-left: 4px solid {COLOR_PRIMARY};">
+                                <p style="margin: 0 0 8px 0; color: {COLOR_PRIMARY}; font-size: 14px; font-weight: 600;">Votre stack actuelle</p>
+                                <p style="margin: 0; color: {COLOR_TEXT_MEDIUM}; font-size: 15px;">Framework / CMS : {{framework}} {{cms}} · Hébergement : {{hosting_provider}}</p>
+                            </div>
+                            {{#endif}}
+                            <p style="margin: 0 0 24px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                                Je vous propose un audit gratuit ciblé sur votre secteur pour identifier les leviers les plus impactants.
+                            </p>
+                            <table role="presentation" style="margin: 24px 0;">
+                                <tr>
+                                    <td style="background-color: {COLOR_PRIMARY}; border-radius: 8px; padding: 14px 24px; text-align: center;">
+                                        <a href="{{base_url}}/audit" style="color: {COLOR_WHITE}; font-size: 15px; font-weight: 600; text-decoration: none;">Demander l'audit gratuit</a>
+                                    </td>
+                                </tr>
+                            </table>
+                            <p style="margin: 24px 0 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                                Cordialement,<br><strong style="color: {COLOR_PRIMARY};">Votre nom</strong><br>Votre titre
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>"""
+
+
+def get_template_post_demo_html():
+    """Remerciement après démo / suivi."""
+    return f"""<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Suite à notre échange - {{entreprise}}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: {COLOR_BG};">
+    <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: {COLOR_BG};">
+        <tr>
+            <td style="padding: 40px 20px;">
+                <table role="presentation" style="max-width: 560px; margin: 0 auto; background-color: {COLOR_WHITE}; border-radius: 12px; box-shadow: 0 2px 16px rgba(0,0,0,0.06);">
+                    <tr>
+                        <td style="padding: 32px 36px;">
+                            <p style="margin: 0 0 8px 0; color: {COLOR_TEXT_MEDIUM}; font-size: 13px;">Suite à notre échange</p>
+                            <h1 style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 22px; font-weight: 600;">Bonjour {{nom}},</h1>
+                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                                Merci d'avoir pris le temps d'échanger avec moi concernant <strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong>.
+                            </p>
+                            <p style="margin: 0 0 24px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                                Comme convenu, je vous envoie un récapitulatif des points abordés et des prochaines étapes possibles. N'hésitez pas à me recontacter pour toute question.
+                            </p>
+                            <table role="presentation" style="margin: 24px 0;">
+                                <tr>
+                                    <td style="background-color: {COLOR_PRIMARY}; border-radius: 8px; padding: 14px 24px; text-align: center;">
+                                        <a href="{{base_url}}/contact" style="color: {COLOR_WHITE}; font-size: 15px; font-weight: 600; text-decoration: none;">Voir le récapitulatif</a>
+                                    </td>
+                                </tr>
+                            </table>
+                            <p style="margin: 24px 0 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                                Bien cordialement,<br><strong style="color: {COLOR_PRIMARY};">Votre nom</strong>
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>"""
+
+
+def get_template_relance2_html():
+    """Deuxième relance, dernière chance."""
+    return f"""<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dernière relance - {{entreprise}}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: {COLOR_BG};">
+    <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: {COLOR_BG};">
+        <tr>
+            <td style="padding: 40px 20px;">
+                <table role="presentation" style="max-width: 560px; margin: 0 auto; background-color: {COLOR_WHITE}; border-radius: 12px; box-shadow: 0 2px 16px rgba(0,0,0,0.06);">
+                    <tr>
+                        <td style="padding: 32px 36px;">
+                            <p style="margin: 0 0 8px 0; color: {COLOR_TEXT_MEDIUM}; font-size: 13px;">Dernière relance</p>
+                            <h1 style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 22px; font-weight: 600;">Bonjour {{nom}},</h1>
+                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                                Je me permets de revenir une dernière fois vers vous pour ma proposition destinée à <strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong>.
+                            </p>
+                            <p style="margin: 0 0 24px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                                Si vous souhaitez en discuter, je reste disponible. Sinon, je ne vous solliciterai plus et vous remercie pour votre attention.
+                            </p>
+                            <table role="presentation" style="margin: 24px 0;">
+                                <tr>
+                                    <td style="background-color: {COLOR_PRIMARY}; border-radius: 8px; padding: 14px 24px; text-align: center;">
+                                        <a href="{{base_url}}/contact" style="color: {COLOR_WHITE}; font-size: 15px; font-weight: 600; text-decoration: none;">Répondre à ce message</a>
+                                    </td>
+                                </tr>
+                            </table>
+                            <p style="margin: 24px 0 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                                Cordialement,<br><strong style="color: {COLOR_PRIMARY};">Votre nom</strong>
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>"""
+
+
+def get_template_technique_avance_html():
+    """Technique avancé : framework, cms, performance, sécurité (données complètes)."""
+    return f"""<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analyse technique - {{entreprise}}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: {COLOR_BG};">
+    <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: {COLOR_BG};">
+        <tr>
+            <td style="padding: 40px 20px;">
+                <table role="presentation" style="max-width: 600px; margin: 0 auto; background-color: {COLOR_WHITE}; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08);">
+                    <tr>
+                        <td style="padding: 28px 32px; background: linear-gradient(135deg, {COLOR_PRIMARY}, #C62828); border-radius: 12px 12px 0 0;">
+                            <h1 style="margin: 0; color: {COLOR_WHITE}; font-size: 22px; font-weight: 600;">Analyse technique de votre site</h1>
+                            <p style="margin: 8px 0 0; color: rgba(255,255,255,0.9); font-size: 14px;">{{entreprise}} {{#if_website}}· {{website}} {{#endif}}</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 36px 32px;">
+                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">Bonjour {{nom}},</p>
+                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                                J'ai réalisé une analyse technique de la présence en ligne de <strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong>. Voici une synthèse.
+                            </p>
+                            {{#if_all_data}}
+                            <div style="background-color: {COLOR_BG}; padding: 24px; border-radius: 8px; margin: 24px 0; border-left: 4px solid {COLOR_PRIMARY};">
+                                <h3 style="margin: 0 0 16px 0; color: {COLOR_PRIMARY}; font-size: 18px;">Résultats de l'analyse</h3>
+                                <table role="presentation" style="width: 100%; border-collapse: collapse;">
+                                    {{analysis_summary}}
+                                </table>
+                            </div>
+                            {{#endif}}
+                            <p style="margin: 0 0 24px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                                Je peux vous détailler ces points et proposer un plan d'action personnalisé lors d'un court échange.
+                            </p>
+                            <table role="presentation" style="margin: 24px 0;">
+                                <tr>
+                                    <td style="background-color: {COLOR_PRIMARY}; border-radius: 8px; padding: 14px 24px; text-align: center;">
+                                        <a href="{{base_url}}/audit" style="color: {COLOR_WHITE}; font-size: 15px; font-weight: 600; text-decoration: none;">Obtenir le rapport détaillé</a>
+                                    </td>
+                                </tr>
+                            </table>
+                            <p style="margin: 24px 0 0; color: {COLOR_TEXT_DARK}; font-size: 16px;">Cordialement,<br><strong style="color: {COLOR_PRIMARY};">Votre nom</strong></p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>"""
+
+
+def get_template_securite_html():
+    """Focus sécurité : score, vulnérabilités (si données pentest)."""
+    return f"""<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sécurité de votre site - {{entreprise}}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: {COLOR_BG};">
+    <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: {COLOR_BG};">
+        <tr>
+            <td style="padding: 40px 20px;">
+                <table role="presentation" style="max-width: 600px; margin: 0 auto; background-color: {COLOR_WHITE}; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08);">
+                    <tr>
+                        <td style="padding: 28px 32px; background: linear-gradient(135deg, #2E7D32, #1B5E20); border-radius: 12px 12px 0 0;">
+                            <h1 style="margin: 0; color: {COLOR_WHITE}; font-size: 22px; font-weight: 600;">Sécurité et conformité</h1>
+                            <p style="margin: 8px 0 0; color: rgba(255,255,255,0.9); font-size: 14px;">{{entreprise}}{{#if_website}} · {{website}}{{#endif}}</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 36px 32px;">
+                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">Bonjour {{nom}},</p>
+                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                                La sécurité du site de <strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong>{{#if_website}} ({{website}}){{#endif}} est un enjeu majeur pour protéger vos données et celles de vos clients.
+                            </p>
+                            {{#if_security}}
+                            <div style="background-color: #FFF3E0; padding: 20px; border-radius: 8px; margin: 24px 0; border-left: 4px solid #E65100;">
+                                <p style="margin: 0 0 8px 0; color: #E65100; font-size: 14px; font-weight: 600;">Score de sécurité actuel</p>
+                                <p style="margin: 0; color: {COLOR_TEXT_DARK}; font-size: 15px;">Votre site obtient un score de <strong>{{security_score}}/100</strong>. Des améliorations sont possibles.</p>
+                            </div>
+                            {{#endif}}
+                            <p style="margin: 0 0 24px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                                Je propose un audit de sécurité gratuit : analyse des headers, SSL, bonnes pratiques et recommandations personnalisées.
+                            </p>
+                            <table role="presentation" style="margin: 24px 0;">
+                                <tr>
+                                    <td style="background-color: #2E7D32; border-radius: 8px; padding: 14px 24px; text-align: center;">
+                                        <a href="{{base_url}}/security-audit" style="color: {COLOR_WHITE}; font-size: 15px; font-weight: 600; text-decoration: none;">Demander l'audit sécurité</a>
+                                    </td>
+                                </tr>
+                            </table>
+                            <p style="margin: 24px 0 0; color: {COLOR_TEXT_DARK}; font-size: 16px;">Cordialement,<br><strong style="color: #2E7D32;">Votre nom</strong></p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>"""
+
+
+def get_template_contacts_html():
+    """Découverte basée sur les contacts / scraping (total_emails, total_people)."""
+    return f"""<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Votre présence en ligne - {{entreprise}}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: {COLOR_BG};">
+    <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: {COLOR_BG};">
+        <tr>
+            <td style="padding: 40px 20px;">
+                <table role="presentation" style="max-width: 600px; margin: 0 auto; background-color: {COLOR_WHITE}; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08);">
+                    <tr>
+                        <td style="padding: 28px 32px; background: linear-gradient(135deg, {COLOR_PRIMARY}, #C62828); border-radius: 12px 12px 0 0;">
+                            <h1 style="margin: 0; color: {COLOR_WHITE}; font-size: 22px; font-weight: 600;">Votre présence digitale</h1>
+                            <p style="margin: 8px 0 0; color: rgba(255,255,255,0.9); font-size: 14px;">{{entreprise}}{{#if_website}} · {{website}}{{#endif}}</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 36px 32px;">
+                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">Bonjour {{nom}},</p>
+                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                                {{#if_secteur}}Dans le secteur <strong>{{secteur}}</strong>, {{#endif}}j'ai analysé la présence en ligne de <strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong>{{#if_website}} ({{website}}){{#endif}}.
+                            </p>
+                            {{#if_scraping_data}}
+                            <div style="background-color: {COLOR_BG}; padding: 20px; border-radius: 8px; margin: 24px 0;">
+                                <h3 style="margin: 0 0 12px 0; color: {COLOR_PRIMARY}; font-size: 18px;">Ce que j'ai observé</h3>
+                                <ul style="margin: 0; padding-left: 20px; color: {COLOR_TEXT_MEDIUM}; font-size: 15px; line-height: 1.8;">
+                                    {{scraping_info}}
+                                </ul>
+                            </div>
+                            {{#endif}}
+                            <p style="margin: 0 0 24px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                                Je peux vous aider à structurer votre communication digitale et à mieux toucher vos cibles. Souhaitez-vous en parler 15 minutes ?
+                            </p>
+                            <table role="presentation" style="margin: 24px 0;">
+                                <tr>
+                                    <td style="background-color: {COLOR_PRIMARY}; border-radius: 8px; padding: 14px 24px; text-align: center;">
+                                        <a href="{{base_url}}/contact" style="color: {COLOR_WHITE}; font-size: 15px; font-weight: 600; text-decoration: none;">Échanger 15 min</a>
+                                    </td>
+                                </tr>
+                            </table>
+                            <p style="margin: 24px 0 0; color: {COLOR_TEXT_DARK}; font-size: 16px;">Cordialement,<br><strong style="color: {COLOR_PRIMARY};">Votre nom</strong></p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>"""
+
+
+def get_cold_email_templates():
+    """Retourne les 2 modèles texte (cold email) pour le fichier par défaut."""
+    from datetime import datetime
+    now = datetime.now().isoformat()
+    return [
+        {
+            'id': 'cold_email_1',
+            'name': 'Cold Email - Entreprise Locale',
+            'category': 'cold_email',
+            'subject': 'Développeur web freelance - Partenariat pour vos startups',
+            'content': """Bonjour,
+
+Je suis {Votre nom}, développeur web freelance, spécialisé en TypeScript, React et Node.js.
+
+Je vois que {entreprise} accompagne de nombreuses startups et entreprises innovantes. Beaucoup d'entre elles ont besoin de sites web modernes, d'applications web ou d'optimisation de leurs outils numériques.
+
+Je propose mes services aux entreprises que vous accompagnez :
+- Sites vitrines modernes et performants (600€)
+- Applications web sur mesure
+- Audit et optimisation de sites existants (800€)
+- Automatisation de processus (900€)
+
+Pourriez-vous me mettre en relation avec des entreprises qui auraient des besoins en développement web ? Je peux également intervenir lors d'événements ou proposer des ateliers techniques.
+
+Disponible pour un échange de 15 minutes cette semaine pour discuter d'un éventuel partenariat ?
+
+Cordialement,
+{Votre nom}
+{Votre titre}
+{votre-site.example.com}""",
+            'created_at': now,
+            'updated_at': now
+        },
+        {
+            'id': 'cold_email_2',
+            'name': 'Cold Email - PME avec site obsolète',
+            'category': 'cold_email',
+            'subject': 'Modernisation de votre site web - {entreprise}',
+            'content': """Bonjour {nom},
+
+J'ai remarqué que le site web de {entreprise} pourrait bénéficier d'une modernisation pour améliorer l'expérience utilisateur et les performances.
+
+En tant que développeur web freelance spécialisé en TypeScript, React et Node.js, j'ai aidé plusieurs entreprises similaires à moderniser leur présence en ligne, avec des résultats concrets :
+- Amélioration de la vitesse de chargement (réduction de 40-60%)
+- Meilleure expérience utilisateur mobile
+- Optimisation SEO pour plus de visibilité
+
+Je propose un audit gratuit de votre site actuel pour identifier les opportunités d'amélioration.
+
+Seriez-vous disponible pour un échange de 15 minutes cette semaine ?
+
+Cordialement,
+{Votre nom}
+{Votre titre}
+{votre-site.example.com}""",
+            'created_at': now,
+            'updated_at': now
+        }
+    ]
+
+
 if __name__ == "__main__":
     import sys
     root = Path(__file__).parent.parent
     templates_file = root / 'templates_data.json'
     default_file = root / 'templates_data.default.json'
+    now = datetime.now().isoformat()
 
-    # Option --restore : recopie le fichier par defaut (tous les modeles) sur templates_data.json
+    def _html(id_, name, subject, content):
+        return {'id': id_, 'name': name, 'category': 'html_email', 'subject': subject, 'content': content, 'is_html': True, 'created_at': now, 'updated_at': now}
+
+    # Option --write-default : genere templates_data.default.json (HTML uniquement, pas de cold email)
+    if '--write-default' in sys.argv or '-w' in sys.argv:
+        default_templates = [
+            _html('html_modernisation_technique', 'HTML - Modernisation technique', 'Modernisation de votre site web - {entreprise}', get_template_1_html()),
+            _html('html_optimisation_performance', 'HTML - Optimisation performance', 'Optimiser les performances de votre site - {entreprise}', get_template_2_html()),
+            _html('html_securite_conformite', 'HTML - Sécurité et conformité', 'Renforcer la sécurité de votre site - {entreprise}', get_template_3_html()),
+            _html('html_presence_digitale', 'HTML - Présence digitale', 'Améliorer votre présence digitale - {entreprise}', get_template_4_html()),
+            _html('html_audit_complet', 'HTML - Audit complet', 'Audit complet de votre présence digitale - {entreprise}', get_template_5_html()),
+            _html('html_decouverte_hero', 'HTML - Découverte', 'Un mot pour {entreprise}', get_template_decouverte_hero_html()),
+            _html('html_relance', 'HTML - Relance courte', 'Relance - {entreprise}', get_template_relance_html()),
+            _html('html_relance2', 'HTML - Relance 2', 'Dernière relance - {entreprise}', get_template_relance2_html()),
+            _html('html_secteur', 'HTML - Par secteur', 'Proposition pour votre secteur - {entreprise}', get_template_secteur_html()),
+            _html('html_post_demo', 'HTML - Post-démo', 'Suite à notre échange - {entreprise}', get_template_post_demo_html()),
+            _html('html_technique_avance', 'HTML - Technique avancé', 'Analyse technique - {entreprise}', get_template_technique_avance_html()),
+            _html('html_securite', 'HTML - Sécurité', 'Sécurité de votre site - {entreprise}', get_template_securite_html()),
+            _html('html_contacts', 'HTML - Contacts / présence', 'Votre présence en ligne - {entreprise}', get_template_contacts_html()),
+        ]
+        with open(default_file, 'w', encoding='utf-8') as f:
+            json.dump({'templates': default_templates}, f, ensure_ascii=False, indent=2)
+        print("OK: " + str(default_file) + " ecrit avec " + str(len(default_templates)) + " modeles HTML.")
+        sys.exit(0)
+
+    # Option --restore : recopie le fichier par defaut (HTML uniquement) sur templates_data.json
     if '--restore' in sys.argv or '-r' in sys.argv:
         if not default_file.exists():
-            print("Erreur: templates_data.default.json introuvable.")
+            print("Erreur: templates_data.default.json introuvable. Lancez d'abord: python scripts/generate_html_templates.py --write-default")
             sys.exit(1)
         import shutil
         shutil.copy(default_file, templates_file)
-        print("Restauration OK: templates_data.json recree avec tous les modeles (2 Cold Email + 5 HTML).")
+        with open(default_file, 'r', encoding='utf-8') as f:
+            n = len(json.load(f).get('templates', []))
+        print("Restauration OK: templates_data.json recree avec " + str(n) + " modeles HTML.")
         sys.exit(0)
 
     # Charger les templates existants
@@ -461,61 +957,23 @@ if __name__ == "__main__":
     else:
         data = {'templates': []}
     
-    # Ajouter les nouveaux templates HTML
+    # Ajouter les nouveaux templates HTML (ids a ajouter si absents)
     new_templates = [
-        {
-            'id': 'html_modernisation_technique',
-            'name': 'HTML - Modernisation technique',
-            'category': 'html_email',
-            'subject': 'Modernisation de votre site web - {entreprise}',
-            'content': get_template_1_html(),
-            'is_html': True,
-            'created_at': datetime.now().isoformat(),
-            'updated_at': datetime.now().isoformat()
-        },
-        {
-            'id': 'html_optimisation_performance',
-            'name': 'HTML - Optimisation performance',
-            'category': 'html_email',
-            'subject': 'Optimiser les performances de votre site - {entreprise}',
-            'content': get_template_2_html(),
-            'is_html': True,
-            'created_at': datetime.now().isoformat(),
-            'updated_at': datetime.now().isoformat()
-        },
-        {
-            'id': 'html_securite_conformite',
-            'name': 'HTML - Sécurité et conformité',
-            'category': 'html_email',
-            'subject': 'Renforcer la sécurité de votre site - {entreprise}',
-            'content': get_template_3_html(),
-            'is_html': True,
-            'created_at': datetime.now().isoformat(),
-            'updated_at': datetime.now().isoformat()
-        },
-        {
-            'id': 'html_presence_digitale',
-            'name': 'HTML - Présence digitale',
-            'category': 'html_email',
-            'subject': 'Améliorer votre présence digitale - {entreprise}',
-            'content': get_template_4_html(),
-            'is_html': True,
-            'created_at': datetime.now().isoformat(),
-            'updated_at': datetime.now().isoformat()
-        },
-        {
-            'id': 'html_audit_complet',
-            'name': 'HTML - Audit complet',
-            'category': 'html_email',
-            'subject': 'Audit complet de votre présence digitale - {entreprise}',
-            'content': get_template_5_html(),
-            'is_html': True,
-            'created_at': datetime.now().isoformat(),
-            'updated_at': datetime.now().isoformat()
-        }
+        _html('html_modernisation_technique', 'HTML - Modernisation technique', 'Modernisation de votre site web - {entreprise}', get_template_1_html()),
+        _html('html_optimisation_performance', 'HTML - Optimisation performance', 'Optimiser les performances de votre site - {entreprise}', get_template_2_html()),
+        _html('html_securite_conformite', 'HTML - Sécurité et conformité', 'Renforcer la sécurité de votre site - {entreprise}', get_template_3_html()),
+        _html('html_presence_digitale', 'HTML - Présence digitale', 'Améliorer votre présence digitale - {entreprise}', get_template_4_html()),
+        _html('html_audit_complet', 'HTML - Audit complet', 'Audit complet de votre présence digitale - {entreprise}', get_template_5_html()),
+        _html('html_decouverte_hero', 'HTML - Découverte', 'Un mot pour {entreprise}', get_template_decouverte_hero_html()),
+        _html('html_relance', 'HTML - Relance courte', 'Relance - {entreprise}', get_template_relance_html()),
+        _html('html_relance2', 'HTML - Relance 2', 'Dernière relance - {entreprise}', get_template_relance2_html()),
+        _html('html_secteur', 'HTML - Par secteur', 'Proposition pour votre secteur - {entreprise}', get_template_secteur_html()),
+        _html('html_post_demo', 'HTML - Post-démo', 'Suite à notre échange - {entreprise}', get_template_post_demo_html()),
+        _html('html_technique_avance', 'HTML - Technique avancé', 'Analyse technique - {entreprise}', get_template_technique_avance_html()),
+        _html('html_securite', 'HTML - Sécurité', 'Sécurité de votre site - {entreprise}', get_template_securite_html()),
+        _html('html_contacts', 'HTML - Contacts / présence', 'Votre présence en ligne - {entreprise}', get_template_contacts_html()),
     ]
     
-    # Vérifier si les templates existent déjà
     existing_ids = {t.get('id') for t in data.get('templates', [])}
     added = 0
     for template in new_templates:
@@ -526,7 +984,6 @@ if __name__ == "__main__":
         else:
             print("Deja present : " + template['name'])
     
-    # Sauvegarder
     with open(templates_file, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     

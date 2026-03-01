@@ -1167,11 +1167,12 @@ function toggleEmail(entrepriseId, emailIdx, checked) {
     const emailKey = `${email.email}-${email.entreprise_id}`;
 
     if (checked) {
-        // Ajouter le destinataire
+        // Ajouter le destinataire : nom du contact > responsable entreprise > null
+        var nomDest = (email.nom && email.nom !== 'N/A' && String(email.nom).trim()) ? email.nom : (entreprise.responsable && String(entreprise.responsable).trim()) ? entreprise.responsable : null;
         if (!selectedRecipients.find(r => r.email === email.email && r.entreprise_id === email.entreprise_id)) {
             selectedRecipients.push({
                 email: email.email,
-                nom: email.nom || null,
+                nom: nomDest,
                 entreprise: entreprise.nom,
                 entreprise_id: email.entreprise_id
             });

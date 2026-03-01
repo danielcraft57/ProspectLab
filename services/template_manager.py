@@ -35,65 +35,8 @@ class TemplateManager:
         self.templates = self._load_templates()
     
     def _init_templates_file(self):
-        """Initialise le fichier de templates avec des exemples"""
-        default_templates = {
-            'templates': [
-                {
-                    'id': 'cold_email_1',
-                    'name': 'Cold Email - Entreprise Locale',
-                    'category': 'cold_email',
-                    'subject': 'Développeur web freelance à Metz - Partenariat pour vos startups',
-                    'content': """Bonjour,
-
-Je suis {Votre nom}, développeur web freelance, spécialisé en TypeScript, React et Node.js.
-
-Je vois que {entreprise} accompagne de nombreuses startups et entreprises innovantes. Beaucoup d'entre elles ont besoin de sites web modernes, d'applications web ou d'optimisation de leurs outils numériques.
-
-Je propose mes services aux entreprises que vous accompagnez :
-- Sites vitrines modernes et performants (600€)
-- Applications web sur mesure
-- Audit et optimisation de sites existants (800€)
-- Automatisation de processus (900€)
-
-Pourriez-vous me mettre en relation avec des entreprises qui auraient des besoins en développement web ? Je peux également intervenir lors d'événements ou proposer des ateliers techniques.
-
-Disponible pour un échange de 15 minutes cette semaine pour discuter d'un éventuel partenariat ?
-
-Cordialement,
-{Votre nom}
-{Votre titre}
-{votre-site.example.com}""",
-                    'created_at': datetime.now().isoformat(),
-                    'updated_at': datetime.now().isoformat()
-                },
-                {
-                    'id': 'cold_email_2',
-                    'name': 'Cold Email - PME avec site obsolète',
-                    'category': 'cold_email',
-                    'subject': 'Modernisation de votre site web - {entreprise}',
-                    'content': """Bonjour {nom},
-
-J'ai remarqué que le site web de {entreprise} pourrait bénéficier d'une modernisation pour améliorer l'expérience utilisateur et les performances.
-
-En tant que développeur web freelance spécialisé en TypeScript, React et Node.js, j'ai aidé plusieurs entreprises similaires à moderniser leur présence en ligne, avec des résultats concrets :
-- Amélioration de la vitesse de chargement (réduction de 40-60%)
-- Meilleure expérience utilisateur mobile
-- Optimisation SEO pour plus de visibilité
-
-Je propose un audit gratuit de votre site actuel pour identifier les opportunités d'amélioration.
-
-Seriez-vous disponible pour un échange de 15 minutes cette semaine ?
-
-Cordialement,
-{Votre nom}
-{Votre titre}
-{votre-site.example.com}""",
-                    'created_at': datetime.now().isoformat(),
-                    'updated_at': datetime.now().isoformat()
-                }
-            ]
-        }
-        
+        """Initialise le fichier de templates (vide). Utilisez scripts/generate_html_templates.py --restore pour charger les modèles HTML."""
+        default_templates = {'templates': []}
         with open(self.templates_file, 'w', encoding='utf-8') as f:
             json.dump(default_templates, f, ensure_ascii=False, indent=2)
     
@@ -133,7 +76,7 @@ Cordialement,
             if 'content' in template:
                 content = template['content']
                 if template.get('is_html'):
-                    template['preview'] = 'Modèle HTML avec variables dynamiques (nom, entreprise, email, blocs conditionnels). Voir la liste des variables ci-dessous.'
+                    template['preview'] = 'Modèle HTML avec variables dynamiques. {{nom}} = nom du contact ou responsable entreprise si inconnu ; {{entreprise}}, {{email}}, {{responsable}}, blocs conditionnels.'
                 else:
                     template['preview'] = content[:100] + '...' if len(content) > 100 else content
         
@@ -275,6 +218,8 @@ Cordialement,
                     'secteur': entreprise.get('secteur', ''),
                     'framework': entreprise.get('framework', ''),
                     'hosting_provider': entreprise.get('hosting_provider', ''),
+                    'responsable': entreprise.get('responsable') or '',
+                    'email_principal': entreprise.get('email_principal') or '',
                 })
             conn.close()
             
@@ -316,11 +261,13 @@ Cordialement,
             scrapers = scraper_manager.get_scrapers_by_entreprise(entreprise_id)
             if scrapers and len(scrapers) > 0:
                 scraper = scrapers[0]  # Le premier est le plus récent (trié par date DESC)
+                social_list = scraper.get('total_social_profiles', [])
                 data.update({
                     'total_emails': scraper.get('total_emails', 0),
                     'total_people': scraper.get('total_people', 0),
                     'total_phones': scraper.get('total_phones', 0),
-                    'total_social': scraper.get('total_social_profiles', []),
+                    'total_social': social_list,
+                    'total_social_count': len(social_list) if isinstance(social_list, list) else 0,
                     'total_technologies': scraper.get('total_technologies', 0),
                 })
             
@@ -357,16 +304,31 @@ Cordialement,
         if entreprise_id:
             extended_data = self._get_entreprise_extended_data(entreprise_id)
         
-        # Formater le nom si c'est du JSON
+        # Formater le nom : contact > responsable entreprise > Monsieur/Madame
         from utils.name_formatter import format_name
-        formatted_nom = format_name(nom) if nom else 'Monsieur/Madame'
+        formatted_nom = format_name(nom) if nom else None
+        if not formatted_nom or str(formatted_nom).strip() in ('', 'N/A'):
+            formatted_nom = (extended_data.get('responsable') or '').strip() or None
+        if not formatted_nom:
+            formatted_nom = 'Monsieur/Madame'
         
-        # Préparer toutes les variables
+        # Base URL pour les images (hero.webp, etc.) et liens
+        try:
+            from config import BASE_URL
+            base_url = (BASE_URL or '').rstrip('/') or 'http://localhost:5000'
+        except Exception:
+            base_url = 'http://localhost:5000'
+        
+        # Préparer toutes les variables (total_social_count pour condition scraping)
+        extended_flat = dict(extended_data)
+        if 'total_social' in extended_flat and isinstance(extended_flat.get('total_social'), list):
+            extended_flat['total_social_count'] = len(extended_flat['total_social'])
         variables = {
             'nom': formatted_nom,
             'entreprise': entreprise or 'votre entreprise',
             'email': email or '',
-            **extended_data
+            'base_url': base_url,
+            **extended_flat
         }
         
         # Remplacer les conditions {#if_xxx} ... {#endif}
@@ -408,13 +370,13 @@ Cordialement,
         
         # Gérer {#if_scraping_data}
         if '{#if_scraping_data}' in content:
-            has_scraping = any(variables.get(k, 0) > 0 for k in ['total_emails', 'total_people', 'total_social'])
+            has_scraping = any(variables.get(k, 0) > 0 for k in ['total_emails', 'total_people', 'total_social_count'])
             if has_scraping:
                 scraping_items = []
                 if variables.get('total_emails', 0) > 0:
                     scraping_items.append(f"<li><strong>{variables['total_emails']}</strong> contacts identifiés sur votre site</li>")
-                if variables.get('total_social', 0) > 0:
-                    scraping_items.append(f"<li>Présence sur <strong>{variables['total_social']}</strong> réseaux sociaux</li>")
+                if variables.get('total_social_count', 0) > 0:
+                    scraping_items.append(f"<li>Présence sur <strong>{variables['total_social_count']}</strong> réseau(x) social(aux)</li>")
                 if variables.get('website'):
                     scraping_items.append(f"<li>Site web : <strong>{variables['website']}</strong></li>")
                 variables['scraping_info'] = '\n'.join(scraping_items)
@@ -439,6 +401,12 @@ Cordialement,
             else:
                 content = re.sub(r'\{#if_all_data\}.*?\{#endif\}', '', content, flags=re.DOTALL)
         
+        # Gérer les conditionnels génériques {#if_xxx} ... {#endif} (secteur, website, etc.)
+        def replace_generic_if(match):
+            var_name = match.group(1)
+            block_content = match.group(2)
+            return block_content if variables.get(var_name) else ''
+        content = re.sub(r'\{#if_(\w+)\}(.*?)\{#endif\}', replace_generic_if, content, flags=re.DOTALL)
         # Nettoyer les marqueurs de condition restants
         content = re.sub(r'\{#if_\w+\}', '', content)
         content = re.sub(r'\{#endif\}', '', content)
