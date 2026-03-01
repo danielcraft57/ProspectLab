@@ -28,11 +28,17 @@ bash scripts/linux/test_all_tools.sh
 
 ## Scripts disponibles
 
-### Dispatchers (racine)
+### Dispatchers et utilitaires (racine)
 
 - `install_all_tools.sh` : Installation complète (OSINT, Pentest, SEO, Social) avec détection auto
 - `test_all_tools.sh` : Test complet de tous les outils avec détection auto
-- `upgrade_python_venv.sh` : Mise à jour du venv Python vers une version plus récente
+- `upgrade_python_venv.sh` : Mise à jour du venv Python vers une version plus récente (dev local)
+- `clear-db.sh` : Nettoie la base (SQLite/PostgreSQL), utilise l’env Conda `env/` ou venv
+- `clear-all.sh` : Nettoie logs + base + Redis, utilise `env/` ou venv
+- `clear-logs.sh` : Nettoie uniquement les fichiers `logs/*.log`
+- `start-celery.sh` : Démarre worker + beat (utilise `env/` ou venv)
+- `start-celery-beat.sh` : Démarre uniquement Celery beat (`env/` ou venv)
+- `update_services_to_conda.sh` : Met à jour les unités systemd pour Conda (prod)
 
 ### Par version (bookworm/, trixie/, kali/)
 
