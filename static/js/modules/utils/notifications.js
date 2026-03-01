@@ -7,11 +7,26 @@
     
     const Notifications = {
         /**
+         * Icônes par défaut selon le type
+         */
+        getDefaultIcon(type) {
+            const icons = {
+                'info': 'fa-info-circle',
+                'success': 'fa-check-circle',
+                'error': 'fa-exclamation-circle',
+                'warning': 'fa-exclamation-triangle'
+            };
+            return icons[type] || icons.info;
+        },
+        /**
          * Affiche une notification
          * @param {string} message
          * @param {string} type - 'info', 'success', 'error', 'warning'
+         * @param {string} [icon] - classe FontAwesome (ex: 'fa-play-circle') ou null pour l'icône par défaut
          */
-        show(message, type = 'info') {
+        show(message, type = 'info', icon = null) {
+            const iconClass = icon || this.getDefaultIcon(type);
+            const iconHtml = `<i class="fas ${iconClass}" style="margin-right: 0.5rem; opacity: 0.95;"></i>`;
             const notification = document.createElement('div');
             notification.className = `notification notification-${type}`;
             notification.style.cssText = `
@@ -26,8 +41,10 @@
                 z-index: 10000;
                 animation: slideIn 0.3s ease;
                 max-width: 400px;
+                display: flex;
+                align-items: center;
             `;
-            notification.textContent = message;
+            notification.innerHTML = iconHtml + '<span>' + this.escapeHtml(message) + '</span>';
             
             document.body.appendChild(notification);
             
@@ -42,6 +59,11 @@
          * @param {string} type
          * @returns {string}
          */
+        escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        },
         getColor(type) {
             const colors = {
                 'info': '#3498db',

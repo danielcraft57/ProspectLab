@@ -44,7 +44,7 @@ class ProspectLabWebSocket {
 
 ## Événements
 
-### Analyse d'entreprises
+### Analyse globale d'entreprises
 
 **Client → Serveur :**
 - `start_analysis` : Démarre l'analyse
@@ -55,6 +55,125 @@ class ProspectLabWebSocket {
 - `analysis_complete` : Analyse terminée
 - `analysis_error` : Erreur globale
 - `analysis_error_item` : Erreur pour une entreprise spécifique
+
+### Analyses techniques / SEO / OSINT / Pentest par entreprise
+
+Ces flux sont utilisés principalement par la page **Liste des entreprises** et la **fiche entreprise détaillée**.
+
+#### 1. Analyse technique
+
+**Client → Serveur :**
+
+- `start_technical_analysis`
+  - `url` (string) : URL du site à analyser
+  - `entreprise_id` (int) : ID de l'entreprise
+  - `enable_nmap` (bool, optionnel) : Active le scan réseau
+
+**Serveur → Client :**
+
+- `technical_analysis_started`
+  - `message` (string)
+  - `task_id` (string)
+- `technical_analysis_progress`
+  - `progress` (0‑100)
+  - `message` (string)
+- `technical_analysis_complete`
+  - `success` (bool)
+  - `analysis_id` (int)
+  - `url` (string)
+  - `entreprise_id` (int)
+  - `results` (dict) : Résultat technique normalisé
+- `technical_analysis_error`
+  - `error` (string)
+  - `entreprise_id` (int)
+
+#### 2. Analyse SEO
+
+**Client → Serveur :**
+
+- `start_seo_analysis`
+  - `url` (string)
+  - `entreprise_id` (int)
+  - `use_lighthouse` (bool) : Active l'audit Lighthouse
+
+**Serveur → Client :**
+
+- `seo_analysis_started`
+  - `message` (string)
+  - `task_id` (string)
+- `seo_analysis_progress`
+  - `progress` (0‑100)
+  - `message` (string)
+- `seo_analysis_complete`
+  - `success` (bool)
+  - `analysis_id` (int)
+  - `url` (string)
+  - `entreprise_id` (int)
+  - `summary` (dict)
+  - `score` (int) : Score SEO global 0‑100
+  - `updated` (bool) : Indique si l'analyse a été persistée
+- `seo_analysis_error`
+  - `error` (string)
+  - `entreprise_id` (int)
+
+#### 3. Analyse OSINT
+
+**Client → Serveur :**
+
+- `start_osint_analysis`
+  - `url` (string)
+  - `entreprise_id` (int)
+
+**Serveur → Client :**
+
+- `osint_analysis_started`
+  - `message` (string)
+  - `task_id` (string)
+- `osint_analysis_progress`
+  - `progress` (0‑100)
+  - `message` (string)
+  - `entreprise_id` (int)
+- `osint_analysis_complete`
+  - `success` (bool)
+  - `analysis_id` (int)
+  - `url` (string)
+  - `entreprise_id` (int)
+  - `summary` (dict)
+  - `updated` (bool)
+- `osint_analysis_error`
+  - `error` (string)
+  - `entreprise_id` (int)
+
+#### 4. Analyse Pentest
+
+**Client → Serveur :**
+
+- `start_pentest_analysis`
+  - `url` (string)
+  - `entreprise_id` (int)
+  - `options` (dict) : Options avancées du test
+
+**Serveur → Client :**
+
+- `pentest_analysis_started`
+  - `message` (string)
+  - `task_id` (string)
+- `pentest_analysis_progress`
+  - `progress` (0‑100)
+  - `message` (string)
+  - `entreprise` (string) : Nom de l'entreprise
+  - `cumulative_totals` (dict) : Statistiques agrégées
+- `pentest_analysis_complete`
+  - `success` (bool)
+  - `analysis_id` (int)
+  - `url` (string)
+  - `entreprise_id` (int)
+  - `summary` (dict)
+  - `risk_score` (int) : Score de risque 0‑100
+  - `updated` (bool)
+- `pentest_analysis_error`
+  - `error` (string)
+  - `entreprise_id` (int)
 
 ### Scraping d'emails
 

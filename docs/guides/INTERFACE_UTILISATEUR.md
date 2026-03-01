@@ -49,12 +49,23 @@ Affiche toutes les entreprises importees avec leurs informations principales.
 
 - **Vue grille** : Cartes avec informations principales
 - **Vue liste** : Tableau detaille avec toutes les colonnes
+- **Indicateurs circulaires** : pour chaque entreprise, affichage de 2 jauges 0‑100 :
+  - **Score de securite** (analyse technique)
+  - **Score SEO**
 
 #### Actions rapides
 
-- Clic sur une entreprise : Ouvre la fiche detaillee
-- Etoile : Marquer comme favori
-- Bouton de scraping : Lancer un scraping pour une entreprise specifique
+- **Clic sur une carte / ligne** : Ouvre la fiche detaillee dans une modal
+- **Etoile** : Marquer / demarquer comme favori (mise a jour temps reel)
+- **Bouton de scraping** : Lancer un scraping pour une entreprise specifique
+- **Boutons de relance sur les indicateurs** :
+  - un petit bouton `↻` sous la jauge **Securite** relance l'**analyse technique** pour l'entreprise courante,
+  - un bouton `↻` sous la jauge **SEO** relance l'**analyse SEO**,
+  - l'etat de connexion WebSocket est verifie avant d'envoyer la commande; en cas de probleme un toast d'avertissement est affiche.
+- Lorsqu'une analyse est relancee :
+  - un **loader circulaire** recouvre uniquement la jauge concernee,
+  - a la fin de l'analyse, la jauge est mise a jour en temps reel (sans recharger la page),
+  - une **notification** en haut de l'ecran affiche le resultat : `"NomEntreprise — Analyse technique/SEO terminee"` ou un message d'erreur.
 
 ### Fiche entreprise detaillee
 
@@ -114,6 +125,8 @@ Affiche une vue synthetique et detaillee de la fiche technique du site :
 - Score de securite global (0-100) avec code couleur
 - Metriques de performance et details techniques complets (section deroulante)
 
+Un bouton **"Relancer l'analyse"** permet de declencher une nouvelle analyse technique pour l'entreprise courante. La progression et le resultat sont suivis via WebSocket, avec mise a jour automatique du score dans la modal et sur la carte entreprise.
+
 #### Onglet Analyse OSINT
 
 Resultats de l'analyse OSINT (recherche approfondie sur les responsables).
@@ -121,6 +134,8 @@ Resultats de l'analyse OSINT (recherche approfondie sur les responsables).
 #### Onglet Analyse Pentest
 
 Resultats des tests de penetration.
+
+Comme pour les onglets Technique et SEO, des boutons de **relance d'analyse** sont disponibles; les evenements WebSocket mettent a jour automatiquement les resultats et le score de risque dans la fiche entreprise.
 
 #### Onglet Notes
 

@@ -1219,6 +1219,7 @@ def register_websocket_handlers(socketio, app):
                                     'success': True,
                                     'analysis_id': result.get('analysis_id'),
                                     'url': url,
+                                    'entreprise_id': entreprise_id,
                                     'summary': result.get('summary', {}),
                                     'updated': result.get('updated', False)
                                 }, room=session_id)
@@ -1228,7 +1229,8 @@ def register_websocket_handlers(socketio, app):
                                 break
                             elif current_state == 'FAILURE':
                                 safe_emit(socketio, 'osint_analysis_error', {
-                                    'error': str(task_result.info)
+                                    'error': str(task_result.info),
+                                    'entreprise_id': entreprise_id
                                 }, room=session_id)
                                 with tasks_lock:
                                     if session_id in active_tasks:
@@ -1236,7 +1238,8 @@ def register_websocket_handlers(socketio, app):
                                 break
                         except Exception as e:
                             safe_emit(socketio, 'osint_analysis_error', {
-                                'error': f'Erreur lors du suivi de la tâche: {str(e)}'
+                                'error': f'Erreur lors du suivi de la tâche: {str(e)}',
+                                'entreprise_id': entreprise_id
                             }, room=session_id)
                             with tasks_lock:
                                 if session_id in active_tasks:
@@ -1245,7 +1248,8 @@ def register_websocket_handlers(socketio, app):
                         threading.Event().wait(0.5)
                 except Exception as e:
                     safe_emit(socketio, 'osint_analysis_error', {
-                        'error': f'Erreur dans le suivi: {str(e)}'
+                        'error': f'Erreur dans le suivi: {str(e)}',
+                        'entreprise_id': entreprise_id
                     }, room=session_id)
             
             thread = threading.Thread(target=monitor_task)
@@ -1331,6 +1335,7 @@ def register_websocket_handlers(socketio, app):
                                     'success': True,
                                     'analysis_id': result.get('analysis_id'),
                                     'url': url,
+                                    'entreprise_id': entreprise_id,
                                     'summary': result.get('summary', {}),
                                     'risk_score': result.get('risk_score', 0),
                                     'updated': result.get('updated', False)
@@ -1341,7 +1346,8 @@ def register_websocket_handlers(socketio, app):
                                 break
                             elif current_state == 'FAILURE':
                                 safe_emit(socketio, 'pentest_analysis_error', {
-                                    'error': str(task_result.info)
+                                    'error': str(task_result.info),
+                                    'entreprise_id': entreprise_id
                                 }, room=session_id)
                                 with tasks_lock:
                                     if session_id in active_tasks:
@@ -1349,7 +1355,8 @@ def register_websocket_handlers(socketio, app):
                                 break
                         except Exception as e:
                             safe_emit(socketio, 'pentest_analysis_error', {
-                                'error': f'Erreur lors du suivi de la tâche: {str(e)}'
+                                'error': f'Erreur lors du suivi de la tâche: {str(e)}',
+                                'entreprise_id': entreprise_id
                             }, room=session_id)
                             with tasks_lock:
                                 if session_id in active_tasks:
@@ -1358,7 +1365,8 @@ def register_websocket_handlers(socketio, app):
                         threading.Event().wait(0.5)
                 except Exception as e:
                     safe_emit(socketio, 'pentest_analysis_error', {
-                        'error': f'Erreur dans le suivi: {str(e)}'
+                        'error': f'Erreur dans le suivi: {str(e)}',
+                        'entreprise_id': entreprise_id
                     }, room=session_id)
             
             thread = threading.Thread(target=monitor_task)
@@ -1444,6 +1452,7 @@ def register_websocket_handlers(socketio, app):
                                     'success': True,
                                     'analysis_id': result.get('analysis_id'),
                                     'url': url,
+                                    'entreprise_id': entreprise_id,
                                     'summary': result.get('summary', {}),
                                     'score': result.get('score', 0),
                                     'updated': result.get('updated', False)
@@ -1454,7 +1463,8 @@ def register_websocket_handlers(socketio, app):
                                 break
                             elif current_state == 'FAILURE':
                                 safe_emit(socketio, 'seo_analysis_error', {
-                                    'error': str(task_result.info)
+                                    'error': str(task_result.info),
+                                    'entreprise_id': entreprise_id
                                 }, room=session_id)
                                 with tasks_lock:
                                     if session_id in active_tasks:
@@ -1462,7 +1472,8 @@ def register_websocket_handlers(socketio, app):
                                 break
                         except Exception as e:
                             safe_emit(socketio, 'seo_analysis_error', {
-                                'error': f'Erreur lors du suivi de la tâche: {str(e)}'
+                                'error': f'Erreur lors du suivi de la tâche: {str(e)}',
+                                'entreprise_id': entreprise_id
                             }, room=session_id)
                             with tasks_lock:
                                 if session_id in active_tasks:
@@ -1471,7 +1482,8 @@ def register_websocket_handlers(socketio, app):
                         threading.Event().wait(0.5)
                 except Exception as e:
                     safe_emit(socketio, 'seo_analysis_error', {
-                        'error': f'Erreur dans le suivi: {str(e)}'
+                        'error': f'Erreur dans le suivi: {str(e)}',
+                        'entreprise_id': entreprise_id
                     }, room=session_id)
             
             thread = threading.Thread(target=monitor_task)
@@ -1553,6 +1565,7 @@ def register_websocket_handlers(socketio, app):
                                     'success': True,
                                     'analysis_id': result.get('analysis_id'),
                                     'url': url,
+                                    'entreprise_id': entreprise_id,
                                     'results': result.get('results', {})
                                 }, room=session_id)
                                 with tasks_lock:
@@ -1561,7 +1574,8 @@ def register_websocket_handlers(socketio, app):
                                 break
                             elif current_state == 'FAILURE':
                                 safe_emit(socketio, 'technical_analysis_error', {
-                                    'error': str(task_result.info)
+                                    'error': str(task_result.info),
+                                    'entreprise_id': entreprise_id
                                 }, room=session_id)
                                 with tasks_lock:
                                     if session_id in active_tasks:
@@ -1569,7 +1583,8 @@ def register_websocket_handlers(socketio, app):
                                 break
                         except Exception as e:
                             safe_emit(socketio, 'technical_analysis_error', {
-                                'error': f'Erreur lors du suivi de la tâche: {str(e)}'
+                                'error': f'Erreur lors du suivi de la tâche: {str(e)}',
+                                'entreprise_id': entreprise_id
                             }, room=session_id)
                             with tasks_lock:
                                 if session_id in active_tasks:
@@ -1578,7 +1593,8 @@ def register_websocket_handlers(socketio, app):
                         threading.Event().wait(0.5)
                 except Exception as e:
                     safe_emit(socketio, 'technical_analysis_error', {
-                        'error': f'Erreur dans le suivi: {str(e)}'
+                        'error': f'Erreur dans le suivi: {str(e)}',
+                        'entreprise_id': entreprise_id
                     }, room=session_id)
 
             thread = threading.Thread(target=monitor_task)

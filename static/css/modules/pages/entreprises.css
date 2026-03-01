@@ -3,7 +3,9 @@
 .entreprises-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-    gap: 1.5rem;
+    gap: 1.5rem 1.5rem;
+    /* Espace vertical suffisant pour que le logo (top: -3rem) de la carte du dessous ne chevauche pas le footer */
+    row-gap: 4rem;
 }
 
 .entreprises-list {
@@ -24,6 +26,8 @@
     display: flex;
     flex-direction: column;
     height: 100%;
+    /* Éviter que le footer touche le logo de la carte en dessous */
+    margin-bottom: 1.5rem;
 }
 
 .entreprise-card:hover {
@@ -102,6 +106,7 @@
     flex: 1;
     display: flex;
     flex-direction: column;
+    min-height: 0;
 }
 
 .card-body p {
@@ -125,6 +130,8 @@
 
 .card-footer {
     padding: 0.75rem 1.5rem 1rem;
+    margin-top: auto;
+    flex-shrink: 0;
     background: #f8f9fa;
     border-top: 1px solid #e9ecef;
     display: flex;
