@@ -2052,12 +2052,23 @@ class OSINTAnalyzer:
                 progress_callback(f'Ajout de {len(phones_from_scrapers)} téléphone(s) du scraper...')
             results['phones_from_scrapers'] = phones_from_scrapers
         
-        # Recherche OSINT avancée sur les téléphones
+        # Recherche OSINT avancée sur les téléphones (normaliser: accepter str ou dict)
         if phones_from_scrapers and len(phones_from_scrapers) > 0:
             if progress_callback:
                 progress_callback('Analyse OSINT des numéros de téléphone...')
             try:
-                phone_osint_data = self.analyze_phones_osint(phones_from_scrapers[:5], progress_callback)
+                phones_normalized = []
+                for p in phones_from_scrapers[:10]:
+                    if isinstance(p, str) and p.strip():
+                        phones_normalized.append(p.strip())
+                    elif isinstance(p, dict):
+                        phones_normalized.append(
+                            (p.get('phone') or p.get('value') or p.get('number') or '').strip()
+                        )
+                    elif p is not None:
+                        phones_normalized.append(str(p).strip())
+                phones_normalized = [x for x in phones_normalized if x]
+                phone_osint_data = self.analyze_phones_osint(phones_normalized[:5], progress_callback)
                 results['phone_osint'] = phone_osint_data
             except Exception as e:
                 logger.warning(f'Erreur lors de l\'analyse OSINT des téléphones: {e}')

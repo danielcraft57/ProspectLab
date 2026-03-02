@@ -270,6 +270,17 @@
     form.addEventListener('submit', function(e) {
         e.preventDefault();
         
+        // Si aucune nouvelle entreprise, ne pas lancer l'analyse
+        const totalEl = document.getElementById('preview-stat-total');
+        if (totalEl) {
+            const rawText = totalEl.textContent || totalEl.innerText || '0';
+            const newTotal = parseInt(rawText.replace(/\D/g, '') || rawText, 10) || 0;
+            if (newTotal === 0) {
+                showToast('Aucune nouvelle entreprise à analyser pour ce fichier.', 'info');
+                return;
+            }
+        }
+        
         // Récupérer le nombre de workers depuis l'attribut data du page-header
         const pageHeader = document.querySelector('.page-header');
         const celeryWorkersAttr = pageHeader ? pageHeader.getAttribute('data-celery-workers') : null;
@@ -600,11 +611,16 @@
                     progressContainer.after(scrapingProgressContainer);
                 }
                 scrapingProgressContainer.style.display = 'block';
-                
+                // Dénominateur OSINT/Pentest : garder le total si pas encore défini
+                const n = data.total_entreprises || data.scraped_count;
+                if (typeof totalAnalysisEnterprises !== 'undefined' && typeof n === 'number' && n > 0 && totalAnalysisEnterprises === 0) {
+                    totalAnalysisEnterprises = n;
+                }
                 // Mettre à jour la barre de progression à 100%
-                if (data.current && data.total) {
+                const totalForBar = data.total || data.total_entreprises || data.scraped_count || 0;
+                if (totalForBar > 0) {
                     entreprisesProgressFill.style.width = '100%';
-                    entreprisesProgressText.textContent = `${data.total} / ${data.total} entreprises`;
+                    entreprisesProgressText.textContent = `${totalForBar} / ${totalForBar} entreprises`;
                 }
 
                 const counters = [];
@@ -661,7 +677,10 @@
                 }
                 scrapingProgressContainer.style.display = 'block';
                 entreprisesProgressFill.style.width = '0%';
-                // Si on a le total dans les données, l'afficher, sinon afficher un message générique
+                // Total pour dénominateur OSINT/Pentest (utilisé aussi par technical_analysis_*)
+                if (typeof data.total === 'number' && data.total > 0 && typeof totalAnalysisEnterprises !== 'undefined') {
+                    totalAnalysisEnterprises = data.total;
+                }
                 if (data.total && data.total > 0) {
                     entreprisesProgressText.textContent = `0 / ${data.total} entreprises`;
                 } else {
@@ -669,7 +688,6 @@
                 }
                 scrapingProgressText.innerHTML = '<div style="color: #666;">Initialisation du scraping...</div>';
                 
-                // Scroll automatique vers le conteneur de scraping
                 setTimeout(() => {
                     scrapingProgressContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }, 100);
@@ -678,6 +696,10 @@
     }
     
     // Section pour l'avancement de l'analyse technique
+    // Nombre total d'entreprises pour cette analyse (avec site),
+    // utilisé aussi comme dénominateur pour OSINT et Pentest.
+    let totalAnalysisEnterprises = 0;
+
     const technicalProgressContainer = document.createElement('div');
     technicalProgressContainer.id = 'technical-progress-container';
     // Fond sombre pour s'aligner avec le thème global
@@ -746,8 +768,10 @@
                 const message = data.message || 'Analyse technique + SEO en cours...';
                 
                 // Compteur X/Y entreprises (analyse technique)
-                if (typeof data.current === 'number' && typeof data.total === 'number' && data.total > 0) {
-                    technicalProgressCountBadge.textContent = `${data.current} / ${data.total} entreprises`;
+                if (typeof data.total === 'number' && data.total > 0) {
+                    totalAnalysisEnterprises = data.total;
+                    const current = typeof data.current === 'number' ? data.current : 0;
+                    technicalProgressCountBadge.textContent = `${current} / ${totalAnalysisEnterprises} entreprises`;
                 } else {
                     technicalProgressCountBadge.textContent = 'Analyse en cours...';
                 }
@@ -779,8 +803,10 @@
                 const percent = typeof data.progress === 'number' ? Math.min(100, Math.max(0, data.progress)) : null;
                 
                 // Compteur X/Y entreprises (analyse technique)
-                if (typeof data.current === 'number' && typeof data.total === 'number' && data.total > 0) {
-                    technicalProgressCountBadge.textContent = `${data.current} / ${data.total} entreprises`;
+                if (typeof data.total === 'number' && data.total > 0) {
+                    totalAnalysisEnterprises = data.total;
+                    const current = typeof data.current === 'number' ? data.current : 0;
+                    technicalProgressCountBadge.textContent = `${current} / ${totalAnalysisEnterprises} entreprises`;
                 } else {
                     technicalProgressCountBadge.textContent = 'Analyse en cours...';
                 }
@@ -859,19 +885,47 @@
                 
                 const current = typeof data.current === 'number' ? data.current : null;
                 const total = typeof data.total === 'number' ? data.total : null;
-                
+
+                let technicalSummaryText = '';
                 if (current !== null && total !== null && total > 0) {
                     technicalProgressCountBadge.textContent = `${current} / ${total} entreprises`;
                     technicalProgressText.textContent = `Analyses techniques + SEO terminées pour ${current}/${total} entreprises.`;
                     // Ne marquer comme terminé que si toutes les analyses sont vraiment terminées
                     if (current >= total) {
                         technicalDone = true;
-                        technicalProgressText.textContent = `Analyses techniques + SEO terminées pour ${total}/${total} entreprises.`;
+                        technicalSummaryText = `Analyses techniques + SEO terminées pour ${total}/${total} entreprises.`;
+                        technicalProgressText.textContent = technicalSummaryText;
                     }
                 } else {
                     // Si pas de compteur, considérer comme terminé
                     technicalDone = true;
-                    technicalProgressText.textContent = data.message || 'Analyse technique + SEO terminée';
+                    technicalSummaryText = data.message || 'Analyse technique + SEO terminée';
+                    technicalProgressText.textContent = technicalSummaryText;
+                }
+
+                // Afficher un cadre \"terminé\" similaire au scraping
+                if (technicalDone) {
+                    const isDark = document.body && (document.body.getAttribute('data-theme') === 'dark');
+                    const summaryBg = isDark ? '#022c22' : 'linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%)';
+                    const summaryBorderLeft = isDark ? '#22c55e' : '#27ae60';
+                    const titleColor = isDark ? '#bbf7d0' : '#229954';
+                    const textColor = isDark ? '#e5e7eb' : '#2c3e50';
+
+                    let box = document.getElementById('technical-summary-box');
+                    if (!box) {
+                        box = document.createElement('div');
+                        box.id = 'technical-summary-box';
+                        box.style.marginTop = '0.75rem';
+                        technicalProgressContainer.appendChild(box);
+                    }
+
+                    const message = technicalSummaryText || 'Analyses techniques + SEO terminées.';
+                    box.innerHTML =
+                        `<div style=\"background: ${summaryBg}; padding: 1rem; border-radius: 6px; border-left: 3px solid ${summaryBorderLeft};\">` +
+                        `<div style=\"font-size: 0.9rem; color: ${titleColor}; font-weight: 600; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px;\">` +
+                        `<i class=\"fas fa-check\"></i> Analyse technique + SEO terminée</div>` +
+                        `<div style=\"color: ${textColor}; font-size: 0.95rem; font-weight: 500;\">${message}</div>` +
+                        `</div>`;
                 }
                 
                 if (data.analysis_id && (!lastScrapingResult || !lastScrapingResult.analysis_id)) {
@@ -1024,9 +1078,15 @@
                 
                 const message = data.message || 'Analyse OSINT en cours...';
                 
-                // Compteur X/Y entreprises (OSINT)
-                if (typeof data.current === 'number' && typeof data.total === 'number' && data.total > 0) {
-                    osintProgressCountBadge.textContent = `${data.current} / ${data.total} entreprises`;
+                // Compteur X/Y entreprises (OSINT) — priorité: expected_total > totalAnalysisEnterprises > data.total
+                const osintTotal = (typeof data.expected_total === 'number' && data.expected_total > 0)
+                    ? data.expected_total
+                    : (typeof totalAnalysisEnterprises === 'number' && totalAnalysisEnterprises > 0)
+                        ? totalAnalysisEnterprises
+                        : (typeof data.total === 'number' ? data.total : 0);
+                const osintCurrent = typeof data.current === 'number' ? data.current : 0;
+                if (osintTotal > 0) {
+                    osintProgressCountBadge.textContent = `${osintCurrent} / ${osintTotal} entreprises`;
                 } else {
                     osintProgressCountBadge.textContent = 'En cours...';
                 }
@@ -1102,10 +1162,16 @@
                 
                 // Progression globale (basée sur current/total)
                 let totalProgress = null;
-                if (typeof data.current === 'number' && typeof data.total === 'number' && data.total > 0) {
-                    totalProgress = Math.round((data.current / data.total) * 100);
-                    osintProgressCountBadge.textContent = `${data.current} / ${data.total} entreprises`;
-                    osintTotalInfo.textContent = `${data.current} / ${data.total} terminées`;
+                const osintTotal = (typeof data.expected_total === 'number' && data.expected_total > 0)
+                    ? data.expected_total
+                    : (typeof totalAnalysisEnterprises === 'number' && totalAnalysisEnterprises > 0)
+                        ? totalAnalysisEnterprises
+                        : (typeof data.total === 'number' ? data.total : 0);
+                const osintCurrent = typeof data.current === 'number' ? data.current : 0;
+                if (osintTotal > 0) {
+                    totalProgress = Math.round((osintCurrent / osintTotal) * 100);
+                    osintProgressCountBadge.textContent = `${osintCurrent} / ${osintTotal} entreprises`;
+                    osintTotalInfo.textContent = `${osintCurrent} / ${osintTotal} terminées`;
                 } else {
                     osintProgressCountBadge.textContent = 'En cours...';
                     osintTotalInfo.textContent = 'En cours...';
@@ -1252,9 +1318,12 @@
                 osintCurrentLabelInner.textContent = '100%';
                 osintCurrentFill.style.background = 'linear-gradient(90deg, #8b5cf6, #7c3aed)';
                 
-                // Mettre à jour la jauge globale
-                if (typeof data.current === 'number' && typeof data.total === 'number' && data.total > 0) {
-                    const totalProgress = Math.round((data.current / data.total) * 100);
+                // Mettre à jour la jauge globale (utiliser expected_total pour le dénominateur si dispo)
+                const expectedTotal = typeof data.expected_total === 'number' && data.expected_total > 0
+                    ? data.expected_total
+                    : (totalAnalysisEnterprises > 0 ? totalAnalysisEnterprises : (typeof data.total === 'number' ? data.total : 1));
+                if (typeof data.current === 'number' && expectedTotal > 0) {
+                    const totalProgress = Math.round((data.current / expectedTotal) * 100);
                     osintTotalFill.style.width = totalProgress + '%';
                     osintTotalLabelInner.textContent = `${totalProgress}%`;
                 }
@@ -1262,18 +1331,48 @@
                 const current = typeof data.current === 'number' ? data.current : null;
                 const total = typeof data.total === 'number' ? data.total : null;
                 
-                if (current !== null && total !== null && total > 0) {
-                    osintProgressCountBadge.textContent = `${current} / ${total} entreprises`;
-                    osintTotalInfo.textContent = `${current} / ${total} terminées`;
-                    if (current >= total) {
+                if (current !== null && total !== null && expectedTotal > 0) {
+                    osintProgressCountBadge.textContent = `${current} / ${expectedTotal} entreprises`;
+                    osintTotalInfo.textContent = `${current} / ${expectedTotal} terminées`;
+                    // Ne marquer OSINT terminé (et permettre la redirection) que quand la progression totale est 100 %
+                    if (current >= expectedTotal) {
                         osintDone = true;
-                        osintTotalInfo.textContent = `${total} / ${total} terminées`;
-                        showToast(`<i class="fas fa-check"></i> Analyse OSINT terminée pour ${total} entreprise(s)`, 'info');
+                        osintTotalInfo.textContent = `${expectedTotal} / ${expectedTotal} terminées`;
+                        showToast(`<i class=\"fas fa-check\"></i> Analyse OSINT terminée pour ${expectedTotal} entreprise(s)`, 'info');
                     }
                 } else {
                     osintDone = true;
                     osintTotalInfo.textContent = 'Terminé';
                     showToast('<i class="fas fa-check"></i> Analyse OSINT terminée', 'info');
+                }
+
+                // Afficher un cadre \"terminé\" pour l'OSINT (comme pour le scraping)
+                if (osintDone) {
+                    const isDark = document.body && (document.body.getAttribute('data-theme') === 'dark');
+                    const summaryBg = isDark ? '#020617' : 'linear-gradient(135deg, #eef2ff 0%, #e0f2fe 100%)';
+                    const summaryBorderLeft = isDark ? '#6366f1' : '#2563eb';
+                    const titleColor = isDark ? '#c7d2fe' : '#1d4ed8';
+                    const textColor = isDark ? '#e5e7eb' : '#1f2937';
+
+                    let box = document.getElementById('osint-summary-box');
+                    if (!box) {
+                        box = document.createElement('div');
+                        box.id = 'osint-summary-box';
+                        box.style.marginTop = '0.75rem';
+                        osintProgressContainer.appendChild(box);
+                    }
+
+                    const totalsBox = document.getElementById('osint-cumulative-content');
+                    const totalsText = totalsBox && totalsBox.textContent.trim().length > 0
+                        ? totalsBox.textContent.trim()
+                        : 'Analyses OSINT terminées pour toutes les entreprises.';
+
+                    box.innerHTML =
+                        `<div style=\"background: ${summaryBg}; padding: 1rem; border-radius: 6px; border-left: 3px solid ${summaryBorderLeft};\">` +
+                        `<div style=\"font-size: 0.9rem; color: ${titleColor}; font-weight: 600; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px;\">` +
+                        `<i class=\"fas fa-check\"></i> Analyse OSINT terminée</div>` +
+                        `<div style=\"color: ${textColor}; font-size: 0.95rem; font-weight: 500;\">${totalsText}</div>` +
+                        `</div>`;
                 }
                 
                 maybeRedirectAfterAllDone();
@@ -1321,7 +1420,14 @@
                 pentestProgressContainer.style.display = 'block';
                 pentestDone = false;
 
-                pentestProgressCountBadge.textContent = `${data.current || 0} / ${data.total || 0} entreprises`;
+                // expected_total = nombre d'entreprises de l'analyse (envoyé par le backend), sinon totalAnalysisEnterprises, sinon data.total
+                const pentestTotal = (typeof data.expected_total === 'number' && data.expected_total > 0)
+                    ? data.expected_total
+                    : (typeof totalAnalysisEnterprises === 'number' && totalAnalysisEnterprises > 0)
+                        ? totalAnalysisEnterprises
+                        : (typeof data.total === 'number' ? data.total : 0);
+                const pentestCurrent = typeof data.current === 'number' ? data.current : 0;
+                pentestProgressCountBadge.textContent = `${pentestCurrent} / ${pentestTotal} entreprises`;
                 pentestCurrentInfo.textContent = 'En cours...';
                 pentestCurrentFill.style.width = '0%';
                 pentestCurrentLabelInner.textContent = '0%';
@@ -1357,9 +1463,15 @@
                 const totalProgress = typeof data.progress === 'number' ? data.progress : null;
                 const taskProgress = typeof data.task_progress === 'number' ? data.task_progress : null;
 
-                if (typeof data.current === 'number' && typeof data.total === 'number' && data.total > 0) {
-                    pentestProgressCountBadge.textContent = `${data.current} / ${data.total} entreprises`;
-                    pentestTotalInfo.textContent = `${data.current} / ${data.total} terminées`;
+                const pentestTotal = (typeof data.expected_total === 'number' && data.expected_total > 0)
+                    ? data.expected_total
+                    : (typeof totalAnalysisEnterprises === 'number' && totalAnalysisEnterprises > 0)
+                        ? totalAnalysisEnterprises
+                        : (typeof data.total === 'number' ? data.total : 0);
+                const pentestCurrent = typeof data.current === 'number' ? data.current : 0;
+                if (pentestTotal > 0) {
+                    pentestProgressCountBadge.textContent = `${pentestCurrent} / ${pentestTotal} entreprises`;
+                    pentestTotalInfo.textContent = `${pentestCurrent} / ${pentestTotal} terminées`;
                 }
 
                 if (taskProgress !== null) {
@@ -1374,8 +1486,23 @@
                     pentestTotalLabelInner.textContent = `${Math.round(totalPercent)}%`;
                 }
 
-                const labelText = data.entreprise || data.url || data.message || 'En cours...';
-                pentestCurrentInfo.textContent = labelText.length > 40 ? `${labelText.slice(0, 37)}...` : labelText;
+                // Libellé \"entreprise en cours\" :
+                // - Mettre à jour uniquement quand on reçoit une entreprise/url
+                // - Ne pas l'écraser avec les events globaux qui n'ont qu'un message
+                let labelText = null;
+                if (typeof data.entreprise === 'string' && data.entreprise.trim().length > 0) {
+                    labelText = data.entreprise.trim();
+                } else if (typeof data.url === 'string' && data.url.trim().length > 0) {
+                    labelText = data.url.trim();
+                } else if (!pentestCurrentInfo.textContent) {
+                    // Fallback uniquement si rien n'a encore été affiché
+                    labelText = (data.message && data.message.trim().length > 0) ? data.message.trim() : 'En cours...';
+                }
+
+                if (labelText) {
+                    pentestCurrentInfo.textContent =
+                        labelText.length > 40 ? `${labelText.slice(0, 37)}...` : labelText;
+                }
                 
                 // Afficher les totaux cumulés Pentest.
                 // Important : si un évènement de progression n'embarque pas à nouveau
@@ -1435,22 +1562,77 @@
 
                 const current = typeof data.current === 'number' ? data.current : null;
                 const total = typeof data.total === 'number' ? data.total : null;
-                if (current !== null && total !== null) {
+                const expectedTotal = (typeof data.expected_total === 'number' && data.expected_total > 0)
+                    ? data.expected_total
+                    : (typeof totalAnalysisEnterprises === 'number' && totalAnalysisEnterprises > 0
+                        ? totalAnalysisEnterprises
+                        : (typeof total === 'number' && total > 0 ? total : 1));
+
+                if (current !== null && expectedTotal > 0) {
+                    pentestProgressCountBadge.textContent = `${current} / ${expectedTotal} entreprises`;
+                    pentestTotalInfo.textContent = `${current} / ${expectedTotal} terminées`;
+                } else if (current !== null && total !== null) {
+                    // Fallback si expectedTotal n'est pas exploitable
                     pentestProgressCountBadge.textContent = `${current} / ${total} entreprises`;
                     pentestTotalInfo.textContent = `${current} / ${total} terminées`;
                 } else {
                     pentestTotalInfo.textContent = 'Terminé';
                 }
 
-                pentestDone = true;
+                // Ne marquer Pentest terminé (et permettre la redirection) que quand la progression totale est 100 %
+                if (current !== null && expectedTotal > 0 && current >= expectedTotal) {
+                    pentestDone = true;
+                } else if (current === null && total === null) {
+                    pentestDone = true;
+                }
                 
-                // Toast de notification (réutiliser les variables déjà déclarées)
-                if (current !== null && total !== null && current >= total) {
+                // Toast de notification (basé sur expectedTotal si possible)
+                if (current !== null && expectedTotal > 0 && current >= expectedTotal) {
+                    showToast(`<i class="fas fa-check"></i> Analyse Pentest terminée pour ${expectedTotal} entreprise(s)`, 'success');
+                } else if (current !== null && total !== null && current >= total) {
                     showToast(`<i class="fas fa-check"></i> Analyse Pentest terminée pour ${total} entreprise(s)`, 'success');
                 } else {
                     showToast('<i class="fas fa-check"></i> Analyse Pentest terminée', 'success');
                 }
-                
+
+                // Afficher un cadre \"terminé\" pour le Pentest (comme pour le scraping)
+                if (pentestDone) {
+                    // Mettre à jour le libellé d'état
+                    pentestCurrentLabel.textContent = 'État :';
+                    pentestCurrentInfo.textContent = 'Aucune entreprise en cours';
+
+                    const isDark = document.body && (document.body.getAttribute('data-theme') === 'dark');
+                    const summaryBg = isDark ? '#130b0b' : 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)';
+                    const summaryBorderLeft = isDark ? '#f97316' : '#ef4444';
+                    const titleColor = isDark ? '#fed7aa' : '#b91c1c';
+                    const textColor = isDark ? '#e5e7eb' : '#1f2937';
+
+                    let box = document.getElementById('pentest-summary-box');
+                    if (!box) {
+                        box = document.createElement('div');
+                        box.id = 'pentest-summary-box';
+                        box.style.marginTop = '0.75rem';
+                        pentestProgressContainer.appendChild(box);
+                    }
+
+                    const cumulativeBox = document.getElementById('pentest-cumulative-content');
+                    const cumulativeText = cumulativeBox && cumulativeBox.textContent.trim().length > 0
+                        ? cumulativeBox.textContent.trim()
+                        : 'Analyses Pentest terminées pour toutes les entreprises.';
+
+                    box.innerHTML =
+                        `<div style=\"background: ${summaryBg}; padding: 1rem; border-radius: 6px; border-left: 3px solid ${summaryBorderLeft};\">` +
+                        `<div style=\"font-size: 0.9rem; color: ${titleColor}; font-weight: 600; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px;\">` +
+                        `<i class=\"fas fa-check\"></i> Analyse Pentest terminée</div>` +
+                        `<div style=\"color: ${textColor}; font-size: 0.95rem; font-weight: 500;\">${cumulativeText}</div>` +
+                        `</div>`;
+
+                    // Cacher la box \"TOTAL CUMULÉ\" une fois le résumé final affiché
+                    if (pentestCumulativeBox) {
+                        pentestCumulativeBox.style.display = 'none';
+                    }
+                }
+
                 maybeRedirectAfterAllDone();
             });
 
@@ -1505,8 +1687,10 @@
         
         progressFill.style.width = '100%';
         progressFill.textContent = '100%';
-        const totalProcessed = data.total_processed || data.total || 0;
-        progressText.textContent = `Terminé ! ${totalProcessed} entreprises analysées`;
+        const stats = data.stats || {};
+        const inserted = typeof stats.inserted === 'number' ? stats.inserted : null;
+        const totalProcessed = inserted !== null ? inserted : (data.total_processed || data.total || 0);
+        progressText.textContent = `Terminé ! ${totalProcessed} nouvelles entreprises analysées`;
         
         // Réactiver le formulaire et masquer le bouton stop
         const startBtn = document.getElementById('start-analysis-btn');

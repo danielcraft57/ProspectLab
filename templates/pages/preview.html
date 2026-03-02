@@ -13,12 +13,12 @@
     <h2 class="preview-stats-title">Résumé du fichier</h2>
     <div class="preview-stats-grid">
         <div class="preview-stat-item">
-            <span class="preview-stat-value" id="preview-stat-total">{{ preview_stats.total|default(total_rows)|default(0) }}</span>
-            <span class="preview-stat-label">Entreprises</span>
+            <span class="preview-stat-value">{{ preview_stats.file_total|default(total_rows)|default(0) }}</span>
+            <span class="preview-stat-label">Entreprises dans le fichier</span>
         </div>
         <div class="preview-stat-item">
-            <span class="preview-stat-value">{{ preview_stats.with_website|default(0) }}</span>
-            <span class="preview-stat-label">Avec site web</span>
+            <span class="preview-stat-value" id="preview-stat-total">{{ preview_stats.total|default(0) }}</span>
+            <span class="preview-stat-label">Nouvelles entreprises</span>
         </div>
         <div class="preview-stat-item">
             <span class="preview-stat-value">{{ preview_stats.with_phone|default(0) }}</span>

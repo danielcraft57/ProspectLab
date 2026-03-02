@@ -8,6 +8,7 @@ from datetime import datetime
 import os
 import pandas as pd
 from services.entreprise_analyzer import EntrepriseAnalyzer
+from services.database import Database
 from utils.helpers import allowed_file, get_file_path
 from config import UPLOAD_FOLDER, CELERY_WORKERS
 from utils.template_helpers import render_page
@@ -16,26 +17,71 @@ from services.auth import login_required
 upload_bp = Blueprint('upload', __name__)
 
 
-def _preview_stats_from_df(df):
+def _row_to_duplicate_keys(row, columns=None):
+    """Extrait nom, website, address_1, address_2 depuis une ligne (même logique que la tâche d'analyse)."""
+    # Colonnes possibles (nom exact ou variantes) - insensible à la casse via _find_col
+    def _find_col(cols, *candidates):
+        if not cols:
+            return None
+        lower_map = {c.lower(): c for c in cols}
+        for cand in candidates:
+            if cand.lower() in lower_map:
+                return lower_map[cand.lower()]
+        return None
+
+    cols = list(columns) if columns else (list(row.index) if hasattr(row, 'index') else [])
+    name_col = _find_col(cols, 'name', 'nom', 'Name', 'Nom')
+    web_col = _find_col(cols, 'website', 'site', 'Site web', 'url', 'Website')
+    addr1_col = _find_col(cols, 'address_1', 'address_full', 'adresse')
+    addr2_col = _find_col(cols, 'address_2')
+
+    def _val(col):
+        if col and col in (row.index if hasattr(row, 'index') else []):
+            v = row[col] if hasattr(row, '__getitem__') else row.get(col)
+            return str(v).strip() if v is not None and str(v).strip() and str(v).strip().lower() not in ('nan', 'none', 'null', '') else None
+        return None
+
+    name = (_val(name_col) or '').strip() or None
+    website = _val(web_col) or ''
+    address_1 = (str(_val(addr1_col) or '')).strip() or None
+    address_2 = (str(_val(addr2_col) or '')).strip() or None
+    return name or '', website, address_1, address_2
+
+
+def _preview_stats_from_df(df, database=None):
     """
-    Calcule les statistiques du fichier pour le bloc récapitulatif (nombre d'entreprises, avec website, etc.).
+    Calcule les statistiques du fichier pour le bloc récapitulatif.
+    - Si database est fourni : compte les vraies "nouvelles" entreprises (sans doublon en BDD).
+    - Sinon : total = nombre de lignes (comportement de secours).
     
     Args:
         df: DataFrame pandas du fichier Excel
+        database: instance Database optionnelle pour détecter les doublons en BDD
         
     Returns:
-        dict: total, with_website, with_phone, with_address, with_category
+        dict: file_total, total (nouvelles), with_website, with_phone, with_address, with_category, existing, duplicates_in_file
     """
     if df is None or df.empty:
-        return {'total': 0, 'with_website': 0, 'with_phone': 0, 'with_address': 0, 'with_category': 0}
-    
+        return {
+            'file_total': 0,
+            'total': 0,
+            'with_website': 0,
+            'with_phone': 0,
+            'with_address': 0,
+            'with_category': 0,
+            'existing': 0,
+            'duplicates_in_file': 0,
+        }
+
+    total = len(df)
+
     def filled(series):
         return series.notna() & (series.astype(str).str.strip() != '')
 
-    total = len(df)
-    with_website = filled(df['website']).sum() if 'website' in df.columns else 0
-    with_phone = filled(df['phone_number']).sum() if 'phone_number' in df.columns else 0
-    with_category = filled(df['category']).sum() if 'category' in df.columns else 0
+    # Statistiques brutes sur le fichier (toutes les lignes)
+    with_website_all = int(filled(df['website']).sum()) if 'website' in df.columns else 0
+    with_phone_all = int(filled(df['phone_number']).sum()) if 'phone_number' in df.columns else 0
+    with_category_all = int(filled(df['category']).sum()) if 'category' in df.columns else 0
     addr_cols = [c for c in ('address_1', 'address_2', 'address_full') if c in df.columns]
     if addr_cols:
         has_addr = (df[addr_cols].fillna('').astype(str).apply(lambda s: s.str.strip() != '')).any(axis=1)
@@ -43,12 +89,90 @@ def _preview_stats_from_df(df):
     else:
         with_address = 0
 
+    # Statistiques finales (par défaut: basées sur tout le fichier)
+    new_count = total
+    existing_count = 0
+    duplicates_in_file = 0
+    with_phone_new = with_phone_all
+    with_address_new = with_address
+    with_category_new = with_category_all
+
+    if database is not None:
+        seen_signatures = set()
+        new_count = 0
+        # Quand la BDD est disponible, on recalcule aussi les compteurs
+        # téléphone / adresse / catégorie uniquement sur les lignes qui
+        # seront vraiment analysées (non doublons fichier + BDD).
+        with_phone_new = 0
+        with_address_new = 0
+        with_category_new = 0
+        columns = list(df.columns)
+        try:
+            for idx, row in df.iterrows():
+                name, website, address_1, address_2 = _row_to_duplicate_keys(row, columns)
+                # Signature pour doublons dans le fichier (alignée avec analysis_tasks)
+                from utils.url_utils import normalize_website_domain
+                website_norm = normalize_website_domain(website) if website else ''
+                if website_norm:
+                    sig = ('domain', website_norm)
+                else:
+                    sig = (name.lower() if name else '', (address_1 or '').lower(), (address_2 or '').lower())
+                if sig in seen_signatures and any(sig):
+                    duplicates_in_file += 1
+                    continue
+                seen_signatures.add(sig)
+
+                # Présence de téléphone / adresse / catégorie sur cette ligne
+                has_phone = False
+                if 'phone_number' in row.index:
+                    val = row['phone_number']
+                    has_phone = (val is not None) and (str(val).strip() != '') and str(val).strip().lower() not in ('nan', 'none', 'null')
+
+                has_address = False
+                if any(c in row.index for c in ('address_1', 'address_2', 'address_full')):
+                    addr_vals = []
+                    for c in ('address_1', 'address_2', 'address_full'):
+                        if c in row.index:
+                            addr_vals.append(str(row[c]) if row[c] is not None else '')
+                    has_address = any(v.strip() and v.strip().lower() not in ('nan', 'none', 'null') for v in addr_vals)
+
+                has_category = False
+                if 'category' in row.index:
+                    cat = row['category']
+                    has_category = (cat is not None) and (str(cat).strip() != '') and str(cat).strip().lower() not in ('nan', 'none', 'null')
+
+                duplicate_id = database.find_duplicate_entreprise(name, website, address_1, address_2)
+                if duplicate_id:
+                    existing_count += 1
+                else:
+                    new_count += 1
+                    if has_phone:
+                        with_phone_new += 1
+                    if has_address:
+                        with_address_new += 1
+                    if has_category:
+                        with_category_new += 1
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f'Prévisualisation doublons BDD: {e}, fallback total={total}')
+            new_count = total
+            existing_count = 0
+            duplicates_in_file = 0
+            # En cas de fallback, revenir aux compteurs basés sur tout le fichier
+            with_phone_new = with_phone_all
+            with_address_new = with_address
+            with_category_new = with_category_all
+
     return {
-        'total': int(total),
-        'with_website': int(with_website),
-        'with_phone': int(with_phone),
-        'with_address': int(with_address),
-        'with_category': int(with_category),
+        'file_total': int(total),
+        'total': int(new_count),
+        'with_website': with_website_all,
+        # On affiche ici les compteurs pour les lignes réellement analysées (nouvelles)
+        'with_phone': int(with_phone_new),
+        'with_address': int(with_address_new),
+        'with_category': int(with_category_new),
+        'existing': existing_count,
+        'duplicates_in_file': duplicates_in_file,
     }
 
 
@@ -96,7 +220,13 @@ def upload_file():
                 
                 preview = df.head(10).to_dict('records')
                 columns = list(df.columns)
-                preview_stats = _preview_stats_from_df(df)
+                try:
+                    db = Database()
+                    preview_stats = _preview_stats_from_df(df, database=db)
+                except Exception as e:
+                    logger = __import__('logging').getLogger(__name__)
+                    logger.warning(f'Preview stats avec BDD: {e}')
+                    preview_stats = _preview_stats_from_df(df)
 
                 # Debug: logger la valeur de CELERY_WORKERS
                 import logging
@@ -160,7 +290,13 @@ def preview_file(filename):
         
         preview = df.head(10).to_dict('records')
         columns = list(df.columns)
-        preview_stats = _preview_stats_from_df(df)
+        try:
+            db = Database()
+            preview_stats = _preview_stats_from_df(df, database=db)
+        except Exception as e:
+            logger = __import__('logging').getLogger(__name__)
+            logger.warning(f'Preview (GET) stats avec BDD: {e}')
+            preview_stats = _preview_stats_from_df(df)
 
         # Debug: logger la valeur de CELERY_WORKERS
         import logging
@@ -180,12 +316,6 @@ def preview_file(filename):
                              error_title='Fichier vide',
                              error_message='Le fichier Excel est vide.',
                              error_details='Le fichier ne contient aucune donnée. Vérifiez que votre fichier Excel contient bien des données.',
-                             back_url=url_for('upload.upload_file'))
-    except pd.errors.ExcelFileError as e:
-        return render_template('error.html',
-                             error_title='Format de fichier invalide',
-                             error_message='Le fichier n\'est pas un fichier Excel valide.',
-                             error_details=f'Erreur technique: {str(e)}. Assurez-vous que le fichier est bien au format .xlsx ou .xls.',
                              back_url=url_for('upload.upload_file'))
     except Exception as e:
         return render_template('error.html',

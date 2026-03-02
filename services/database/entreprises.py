@@ -8,6 +8,7 @@ import math
 import logging
 from typing import Optional
 from urllib.parse import urljoin
+from utils.url_utils import normalize_website_domain
 from .base import DatabaseBase
 
 logger = logging.getLogger(__name__)
@@ -47,35 +48,42 @@ class EntrepriseManager(DatabaseBase):
         Returns:
             int or None: ID de l'entreprise existante si doublon trouvé, None sinon
         """
-        if not nom:
+        # Au moins nom ou website requis pour chercher un doublon
+        if not nom and not website:
             return None
         
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        # Normaliser les valeurs pour la comparaison (minuscules, espaces supprimés)
-        def normalize(value):
+        # Normaliser les valeurs pour la comparaison
+        # - nom / adresses : minuscules + trim
+        # - website : domaine normalisé (ignorer http/https, www., slash de fin)
+        def normalize_text(value):
             if not value:
                 return None
             return str(value).lower().strip()
+
+        nom_norm = normalize_text(nom)
+        website_norm = normalize_website_domain(website)
+        address_1_norm = normalize_text(address_1)
+        address_2_norm = normalize_text(address_2)
         
-        nom_norm = normalize(nom)
-        website_norm = normalize(website)
-        address_1_norm = normalize(address_1)
-        address_2_norm = normalize(address_2)
-        
-        # Critère 1: Nom + website identiques
-        if nom_norm and website_norm:
-            self.execute_sql(cursor,'''
-                SELECT id FROM entreprises 
-                WHERE LOWER(TRIM(nom)) = ? 
-                AND LOWER(TRIM(website)) = ?
-                LIMIT 1
-            ''', (nom_norm, website_norm))
-            row = cursor.fetchone()
-            if row:
-                conn.close()
-                return row['id']
+        # Critère 1: domaine du site unique (indépendamment du nom/adresse)
+        if website_norm:
+            try:
+                self.execute_sql(cursor, 'SELECT id, website FROM entreprises WHERE website IS NOT NULL')
+                rows = cursor.fetchall()
+                # Utiliser l'index (row[0], row[1]) pour compatibilité sqlite3.Row et tuple
+                for row in rows:
+                    existing_id = row[0]
+                    existing_website = row[1] if len(row) > 1 else None
+                    existing_domain = normalize_website_domain(existing_website)
+                    if existing_domain and existing_domain == website_norm:
+                        conn.close()
+                        return existing_id
+            except Exception:
+                # En cas de problème de lecture, on retombe sur les critères suivants
+                pass
         
         # Critère 2: Nom + address_1 + address_2 identiques (si pas de website ou website différent)
         if nom_norm and address_1_norm and address_2_norm:
@@ -89,7 +97,7 @@ class EntrepriseManager(DatabaseBase):
             row = cursor.fetchone()
             if row:
                 conn.close()
-                return row['id']
+                return row[0]
         
         conn.close()
         return None
@@ -541,7 +549,7 @@ class EntrepriseManager(DatabaseBase):
         conn.close()
         return all_og_data
     
-    def get_entreprises(self, analyse_id=None, filters=None, limit=None, offset=None):
+    def get_entreprises(self, analyse_id=None, filters=None, limit=None, offset=None, include_og=True):
         """
         Récupère les entreprises avec filtres optionnels
         
@@ -553,7 +561,7 @@ class EntrepriseManager(DatabaseBase):
             offset: Offset pour la pagination (optionnel)
 
         Returns:
-            Liste des entreprises avec leurs données OG et score pentest (dernier score disponible)
+            Liste des entreprises avec, optionnellement, leurs données OG et score pentest / SEO (derniers scores disponibles)
         """
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -596,6 +604,8 @@ class EntrepriseManager(DatabaseBase):
                 params.append(filters['opportunite'])
             if filters.get('favori'):
                 inner_query += ' AND e.favori = 1'
+            if str(filters.get('has_email', '')).lower() in ('1', 'true', 'yes'):
+                inner_query += " AND e.email_principal IS NOT NULL AND TRIM(e.email_principal) <> ''"
             if filters.get('search'):
                 search_term = f"%{filters['search']}%"
                 inner_query += ' AND (e.nom LIKE ? OR e.secteur LIKE ? OR e.email_principal LIKE ? OR e.responsable LIKE ?)'
@@ -642,7 +652,7 @@ class EntrepriseManager(DatabaseBase):
         # Importer la fonction de nettoyage depuis les utils
         from utils.helpers import clean_json_dict
         
-        # Parser les tags et charger les données OpenGraph pour chaque entreprise
+        # Parser les tags et, optionnellement, charger les données OpenGraph pour chaque entreprise
         entreprises = []
         import logging
         logger = logging.getLogger(__name__)
@@ -658,13 +668,14 @@ class EntrepriseManager(DatabaseBase):
             else:
                 entreprise['tags'] = []
             
-            # Charger les données OpenGraph depuis les tables normalisées
-            try:
-                entreprise['og_data'] = self.get_og_data(entreprise['id'])
-            except Exception as og_error:
-                # Sur certains environnements anciens, les tables OG peuvent ne pas encore exister.
-                logger.warning(f"[Database] Erreur lors du chargement des données OG pour entreprise {entreprise.get('id')}: {og_error}")
-                entreprise['og_data'] = None
+            if include_og:
+                # Charger les données OpenGraph depuis les tables normalisées
+                try:
+                    entreprise['og_data'] = self.get_og_data(entreprise['id'])
+                except Exception as og_error:
+                    # Sur certains environnements anciens, les tables OG peuvent ne pas encore exister.
+                    logger.warning(f"[Database] Erreur lors du chargement des données OG pour entreprise {entreprise.get('id')}: {og_error}")
+                    entreprise['og_data'] = None
             
             entreprises.append(entreprise)
         
@@ -672,6 +683,92 @@ class EntrepriseManager(DatabaseBase):
         entreprises = clean_json_dict(entreprises)
         
         return entreprises
+
+    def count_entreprises(self, analyse_id=None, filters=None):
+        """
+        Compte le nombre total d'entreprises correspondant aux filtres.
+        Utilise la même logique de filtres que get_entreprises, mais sans charger les données OG.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        has_security_filters = filters and any(filters.get(k) is not None for k in ('security_min', 'security_max'))
+        has_pentest_filters = filters and any(filters.get(k) is not None for k in ('pentest_min', 'pentest_max'))
+        has_seo_filters = filters and any(filters.get(k) is not None for k in ('seo_min', 'seo_max'))
+        wrap_subquery = has_security_filters or has_pentest_filters or has_seo_filters
+
+        inner_query = '''
+            SELECT e.*,
+                   (SELECT risk_score
+                    FROM analyses_pentest
+                    WHERE entreprise_id = e.id
+                    ORDER BY date_analyse DESC
+                    LIMIT 1) as score_pentest,
+                   (SELECT score
+                    FROM analyses_seo
+                    WHERE entreprise_id = e.id
+                    ORDER BY date_analyse DESC
+                    LIMIT 1) as score_seo
+            FROM entreprises e
+            WHERE 1=1
+        '''
+        params = []
+
+        if analyse_id:
+            inner_query += ' AND e.analyse_id = ?'
+            params.append(analyse_id)
+
+        if filters:
+            if filters.get('secteur'):
+                inner_query += ' AND e.secteur = ?'
+                params.append(filters['secteur'])
+            if filters.get('statut'):
+                inner_query += ' AND e.statut = ?'
+                params.append(filters['statut'])
+            if filters.get('opportunite'):
+                inner_query += ' AND e.opportunite = ?'
+                params.append(filters['opportunite'])
+            if filters.get('favori'):
+                inner_query += ' AND e.favori = 1'
+            if str(filters.get('has_email', '')).lower() in ('1', 'true', 'yes'):
+                inner_query += " AND e.email_principal IS NOT NULL AND TRIM(e.email_principal) <> ''"
+            if filters.get('search'):
+                search_term = f"%{filters['search']}%"
+                inner_query += ' AND (e.nom LIKE ? OR e.secteur LIKE ? OR e.email_principal LIKE ? OR e.responsable LIKE ?)'
+                params.extend([search_term, search_term, search_term, search_term])
+
+        if wrap_subquery:
+            query = 'SELECT COUNT(*) as count FROM (' + inner_query + ') sub WHERE 1=1'
+            if has_security_filters:
+                if filters.get('security_min') is not None:
+                    query += ' AND (sub.score_securite IS NOT NULL AND sub.score_securite >= ?)'
+                    params.append(filters['security_min'])
+                if filters.get('security_max') is not None:
+                    query += ' AND (sub.score_securite IS NOT NULL AND sub.score_securite <= ?)'
+                    params.append(filters['security_max'])
+            if has_pentest_filters:
+                if filters.get('pentest_min') is not None:
+                    query += ' AND (sub.score_pentest IS NOT NULL AND sub.score_pentest >= ?)'
+                    params.append(filters['pentest_min'])
+                if filters.get('pentest_max') is not None:
+                    query += ' AND (sub.score_pentest IS NOT NULL AND sub.score_pentest <= ?)'
+                    params.append(filters['pentest_max'])
+            if has_seo_filters:
+                if filters.get('seo_min') is not None:
+                    query += ' AND (sub.score_seo IS NOT NULL AND sub.score_seo >= ?)'
+                    params.append(filters['seo_min'])
+                if filters.get('seo_max') is not None:
+                    query += ' AND (sub.score_seo IS NOT NULL AND sub.score_seo <= ?)'
+                    params.append(filters['seo_max'])
+        else:
+            query = 'SELECT COUNT(*) as count FROM entreprises e WHERE 1=1'
+            # Re-appliquer les mêmes filtres que dans inner_query
+            # (analyse_id et filtres "simples" ont déjà été appliqués sur inner_query)
+
+        self.execute_sql(cursor, query, params)
+        row = cursor.fetchone()
+        conn.close()
+        return row['count'] if row else 0
     
     def get_entreprise(self, entreprise_id):
         """

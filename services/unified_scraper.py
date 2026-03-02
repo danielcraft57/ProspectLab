@@ -1268,18 +1268,47 @@ class UnifiedScraper:
                     if new_images_count > 0:
                         logger.info(f'[UnifiedScraper] Page {url}: {new_images_count} nouvelles images ajoutées (total: {len(self.images)})')
             
-            # Extraire les liens vers d'autres pages
+            # Extraire les liens vers d'autres pages (y compris redirections META / frames)
             links = []
             all_page_links = soup.find_all('a', href=True)
-            for link in all_page_links:
-                href = link['href']
-                
-                if not href or href.startswith(('javascript:', 'mailto:', 'tel:', '#', 'data:')):
-                    continue
-                
-                normalized_url = self.normalize_url(href, url)
+
+            extra_hrefs = []
+
+            # Redirections via meta refresh (ex: content="0;url=/page.html")
+            try:
+                refresh_meta = soup.find('meta', attrs={'http-equiv': re.compile(r'refresh', re.I)})
+                if refresh_meta:
+                    content = refresh_meta.get('content') or ''
+                    match = re.search(r'url=([^;]+)', content, re.I)
+                    if match:
+                        candidate = match.group(1).strip().strip('\'"')
+                        if candidate:
+                            extra_hrefs.append(candidate)
+                            logger.info(f'[UnifiedScraper] Page {url}: meta refresh détecté vers {candidate}')
+            except Exception:
+                pass
+
+            # Frames / iframes qui chargent la vraie page de contenu
+            try:
+                for frame in soup.find_all(['frame', 'iframe'], src=True):
+                    src = frame.get('src')
+                    if src:
+                        extra_hrefs.append(src)
+            except Exception:
+                pass
+
+            def _add_link_href(href_value: str) -> None:
+                if not href_value or href_value.startswith(('javascript:', 'mailto:', 'tel:', '#', 'data:')):
+                    return
+                normalized_url = self.normalize_url(href_value, url)
                 if normalized_url and self.is_same_domain(normalized_url):
                     links.append(normalized_url)
+
+            for link in all_page_links:
+                _add_link_href(link['href'])
+
+            for href in extra_hrefs:
+                _add_link_href(href)
             
             with self.lock:
                 valid_links = []

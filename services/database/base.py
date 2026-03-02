@@ -48,14 +48,19 @@ class DatabaseBase:
             # Mode SQLite (dev)
             self.db_type = 'sqlite'
             
+        app_dir = Path(__file__).parent.parent.parent
+
         if db_path is None:
             # Vérifier si un chemin est défini dans les variables d'environnement
             env_db_path = os.environ.get('DATABASE_PATH')
             if env_db_path:
-                db_path = env_db_path
+                # IMPORTANT (Windows/WSL): si DATABASE_PATH est relatif, l'ancrer au dossier de l'app
+                # pour éviter que Flask/Celery n'utilisent pas la même base selon leur CWD.
+                candidate = Path(env_db_path)
+                db_path = (app_dir / candidate) if not candidate.is_absolute() else candidate
             else:
-                app_dir = Path(__file__).parent.parent.parent
-                db_path = app_dir / 'ProspectLab.db'
+                # Nom en minuscules pour éviter les divergences de casse (prospectlab.db vs ProspectLab.db)
+                db_path = app_dir / 'prospectlab.db'
         
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(exist_ok=True, parents=True)

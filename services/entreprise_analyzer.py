@@ -1035,7 +1035,11 @@ class EntrepriseAnalyzer:
     
     def process_all(self):
         """Traite toutes les entreprises"""
-        df = self.load_excel()
+        # Permettre à des sous-classes (ex: ProgressAnalyzer) d'injecter
+        # un DataFrame déjà filtré/dédupliqué via _df_override
+        df = getattr(self, '_df_override', None)
+        if df is None:
+            df = self.load_excel()
         if df is None:
             return None
         

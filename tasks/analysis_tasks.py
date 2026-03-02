@@ -145,13 +145,104 @@ def analyze_entreprise_task(self, filepath, output_path, max_workers=4, delay=0.
                     logger.warning('Fichier Excel vide ou invalide - arrêt')
                     return None
                 
-                self.total = len(df)
-                logger.info(f'{self.total} lignes trouvées dans Excel')
+                original_total = len(df)
+                logger.info(f'{original_total} lignes trouvées dans Excel (avant déduplication)')
+
+                # Dédupliquer en amont pour éviter les doublons (dans le fichier et en BDD)
+                try:
+                    database = getattr(self, 'database', None)
+                    existing_ids_before = getattr(self, 'existing_ids_before', set())
+                    stats = getattr(self, 'stats', {})
+                    stats_lock = getattr(self, 'stats_lock', None)
+
+                    from utils.url_utils import normalize_website_domain
+
+                    seen_signatures = set()
+                    rows_to_keep = []
+
+                    def normalize_website_for_signature(raw):
+                        """
+                        Utilise la même normalisation de domaine que le backend (normalize_website_domain)
+                        pour garantir qu'un domaine correspond à une seule entreprise.
+                        """
+                        domain = normalize_website_domain(raw)
+                        return domain or ''
+
+                    for idx, row in df.iterrows():
+                        try:
+                            name = (str(row.get('name') or row.get('nom') or '')).strip()
+                            website_raw = row.get('website') or ''
+                            website_norm = normalize_website_for_signature(website_raw)
+                            address_1 = (str(row.get('address_1') or row.get('address_full') or '')).strip().lower()
+                            address_2 = (str(row.get('address_2') or '')).strip().lower()
+                        except Exception:
+                            name = str(row.get('name', '')).strip()
+                            website_raw = row.get('website')
+                            website_norm = normalize_website_for_signature(website_raw)
+                            address_1 = str(row.get('address_1', '')).strip().lower()
+                            address_2 = str(row.get('address_2', '')).strip().lower()
+
+                        # Signature pour détecter les doublons dans le fichier :
+                        # - si domaine connu : unicité sur le domaine
+                        # - sinon : fallback nom + adresses
+                        if website_norm:
+                            signature = ('domain', website_norm)
+                        else:
+                            signature = (name.lower(), address_1, address_2)
+
+                        # Doublon dans le même fichier
+                        if signature in seen_signatures and any(signature):
+                            if stats_lock:
+                                with stats_lock:
+                                    stats['duplicates'] = stats.get('duplicates', 0) + 1
+                            continue
+
+                        duplicate_existing_id = None
+                        # Doublon déjà présent en base AVANT cette analyse
+                        if database and (name or website_raw):
+                            try:
+                                duplicate_existing_id = database.find_duplicate_entreprise(
+                                    name, website_raw, address_1, address_2
+                                )
+                            except Exception as e:
+                                logger.warning(f'Erreur find_duplicate_entreprise pour "{name}": {e}')
+
+                        if duplicate_existing_id and duplicate_existing_id in existing_ids_before:
+                            # On considère cette ligne comme doublon global -> on ne relance pas d\'analyse dessus
+                            if stats_lock:
+                                with stats_lock:
+                                    stats['duplicates'] = stats.get('duplicates', 0) + 1
+                            continue
+
+                        seen_signatures.add(signature)
+                        rows_to_keep.append(idx)
+
+                    if rows_to_keep:
+                        df_filtered = df.loc[rows_to_keep].reset_index(drop=True)
+                    else:
+                        df_filtered = df.iloc[0:0].copy()
+
+                    self._df_override = df_filtered
+                    self.total = len(df_filtered)
+                    logger.info(
+                        f'{self.total} lignes à analyser après déduplication '
+                        f'({original_total - self.total} doublon(s) ignoré(s))'
+                    )
+                except Exception as e:
+                    # En cas de problème, on retombe sur le comportement existant
+                    logger.warning(f'Erreur lors de la déduplication en amont: {e}')
+                    self.total = original_total
+
                 _safe_update_state(
                     self.task,
                     self.task_id,
                     state='PROGRESS',
-                    meta={'current': 0, 'total': self.total, 'percentage': 0, 'message': 'Démarrage de l\'analyse...'}
+                    meta={
+                        'current': 0,
+                        'total': self.total,
+                        'percentage': 0,
+                        'message': 'Démarrage de l\'analyse...'
+                    }
                 )
                 
                 return super().process_all()
@@ -312,21 +403,20 @@ def analyze_entreprise_task(self, filepath, output_path, max_workers=4, delay=0.
         cursor = conn.cursor()
         database.execute_sql(cursor, 'SELECT id FROM entreprises')
         rows = cursor.fetchall()
-        # Gérer les dictionnaires PostgreSQL et les tuples SQLite
-        # Récupérer les IDs existants en gérant les différents formats (dict ou tuple)
         analyzer.existing_ids_before = set()
+
+        # SQLite utilise sqlite3.Row (indexable), Postgres peut renvoyer dict/tuple
         for row in rows:
             try:
                 if isinstance(row, dict):
-                    if 'id' in row:
-                        analyzer.existing_ids_before.add(row['id'])
-                elif isinstance(row, (list, tuple)) and len(row) > 0:
-                    # Si c'est un tuple/liste, prendre le premier élément (généralement l'ID)
-                    analyzer.existing_ids_before.add(row[0])
+                    rid = row.get('id')
                 else:
-                    logger.warning(f'Format de row inattendu pour existing_ids_before: {type(row)}')
-            except (KeyError, IndexError, TypeError) as e:
-                logger.warning(f'Erreur lors de l\'extraction de l\'ID depuis row: {e}, row type: {type(row)}')
+                    # sqlite3.Row et tuple: premier champ = id
+                    rid = row[0]
+                if rid is not None:
+                    analyzer.existing_ids_before.add(int(rid))
+            except Exception as e:
+                logger.warning(f'Erreur extraction existing_ids_before: {e} (row_type={type(row)})')
                 continue
         conn.close()
         logger.info(f'{len(analyzer.existing_ids_before)} entreprises déjà présentes avant analyse')

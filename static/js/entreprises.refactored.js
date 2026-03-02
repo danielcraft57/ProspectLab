@@ -68,6 +68,29 @@ async function init() {
             }
         });
     }
+
+    function setScrapingRelaunchLoading(entrepriseId, isLoading, message) {
+        if (!entrepriseId) return;
+        const btn = document.querySelector(`#entreprise-modal .btn-relancer-scraping[data-entreprise-id="${entrepriseId}"]`);
+        const stats = document.getElementById('scraping-stats');
+        if (!btn) return;
+
+        if (isLoading) {
+            btn.disabled = true;
+            btn.setAttribute('aria-busy', 'true');
+            btn.dataset.originalHtml = btn.dataset.originalHtml || btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Relance...';
+            if (stats) {
+                stats.innerHTML = `<div style="color:#64748b;"><i class="fas fa-spinner fa-spin"></i> ${Formatters.escapeHtml(message || 'Scraping en cours...')}</div>`;
+            }
+        } else {
+            btn.disabled = false;
+            btn.removeAttribute('aria-busy');
+            if (btn.dataset.originalHtml) {
+                btn.innerHTML = btn.dataset.originalHtml;
+            }
+        }
+    }
     
     const debounceFn = typeof window.debounce === 'function'
         ? window.debounce
@@ -77,8 +100,9 @@ async function init() {
     let currentView = 'grid';
     let currentPage = 1;
     const itemsPerPage = 20;
-    let allEntreprises = [];
-    let filteredEntreprises = [];
+    let allEntreprises = [];        // entreprises de la page courante
+    let filteredEntreprises = [];   // idem (après éventuels filtres client si on en ajoute)
+    let totalEntreprises = 0;       // total tous résultats côté serveur
     let currentModalEntrepriseId = null;
     let currentModalEntrepriseData = null;
     let currentModalPentestScore = null;
@@ -136,6 +160,10 @@ async function init() {
         if (search) filters.search = search;
         if (secteur) filters.secteur = secteur;
         if (statut) filters.statut = statut;
+        const hasEmailCheckbox = document.getElementById('filter-has-email');
+        if (hasEmailCheckbox && hasEmailCheckbox.checked) {
+            filters.has_email = 'true';
+        }
         if (!Number.isNaN(securityMin) && securityMin > 0) {
             filters.security_min = securityMin;
         }
@@ -151,13 +179,20 @@ async function init() {
         return filters;
     }
 
-    /** Charge les entreprises avec les filtres courants (côté serveur). */
+    /** Charge les entreprises avec les filtres courants (côté serveur, pagination). */
     async function loadEntreprises() {
         try {
             const filters = getCurrentFilters();
-            allEntreprises = await EntreprisesAPI.loadAll(filters);
-            filteredEntreprises = [...allEntreprises];
-            currentPage = 1;
+            const data = await EntreprisesAPI.loadAll(filters, currentPage, itemsPerPage, false);
+            const items = data && data.items ? data.items : [];
+            allEntreprises = items;
+            filteredEntreprises = [...items];
+            totalEntreprises = data && typeof data.total === 'number' ? data.total : items.length;
+            // S'assurer que la page reste dans les bornes si les filtres changent beaucoup
+            if (!items.length && totalEntreprises > 0 && currentPage > 1) {
+                currentPage = 1;
+                return loadEntreprises();
+            }
             renderEntreprises();
         } catch (error) {
             console.error('[entreprises] Erreur loadEntreprises:', error);
@@ -168,18 +203,17 @@ async function init() {
 
     /** Réapplique les filtres (recharge depuis l'API avec les critères du formulaire). */
     async function applyFilters() {
+        currentPage = 1;
         await loadEntreprises();
     }
     
     // Rendre les entreprises
     function renderEntreprises() {
         const container = document.getElementById('entreprises-container');
-        const start = (currentPage - 1) * itemsPerPage;
-        const end = start + itemsPerPage;
-        const pageEntreprises = filteredEntreprises.slice(start, end);
+        const pageEntreprises = filteredEntreprises;
         
         document.getElementById('results-count').textContent = 
-            `${filteredEntreprises.length} entreprise${filteredEntreprises.length > 1 ? 's' : ''} trouvée${filteredEntreprises.length > 1 ? 's' : ''}`;
+            `${totalEntreprises} entreprise${totalEntreprises > 1 ? 's' : ''} trouvée${totalEntreprises > 1 ? 's' : ''}`;
         
         if (pageEntreprises.length === 0) {
             container.innerHTML = '<p class="no-results">Aucune entreprise ne correspond aux critères</p>';
@@ -188,10 +222,10 @@ async function init() {
         }
         
         if (currentView === 'grid') {
-            container.className = 'entreprises-grid';
+            container.className = 'entreprises-grid pagination-transition';
             container.innerHTML = pageEntreprises.map(entreprise => createEntrepriseCard(entreprise)).join('');
         } else {
-            container.className = 'entreprises-list';
+            container.className = 'entreprises-list pagination-transition';
             container.innerHTML = pageEntreprises.map(entreprise => createEntrepriseRow(entreprise)).join('');
         }
         
@@ -522,7 +556,7 @@ async function init() {
     }
     
     function renderPagination() {
-        const totalPages = Math.ceil(filteredEntreprises.length / itemsPerPage);
+        const totalPages = Math.ceil(totalEntreprises / itemsPerPage);
         const pagination = document.getElementById('pagination');
         
         if (totalPages <= 1) {
@@ -530,8 +564,14 @@ async function init() {
             return;
         }
         
-        let html = '<div class="pagination-controls">';
-        html += `<button class="btn-pagination ${currentPage === 1 ? 'disabled' : ''}" data-page="${currentPage - 1}">← Précédent</button>`;
+        const start = (currentPage - 1) * itemsPerPage + 1;
+        const end = Math.min(currentPage * itemsPerPage, totalEntreprises);
+        
+        let html = '<div class="pagination-info">';
+        html += `${start}–${end} sur ${totalEntreprises}`;
+        html += '</div>';
+        html += '<div class="pagination-controls">';
+        html += `<button class="btn-pagination btn-pagination-nav ${currentPage === 1 ? 'disabled' : ''}" data-page="${currentPage - 1}" title="Précédent (←)">← Précédent</button>`;
         
         for (let i = 1; i <= totalPages; i++) {
             if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) {
@@ -541,19 +581,68 @@ async function init() {
             }
         }
         
-        html += `<button class="btn-pagination ${currentPage === totalPages ? 'disabled' : ''}" data-page="${currentPage + 1}">Suivant →</button>`;
+        html += `<button class="btn-pagination btn-pagination-nav ${currentPage === totalPages ? 'disabled' : ''}" data-page="${currentPage + 1}" title="Suivant (→)">Suivant →</button>`;
+        
+        if (totalPages > 5) {
+            html += '<div class="pagination-jump">';
+            html += '<label for="pagination-jump-input">Aller à</label>';
+            html += `<input type="number" id="pagination-jump-input" min="1" max="${totalPages}" value="${currentPage}" aria-label="Page">`;
+            html += '</div>';
+        }
         html += '</div>';
         pagination.innerHTML = html;
         
         pagination.querySelectorAll('.btn-pagination').forEach(btn => {
-            btn.addEventListener('click', () => {
+            btn.addEventListener('click', async () => {
                 const page = parseInt(btn.dataset.page);
                 if (page >= 1 && page <= totalPages && !btn.classList.contains('disabled')) {
                     currentPage = page;
-                    renderEntreprises();
+                    await loadEntreprises();
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                 }
             });
+        });
+        
+        const jumpInput = document.getElementById('pagination-jump-input');
+        if (jumpInput) {
+            const goToPage = async () => {
+                const page = parseInt(jumpInput.value, 10);
+                if (page >= 1 && page <= totalPages) {
+                    currentPage = page;
+                    await loadEntreprises();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                } else {
+                    jumpInput.value = currentPage;
+                }
+            };
+            jumpInput.addEventListener('change', goToPage);
+            jumpInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    goToPage();
+                }
+            });
+        }
+    }
+    
+    function setupPaginationKeyboard() {
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            const totalPages = Math.ceil(totalEntreprises / itemsPerPage);
+            if (totalPages <= 1) return;
+            if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                if (currentPage > 1) {
+                    currentPage--;
+                    loadEntreprises().then(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
+                }
+            } else if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    loadEntreprises().then(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
+                }
+            }
         });
     }
     
@@ -910,7 +999,8 @@ async function init() {
             'filter-security-min',
             'filter-security-max',
             'filter-seo-min',
-            'filter-seo-max'
+            'filter-seo-max',
+            'filter-has-email'
         ];
 
         advancedFilterIds.forEach(id => {
@@ -1040,6 +1130,7 @@ async function init() {
         const securityMax = document.getElementById('filter-security-max')?.value;
         const seoMin = document.getElementById('filter-seo-min')?.value;
         const seoMax = document.getElementById('filter-seo-max')?.value;
+        const hasEmail = document.getElementById('filter-has-email')?.checked;
 
         if (secteur) count += 1;
         if (statut) count += 1;
@@ -1047,6 +1138,7 @@ async function init() {
         if (securityMax && parseInt(securityMax, 10) < 100) count += 1;
         if (seoMin && parseInt(seoMin, 10) > 0) count += 1;
         if (seoMax && parseInt(seoMax, 10) < 100) count += 1;
+        if (hasEmail) count += 1;
 
         if (count > 0) {
             badge.textContent = String(count);
@@ -1237,11 +1329,12 @@ async function init() {
                     <div class="tab-panel" id="tab-scraping">
                         <div id="scraping-results" class="scraping-results" style="display: block;">
                             <div class="scraping-results-header">
-                                <div class="scraping-results-title-row">
+                                <div class="scraping-results-title-row" style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem;flex-wrap:wrap;">
                                     <h3 class="scraping-results-title">
                                         <i class="fas fa-spider"></i>
                                         Résultats du scraping
                                     </h3>
+                                    <button type="button" class="btn btn-outline btn-relancer-scraping" data-entreprise-id="${entreprise.id}" title="Relancer le scraping"><i class="fas fa-sync-alt"></i> Relancer</button>
                                 </div>
                                 <div id="scraping-stats" class="scraping-stats-summary">
                                     <!-- Les statistiques seront injectées ici -->
@@ -1323,6 +1416,9 @@ async function init() {
             
             <div class="modal-footer">
                 <button class="btn btn-secondary" id="modal-close-footer-btn">Fermer</button>
+                <button class="btn btn-danger" id="modal-delete-entreprise" data-id="${entreprise.id}">
+                    <i class="fas fa-trash"></i> Supprimer
+                </button>
                 <button class="btn btn-outline ${entreprise.favori ? 'active' : ''}" id="modal-toggle-favori">
                     ${entreprise.favori ? '<i class="fas fa-star"></i> Favori' : '<i class="far fa-star"></i> Ajouter aux favoris'}
                 </button>
@@ -1430,6 +1526,41 @@ async function init() {
                 loadPentestAnalysis(currentModalEntrepriseId);
             }
         });
+
+        s.on('scraping_started', function(data) {
+            const entrepriseId = data && data.entreprise_id != null ? data.entreprise_id : currentModalEntrepriseId;
+            if (entrepriseId == null) return;
+            setScrapingRelaunchLoading(entrepriseId, true, 'Scraping démarré...');
+        });
+
+        s.on('scraping_progress', function(data) {
+            const entrepriseId = data && data.entreprise_id != null ? data.entreprise_id : currentModalEntrepriseId;
+            if (entrepriseId == null) return;
+            setScrapingRelaunchLoading(entrepriseId, true, (data && data.message) ? data.message : 'Scraping en cours...');
+        });
+
+        s.on('scraping_complete', function(data) {
+            const entrepriseId = data && data.entreprise_id != null ? data.entreprise_id : currentModalEntrepriseId;
+            if (entrepriseId == null) return;
+            setScrapingRelaunchLoading(entrepriseId, false);
+            const nom = getEntrepriseNom(entrepriseId);
+            Notifications.show(nom + ' — Scraping terminé', 'success', 'fa-check-circle');
+            if (entrepriseId === currentModalEntrepriseId) {
+                refreshEntrepriseFromServer(entrepriseId).then(() => {
+                    try { loadScrapingResults(entrepriseId); } catch (e) {}
+                    try { loadEntrepriseImages(entrepriseId); } catch (e) {}
+                    try { if (currentModalEntrepriseData) loadEntreprisePages(currentModalEntrepriseData); } catch (e) {}
+                });
+            }
+        });
+
+        s.on('scraping_error', function(data) {
+            const entrepriseId = data && data.entreprise_id != null ? data.entreprise_id : currentModalEntrepriseId;
+            if (entrepriseId == null) return;
+            setScrapingRelaunchLoading(entrepriseId, false);
+            const nom = getEntrepriseNom(entrepriseId);
+            Notifications.show(nom + ' — ' + (data && data.error ? data.error : 'Erreur scraping'), 'error', 'fa-exclamation-circle');
+        });
         window._entrepriseModalWsListenersSetup = true;
     }
     
@@ -1502,6 +1633,28 @@ async function init() {
                 } catch (error) {
                     console.error('Erreur:', error);
                     Notifications.show('Erreur lors de la mise à jour du favori', 'error');
+                }
+            });
+        }
+
+        const deleteModalBtn = document.getElementById('modal-delete-entreprise');
+        if (deleteModalBtn) {
+            deleteModalBtn.addEventListener('click', async () => {
+                if (!currentModalEntrepriseId) return;
+                const name = currentModalEntrepriseData && currentModalEntrepriseData.nom
+                    ? currentModalEntrepriseData.nom
+                    : 'Cette entreprise';
+                if (!confirm(`Êtes-vous sûr de vouloir supprimer "${name}" ?`)) {
+                    return;
+                }
+                try {
+                    await EntreprisesAPI.delete(currentModalEntrepriseId);
+                    closeEntrepriseModal();
+                    await applyFilters();
+                    Notifications.show('Entreprise supprimée', 'success');
+                } catch (error) {
+                    console.error('Erreur:', error);
+                    Notifications.show('Erreur lors de la suppression de l\'entreprise', 'error');
                 }
             });
         }
@@ -1750,6 +1903,35 @@ async function init() {
                     } else if (analysisType === 'pentest') {
                         socket.emit('start_pentest_analysis', { url: url, entreprise_id: currentModalEntrepriseId });
                     }
+                    e.preventDefault();
+                    return;
+                }
+
+                const relancerScrapingBtn = e.target.closest('.btn-relancer-scraping');
+                if (relancerScrapingBtn && currentModalEntrepriseId && currentModalEntrepriseData) {
+                    const url = (currentModalEntrepriseData.website || '').trim();
+                    if (!url) {
+                        Notifications.show('Indiquez un site web pour cette entreprise pour relancer le scraping.', 'warning', 'fa-exclamation-triangle');
+                        e.preventDefault();
+                        return;
+                    }
+                    const socket = window.wsManager && window.wsManager.socket;
+                    if (!socket) {
+                        Notifications.show('Connexion temps réel non disponible. Rechargez la page.', 'warning', 'fa-wifi');
+                        e.preventDefault();
+                        return;
+                    }
+                    ensureModalWebSocketListeners();
+                    setScrapingRelaunchLoading(currentModalEntrepriseId, true, 'Initialisation...');
+                    Notifications.show('Scraping relancé...', 'info', 'fa-spider');
+                    socket.emit('start_scraping', {
+                        url: url,
+                        max_depth: 3,
+                        max_workers: 5,
+                        max_time: 300,
+                        max_pages: 50,
+                        entreprise_id: currentModalEntrepriseId
+                    });
                     e.preventDefault();
                     return;
                 }
@@ -2298,6 +2480,11 @@ async function init() {
         setupEventListeners();
     } catch (e) {
         console.error('[entreprises] Erreur init event listeners:', e);
+    }
+    try {
+        setupPaginationKeyboard();
+    } catch (e) {
+        console.error('[entreprises] Erreur init pagination keyboard:', e);
     }
 }
 

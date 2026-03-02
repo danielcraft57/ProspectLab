@@ -628,6 +628,11 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                 )
                 
                 # Lancer les analyses OSINT / SEO / Pentest après le scraper (utilise les données du scraper)
+                # Important : une tâche OSINT et une tâche Pentest sont ajoutées à la fin du scraping
+                # de chaque site. Les listes osint_tasks / pentest_tasks grossissent au fil du loop
+                # (1 après le 1er site, 2 après le 2e, etc.). Le meta envoyé par update_progress
+                # contient osint_tasks_launched_ids et pentest_tasks_launched_ids ; le monitoring
+                # WebSocket utilise expected_total (meta["total"] = nb d'entreprises) pour afficher X/N.
                 try:
                     from tasks.osint_tasks import osint_analysis_task
                     from tasks.seo_tasks import seo_analysis_task
@@ -654,6 +659,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                     )
 
                     # Lancer la tâche OSINT en arrière-plan (ne pas attendre)
+                    # Une tâche OSINT par site scrapé ; ajoutée ici à la fin du scraping de ce site.
                     osint_task = osint_analysis_task.delay(
                         url=website_str,
                         entreprise_id=entreprise_id,
@@ -663,7 +669,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                         phones_from_scrapers=phones_from_scrapers
                     )
                     
-                    # Stocker la tâche OSINT pour le monitoring
+                    # Stocker la tâche OSINT pour le monitoring (liste alimentée à chaque fin de site scrapé)
                     osint_tasks.append({
                         'task': osint_task,
                         'task_id': osint_task.id,
@@ -674,7 +680,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
 
                     logger.info(
                         f'[Scraping Analyse {analysis_id}] ✓ Analyse OSINT lancee pour {entreprise_name} '
-                        f'(task_id={osint_task.id})'
+                        f'(task_id={osint_task.id}), total_osint_tasks={len(osint_tasks)}'
                     )
                     # Lancer l'analyse SEO en parallèle
                     try:
@@ -700,6 +706,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                         )
 
                     # Lancer l'analyse Pentest (tâche dédiée, même si aucun formulaire détecté)
+                    # Une tâche Pentest par site scrapé ; ajoutée ici à la fin du scraping de ce site.
                     try:
                         logger.info(
                             f'[Scraping Analyse {analysis_id}] Lancement de l analyse Pentest pour {entreprise_name} ({website_str})'
@@ -715,6 +722,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                             forms_from_scrapers=forms_from_scrapers
                         )
 
+                        # Stocker pour le monitoring (liste alimentée à chaque fin de site scrapé)
                         pentest_tasks.append({
                             'task': pentest_task,
                             'task_id': pentest_task.id,

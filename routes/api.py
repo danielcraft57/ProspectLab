@@ -140,7 +140,14 @@ def entreprises():
         seo_max (int): Score SEO maximal (0-100)
     
     Returns:
-        JSON: Liste des entreprises
+        - Mode legacy (sans pagination): liste simple d'entreprises (compatibilité ascendante)
+        - Mode paginé (avec query param page/page_size): objet JSON
+          {
+              "items": [...],
+              "total": <int>,
+              "page": <int>,
+              "page_size": <int>
+          }
     """
     try:
         analyse_id = request.args.get('analyse_id', type=int)
@@ -156,6 +163,7 @@ def entreprises():
             'pentest_max': request.args.get('pentest_max', type=int),
             'seo_min': request.args.get('seo_min', type=int),
             'seo_max': request.args.get('seo_max', type=int),
+            'has_email': request.args.get('has_email'),
         }
         # Ne pas retirer les entiers 0 (valides pour min/max)
         def keep_filter(k, v):
@@ -163,14 +171,60 @@ def entreprises():
                 return False
             if k in ('security_min', 'security_max', 'pentest_min', 'pentest_max', 'seo_min', 'seo_max'):
                 return 0 <= v <= 100
+            if k == 'has_email':
+                return str(v).lower() in ('1', 'true', 'yes')
             return v != ''
         filters = {k: v for k, v in filters.items() if keep_filter(k, v)}
-        
+
+        page = request.args.get('page', type=int)
+        page_size = request.args.get('page_size', type=int)
+        # include_og=1 pour forcer le chargement des données OG,
+        # sinon, en mode paginé, on les désactive par défaut pour accélérer la liste.
+        include_og_flag = request.args.get('include_og')
+        include_og = True
+        if include_og_flag is not None:
+            include_og = include_og_flag in ('1', 'true', 'True')
+        elif page or page_size:
+            include_og = False
+
+        # Mode paginé: on renvoie un objet { items, total, page, page_size }
+        if page or page_size:
+            page = page or 1
+            page_size = page_size or 20
+            page = max(page, 1)
+            page_size = max(1, min(page_size, 200))
+            offset = (page - 1) * page_size
+
+            entreprises_list = database.get_entreprises(
+                analyse_id=analyse_id,
+                filters=filters if filters else None,
+                limit=page_size,
+                offset=offset,
+                include_og=include_og,
+            )
+
+            total = database.count_entreprises(
+                analyse_id=analyse_id,
+                filters=filters if filters else None,
+            )
+
+            from utils.helpers import clean_json_dict
+            entreprises_list = clean_json_dict(entreprises_list)
+
+            return jsonify({
+                'items': entreprises_list,
+                'total': total,
+                'page': page,
+                'page_size': page_size,
+            })
+
+        # Mode legacy: on renvoie la liste brute (avec OG) pour compatibilité
         entreprises_list = database.get_entreprises(
-            analyse_id=analyse_id, 
-            filters=filters if filters else None
+            analyse_id=analyse_id,
+            filters=filters if filters else None,
+            include_og=True,
         )
-        
+
         # Nettoyer les valeurs NaN pour la sérialisation JSON (double sécurité)
         from utils.helpers import clean_json_dict
         entreprises_list = clean_json_dict(entreprises_list)

@@ -7,18 +7,26 @@
     
     const EntreprisesAPI = {
         /**
-         * Charge les entreprises, optionnellement filtrées par les paramètres fournis.
-         * @param {Object} [filters] - Filtres (secteur, statut, opportunite, favori, search, security_min, security_max, pentest_min, pentest_max)
-         * @returns {Promise<Array>}
+         * Charge les entreprises avec pagination serveur.
+         * @param {Object} [filters] - Filtres (secteur, statut, opportunite, favori, search, security_min, security_max, pentest_min, pentest_max, seo_min, seo_max)
+         * @param {number} [page] - Numéro de page (1-based)
+         * @param {number} [pageSize] - Taille de page
+         * @param {boolean} [includeOg] - Inclure ou non les données OpenGraph (par défaut false pour la liste)
+         * @returns {Promise<{items: Array, total: number, page: number, page_size: number}>}
          */
-        async loadAll(filters = {}) {
+        async loadAll(filters = {}, page = 1, pageSize = 20, includeOg = false) {
             const params = new URLSearchParams();
             Object.keys(filters).forEach(key => {
                 const v = filters[key];
                 if (v !== undefined && v !== null && v !== '') params.set(key, String(v));
             });
+            params.set('page', String(page));
+            params.set('page_size', String(pageSize));
+            if (includeOg) {
+                params.set('include_og', '1');
+            }
             const qs = params.toString();
-            const url = qs ? `/api/entreprises?${qs}` : '/api/entreprises';
+            const url = `/api/entreprises?${qs}`;
             const response = await fetch(url);
             if (!response.ok) throw new Error('Erreur lors du chargement des entreprises');
             return await response.json();

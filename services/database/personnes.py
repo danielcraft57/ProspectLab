@@ -131,7 +131,7 @@ class PersonneManager(DatabaseBase):
             self.execute_sql(cursor,'''
                 SELECT id, entreprise_id, nom, prenom, titre, role, email, telephone,
                        linkedin_url, linkedin_profile_data, social_profiles, osint_data,
-                       niveau_hierarchique, manager_id, source, date_created, date_updated
+                       niveau_hierarchique, manager_id, source, date_creation, date_mise_a_jour
                 FROM personnes
                 WHERE entreprise_id = ?
                 ORDER BY nom, prenom

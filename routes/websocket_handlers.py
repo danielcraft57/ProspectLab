@@ -159,9 +159,12 @@ def register_websocket_handlers(socketio, app):
                                 
                                 result = task_result.result
                                 total_processed = result.get('total_processed', 0) if result else 0
+                                stats = result.get('stats', {}) if result else {}
+                                inserted = stats.get('inserted')
+                                effective_total = inserted if isinstance(inserted, int) else total_processed
                                 analysis_id = result.get('analysis_id') if result else None
                                 
-                                logger.info(f'Analyse terminée: total_processed={total_processed}, analysis_id={analysis_id}')
+                                logger.info(f'Analyse terminée: total_processed={total_processed}, inserted={inserted}, analysis_id={analysis_id}')
                                 logger.info(f'Résultat complet de la tâche: {result}')
                                 
                                 safe_emit(
@@ -170,9 +173,10 @@ def register_websocket_handlers(socketio, app):
                                     {
                                     'success': True,
                                     'output_file': result.get('output_file') if result else None,
-                                    'total_processed': total_processed,
-                                    'total': total_processed,  # Pour compatibilité avec l'ancien code
-                                    'message': f'Analyse terminée avec succès ! {total_processed} entreprises analysées.'
+                                    'total_processed': effective_total,
+                                    'total': effective_total,  # Pour compatibilité avec l'ancien code
+                                    'stats': stats,
+                                    'message': f'Analyse terminée avec succès ! {effective_total} nouvelles entreprises analysées.'
                                     },
                                     room=session_id
                                 )
@@ -182,7 +186,7 @@ def register_websocket_handlers(socketio, app):
                                 logger.info(f'Vérification du lancement du scraping: analysis_id={analysis_id}, scraping_launched={scraping_launched}')
                                 if not analysis_id:
                                     logger.warning(f'analysis_id est None ou vide, impossible de lancer le scraping automatiquement')
-                                elif analysis_id:
+                                elif analysis_id and effective_total > 0:
                                     logger.info(f'Lancement automatique du scraping pour analysis_id={analysis_id}')
                                     try:
                                         # Vérifier si une tâche de scraping est déjà en cours pour cette analyse
@@ -217,23 +221,7 @@ def register_websocket_handlers(socketio, app):
                                                 'analysis_id': analysis_id
                                             }
 
-                                        safe_emit(
-                                            socketio,
-                                            'scraping_started',
-                                            {
-                                                'message': 'Scraping des entreprises en cours...',
-                                                'task_id': scraping_task.id,
-                                                'analysis_id': analysis_id
-                                            },
-                                            room=session_id
-                                        )
-
-                                        # L'analyse technique est maintenant lancée en parallèle dans la tâche de scraping
-                                        # On va suivre les tâches techniques via le monitoring du scraping
-                                        logger.debug(f'Analyse technique lancée en parallèle du scraping')
-                                        
-                                        # Émettre l'événement de démarrage de l'analyse technique immédiatement
-                                        # On utilisera le même nombre que les entreprises scrapées
+                                        # Récupérer le total d'entreprises (avec site) pour l'UI OSINT/Pentest
                                         db = Database()
                                         conn = db.get_connection()
                                         cursor = conn.cursor()
@@ -249,6 +237,21 @@ def register_websocket_handlers(socketio, app):
                                         result = cursor.fetchone()
                                         total_entreprises_avec_site = result['count'] if isinstance(result, dict) else result[0] if result else 0
                                         conn.close()
+
+                                        safe_emit(
+                                            socketio,
+                                            'scraping_started',
+                                            {
+                                                'message': 'Scraping des entreprises en cours...',
+                                                'task_id': scraping_task.id,
+                                                'analysis_id': analysis_id,
+                                                'total': total_entreprises_avec_site
+                                            },
+                                            room=session_id
+                                        )
+
+                                        # L'analyse technique est maintenant lancée en parallèle dans la tâche de scraping
+                                        logger.debug(f'Analyse technique lancée en parallèle du scraping')
                                         
                                         if total_entreprises_avec_site > 0:
                                             safe_emit(
@@ -439,9 +442,11 @@ def register_websocket_handlers(socketio, app):
                                                                     threading.Thread(target=monitor_tech_tasks_realtime, daemon=True).start()
                                                                 
                                                                 # Récupérer les IDs des tâches OSINT depuis le meta
+                                                                # (une tâche OSINT par site scrapé ; la liste grossit à chaque update_progress)
                                                                 osint_tasks_ids = meta_scraping.get('osint_tasks_launched_ids', [])
                                                                 if osint_tasks_ids:
-                                                                    # Initialiser la liste si elle n'existe pas
+                                                                    # Nombre d'entreprises attendu (pour redirection à 100 %)
+                                                                    expected_total_osint = meta_scraping.get('total') or len(monitor_scraping.osint_tasks_to_monitor)
                                                                     if not hasattr(monitor_scraping, 'osint_tasks_to_monitor'):
                                                                         monitor_scraping.osint_tasks_to_monitor = []
                                                                         monitor_scraping.osint_monitoring_started = False
@@ -453,24 +458,39 @@ def register_websocket_handlers(socketio, app):
                                                                     if new_tasks:
                                                                         monitor_scraping.osint_tasks_to_monitor.extend(new_tasks)
                                                                         logger.debug(f'{len(new_tasks)} nouvelle(s) tâche(s) OSINT détectée(s), total: {len(monitor_scraping.osint_tasks_to_monitor)}')
+                                                                        
+                                                                        # Si le monitoring OSINT est déjà démarré, mettre à jour le compteur X/Y
+                                                                        if getattr(monitor_scraping, 'osint_monitoring_started', False):
+                                                                            safe_emit(
+                                                                                socketio,
+                                                                                'osint_analysis_started',
+                                                                                {
+                                                                                    'message': f'Analyse OSINT démarrée pour {len(monitor_scraping.osint_tasks_to_monitor)} entreprises...',
+                                                                                    'total': len(monitor_scraping.osint_tasks_to_monitor),
+                                                                                    'expected_total': expected_total_osint,
+                                                                                    'current': 0
+                                                                                },
+                                                                                room=session_id
+                                                                            )
                                                                     
                                                                     # Démarrer le monitoring si ce n'est pas déjà fait
                                                                     if not monitor_scraping.osint_monitoring_started and len(monitor_scraping.osint_tasks_to_monitor) > 0:
                                                                         osint_tasks_to_monitor = monitor_scraping.osint_tasks_to_monitor
                                                                         monitor_scraping.osint_monitoring_started = True
                                                                         logger.debug(f'Monitoring de {len(osint_tasks_to_monitor)} analyses OSINT démarré')
-                                                                    
-                                                                    # Émettre l'événement de démarrage OSINT
-                                                                    safe_emit(
-                                                                        socketio,
-                                                                        'osint_analysis_started',
-                                                                        {
-                                                                            'message': f'Analyse OSINT démarrée pour {len(osint_tasks_to_monitor)} entreprises...',
-                                                                            'total': len(osint_tasks_to_monitor),
-                                                                            'current': 0
-                                                                        },
-                                                                        room=session_id
-                                                                    )
+                                                                        
+                                                                        # Émettre l'événement de démarrage OSINT initial
+                                                                        safe_emit(
+                                                                            socketio,
+                                                                            'osint_analysis_started',
+                                                                            {
+                                                                                'message': f'Analyse OSINT démarrée pour {len(osint_tasks_to_monitor)} entreprises...',
+                                                                                'total': len(osint_tasks_to_monitor),
+                                                                                'expected_total': expected_total_osint,
+                                                                                'current': 0
+                                                                            },
+                                                                            room=session_id
+                                                                        )
                                                                     
                                                                     # Démarrer le monitoring des analyses OSINT en temps réel
                                                                     def monitor_osint_tasks_realtime():
@@ -504,7 +524,13 @@ def register_websocket_handlers(socketio, app):
                                                                                 # Vérifier s'il y a de nouvelles tâches en attente
                                                                                 pending_tasks = [t for t in current_osint_tasks if not osint_tasks_status.get(t['task_id'], {}).get('completed', False)]
                                                                                 if len(pending_tasks) == 0:
-                                                                                    break
+                                                                                    # Ne sortir définitivement que lorsque le scraping est terminé,
+                                                                                    # sinon on risque de manquer des tâches OSINT ajoutées plus tard
+                                                                                    if getattr(monitor_scraping, 'scraping_done', False):
+                                                                                        break
+                                                                                    # Scraping toujours en cours : attendre et continuer à surveiller
+                                                                                    threading.Event().wait(0.5)
+                                                                                    continue
                                                                             
                                                                             # Parcourir toutes les tâches pour mettre à jour leur état
                                                                             for osint_info in current_osint_tasks:
@@ -547,6 +573,7 @@ def register_websocket_handlers(socketio, app):
                                                                                                 {
                                                                                                     'current': osint_completed,
                                                                                                     'total': total_osint,
+                                                                                                    'expected_total': expected_total_osint,
                                                                                                     'progress': global_progress,
                                                                                                     'message': f'{message_osint} - {osint_info.get("nom", "N/A")}',
                                                                                                     'url': osint_info.get('url', ''),
@@ -605,6 +632,7 @@ def register_websocket_handlers(socketio, app):
                                                                                                 {
                                                                                                     'current': osint_completed,
                                                                                                     'total': total_osint,
+                                                                                                    'expected_total': expected_total_osint,
                                                                                                     'progress': global_progress,
                                                                                                     'message': f'Analyse OSINT terminée pour {osint_info.get("nom", "N/A")}',
                                                                                                     'url': osint_info.get('url', ''),
@@ -661,7 +689,8 @@ def register_websocket_handlers(socketio, app):
                                                                             {
                                                                                 'message': f'Analyses OSINT terminées pour {osint_completed}/{final_total} entreprises.',
                                                                                 'current': osint_completed,
-                                                                                'total': final_total
+                                                                                'total': final_total,
+                                                                                'expected_total': expected_total_osint
                                                                             },
                                                                             room=session_id
                                                                         )
@@ -669,8 +698,11 @@ def register_websocket_handlers(socketio, app):
                                                                     threading.Thread(target=monitor_osint_tasks_realtime, daemon=True).start()
                                                                 
                                                                 # Récupérer les IDs des tâches Pentest depuis le meta
+                                                                # (une tâche Pentest par site scrapé ; la liste grossit à chaque update_progress)
                                                                 pentest_tasks_ids = meta_scraping.get('pentest_tasks_launched_ids', [])
                                                                 if pentest_tasks_ids:
+                                                                    # Nombre d'entreprises de l'analyse (pour afficher X/2 au lieu de X/1)
+                                                                    expected_total_entreprises = meta_scraping.get('total') or len(monitor_scraping.pentest_tasks_to_monitor)
                                                                     if not hasattr(monitor_scraping, 'pentest_tasks_to_monitor'):
                                                                         monitor_scraping.pentest_tasks_to_monitor = []
                                                                         monitor_scraping.pentest_monitoring_started = False
@@ -680,6 +712,20 @@ def register_websocket_handlers(socketio, app):
                                                                     if new_pentest_tasks:
                                                                         monitor_scraping.pentest_tasks_to_monitor.extend(new_pentest_tasks)
                                                                         logger.info(f'[WebSocket] {len(new_pentest_tasks)} nouvelle(s) tâche(s) Pentest détectée(s), total: {len(monitor_scraping.pentest_tasks_to_monitor)}')
+                                                                        
+                                                                        # Si le monitoring Pentest est déjà démarré, mettre à jour le compteur X/Y
+                                                                        if getattr(monitor_scraping, 'pentest_monitoring_started', False):
+                                                                            safe_emit(
+                                                                                socketio,
+                                                                                'pentest_analysis_started',
+                                                                                {
+                                                                                    'message': f'Analyse Pentest démarrée pour {len(monitor_scraping.pentest_tasks_to_monitor)} entreprises...',
+                                                                                    'total': len(monitor_scraping.pentest_tasks_to_monitor),
+                                                                                    'expected_total': expected_total_entreprises,
+                                                                                    'current': 0
+                                                                                },
+                                                                                room=session_id
+                                                                            )
                                                                     
                                                                     if not monitor_scraping.pentest_monitoring_started and len(monitor_scraping.pentest_tasks_to_monitor) > 0:
                                                                         monitor_scraping.pentest_monitoring_started = True
@@ -691,6 +737,7 @@ def register_websocket_handlers(socketio, app):
                                                                             {
                                                                                 'message': f'Analyse Pentest démarrée pour {len(pentest_tasks_to_monitor)} entreprises...',
                                                                                 'total': len(pentest_tasks_to_monitor),
+                                                                                'expected_total': expected_total_entreprises,
                                                                                 'current': 0
                                                                             },
                                                                             room=session_id
@@ -750,6 +797,7 @@ def register_websocket_handlers(socketio, app):
                                                                                                     {
                                                                                                         'current': pentest_completed,
                                                                                                         'total': total_pentest,
+                                                                                                        'expected_total': expected_total_entreprises,
                                                                                                         'progress': global_progress,
                                                                                                         'message': f'{message_pentest} - {pentest_info.get("nom", "N/A")}',
                                                                                                         'url': pentest_info.get('url', ''),
@@ -797,6 +845,7 @@ def register_websocket_handlers(socketio, app):
                                                                                                     {
                                                                                                         'current': pentest_completed,
                                                                                                         'total': total_pentest,
+                                                                                                        'expected_total': expected_total_entreprises,
                                                                                                         'progress': global_progress,
                                                                                                         'message': f'Analyse Pentest terminée pour {pentest_info.get("nom", "N/A")}',
                                                                                                         'url': pentest_info.get('url', ''),
@@ -833,15 +882,17 @@ def register_websocket_handlers(socketio, app):
                                                                                 if total_pentest > 0:
                                                                                     global_progress = int((total_progress_sum / total_pentest))
                                                                                     if last_global_progress != global_progress:
+                                                                                        # Événement \"heartbeat\" global : NE PAS envoyer task_progress ni entreprise/url
+                                                                                        # pour ne pas écraser l'affichage de l'entreprise en cours côté frontend.
                                                                                         safe_emit(
                                                                                             socketio,
                                                                                             'pentest_analysis_progress',
                                                                                             {
                                                                                                 'current': pentest_completed,
                                                                                                 'total': total_pentest,
+                                                                                                'expected_total': expected_total_entreprises,
                                                                                                 'progress': global_progress,
-                                                                                                'message': 'Analyse Pentest en cours...',
-                                                                                                'task_progress': global_progress
+                                                                                                'message': 'Analyse Pentest en cours...'
                                                                                             },
                                                                                             room=session_id
                                                                                         )
@@ -866,7 +917,8 @@ def register_websocket_handlers(socketio, app):
                                                                                 {
                                                                                     'message': f'Analyses Pentest terminées pour {pentest_completed}/{final_total} entreprises.',
                                                                                     'current': pentest_completed,
-                                                                                    'total': final_total
+                                                                                    'total': final_total,
+                                                                                    'expected_total': expected_total_entreprises
                                                                                 },
                                                                                 room=session_id
                                                                             )
@@ -875,9 +927,25 @@ def register_websocket_handlers(socketio, app):
                                                                 
                                                                 last_meta_scraping = meta_scraping
                                                         elif scraping_result.state == 'SUCCESS':
-                                                            # Le scraping est terminé: on peut autoriser les autres monitorings à finaliser proprement
-                                                            monitor_scraping.scraping_done = True
                                                             res = scraping_result.result or {}
+                                                            # IMPORTANT: synchroniser les listes OSINT/Pentest depuis le résultat AVANT de marquer scraping_done.
+                                                            # Sinon, si on a passé directement de PROGRESS (1 tâche) à SUCCESS sans voir le dernier meta,
+                                                            # les monitors n'auraient qu'une tâche et sortiraient prématurément avec 1/2.
+                                                            for osint_info in res.get('osint_tasks', []):
+                                                                tid = osint_info.get('task_id')
+                                                                if tid and (not hasattr(monitor_scraping, 'osint_tasks_to_monitor') or not any(t.get('task_id') == tid for t in monitor_scraping.osint_tasks_to_monitor)):
+                                                                    if not hasattr(monitor_scraping, 'osint_tasks_to_monitor'):
+                                                                        monitor_scraping.osint_tasks_to_monitor = []
+                                                                    monitor_scraping.osint_tasks_to_monitor.append(osint_info)
+                                                                    logger.debug(f'[WebSocket] Tâche OSINT {tid} ajoutée depuis SUCCESS (sync)')
+                                                            for pentest_info in res.get('pentest_tasks', []):
+                                                                tid = pentest_info.get('task_id')
+                                                                if tid and (not hasattr(monitor_scraping, 'pentest_tasks_to_monitor') or not any(t.get('task_id') == tid for t in monitor_scraping.pentest_tasks_to_monitor)):
+                                                                    if not hasattr(monitor_scraping, 'pentest_tasks_to_monitor'):
+                                                                        monitor_scraping.pentest_tasks_to_monitor = []
+                                                                    monitor_scraping.pentest_tasks_to_monitor.append(pentest_info)
+                                                                    logger.debug(f'[WebSocket] Tâche Pentest {tid} ajoutée depuis SUCCESS (sync)')
+                                                            monitor_scraping.scraping_done = True
                                                             stats = res.get('stats', {})
                                                             scraped_count = res.get('scraped_count', 0)
                                                             total_entreprises = res.get('total_entreprises', 0)
@@ -1038,10 +1106,16 @@ def register_websocket_handlers(socketio, app):
             max_depth = int(data.get('max_depth', 3))
             max_workers = int(data.get('max_workers', 5))
             max_time = int(data.get('max_time', 300))
+            max_pages = int(data.get('max_pages', 50))
+            entreprise_id = data.get('entreprise_id')
+            try:
+                entreprise_id = int(entreprise_id) if entreprise_id is not None else None
+            except Exception:
+                entreprise_id = None
             session_id = request.sid
             
             if not url:
-                safe_emit(socketio, 'scraping_error', {'error': 'URL requise'}, room=session_id)
+                safe_emit(socketio, 'scraping_error', {'error': 'URL requise', 'entreprise_id': entreprise_id}, room=session_id)
                 return
             
             # Vérifier que Celery/Redis est disponible
@@ -1063,11 +1137,14 @@ def register_websocket_handlers(socketio, app):
                     url=url,
                     max_depth=max_depth,
                     max_workers=max_workers,
-                    max_time=max_time
+                    max_time=max_time,
+                    max_pages=max_pages,
+                    entreprise_id=entreprise_id
                 )
             except Exception as e:
                 safe_emit(socketio, 'scraping_error', {
-                    'error': f'Erreur lors du démarrage de la tâche: {str(e)}'
+                    'error': f'Erreur lors du démarrage de la tâche: {str(e)}',
+                    'entreprise_id': entreprise_id
                 }, room=session_id)
                 return
         
@@ -1075,7 +1152,7 @@ def register_websocket_handlers(socketio, app):
             with tasks_lock:
                 active_tasks[session_id] = {'task_id': task.id, 'type': 'scraping'}
             
-            safe_emit(socketio, 'scraping_started', {'message': 'Scraping démarré...', 'task_id': task.id}, room=session_id)
+            safe_emit(socketio, 'scraping_started', {'message': 'Scraping démarré...', 'task_id': task.id, 'entreprise_id': entreprise_id}, room=session_id)
             
             # Surveiller la progression (similaire à l'analyse)
             def monitor_task():
@@ -1086,13 +1163,15 @@ def register_websocket_handlers(socketio, app):
                             if task_result.state == 'PROGRESS':
                                 meta = task_result.info
                                 safe_emit(socketio, 'scraping_progress', {
-                                    'message': meta.get('message', '')
+                                    'message': meta.get('message', ''),
+                                    'entreprise_id': entreprise_id
                                 }, room=session_id)
                             elif task_result.state == 'SUCCESS':
                                 result = task_result.result
                                 safe_emit(socketio, 'scraping_complete', {
                                     'success': True,
-                                    'results': result.get('results', {})
+                                    'results': result.get('results', {}),
+                                    'entreprise_id': entreprise_id
                                 }, room=session_id)
                                 with tasks_lock:
                                     if session_id in active_tasks:
@@ -1100,7 +1179,8 @@ def register_websocket_handlers(socketio, app):
                                 break
                             elif task_result.state == 'FAILURE':
                                 safe_emit(socketio, 'scraping_error', {
-                                    'error': str(task_result.info)
+                                    'error': str(task_result.info),
+                                    'entreprise_id': entreprise_id
                                 }, room=session_id)
                                 with tasks_lock:
                                     if session_id in active_tasks:
@@ -1108,7 +1188,8 @@ def register_websocket_handlers(socketio, app):
                                 break
                         except Exception as e:
                             safe_emit(socketio, 'scraping_error', {
-                                'error': f'Erreur lors du suivi de la tâche: {str(e)}'
+                                'error': f'Erreur lors du suivi de la tâche: {str(e)}',
+                                'entreprise_id': entreprise_id
                             }, room=session_id)
                             with tasks_lock:
                                 if session_id in active_tasks:

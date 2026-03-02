@@ -70,6 +70,23 @@ Sans cela, en production avec PostgreSQL, les tables `scrapers`, `images`, `entr
 - **Doc** : `INSTALL_OSINT_TOOLS.md` précise en tête que prod = installation directe sur le serveur, dev = WSL + outils dans la distro. Section dépannage mise à jour en conséquence. Rappel des routes `/api/osint/diagnostic` et `/api/pentest/diagnostic`.
 - **Nouveaux outils documentés** : Serposcope, Lighthouse, Screaming Frog (SEO) ; Social Analyzer, Sherlock, Maigret, Tinfoleak (réseaux sociaux).
 
+## Prévisualisation Excel & suivi temps réel analyse (mars 2026)
+
+- **Prévisualisation upload (`routes/upload.py`, `templates/pages/preview.html`)** :
+  - Les compteurs du bloc résumé affichent maintenant :
+    - `Entreprises dans le fichier` = toutes les lignes valides du fichier Excel.
+    - `Nouvelles entreprises` = lignes réellement insérées (déduplication dans le fichier **et** en BDD via `find_duplicate_entreprise`).
+    - `Avec téléphone` / `Avec adresse` / `Avec catégorie` = uniquement sur les **nouvelles** entreprises (pas sur les doublons).
+  - `_preview_stats_from_df` utilise le même algorithme de doublons que la tâche Celery (`analyze_entreprise_task`) pour garantir que la prévisualisation reflète exactement ce qui sera traité.
+- **Détection de doublons BDD (`services/database/entreprises.py`, `tasks/analysis_tasks.py`)** :
+  - `find_duplicate_entreprise` gère correctement `sqlite3.Row` et accepte la recherche par **website seul** (cas `nom` vide).
+  - `existing_ids_before` est initialisé en lisant `SELECT id FROM entreprises` et en extrayant l’ID depuis n’importe quel type de ligne (dict, tuple, `sqlite3.Row`), ce qui évite de réanalyser des entreprises déjà présentes.
+- **Suivi temps réel OSINT / Pentest (`routes/websocket_handlers.py`, `static/js/preview.js`)** :
+  - Les événements OSINT/Pentest véhiculent maintenant un `expected_total` qui correspond au nombre d’entreprises de l’analyse, ce qui permet d’afficher `X / N entreprises` correctement (et non plus `X / 1`).
+  - Correction des conditions de course : le monitoring OSINT/Pentest synchronise les listes de tâches à partir du résultat final du scraping avant de se terminer ; avec plusieurs entreprises, les compteurs atteignent bien `2 / 2` (ou `N / N`) avant la redirection.
+  - Le Pentest distingue la **progression de l’entreprise en cours** (`task_progress`) de la **progression globale** (moyenne de toutes les tâches) ; l’entreprise en cours et le compteur global ne restent plus bloqués au même pourcentage.
+  - Une fois les analyses terminées, chaque bloc (Scraping, Technique+SEO, OSINT, Pentest) affiche un encadré « *… terminé* » avec un résumé lisible (ex. nombre de formulaires testés pour le Pentest, totaux cumulés OSINT).
+
 ## Documentation et confidentialité
 
 - Les guides de déploiement et configuration utilisent des placeholders (`<SERVEUR_APP>`, `<VOTRE_DOMAINE>`, `<UTILISATEUR>`, etc.) au lieu de noms de serveurs ou domaines réels.
