@@ -73,10 +73,17 @@ class EntrepriseManager(DatabaseBase):
             try:
                 self.execute_sql(cursor, 'SELECT id, website FROM entreprises WHERE website IS NOT NULL')
                 rows = cursor.fetchall()
-                # Utiliser l'index (row[0], row[1]) pour compatibilité sqlite3.Row et tuple
                 for row in rows:
-                    existing_id = row[0]
-                    existing_website = row[1] if len(row) > 1 else None
+                    # sqlite3.Row / tuple / dict (RealDictRow) -> normaliser l'accès
+                    try:
+                        if isinstance(row, dict):
+                            existing_id = row.get('id')
+                            existing_website = row.get('website')
+                        else:
+                            existing_id = row[0]
+                            existing_website = row[1] if len(row) > 1 else None
+                    except (KeyError, IndexError, TypeError):
+                        continue
                     existing_domain = normalize_website_domain(existing_website)
                     if existing_domain and existing_domain == website_norm:
                         conn.close()
@@ -215,14 +222,7 @@ class EntrepriseManager(DatabaseBase):
             if logo and not logo.startswith(('http://', 'https://')):
                 logo = urljoin(website, logo)
         
-        self.execute_sql(cursor, '''
-            INSERT INTO entreprises (
-                analyse_id, nom, website, secteur, statut, opportunite,
-                email_principal, responsable, taille_estimee, hosting_provider,
-                framework, score_securite, telephone, pays, address_1, address_2,
-                longitude, latitude, note_google, nb_avis_google, resume, og_image, favicon, logo
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
+        params = (
             analyse_id,
             nom,
             website,
@@ -247,9 +247,47 @@ class EntrepriseManager(DatabaseBase):
             og_image,
             favicon,
             logo
-        ))
-        
-        entreprise_id = cursor.lastrowid
+        )
+
+        # IMPORTANT :
+        # - En SQLite, on peut utiliser cursor.lastrowid après INSERT.
+        # - En PostgreSQL, cursor.lastrowid n'est pas fiable : il faut utiliser RETURNING id.
+        if self.is_postgresql():
+            insert_sql = '''
+                INSERT INTO entreprises (
+                    analyse_id, nom, website, secteur, statut, opportunite,
+                    email_principal, responsable, taille_estimee, hosting_provider,
+                    framework, score_securite, telephone, pays, address_1, address_2,
+                    longitude, latitude, note_google, nb_avis_google, resume, og_image, favicon, logo
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s
+                )
+                RETURNING id
+            '''
+            cursor.execute(insert_sql, params)
+            row = cursor.fetchone()
+            if not row:
+                entreprise_id = None
+            elif isinstance(row, dict):
+                # Avec RealDictCursor (psycopg2) on reçoit un dict
+                entreprise_id = row.get('id')
+            else:
+                # Fallback tuple (id, ...)
+                entreprise_id = row[0]
+        else:
+            # Mode SQLite (ou autre) : on garde execute_sql + lastrowid
+            self.execute_sql(cursor, '''
+                INSERT INTO entreprises (
+                    analyse_id, nom, website, secteur, statut, opportunite,
+                    email_principal, responsable, taille_estimee, hosting_provider,
+                    framework, score_securite, telephone, pays, address_1, address_2,
+                    longitude, latitude, note_google, nb_avis_google, resume, og_image, favicon, logo
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', params)
+            entreprise_id = cursor.lastrowid
         
         # Sauvegarder les données OpenGraph normalisées si présentes
         if og_tags:

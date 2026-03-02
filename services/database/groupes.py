@@ -81,15 +81,35 @@ class GroupeEntrepriseManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
 
-        self.execute_sql(
-            cursor,
-            '''
-            INSERT INTO groupes_entreprises (nom, description, couleur)
-            VALUES (?, ?, ?)
-            ''',
-            (nom, description, couleur),
-        )
-        groupe_id = cursor.lastrowid
+        params = (nom, description, couleur)
+
+        # Compatibilité SQLite / PostgreSQL
+        if self.is_postgresql():
+            self.execute_sql(
+                cursor,
+                '''
+                INSERT INTO groupes_entreprises (nom, description, couleur)
+                VALUES (?, ?, ?)
+                RETURNING id
+                ''',
+                params,
+            )
+            row = cursor.fetchone()
+            if isinstance(row, dict):
+                groupe_id = row.get('id')
+            else:
+                groupe_id = row[0] if row else None
+        else:
+            self.execute_sql(
+                cursor,
+                '''
+                INSERT INTO groupes_entreprises (nom, description, couleur)
+                VALUES (?, ?, ?)
+                ''',
+                params,
+            )
+            groupe_id = cursor.lastrowid
+
         try:
             conn.commit()
         except Exception:

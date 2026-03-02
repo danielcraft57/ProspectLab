@@ -166,6 +166,19 @@ Les logs des campagnes sont enregistrés dans `logs/email_tasks.log` avec :
 3. Vérifier les logs dans `logs/email_tasks.log`
 4. Vérifier que le pixel est bien injecté dans les emails HTML
 
+### Toutes les campagnes passent en FAILED / tous les emails sont en Échec
+
+1. Vérifier la configuration SMTP réelle côté serveur (prod) :
+   - `MAIL_SERVER`, `MAIL_PORT`, `MAIL_USE_TLS`, `MAIL_USERNAME`, `MAIL_PASSWORD`.
+   - Pour un port 587 classique, le serveur attend généralement **STARTTLS** → `MAIL_USE_TLS` doit être à `True`.
+2. Tester directement depuis le serveur (dans le venv) :
+   ```bash
+   python -c "from services.email_sender import EmailSender; s = EmailSender(); print(s.send_email('votre-email@exemple.com','Test SMTP','Ceci est un test'))"
+   ```
+   - Si le message contient `Must issue a STARTTLS command first` : activer `MAIL_USE_TLS=true`.
+   - Si le message contient `SMTP AUTH extension not supported by server` : le relais ne supporte pas AUTH ; depuis mars 2026, l’envoi continue sans authentification et les campagnes ne devraient plus échouer juste pour cette raison.
+3. Vérifier que les services (gunicorn, workers Celery) tournent bien avec les mêmes variables d’environnement (`.env` ou `EnvironmentFile` systemd) que le test manuel.
+
 ### Le texte sous la barre de progression ne s'affiche pas
 
 - Le problème a été corrigé avec des styles inline et `appendChild`

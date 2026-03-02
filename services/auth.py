@@ -66,24 +66,47 @@ class AuthManager:
         """
         conn = self.db.get_connection()
         cursor = conn.cursor()
-        
+
         # Vérifier si l'utilisateur existe déjà
         cursor.execute('SELECT id FROM users WHERE username = ? OR email = ?', (username, email))
         if cursor.fetchone():
             conn.close()
             raise ValueError('Un utilisateur avec ce nom ou cet email existe déjà')
-        
+
         # Créer l'utilisateur
         password_hash = self.hash_password(password)
-        cursor.execute('''
-            INSERT INTO users (username, email, password_hash, is_admin, is_active)
-            VALUES (?, ?, ?, ?, 1)
-        ''', (username, email, password_hash, 1 if is_admin else 0))
-        
-        user_id = cursor.lastrowid
+        params = (username, email, password_hash, 1 if is_admin else 0)
+
+        # Compatibilité SQLite / PostgreSQL
+        if self.db.is_postgresql():
+            self.db.execute_sql(
+                cursor,
+                '''
+                INSERT INTO users (username, email, password_hash, is_admin, is_active)
+                VALUES (?, ?, ?, ?, 1)
+                RETURNING id
+                ''',
+                params,
+            )
+            row = cursor.fetchone()
+            if isinstance(row, dict):
+                user_id = row.get('id')
+            else:
+                user_id = row[0] if row else None
+        else:
+            self.db.execute_sql(
+                cursor,
+                '''
+                INSERT INTO users (username, email, password_hash, is_admin, is_active)
+                VALUES (?, ?, ?, ?, 1)
+                ''',
+                params,
+            )
+            user_id = cursor.lastrowid
+
         conn.commit()
         conn.close()
-        
+
         return user_id
     
     def authenticate(self, username: str, password: str) -> Optional[dict]:

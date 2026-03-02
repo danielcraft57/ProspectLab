@@ -56,11 +56,7 @@ class APITokenManager:
         conn = self.db.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
-            INSERT INTO api_tokens 
-            (token, name, app_url, user_id, is_active, can_read_entreprises, can_read_emails, can_read_statistics, can_read_campagnes)
-            VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
-        ''', (
+        params = (
             token, 
             name, 
             app_url, 
@@ -69,9 +65,29 @@ class APITokenManager:
             1 if can_read_emails else 0,
             1 if can_read_statistics else 0,
             1 if can_read_campagnes else 0
-        ))
+        )
         
-        token_id = cursor.lastrowid
+        # Compatibilité SQLite / PostgreSQL
+        if self.db.is_postgresql():
+            self.db.execute_sql(cursor, '''
+                INSERT INTO api_tokens 
+                (token, name, app_url, user_id, is_active, can_read_entreprises, can_read_emails, can_read_statistics, can_read_campagnes)
+                VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
+                RETURNING id
+            ''', params)
+            row = cursor.fetchone()
+            if isinstance(row, dict):
+                token_id = row.get('id')
+            else:
+                token_id = row[0] if row else None
+        else:
+            self.db.execute_sql(cursor, '''
+                INSERT INTO api_tokens 
+                (token, name, app_url, user_id, is_active, can_read_entreprises, can_read_emails, can_read_statistics, can_read_campagnes)
+                VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
+            ''', params)
+            token_id = cursor.lastrowid
+        
         conn.commit()
         conn.close()
         

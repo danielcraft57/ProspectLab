@@ -86,6 +86,22 @@ Sans cela, en production avec PostgreSQL, les tables `scrapers`, `images`, `entr
   - Correction des conditions de course : le monitoring OSINT/Pentest synchronise les listes de tâches à partir du résultat final du scraping avant de se terminer ; avec plusieurs entreprises, les compteurs atteignent bien `2 / 2` (ou `N / N`) avant la redirection.
   - Le Pentest distingue la **progression de l’entreprise en cours** (`task_progress`) de la **progression globale** (moyenne de toutes les tâches) ; l’entreprise en cours et le compteur global ne restent plus bloqués au même pourcentage.
   - Une fois les analyses terminées, chaque bloc (Scraping, Technique+SEO, OSINT, Pentest) affiche un encadré « *… terminé* » avec un résumé lisible (ex. nombre de formulaires testés pour le Pentest, totaux cumulés OSINT).
+ - **Compatibilité PostgreSQL pour les entreprises (`services/database/entreprises.py`)** :
+   - `save_entreprise` utilisait `cursor.lastrowid`, correct en SQLite mais invalide en PostgreSQL (renvoyait 0). La méthode utilise maintenant `INSERT ... RETURNING id` en mode Postgres, et `lastrowid` uniquement en SQLite.
+   - Conséquence : les IDs retournés sont corrects en production Postgres, les compteurs `inserted` / `duplicates` dans `tasks/analysis_tasks.py` sont fiables, et la déduplication BDD se comporte comme en dev.
+
+## PostgreSQL & SMTP : compatibilité généralisée (mars 2026)
+
+- **Couche BDD Postgres généralisée** :
+  - `services/api_auth.py` (`APITokenManager.create_token`) : création de tokens API via `INSERT ... RETURNING id` en mode PostgreSQL, `cursor.lastrowid` conservé pour SQLite.
+  - `services/auth.py` (`AuthManager.create_user`) : création d'utilisateur robuste en PostgreSQL (`RETURNING id`) avec fallback SQLite inchangé.
+  - `services/database/personnes.py` (`PersonneManager.save_personne`) : création de contact (`personnes`) compatible dict/tuple ; l’ID retourné est fiable en Postgres comme en SQLite.
+  - `services/database/groupes.py` (`GroupeEntrepriseManager.create_groupe_entreprise`) : création de groupes d’entreprises via `RETURNING id` en Postgres, `lastrowid` en SQLite.
+  - `services/database/campagnes.py` (`CampagneManager.save_email_envoye`, `save_tracking_event`, création de segments) : tous les `INSERT` qui ont besoin de l’ID utilisent désormais `RETURNING id` en PostgreSQL ; plus de `id = 0` ou `NULL` dans `emails_envoyes`, `email_tracking_events`, `segments_ciblage`.
+- **Campagnes email & SMTP (`services/email_sender.py`)** :
+  - L’envoi SMTP utilise maintenant `starttls()` uniquement si `MAIL_USE_TLS=true` (cas typique : port 587 + STARTTLS).
+  - L’authentification `server.login()` est tentée seulement si `MAIL_USERNAME` est défini, et l’erreur `SMTPNotSupportedError` (« SMTP AUTH extension not supported by server ») est gérée proprement : on continue l’envoi sans AUTH pour les relais internes.
+  - En pratique : les campagnes ne passent plus en statut `FAILED` uniquement parce que le relais SMTP ne supporte pas AUTH, et les environnements Postgres/production et SQLite/dev partagent le même comportement fonctionnel côté campagnes email.
 
 ## Documentation et confidentialité
 

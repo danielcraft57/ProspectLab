@@ -93,16 +93,34 @@ class PersonneManager(DatabaseBase):
                       social_profiles_json, osint_data_json, niveau_hierarchique, manager_id, source, personne_id))
             else:
                 # Créer
-                self.execute_sql(cursor,'''
-                    INSERT INTO personnes (
-                        entreprise_id, nom, prenom, titre, role, email, telephone,
-                        linkedin_url, linkedin_profile_data, social_profiles, osint_data,
-                        niveau_hierarchique, manager_id, source
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (entreprise_id, nom, prenom, titre, role, email, telephone,
-                      linkedin_url, linkedin_data_json, social_profiles_json, osint_data_json,
-                      niveau_hierarchique, manager_id, source))
-                personne_id = cursor.lastrowid
+                params = (
+                    entreprise_id, nom, prenom, titre, role, email, telephone,
+                    linkedin_url, linkedin_data_json, social_profiles_json, osint_data_json,
+                    niveau_hierarchique, manager_id, source
+                )
+                if self.is_postgresql():
+                    self.execute_sql(cursor, '''
+                        INSERT INTO personnes (
+                            entreprise_id, nom, prenom, titre, role, email, telephone,
+                            linkedin_url, linkedin_profile_data, social_profiles, osint_data,
+                            niveau_hierarchique, manager_id, source
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        RETURNING id
+                    ''', params)
+                    row = cursor.fetchone()
+                    if isinstance(row, dict):
+                        personne_id = row.get('id')
+                    else:
+                        personne_id = row[0] if row else None
+                else:
+                    self.execute_sql(cursor, '''
+                        INSERT INTO personnes (
+                            entreprise_id, nom, prenom, titre, role, email, telephone,
+                            linkedin_url, linkedin_profile_data, social_profiles, osint_data,
+                            niveau_hierarchique, manager_id, source
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', params)
+                    personne_id = cursor.lastrowid
             
             conn.commit()
             return personne_id

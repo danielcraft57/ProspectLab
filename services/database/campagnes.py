@@ -267,26 +267,62 @@ class CampagneManager(DatabaseBase):
             self.execute_sql(cursor, "PRAGMA table_info(emails_envoyes)")
             cols = {row[1] for row in cursor.fetchall()}
 
+        # Préparer les paramètres pour INSERT
         if 'tracking_token' in cols:
-            self.execute_sql(cursor,
-                '''
-                INSERT INTO emails_envoyes
-                (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur, tracking_token)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''',
-                (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur, tracking_token)
-            )
+            params = (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur, tracking_token)
+            if self.is_postgresql():
+                self.execute_sql(cursor,
+                    '''
+                    INSERT INTO emails_envoyes
+                    (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur, tracking_token)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    RETURNING id
+                    ''',
+                    params
+                )
+                row = cursor.fetchone()
+                if isinstance(row, dict):
+                    email_id = row.get('id')
+                else:
+                    email_id = row[0] if row else None
+            else:
+                self.execute_sql(cursor,
+                    '''
+                    INSERT INTO emails_envoyes
+                    (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur, tracking_token)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''',
+                    params
+                )
+                email_id = cursor.lastrowid
         else:
-            self.execute_sql(cursor,
-                '''
-                INSERT INTO emails_envoyes
-                (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ''',
-                (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur)
-            )
+            params = (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur)
+            if self.is_postgresql():
+                self.execute_sql(cursor,
+                    '''
+                    INSERT INTO emails_envoyes
+                    (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    RETURNING id
+                    ''',
+                    params
+                )
+                row = cursor.fetchone()
+                if isinstance(row, dict):
+                    email_id = row.get('id')
+                else:
+                    email_id = row[0] if row else None
+            else:
+                self.execute_sql(cursor,
+                    '''
+                    INSERT INTO emails_envoyes
+                    (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ''',
+                    params
+                )
+                email_id = cursor.lastrowid
 
-        email_id = cursor.lastrowid
         conn.commit()
         conn.close()
 
@@ -427,16 +463,33 @@ class CampagneManager(DatabaseBase):
         if isinstance(event_data, dict):
             event_data = json.dumps(event_data)
 
-        self.execute_sql(cursor,
-            '''
-            INSERT INTO email_tracking_events
-            (email_id, tracking_token, event_type, event_data, ip_address, user_agent)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ''',
-            (email_id, tracking_token, event_type, event_data, ip_address, user_agent)
-        )
+        params = (email_id, tracking_token, event_type, event_data, ip_address, user_agent)
+        if self.is_postgresql():
+            self.execute_sql(cursor,
+                '''
+                INSERT INTO email_tracking_events
+                (email_id, tracking_token, event_type, event_data, ip_address, user_agent)
+                VALUES (?, ?, ?, ?, ?, ?)
+                RETURNING id
+                ''',
+                params
+            )
+            row = cursor.fetchone()
+            if isinstance(row, dict):
+                event_id = row.get('id')
+            else:
+                event_id = row[0] if row else None
+        else:
+            self.execute_sql(cursor,
+                '''
+                INSERT INTO email_tracking_events
+                (email_id, tracking_token, event_type, event_data, ip_address, user_agent)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ''',
+                params
+            )
+            event_id = cursor.lastrowid
 
-        event_id = cursor.lastrowid
         conn.commit()
         conn.close()
 

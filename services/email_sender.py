@@ -41,12 +41,6 @@ class EmailSender:
         Returns:
             dict: {'success': bool, 'message': str}
         """
-        if not self.mail_username or not self.mail_password:
-            return {
-                'success': False,
-                'message': 'Configuration email manquante. Veuillez configurer MAIL_USERNAME et MAIL_PASSWORD dans config.py ou variables d\'environnement.'
-            }
-        
         try:
             # Créer le message
             msg = MIMEMultipart('alternative')
@@ -67,7 +61,17 @@ class EmailSender:
             with smtplib.SMTP(self.mail_server, self.mail_port) as server:
                 if self.mail_use_tls:
                     server.starttls()
-                server.login(self.mail_username, self.mail_password)
+
+                # Certains serveurs (ex: relais interne) n'exposent pas AUTH:
+                # on tente l'auth uniquement si un username est configuré, et
+                # on ignore explicitement le cas "AUTH non supporté".
+                if self.mail_username:
+                    try:
+                        server.login(self.mail_username, self.mail_password)
+                    except smtplib.SMTPNotSupportedError:
+                        # Le serveur ne supporte pas SMTP AUTH: on loguera côté appelant si besoin,
+                        # mais on continue en envoi sans authentification.
+                        pass
                 server.send_message(msg)
             
             return {
