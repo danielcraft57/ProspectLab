@@ -128,10 +128,41 @@
     }
     
     /**
+     * Active une classe visuelle et gère le clic sur les tuiles de permissions
+     */
+    function setupPermissionTiles() {
+        const items = document.querySelectorAll('.permissions-group .permission-item');
+        if (!items.length) return;
+
+        items.forEach(item => {
+            if (item.dataset.permissionTileInit === '1') return;
+            const checkbox = item.querySelector('input[type="checkbox"]');
+            if (!checkbox) return;
+
+            // État initial
+            if (checkbox.checked) {
+                item.classList.add('is-active');
+            }
+
+            // Synchroniser l'état visuel dès que la checkbox change (click clavier, click souris, etc.)
+            checkbox.addEventListener('change', function () {
+                item.classList.toggle('is-active', checkbox.checked);
+            });
+
+            item.dataset.permissionTileInit = '1';
+        });
+    }
+
+    /**
      * Configure le formulaire de création
      */
     function setupForm() {
         const form = document.getElementById('createTokenForm');
+        if (!form) return;
+
+        // Initialiser les tuiles de permissions (visuel + clic)
+        setupPermissionTiles();
+
         form.addEventListener('submit', async function(e) {
             e.preventDefault();
             
@@ -178,6 +209,8 @@
                     showSuccess('Token créé avec succès !');
                     showTokenCreated(data.data);
                     form.reset();
+                    // Réinitialiser l'état visuel des tuiles après reset
+                    setupPermissionTiles();
                     loadTokens();
                 } else {
                     showError('Erreur: ' + (data.error || 'Erreur inconnue'));

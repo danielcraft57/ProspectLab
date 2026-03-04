@@ -6,7 +6,7 @@ Authentification par token API
 
 from flask import Blueprint, request, jsonify
 from services.database import Database
-from services.api_auth import api_token_required
+from services.api_auth import api_token_required, require_api_permission
 import json
 
 api_public_bp = Blueprint('api_public', __name__, url_prefix='/api/public')
@@ -17,6 +17,7 @@ database = Database()
 
 @api_public_bp.route('/entreprises', methods=['GET'])
 @api_token_required
+@require_api_permission('entreprises')
 def get_entreprises():
     """
     API publique : Liste des entreprises
@@ -65,6 +66,7 @@ def get_entreprises():
 
 @api_public_bp.route('/entreprises/<int:entreprise_id>', methods=['GET'])
 @api_token_required
+@require_api_permission('entreprises')
 def get_entreprise(entreprise_id):
     """
     API publique : Détails d'une entreprise
@@ -101,6 +103,8 @@ def get_entreprise(entreprise_id):
 
 @api_public_bp.route('/entreprises/<int:entreprise_id>/emails', methods=['GET'])
 @api_token_required
+@require_api_permission('entreprises')
+@require_api_permission('emails')
 def get_entreprise_emails(entreprise_id):
     """
     API publique : Emails d'une entreprise
@@ -151,6 +155,7 @@ def get_entreprise_emails(entreprise_id):
 
 @api_public_bp.route('/emails', methods=['GET'])
 @api_token_required
+@require_api_permission('emails')
 def get_all_emails():
     """
     API publique : Liste de tous les emails
@@ -231,6 +236,7 @@ def get_all_emails():
 
 @api_public_bp.route('/statistics', methods=['GET'])
 @api_token_required
+@require_api_permission('statistics')
 def get_statistics():
     """
     API publique : Statistiques globales
@@ -254,6 +260,7 @@ def get_statistics():
 
 @api_public_bp.route('/campagnes', methods=['GET'])
 @api_token_required
+@require_api_permission('campagnes')
 def get_campagnes():
     """
     API publique : Liste des campagnes email
@@ -292,6 +299,7 @@ def get_campagnes():
 
 @api_public_bp.route('/campagnes/<int:campagne_id>', methods=['GET'])
 @api_token_required
+@require_api_permission('campagnes')
 def get_campagne(campagne_id):
     """
     API publique : Détails d'une campagne email
@@ -327,6 +335,7 @@ def get_campagne(campagne_id):
 
 @api_public_bp.route('/campagnes/<int:campagne_id>/emails', methods=['GET'])
 @api_token_required
+@require_api_permission('campagnes')
 def get_campagne_emails(campagne_id):
     """
     API publique : Emails envoyés d'une campagne
@@ -388,6 +397,7 @@ def get_campagne_emails(campagne_id):
 
 @api_public_bp.route('/campagnes/<int:campagne_id>/statistics', methods=['GET'])
 @api_token_required
+@require_api_permission('campagnes')
 def get_campagne_statistics(campagne_id):
     """
     API publique : Statistiques de tracking d'une campagne

@@ -684,3 +684,15 @@ def api_tokens_page():
     """
     return render_page('api_tokens.html')
 
+
+@other_bp.route('/documentation-api')
+@login_required
+def api_doc_page():
+    """
+    Page de documentation des endpoints API.
+    
+    Returns:
+        str: Template HTML de la page documentation API
+    """
+    return render_page('api_doc.html')
+

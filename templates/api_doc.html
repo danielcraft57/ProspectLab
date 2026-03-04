@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+
+{% block title %}Documentation API - ProspectLab{% endblock %}
+
+{% block extra_css %}
+<style>
+    .api-doc-page {
+        max-width: 1400px;
+        margin: 0 auto;
+    }
+    .api-doc-page .page-header {
+        margin-bottom: 24px;
+    }
+    .api-doc-page .page-header h1 {
+        color: #333;
+        margin-bottom: 8px;
+    }
+    .api-doc-page .page-header p {
+        color: #666;
+    }
+    .api-doc-page-body {
+        display: flex;
+        gap: 0;
+        min-height: 60vh;
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+        overflow: hidden;
+    }
+    .api-doc-page-nav {
+        width: 240px;
+        flex-shrink: 0;
+        border-right: 1px solid #e0e0e0;
+        padding: 16px 0;
+        overflow-y: auto;
+        background: #fafafa;
+    }
+    .api-doc-nav-item {
+        display: block;
+        width: 100%;
+        padding: 12px 24px;
+        text-align: left;
+        border: none;
+        background: none;
+        cursor: pointer;
+        font-size: 0.95em;
+        color: #555;
+        transition: background 0.2s, color 0.2s;
+    }
+    .api-doc-nav-item:hover {
+        background: #f0f0f0;
+        color: #333;
+    }
+    .api-doc-nav-item.is-active {
+        background: #e8eaf6;
+        color: #667eea;
+        font-weight: 600;
+        border-right: 3px solid #667eea;
+    }
+    .api-doc-page-content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 24px 32px 40px;
+    }
+    .api-doc-section {
+        display: none;
+    }
+    .api-doc-section.is-visible {
+        display: block;
+    }
+    .api-doc-section h3 {
+        margin: 0 0 8px 0;
+        font-size: 1.1em;
+        color: #667eea;
+    }
+    .api-doc-section .section-desc {
+        margin-bottom: 20px;
+        color: #666;
+        font-size: 0.95em;
+    }
+    .api-doc-endpoint {
+        border: 1px solid #e8e8e8;
+        border-radius: 8px;
+        padding: 16px 20px;
+        margin-bottom: 16px;
+        background: #fafafa;
+    }
+    .api-doc-endpoint:hover {
+        background: #f5f5f5;
+    }
+    .api-doc-endpoint-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 10px;
+    }
+    .api-doc-method {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 6px;
+        font-size: 0.8em;
+        font-weight: 700;
+    }
+    .api-doc-method.get { background: #e3f2fd; color: #1565c0; }
+    .api-doc-method.post { background: #e8f5e9; color: #2e7d32; }
+    .api-doc-method.put { background: #fff3e0; color: #e65100; }
+    .api-doc-method.patch { background: #fff8e1; color: #f9a825; }
+    .api-doc-method.delete { background: #ffebee; color: #c62828; }
+    .api-doc-path {
+        font-family: 'Consolas', 'Monaco', monospace;
+        font-size: 0.9em;
+        color: #333;
+        word-break: break-all;
+    }
+    .api-doc-endpoint-desc {
+        font-size: 0.9em;
+        color: #555;
+        margin-bottom: 10px;
+        line-height: 1.4;
+    }
+    .api-doc-params {
+        font-size: 0.85em;
+        color: #666;
+    }
+    .api-doc-params table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 8px;
+    }
+    .api-doc-params th,
+    .api-doc-params td {
+        text-align: left;
+        padding: 6px 10px 6px 0;
+        border-bottom: 1px solid #eee;
+    }
+    .api-doc-params th {
+        color: #555;
+        font-weight: 600;
+    }
+    .api-doc-auth {
+        margin-top: 10px;
+        padding: 8px 12px;
+        background: #fff8e1;
+        border-radius: 6px;
+        font-size: 0.85em;
+        color: #856404;
+    }
+    /* Dark mode - page Documentation API */
+    body[data-theme="dark"] .api-doc-page .page-header h1,
+    body[data-theme="dark"] .api-doc-page .page-header p {
+        color: #e2e8f0;
+    }
+    body[data-theme="dark"] .api-doc-page-body {
+        background: #1e293b;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    }
+    body[data-theme="dark"] .api-doc-page-nav {
+        background: #0f172a;
+        border-right-color: #334155;
+    }
+    body[data-theme="dark"] .api-doc-nav-item {
+        color: #94a3b8;
+    }
+    body[data-theme="dark"] .api-doc-nav-item:hover {
+        background: #1e293b;
+        color: #e2e8f0;
+    }
+    body[data-theme="dark"] .api-doc-nav-item.is-active {
+        background: #1e3a5f;
+        color: #93c5fd;
+        border-right-color: #667eea;
+    }
+    body[data-theme="dark"] .api-doc-page-content {
+        background: #1e293b;
+    }
+    body[data-theme="dark"] .api-doc-section h3 {
+        color: #93c5fd;
+    }
+    body[data-theme="dark"] .api-doc-section .section-desc {
+        color: #94a3b8;
+    }
+    body[data-theme="dark"] .api-doc-section .section-desc code {
+        background: #334155;
+        color: #e2e8f0;
+    }
+    body[data-theme="dark"] .api-doc-endpoint {
+        border-color: #334155;
+        background: #0f172a;
+    }
+    body[data-theme="dark"] .api-doc-endpoint:hover {
+        background: #334155;
+    }
+    body[data-theme="dark"] .api-doc-path {
+        color: #e2e8f0;
+    }
+    body[data-theme="dark"] .api-doc-endpoint-desc {
+        color: #94a3b8;
+    }
+    body[data-theme="dark"] .api-doc-params {
+        color: #94a3b8;
+    }
+    body[data-theme="dark"] .api-doc-params th,
+    body[data-theme="dark"] .api-doc-params td {
+        border-bottom-color: #334155;
+    }
+    body[data-theme="dark"] .api-doc-params code {
+        background: #334155;
+        color: #e2e8f0;
+    }
+    body[data-theme="dark"] .api-doc-auth {
+        background: #422006;
+        color: #fcd34d;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="api-doc-page">
+    <div class="page-header">
+        <h1><i class="fas fa-book"></i> Documentation des endpoints API</h1>
+        <p>Référence des familles d'API : tokens, API publique, API étendue, intégration (Companies) et API principale. Utilisez le menu à gauche pour naviguer.</p>
+    </div>
+    <div class="api-doc-page-body">
+        <nav class="api-doc-page-nav" id="apiDocPageNav" role="tablist">
+            <!-- Rempli par api_doc.js -->
+        </nav>
+        <div class="api-doc-page-content" id="apiDocPageContent">
+            <!-- Sections remplies par api_doc.js -->
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/api_doc_data.js') }}"></script>
+<script src="{{ url_for('static', filename='js/api_doc.js') }}"></script>
+{% endblock %}

@@ -101,6 +101,36 @@ app.register_blueprint(other_bp)
 from routes.websocket_handlers import register_websocket_handlers
 register_websocket_handlers(socketio, app)
 
+# CORS : autoriser l'app prospection (ex: Vite sur localhost:5173) à appeler l'API
+ALLOWED_CORS_ORIGINS = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+]
+
+@app.after_request
+def add_cors_headers(response):
+    origin = request.headers.get('Origin')
+    if origin and origin in ALLOWED_CORS_ORIGINS and request.path.startswith('/api/'):
+        response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, x-api-key'
+        response.headers['Access-Control-Max-Age'] = '86400'
+    return response
+
+@app.route('/api/<path:path>', methods=['OPTIONS'])
+def api_options(path):
+    """Répond aux prérequêtes CORS OPTIONS pour les routes /api/*"""
+    origin = request.headers.get('Origin')
+    if origin and origin in ALLOWED_CORS_ORIGINS:
+        from flask import make_response
+        r = make_response('', 204)
+        r.headers['Access-Control-Allow-Origin'] = origin
+        r.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
+        r.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, x-api-key'
+        r.headers['Access-Control-Max-Age'] = '86400'
+        return r
+    return '', 204
+
 
 def _get_client_ip() -> str:
     """

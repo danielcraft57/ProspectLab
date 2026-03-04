@@ -104,6 +104,25 @@ class APITokenManager:
             'can_read_campagnes': can_read_campagnes
         }
     
+    def _row_to_token_dict(self, row, mask_token: bool = False) -> dict:
+        """Convertit une ligne DB (Row ou RealDictRow) en dict. Compatible SQLite et PostgreSQL."""
+        d = dict(row)
+        token_val = d.get('token')
+        return {
+            'id': d.get('id'),
+            'token': (token_val[:8] + '...') if mask_token and token_val else token_val,
+            'name': d.get('name'),
+            'app_url': d.get('app_url'),
+            'user_id': d.get('user_id'),
+            'is_active': bool(d.get('is_active', 0)),
+            'can_read_entreprises': bool(d.get('can_read_entreprises', 0)),
+            'can_read_emails': bool(d.get('can_read_emails', 0)),
+            'can_read_statistics': bool(d.get('can_read_statistics', 0)),
+            'can_read_campagnes': bool(d.get('can_read_campagnes', 0)),
+            'date_creation': d.get('date_creation'),
+            'last_used': d.get('last_used')
+        }
+    
     def validate_token(self, token: str) -> Optional[dict]:
         """
         Valide un token API et retourne ses informations.
@@ -115,23 +134,9 @@ class APITokenManager:
             dict|None: Informations du token si valide, None sinon
         """
         conn = self.db.get_connection()
-        conn.row_factory = lambda cursor, row: {
-            'id': row[0],
-            'token': row[1],
-            'name': row[2],
-            'app_url': row[3],
-            'user_id': row[4],
-            'is_active': bool(row[5]),
-            'can_read_entreprises': bool(row[6]),
-            'can_read_emails': bool(row[7]),
-            'can_read_statistics': bool(row[8]),
-            'can_read_campagnes': bool(row[9]),
-            'date_creation': row[10],
-            'last_used': row[11]
-        }
         cursor = conn.cursor()
         
-        cursor.execute('''
+        self.db.execute_sql(cursor, '''
             SELECT id, token, name, app_url, user_id, is_active, 
                    can_read_entreprises, can_read_emails, can_read_statistics, can_read_campagnes,
                    date_creation, last_used
@@ -139,11 +144,12 @@ class APITokenManager:
             WHERE token = ? AND is_active = 1
         ''', (token,))
         
-        token_data = cursor.fetchone()
+        row = cursor.fetchone()
+        token_data = self._row_to_token_dict(row, mask_token=False) if row else None
         
         if token_data:
             # Mettre à jour la dernière utilisation
-            cursor.execute('''
+            self.db.execute_sql(cursor, '''
                 UPDATE api_tokens 
                 SET last_used = CURRENT_TIMESTAMP 
                 WHERE id = ?
@@ -164,24 +170,10 @@ class APITokenManager:
             list: Liste des tokens
         """
         conn = self.db.get_connection()
-        conn.row_factory = lambda cursor, row: {
-            'id': row[0],
-            'token': row[1][:8] + '...' if row[1] else None,  # Masquer le token complet
-            'name': row[2],
-            'app_url': row[3],
-            'user_id': row[4],
-            'is_active': bool(row[5]),
-            'can_read_entreprises': bool(row[6]),
-            'can_read_emails': bool(row[7]),
-            'can_read_statistics': bool(row[8]),
-            'can_read_campagnes': bool(row[9]),
-            'date_creation': row[10],
-            'last_used': row[11]
-        }
         cursor = conn.cursor()
         
         if user_id:
-            cursor.execute('''
+            self.db.execute_sql(cursor, '''
                 SELECT id, token, name, app_url, user_id, is_active,
                        can_read_entreprises, can_read_emails, can_read_statistics, can_read_campagnes,
                        date_creation, last_used
@@ -190,7 +182,7 @@ class APITokenManager:
                 ORDER BY date_creation DESC
             ''', (user_id,))
         else:
-            cursor.execute('''
+            self.db.execute_sql(cursor, '''
                 SELECT id, token, name, app_url, user_id, is_active,
                        can_read_entreprises, can_read_emails, can_read_statistics, can_read_campagnes,
                        date_creation, last_used
@@ -198,9 +190,9 @@ class APITokenManager:
                 ORDER BY date_creation DESC
             ''')
         
-        tokens = cursor.fetchall()
+        rows = cursor.fetchall()
         conn.close()
-        return tokens
+        return [self._row_to_token_dict(row, mask_token=True) for row in rows]
     
     def revoke_token(self, token_id: int) -> bool:
         """
@@ -215,7 +207,7 @@ class APITokenManager:
         conn = self.db.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        self.db.execute_sql(cursor, '''
             UPDATE api_tokens 
             SET is_active = 0 
             WHERE id = ?
@@ -240,13 +232,22 @@ class APITokenManager:
         conn = self.db.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('DELETE FROM api_tokens WHERE id = ?', (token_id,))
+        self.db.execute_sql(cursor, 'DELETE FROM api_tokens WHERE id = ?', (token_id,))
         
         deleted = cursor.rowcount > 0
         conn.commit()
         conn.close()
         
         return deleted
+
+
+# Mapping logique permission -> champ booléen dans api_tokens
+API_PERMISSION_FIELD_MAP = {
+    'entreprises': 'can_read_entreprises',
+    'emails': 'can_read_emails',
+    'statistics': 'can_read_statistics',
+    'campagnes': 'can_read_campagnes',
+}
 
 class ClientAppManager:
     """
@@ -401,4 +402,56 @@ def client_api_key_required(f):
         return f(*args, **kwargs)
 
     return decorated_function
+
+
+def require_api_permission(permission_key: str):
+    """
+    Decorator à utiliser APRES api_token_required pour vérifier une permission fine.
+    
+    Exemple:
+        @api_public_bp.route('/entreprises')
+        @api_token_required
+        @require_api_permission('entreprises')
+        def get_entreprises():
+            ...
+    
+    Permissions possibles (clé -> champ BDD):
+        - 'entreprises' -> can_read_entreprises
+        - 'emails'      -> can_read_emails
+        - 'statistics'  -> can_read_statistics
+        - 'campagnes'   -> can_read_campagnes
+    """
+    from functools import wraps as _wraps
+
+    def decorator(f):
+        @_wraps(f)
+        def wrapper(*args, **kwargs):
+            token_data = getattr(request, 'api_token', None)
+            if not token_data:
+                # api_token_required aurait dû être appliqué avant
+                return jsonify({
+                    'error': 'Configuration API invalide',
+                    'message': 'Le décorateur api_token_required doit être appliqué avant require_api_permission.'
+                }), 500
+
+            field = API_PERMISSION_FIELD_MAP.get(permission_key)
+            if not field:
+                # Permission inconnue : mieux vaut bloquer que laisser passer silencieusement
+                return jsonify({
+                    'error': 'Permission API inconnue',
+                    'permission': permission_key
+                }), 500
+
+            if not token_data.get(field, False):
+                return jsonify({
+                    'error': 'Permission API insuffisante',
+                    'permission': field,
+                    'message': f'Le token API ne dispose pas de la permission requise pour cette ressource ({field}).'
+                }), 403
+
+            return f(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
