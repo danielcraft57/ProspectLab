@@ -163,6 +163,8 @@ def entreprises():
             'pentest_max': request.args.get('pentest_max', type=int),
             'seo_min': request.args.get('seo_min', type=int),
             'seo_max': request.args.get('seo_max', type=int),
+            'groupe_id': request.args.get('groupe_id', type=int),
+            'no_group': request.args.get('no_group'),
             'has_email': request.args.get('has_email'),
         }
         # Ne pas retirer les entiers 0 (valides pour min/max)
@@ -172,6 +174,8 @@ def entreprises():
             if k in ('security_min', 'security_max', 'pentest_min', 'pentest_max', 'seo_min', 'seo_max'):
                 return 0 <= v <= 100
             if k == 'has_email':
+                return str(v).lower() in ('1', 'true', 'yes')
+            if k == 'no_group':
                 return str(v).lower() in ('1', 'true', 'yes')
             return v != ''
         filters = {k: v for k, v in filters.items() if keep_filter(k, v)}
@@ -271,16 +275,42 @@ def groupes_entreprises():
         return jsonify({'error': str(e)}), 500
 
 
-@api_bp.route('/groupes-entreprises/<int:groupe_id>', methods=['DELETE'])
+@api_bp.route('/groupes-entreprises/<int:groupe_id>', methods=['DELETE', 'PUT', 'PATCH'])
 @login_required
 def delete_groupe_entreprise(groupe_id):
     """
-    API: Supprime un groupe d'entreprises.
+    API: Supprime ou met à jour un groupe d'entreprises.
+
+    Methods:
+        DELETE: Supprime le groupe.
+        PUT/PATCH: Met à jour le groupe (nom / description / couleur).
 
     Args:
         groupe_id (int): ID du groupe.
     """
     try:
+        if request.method in ('PUT', 'PATCH'):
+            data = request.get_json() or {}
+            nom = data.get('nom')
+            description = data.get('description')
+            couleur = data.get('couleur')
+
+            if nom is not None:
+                nom = nom.strip()
+                if not nom:
+                    return jsonify({'error': 'Le nom du groupe ne peut pas être vide.'}), 400
+
+            updated = database.update_groupe_entreprise(
+                groupe_id,
+                nom=nom,
+                description=description,
+                couleur=couleur,
+            )
+            if not updated:
+                return jsonify({'error': 'Groupe introuvable'}), 404
+            return jsonify(updated)
+
+        # DELETE
         database.delete_groupe_entreprise(groupe_id)
         return jsonify({'success': True})
     except Exception as e:

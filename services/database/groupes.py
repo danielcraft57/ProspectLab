@@ -159,6 +159,72 @@ class GroupeEntrepriseManager(DatabaseBase):
             pass
         conn.close()
 
+    def update_groupe_entreprise(self, groupe_id, nom=None, description=None, couleur=None):
+        """
+        Met à jour les informations d'un groupe d'entreprises.
+
+        Args:
+            groupe_id (int): ID du groupe à mettre à jour.
+            nom (str|None): Nouveau nom du groupe (optionnel).
+            description (str|None): Nouvelle description (optionnel).
+            couleur (str|None): Nouvelle couleur (optionnel).
+
+        Returns:
+            dict|None: Groupe mis à jour, ou None si introuvable.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        # Construire dynamiquement la requête d'UPDATE en ne touchant
+        # qu'aux champs explicitement fournis (nom/description/couleur).
+        fields = []
+        params = []
+        if nom is not None:
+            fields.append('nom = ?')
+            params.append(nom)
+        if description is not None:
+            fields.append('description = ?')
+            params.append(description)
+        if couleur is not None:
+            fields.append('couleur = ?')
+            params.append(couleur)
+
+        if not fields:
+            conn.close()
+            return None
+
+        params.append(groupe_id)
+        sql = f"UPDATE groupes_entreprises SET {', '.join(fields)} WHERE id = ?"
+        self.execute_sql(cursor, sql, tuple(params))
+
+        try:
+            conn.commit()
+        except Exception:
+            pass
+
+        # Recharger le groupe mis à jour
+        self.execute_sql(
+            cursor,
+            '''
+            SELECT
+                g.*,
+                (SELECT COUNT(*) FROM entreprise_groupes egc WHERE egc.groupe_id = g.id) AS entreprises_count
+            FROM groupes_entreprises g
+            WHERE g.id = ?
+            ''',
+            (groupe_id,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return None
+
+        groupe = self.clean_row_dict(dict(row))
+        from utils.helpers import clean_json_dict
+
+        return clean_json_dict(groupe)
+
     def add_entreprise_to_groupe(self, entreprise_id, groupe_id):
         """
         Ajoute une entreprise à un groupe (idempotent).

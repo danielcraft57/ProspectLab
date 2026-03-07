@@ -249,22 +249,121 @@ def analyse_seo_detail(analysis_id):
             return jsonify({'success': True, 'message': 'Analyse SEO supprimée avec succès'})
         except Exception as e:
             return jsonify({'error': str(e)}), 500
-    else:
+
+
+@api_extended_bp.route('/google-maps/import', methods=['POST'])
+@login_required
+def google_maps_import():
+    """
+    API: Importe une liste de lieux Google Maps comme entreprises ProspectLab.
+
+    Corps JSON:
+        {
+            "places": [
+                {
+                    "place_id": "...",
+                    "name": "...",
+                    "website": "...",
+                    "phone_number": "...",
+                    "country": "...",
+                    "address_1": "...",
+                    "address_2": "...",
+                    "latitude": 0.0,
+                    "longitude": 0.0,
+                    "rating": 4.5,
+                    "reviews_count": 123,
+                    "category": "boulangerie"
+                },
+                ...
+            ]
+        }
+
+    Returns:
+        JSON: {
+            "results": [
+                {
+                    "place_id": "...",
+                    "entreprise_id": 123,
+                    "created": true
+                },
+                ...
+            ]
+        }
+    """
+    payload = request.get_json(silent=True) or {}
+    places = payload.get('places') or []
+
+    if not isinstance(places, list) or not places:
+        return jsonify({'error': 'Le champ "places" (liste) est requis.'}), 400
+
+    results = []
+
+    for place in places:
+        if not isinstance(place, dict):
+            continue
+
+        name = (place.get('name') or '').strip()
+        website = (place.get('website') or '').strip() or None
+        phone = (place.get('phone_number') or place.get('phone') or '').strip() or None
+        country = (place.get('country') or '').strip() or None
+        address_1 = (place.get('address_1') or place.get('address') or '').strip() or None
+        address_2 = (place.get('address_2') or '').strip() or None
+        latitude = place.get('latitude', place.get('lat'))
+        longitude = place.get('longitude', place.get('lng'))
+        rating = place.get('rating')
+        reviews_count = place.get('reviews_count')
+        category = (place.get('category') or '').strip() or None
+
         try:
-            analysis = database.get_seo_analysis_by_id(analysis_id)
-            if analysis:
-                return jsonify(analysis)
+            # Vérifier si une entreprise similaire existe déjà
+            existing_id = None
+            if name or website:
+                existing_id = database.find_duplicate_entreprise(
+                    nom=name,
+                    website=website,
+                    address_1=address_1,
+                    address_2=address_2,
+                )
+
+            created = False
+            if existing_id:
+                entreprise_id = existing_id
             else:
-                return jsonify({'error': 'Analyse SEO introuvable'}), 404
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
-            analysis = database.get_pentest_analysis(analysis_id)
-            if analysis:
-                return jsonify(analysis)
-            else:
-                return jsonify({'error': 'Analyse Pentest introuvable'}), 404
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
+                entreprise_data = {
+                    'name': name or website or 'Entreprise Google Maps',
+                    'website': website,
+                    'telephone': phone,
+                    'pays': country,
+                    'address_1': address_1,
+                    'address_2': address_2,
+                    'latitude': latitude,
+                    'longitude': longitude,
+                    'rating': rating,
+                    'reviews_count': reviews_count,
+                    'category': category,
+                    'category_translate': category,
+                    'statut': 'Nouveau',
+                }
+
+                entreprise_id = database.save_entreprise(
+                    analyse_id=None,
+                    entreprise_data=entreprise_data,
+                    skip_duplicates=False,
+                )
+                created = True
+
+            results.append({
+                'place_id': place.get('place_id'),
+                'entreprise_id': entreprise_id,
+                'created': created,
+            })
+        except Exception as e:  # pragma: no cover - robust face aux erreurs ponctuelles
+            results.append({
+                'place_id': place.get('place_id'),
+                'error': str(e),
+            })
+
+    return jsonify({'results': results})
 
 
 @api_extended_bp.route('/entreprise/<int:entreprise_id>/analyse-technique')

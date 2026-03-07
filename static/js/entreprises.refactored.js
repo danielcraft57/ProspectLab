@@ -42,6 +42,34 @@ async function init() {
             return url;
         }
     }
+
+    function getInitials(name) {
+        const s = String(name || '').trim();
+        if (!s) return '?';
+        const parts = s.split(/\s+/).filter(Boolean);
+        const first = parts[0] ? parts[0][0] : '';
+        const second = parts.length > 1 ? parts[1][0] : (parts[0] && parts[0].length > 1 ? parts[0][1] : '');
+        const initials = (first + second).toUpperCase();
+        return initials || '?';
+    }
+
+    function normalizeToHttps(url) {
+        if (!url) return '';
+        const s = String(url).trim();
+        if (!s) return '';
+        if (s.startsWith('http://')) return 'https://' + s.slice('http://'.length);
+        return s;
+    }
+
+    function faviconFallbackUrl(domain, provider) {
+        const d = String(domain || '').trim();
+        if (!d) return '';
+        if (provider === 'ddg') {
+            return `https://icons.duckduckgo.com/ip3/${encodeURIComponent(d)}.ico`;
+        }
+        // google s2 favicons (par défaut)
+        return `https://www.google.com/s2/favicons?sz=128&domain=${encodeURIComponent(d)}`;
+    }
     
     function setScoreRelaunchLoading(entrepriseId, analysisType, isLoading) {
         if (!entrepriseId || !analysisType) return;
@@ -131,12 +159,53 @@ async function init() {
             console.error('Erreur lors du chargement des secteurs:', error);
         }
     }
+
+    // Charger les groupes pour le filtre
+    async function loadGroupFilter() {
+        const select = document.getElementById('filter-groupe');
+        if (!select) return;
+        try {
+            // Réinitialiser les options de base
+            select.innerHTML = '';
+            const allOption = document.createElement('option');
+            allOption.value = '';
+            allOption.textContent = 'Tous les groupes';
+            select.appendChild(allOption);
+
+            const noneOption = document.createElement('option');
+            noneOption.value = 'none';
+            noneOption.textContent = 'Sans groupe';
+            select.appendChild(noneOption);
+
+            const groupes = await EntreprisesAPI.loadGroupes();
+            if (Array.isArray(groupes)) {
+                groupes.forEach(g => {
+                    const option = document.createElement('option');
+                    option.value = String(g.id);
+                    const parts = [];
+                    if (g.nom) {
+                        parts.push(g.nom);
+                    } else {
+                        parts.push(`Groupe ${g.id}`);
+                    }
+                    if (typeof g.entreprises_count !== 'undefined' && g.entreprises_count !== null) {
+                        parts.push(`(${g.entreprises_count})`);
+                    }
+                    option.textContent = parts.join(' ');
+                    select.appendChild(option);
+                });
+            }
+        } catch (error) {
+            console.error('Erreur lors du chargement des groupes pour le filtre:', error);
+        }
+    }
     
     /** Construit l'objet de filtres à partir du formulaire (pour l'API). */
     function getCurrentFilters() {
         const get = (id) => (document.getElementById(id) || {}).value;
         const search = (get('search-input') || '').trim();
         const secteur = get('filter-secteur') || '';
+        const groupeFilter = get('filter-groupe') || '';
         const statut = get('filter-statut') || '';
         const securityMinRaw = get('filter-security-min') || '0';
         const securityMaxRaw = get('filter-security-max') || '100';
@@ -159,6 +228,16 @@ async function init() {
         const filters = {};
         if (search) filters.search = search;
         if (secteur) filters.secteur = secteur;
+        if (groupeFilter) {
+            if (groupeFilter === 'none') {
+                filters.no_group = 'true';
+            } else {
+                const gid = parseInt(groupeFilter, 10);
+                if (!Number.isNaN(gid)) {
+                    filters.groupe_id = gid;
+                }
+            }
+        }
         if (statut) filters.statut = statut;
         const hasEmailCheckbox = document.getElementById('filter-has-email');
         if (hasEmailCheckbox && hasEmailCheckbox.checked) {
@@ -474,14 +553,35 @@ async function init() {
             </div>
         ` : '';
         
+        const domain = getDisplayDomain(entreprise.website || mainImage || '');
+        const initials = getInitials(entreprise.nom || '');
+        const safeMainImage = mainImage ? normalizeToHttps(mainImage) : '';
+        const fallbackGoogle = faviconFallbackUrl(domain, 'google');
+        const fallbackDdg = faviconFallbackUrl(domain, 'ddg');
+
         return `
             <div class="entreprise-card" data-id="${entreprise.id}">
                 <div class="card-header-with-logo">
-                    ${mainImage ? `
                     <div class="card-logo-container">
-                        <img src="${mainImage}" alt="${Formatters.escapeHtml(entreprise.nom || 'Logo')}" class="card-logo" onerror="this.style.display='none'">
+                        <img
+                            src="${safeMainImage || fallbackGoogle}"
+                            alt="${Formatters.escapeHtml(entreprise.nom || 'Logo')}"
+                            class="card-logo"
+                            loading="lazy"
+                            referrerpolicy="no-referrer"
+                            data-fallback-step="0"
+                            onload="this.nextElementSibling && (this.nextElementSibling.style.display='none')"
+                            onerror="
+                                try {
+                                    const step = (this.dataset && this.dataset.fallbackStep) ? String(this.dataset.fallbackStep) : '0';
+                                    if (step === '0' && '${fallbackGoogle}') { this.dataset.fallbackStep = '1'; this.src='${fallbackGoogle}'; return; }
+                                    if (step === '1' && '${fallbackDdg}') { this.dataset.fallbackStep = '2'; this.src='${fallbackDdg}'; return; }
+                                } catch (e) {}
+                                this.style.display='none';
+                            "
+                        >
+                        <div class="card-logo-placeholder" aria-hidden="true">${Formatters.escapeHtml(initials)}</div>
                     </div>
-                    ` : ''}
                     <div class="card-header">
                         <div style="display:flex; align-items:center; gap:0.4rem; min-width:0;">
                             ${typeof entreprise.score_pentest !== 'undefined' && entreprise.score_pentest !== null && entreprise.score_pentest >= 40 ? `
@@ -921,6 +1021,7 @@ async function init() {
                     </div>
                     <div class="group-item-actions">
                         ${g.is_member ? '<span class="group-badge">Dans le groupe</span>' : ''}
+                        <button type="button" class="group-edit-btn" title="Renommer le groupe"><i class="fas fa-pen"></i></button>
                         <button type="button" class="group-delete-btn" title="Supprimer le groupe"><i class="fas fa-trash"></i></button>
                     </div>
                 </div>
@@ -977,6 +1078,38 @@ async function init() {
                     }
                 });
             });
+
+            // Renommer un groupe
+            listEl.querySelectorAll('.group-edit-btn').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    const item = btn.closest('.group-item');
+                    if (!item) return;
+                    const groupId = parseInt(item.dataset.groupId, 10);
+                    const nameEl = item.querySelector('.group-name');
+                    const currentName = nameEl ? nameEl.textContent.trim() : '';
+                    const newName = window.prompt('Nouveau nom du groupe :', currentName);
+                    if (newName === null) {
+                        return; // annulé
+                    }
+                    const trimmed = newName.trim();
+                    if (!trimmed) {
+                        Notifications.show('Le nom du groupe ne peut pas être vide.', 'warning');
+                        return;
+                    }
+                    try {
+                        await EntreprisesAPI.updateGroupe(groupId, { nom: trimmed });
+                        Object.keys(entrepriseGroupsCache).forEach(k => {
+                            entrepriseGroupsCache[k] = null;
+                        });
+                        Notifications.show('Nom du groupe mis à jour', 'success');
+                        await loadGroupsIntoDropdown(entrepriseId, dropdown, true);
+                    } catch (error) {
+                        console.error(error);
+                        Notifications.show('Erreur lors de la mise à jour du groupe', 'error');
+                    }
+                });
+            });
         } catch (error) {
             console.error(error);
             listEl.innerHTML = '<div class="group-list-empty error">Erreur lors du chargement des groupes.</div>';
@@ -995,6 +1128,7 @@ async function init() {
         // Changement des filtres avancés => rafraîchissement auto
         const advancedFilterIds = [
             'filter-secteur',
+            'filter-groupe',
             'filter-statut',
             'filter-security-min',
             'filter-security-max',
@@ -1125,6 +1259,7 @@ async function init() {
 
         let count = 0;
         const secteur = document.getElementById('filter-secteur')?.value;
+        const groupe = document.getElementById('filter-groupe')?.value;
         const statut = document.getElementById('filter-statut')?.value;
         const securityMin = document.getElementById('filter-security-min')?.value;
         const securityMax = document.getElementById('filter-security-max')?.value;
@@ -1133,6 +1268,7 @@ async function init() {
         const hasEmail = document.getElementById('filter-has-email')?.checked;
 
         if (secteur) count += 1;
+        if (groupe) count += 1;
         if (statut) count += 1;
         if (securityMin && parseInt(securityMin, 10) > 0) count += 1;
         if (securityMax && parseInt(securityMax, 10) < 100) count += 1;
@@ -2468,6 +2604,11 @@ async function init() {
         loadSecteurs();
     } catch (e) {
         console.error('[entreprises] Erreur init secteurs:', e);
+    }
+    try {
+        loadGroupFilter();
+    } catch (e) {
+        console.error('[entreprises] Erreur init groupes filtre:', e);
     }
     try {
         loadEntreprises();

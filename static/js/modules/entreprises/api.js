@@ -244,6 +244,22 @@
                 method: 'DELETE'
             });
             if (!response.ok) throw new Error('Erreur lors de la suppression du groupe');
+        },
+
+        /**
+         * Met à jour un groupe d'entreprises (nom / description / couleur).
+         * @param {number} groupeId
+         * @param {{nom?: string, description?: string, couleur?: string}} payload
+         * @returns {Promise<Object>}
+         */
+        async updateGroupe(groupeId, payload) {
+            const response = await fetch(`/api/groupes-entreprises/${groupeId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload || {})
+            });
+            if (!response.ok) throw new Error('Erreur lors de la mise à jour du groupe');
+            return await response.json();
         }
     };
     

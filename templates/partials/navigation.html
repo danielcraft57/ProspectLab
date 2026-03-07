@@ -4,9 +4,31 @@
             <h1 class="logo">
                 <a href="{{ url_for('main.dashboard') }}">ProspectLab</a>
             </h1>
-            <button type="button" class="nav-toggle-btn" aria-label="Ouvrir le menu principal">
-                <i class="fa-solid fa-table-cells-large nav-toggle-icon" aria-hidden="true"></i>
-            </button>
+            <div class="nav-header-actions">
+                <div class="nav-notifications">
+                    <button type="button" class="notifications-toggle-btn" aria-label="Notifications" data-notifications-toggle>
+                        <i class="fa-regular fa-bell"></i>
+                        <span class="notifications-badge" data-notifications-badge style="display:none;">0</span>
+                    </button>
+                    <div class="notifications-panel" data-notifications-panel hidden>
+                        <div class="notifications-panel-header">
+                            <span class="notifications-panel-title">Notifications</span>
+                            <button type="button" class="notifications-clear-btn" data-notifications-clear>Tout marquer comme lu</button>
+                        </div>
+                        <div class="notifications-list" data-notifications-list>
+                            <div class="notifications-empty">Aucune notification pour le moment.</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="nav-theme-toggle">
+                    <button type="button" class="theme-toggle-btn" aria-label="Basculer le thème clair/sombre">
+                        <i class="fa-solid fa-moon"></i>
+                    </button>
+                </div>
+                <button type="button" class="nav-toggle-btn" aria-label="Ouvrir le menu principal">
+                    <i class="fa-solid fa-table-cells-large nav-toggle-icon" aria-hidden="true"></i>
+                </button>
+            </div>
         </div>
         <ul class="nav-links">
             <li><a href="{{ url_for('main.dashboard') }}">Dashboard</a></li>
@@ -16,6 +38,7 @@
                     <li><a href="{{ url_for('main.liste_entreprises') }}">Liste des entreprises</a></li>
                     <li><a href="{{ url_for('upload.upload_file') }}">Importer Excel</a></li>
                     <li><a href="{{ url_for('main.carte_entreprises') }}">Carte des entreprises</a></li>
+                    <li><a href="{{ url_for('main.entreprises_google_maps') }}">Prospects Google Maps</a></li>
                 </ul>
             </li>
             <li class="nav-dropdown">
@@ -44,11 +67,6 @@
                 </ul>
             </li>
             <li><a href="{{ url_for('main.home') }}">Accueil</a></li>
-            <li class="nav-theme-toggle">
-                <button type="button" class="theme-toggle-btn" aria-label="Basculer le thème clair/sombre">
-                    <i class="fa-solid fa-moon"></i>
-                </button>
-            </li>
             <!-- <li class="nav-user">
                 <a href="{{ url_for('auth.logout') }}" class="logout-btn">
                     <i class="fas fa-sign-out-alt"></i> Déconnexion

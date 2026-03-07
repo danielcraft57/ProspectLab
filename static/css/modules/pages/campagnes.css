@@ -1678,6 +1678,36 @@ body[data-theme="dark"] .campagnes-search-input i {
     text-align: center;
 }
 
+/* Mode dark - modale résultats : tableau et conteneur */
+body[data-theme="dark"] .modal-results-content {
+    background: #020617;
+}
+
+body[data-theme="dark"] .results-table-container {
+    border-color: #1e293b;
+}
+
+body[data-theme="dark"] .results-table {
+    background: #020617;
+}
+
+body[data-theme="dark"] .results-table tbody tr {
+    border-bottom-color: #1e293b;
+    background: #020617;
+}
+
+body[data-theme="dark"] .results-table tbody tr:hover {
+    background: #0f172a;
+}
+
+body[data-theme="dark"] .results-table tbody tr.row-opened {
+    background: #1e293b;
+}
+
+body[data-theme="dark"] .results-table tbody tr.row-clicked {
+    background: #14532d;
+}
+
 .contact-name {
     font-weight: 500;
     color: #333;

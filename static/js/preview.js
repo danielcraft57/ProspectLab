@@ -1460,7 +1460,6 @@
                 }
                 pentestProgressContainer.style.display = 'block';
 
-                const totalProgress = typeof data.progress === 'number' ? data.progress : null;
                 const taskProgress = typeof data.task_progress === 'number' ? data.task_progress : null;
 
                 const pentestTotal = (typeof data.expected_total === 'number' && data.expected_total > 0)
@@ -1480,8 +1479,16 @@
                     pentestCurrentLabelInner.textContent = `${Math.round(currentPercent)}%`;
                 }
 
-                if (totalProgress !== null) {
-                    const totalPercent = Math.min(100, Math.max(0, totalProgress));
+                // Pour la progression globale Pentest, on s'aligne sur la logique OSINT :
+                // priorité au ratio entreprises terminées / total entreprises, pour éviter
+                // les incohérences quand toutes les tâches ne sont pas encore connues.
+                if (pentestTotal > 0) {
+                    const totalPercent = Math.min(100, Math.max(0, (pentestCurrent / pentestTotal) * 100));
+                    pentestTotalFill.style.width = `${totalPercent}%`;
+                    pentestTotalLabelInner.textContent = `${Math.round(totalPercent)}%`;
+                } else if (typeof data.progress === 'number') {
+                    // Fallback si jamais on n'a pas de total fiable
+                    const totalPercent = Math.min(100, Math.max(0, data.progress));
                     pentestTotalFill.style.width = `${totalPercent}%`;
                     pentestTotalLabelInner.textContent = `${Math.round(totalPercent)}%`;
                 }

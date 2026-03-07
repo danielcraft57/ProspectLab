@@ -4,7 +4,9 @@ Blueprint pour les routes principales de l'application
 Contient toutes les routes qui affichent des pages HTML.
 """
 
-from flask import Blueprint, redirect, url_for
+import os
+
+from flask import Blueprint, redirect, url_for, current_app
 from utils.template_helpers import render_page
 from services.auth import login_required
 
@@ -121,6 +123,26 @@ def carte_entreprises():
         str: Template HTML de la carte des entreprises
     """
     return render_page('carte_entreprises.html')
+
+
+@main_bp.route('/entreprises-google-maps')
+@login_required
+def entreprises_google_maps():
+    """
+    Page dédiée à l'exploration de prospects via Google Maps.
+    Utilise l'API JavaScript Google Maps (Places) côté front.
+    """
+    api_key = ''
+    try:
+        if current_app and current_app.config:
+            api_key = current_app.config.get('GOOGLE_MAPS_JS_API_KEY') or ''
+    except Exception:
+        api_key = ''
+
+    if not api_key:
+        api_key = os.environ.get('GOOGLE_MAPS_JS_API_KEY', '')
+
+    return render_page('entreprises_google_maps.html', google_maps_api_key=api_key)
 
 
 @main_bp.route('/analyse-technique/<int:analysis_id>')

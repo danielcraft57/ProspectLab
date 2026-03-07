@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block title %}Prospects Google Maps - ProspectLab{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/modules/pages/entreprises_google_maps.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="gmap-page">
+    <div class="gmap-page-header">
+        <h1>Prospects via Google Maps</h1>
+        <p>Explorez des entreprises directement depuis Google Maps, visualisez-les sur la carte et consultez leurs informations principales.</p>
+    </div>
+
+    <div class="gmap-controls">
+        <div class="form-group gmap-query-group">
+            <label for="gmap-query">Requête Google Maps</label>
+            <div class="gmap-query-input-wrapper">
+                <i class="fas fa-search" aria-hidden="true"></i>
+                <input
+                    type="text"
+                    id="gmap-query"
+                    class="form-input"
+                    placeholder="Ex : boulangerie Paris, plombier Lyon, hôtel Marseille..."
+                    autocomplete="off"
+                >
+            </div>
+        </div>
+        <div class="form-group">
+            <label for="gmap-region">Région (optionnel)</label>
+            <input
+                type="text"
+                id="gmap-region"
+                class="form-input"
+                placeholder="Code pays (ex : fr, be...)"
+                value="fr"
+                autocomplete="off"
+            >
+        </div>
+        <div class="form-group gmap-actions">
+            <button type="button" id="gmap-search-btn" class="btn btn-primary">
+                <i class="fas fa-search-location" aria-hidden="true"></i> Rechercher
+            </button>
+            <button type="button" id="gmap-clear-btn" class="btn btn-secondary">
+                <i class="fas fa-times" aria-hidden="true"></i> Effacer
+            </button>
+        </div>
+    </div>
+
+    <div class="gmap-main">
+        <div id="gmap-map"></div>
+
+        <aside class="gmap-sidebar" aria-label="Résultats Google Maps">
+            <div class="gmap-sidebar-header">
+                <span id="gmap-results-count" class="gmap-results-count">Aucun résultat pour le moment</span>
+            </div>
+            <div class="gmap-sidebar-body">
+                <div id="gmap-results-list" class="gmap-results-list"></div>
+                <div id="gmap-results-empty" class="gmap-results-empty">
+                    <i class="fas fa-map-marked-alt" aria-hidden="true"></i>
+                    <p>Saisissez une requête puis cliquez sur « Rechercher » pour afficher les établissements trouvés via Google Maps.</p>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <div class="gmap-hint">
+        <p>
+            <strong>Note :</strong> cette page ne stocke pas encore les résultats dans ProspectLab.
+            Elle sert à explorer et valider des idées de ciblage. L'import automatique depuis Google Maps
+            sera ajouté plus tard (similaire à l'import Excel).
+        </p>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/modules/utils/notifications.js') }}"></script>
+<script
+    src="https://maps.googleapis.com/maps/api/js?key={{ google_maps_api_key|default('YOUR_GOOGLE_MAPS_JS_API_KEY') }}&libraries=places"
+    defer
+></script>
+<script src="{{ url_for('static', filename='js/entreprises.googlemaps.js') }}" defer></script>
+{% endblock %}
+

@@ -236,6 +236,121 @@ class TemplateManager:
                     'security_score': tech_analysis.get('security_score'),
                     'server': tech_analysis.get('server_software', ''),
                 })
+                
+                # Exposer quelques infos SEO / sécurité / perf utiles pour les emails
+                seo_meta = tech_analysis.get('seo_meta') or tech_analysis.get('technical_details', {}).get('seo_meta', {}) or {}
+                technical_details = tech_analysis.get('technical_details', {}) or {}
+                performance_metrics = tech_analysis.get('performance_metrics', {}) or {}
+                pages_summary = tech_analysis.get('pages_summary', {}) or {}
+                security_headers = tech_analysis.get('security_headers', {}) or {}
+
+                # Champs SEO bruts
+                if seo_meta:
+                    data.update({
+                        'meta_title': seo_meta.get('meta_title', ''),
+                        'meta_title_length': seo_meta.get('meta_title_length'),
+                        'meta_description': seo_meta.get('meta_description', ''),
+                        'meta_description_length': seo_meta.get('meta_description_length'),
+                        'canonical_url': seo_meta.get('canonical_url', ''),
+                        'hreflang': seo_meta.get('hreflang', ''),
+                    })
+
+                # Champs techniques complémentaires (robots / sitemap / SSL / mixed content...)
+                for key in [
+                    'robots_txt_exists',
+                    'robots_has_rules',
+                    'sitemap_exists',
+                    'sitemap_url_count',
+                    'mixed_content_detected',
+                    'scripts_without_sri',
+                    'cookies_count',
+                    'cookie_types',
+                    'mobile_friendly',
+                    'viewport_meta',
+                    'html_language',
+                ]:
+                    if key in technical_details:
+                        data[key] = technical_details.get(key)
+
+                # Récupérer quelques agrégats de performance s'ils existent
+                if isinstance(pages_summary, dict):
+                    for key in ['avg_response_time_ms', 'avg_weight_bytes', 'pages_scanned']:
+                        if key in pages_summary:
+                            data[key] = pages_summary.get(key)
+
+                # Construire une liste de problèmes SEO lisibles
+                seo_issues_list = []
+                meta_title = data.get('meta_title') or ''
+                meta_title_len = data.get('meta_title_length')
+                meta_desc = data.get('meta_description') or ''
+                meta_desc_len = data.get('meta_description_length')
+
+                if not meta_title:
+                    seo_issues_list.append("Balise titre absente ou vide sur la page principale.")
+                elif isinstance(meta_title_len, int) and (meta_title_len < 35 or meta_title_len > 65):
+                    seo_issues_list.append("Balise titre trop courte ou trop longue pour un affichage optimal dans Google.")
+
+                if not meta_desc:
+                    seo_issues_list.append("Aucune meta description claire pour contrôler le texte affiché dans Google.")
+                elif isinstance(meta_desc_len, int) and (meta_desc_len < 70 or meta_desc_len > 170):
+                    seo_issues_list.append("Meta description peu optimisée (trop courte ou trop longue).")
+
+                if data.get('robots_txt_exists') is False:
+                    seo_issues_list.append("Pas de fichier robots.txt pour guider les moteurs de recherche.")
+
+                if data.get('sitemap_exists') is False:
+                    seo_issues_list.append("Aucun sitemap.xml détecté pour aider Google à trouver toutes les pages importantes.")
+                elif data.get('sitemap_exists') and isinstance(data.get('sitemap_url_count'), int) and data.get('sitemap_url_count') <= 3:
+                    seo_issues_list.append("Sitemap.xml avec très peu de pages déclarées, ce qui limite la visibilité globale du site.")
+
+                if not data.get('canonical_url'):
+                    seo_issues_list.append("Pas de lien canonique explicite, ce qui peut créer du contenu dupliqué aux yeux de Google.")
+
+                if data.get('html_language') in (None, '', 'Non spécifié'):
+                    seo_issues_list.append("Langue de la page non déclarée dans la balise HTML, ce qui complique la compréhension du site par les moteurs.")
+
+                # Construire une liste de problèmes de sécurité lisibles
+                security_issues_list = []
+
+                security_score_val = data.get('security_score')
+                ssl_valid = data.get('ssl_valid')
+
+                if ssl_valid is False:
+                    security_issues_list.append("Le site n'est pas correctement protégé en HTTPS (problème de certificat ou d'activation SSL).")
+
+                mixed_content = data.get('mixed_content_detected')
+                if mixed_content and mixed_content is not False:
+                    security_issues_list.append("Certaines ressources du site sont encore chargées en HTTP sur une page HTTPS (contenu mixte).")
+
+                scripts_without_sri = data.get('scripts_without_sri')
+                if isinstance(scripts_without_sri, int) and scripts_without_sri > 0:
+                    security_issues_list.append("Les scripts tiers ne sont pas protégés par une vérification d'intégrité (SRI).")
+
+                cookies_count = data.get('cookies_count')
+                cookie_types = (data.get('cookie_types') or '').lower()
+                if isinstance(cookies_count, int) and cookies_count > 0 and 'tracking' in cookie_types:
+                    security_issues_list.append("Présence de cookies de suivi sans information claire, à vérifier côté conformité (RGPD).")
+
+                # Manques dans les headers de sécurité importants
+                if isinstance(security_headers, dict):
+                    normalized_header_keys = {k.lower().replace('_', '-') for k in security_headers.keys()}
+                    missing_map = {
+                        'strict-transport-security': "Header Strict-Transport-Security manquant (protection incomplète contre les attaques sur HTTP).",
+                        'content-security-policy': "Aucune Content-Security-Policy définie (protection limitée contre XSS et injections de scripts).",
+                        'x-frame-options': "Header X-Frame-Options absent (site potentiellement intégrable dans des iframes malveillants).",
+                        'x-content-type-options': "Header X-Content-Type-Options manquant (risque de détection de type MIME incorrect).",
+                        'referrer-policy': "Aucune Referrer-Policy définie (fuite possible d'URLs complètes vers des sites externes).",
+                    }
+                    for header_key, message in missing_map.items():
+                        if header_key not in normalized_header_keys:
+                            security_issues_list.append(message)
+
+                # Exposer les listes sous forme de <li>...</li> pour les templates HTML
+                if seo_issues_list:
+                    data['seo_issues'] = "\n".join(f"<li>{issue}</li>" for issue in seo_issues_list)
+
+                if security_issues_list:
+                    data['security_issues'] = "\n".join(f"<li>{issue}</li>" for issue in security_issues_list)
             
             # Analyse OSINT
             osint_analysis = osint_manager.get_osint_analysis_by_entreprise(entreprise_id)

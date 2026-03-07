@@ -769,6 +769,21 @@ body[data-theme="dark"] .score-range-input {
     color: #fecaca;
 }
 
+.group-edit-btn {
+    border: none;
+    background: transparent;
+    color: #6b7280;
+    cursor: pointer;
+    padding: 0.1rem;
+    border-radius: 999px;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.group-edit-btn:hover {
+    background: rgba(59, 130, 246, 0.1);
+    color: #bfdbfe;
+}
+
 .group-dropdown-section-create .group-create-form {
     display: flex;
     align-items: center;

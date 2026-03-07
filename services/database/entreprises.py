@@ -6,6 +6,7 @@ Contient les méthodes pour la gestion des entreprises et leurs données OpenGra
 import json
 import math
 import logging
+import re
 from typing import Optional
 from urllib.parse import urljoin
 from utils.url_utils import normalize_website_domain
@@ -642,12 +643,35 @@ class EntrepriseManager(DatabaseBase):
                 params.append(filters['opportunite'])
             if filters.get('favori'):
                 inner_query += ' AND e.favori = 1'
+            # Filtrer par appartenance à un groupe spécifique
+            if filters.get('groupe_id') is not None:
+                inner_query += ' AND e.id IN (SELECT entreprise_id FROM entreprise_groupes WHERE groupe_id = ?)'
+                params.append(filters['groupe_id'])
+            # Filtrer les entreprises qui n'appartiennent à aucun groupe
+            if str(filters.get('no_group', '')).lower() in ('1', 'true', 'yes'):
+                inner_query += ' AND e.id NOT IN (SELECT entreprise_id FROM entreprise_groupes)'
             if str(filters.get('has_email', '')).lower() in ('1', 'true', 'yes'):
                 inner_query += " AND e.email_principal IS NOT NULL AND TRIM(e.email_principal) <> ''"
             if filters.get('search'):
-                search_term = f"%{filters['search']}%"
-                inner_query += ' AND (e.nom LIKE ? OR e.secteur LIKE ? OR e.email_principal LIKE ? OR e.responsable LIKE ?)'
-                params.extend([search_term, search_term, search_term, search_term])
+                # Recherche full-text simple, insensible à la casse, multi-mots.
+                # Exemple: "boulanger metz" doit matcher nom + ville/adresse.
+                raw_search = str(filters['search']).strip()
+                tokens = [t.lower() for t in re.split(r'\s+', raw_search) if t.strip()]
+                for token in tokens:
+                    like = f"%{token}%"
+                    inner_query += '''
+                        AND (
+                            LOWER(e.nom) LIKE ?
+                            OR LOWER(e.secteur) LIKE ?
+                            OR LOWER(COALESCE(e.email_principal, '')) LIKE ?
+                            OR LOWER(COALESCE(e.responsable, '')) LIKE ?
+                            OR LOWER(COALESCE(e.website, '')) LIKE ?
+                            OR LOWER(COALESCE(e.address_1, '')) LIKE ?
+                            OR LOWER(COALESCE(e.address_2, '')) LIKE ?
+                        )
+                    '''
+                    # Même token appliqué sur tous les champs cibles
+                    params.extend([like] * 7)
 
         if wrap_subquery:
             query = 'SELECT sub.* FROM (' + inner_query + ') sub WHERE 1=1'
@@ -672,9 +696,50 @@ class EntrepriseManager(DatabaseBase):
                 if filters.get('seo_max') is not None:
                     query += ' AND (sub.score_seo IS NOT NULL AND sub.score_seo <= ?)'
                     params.append(filters['seo_max'])
-            query += ' ORDER BY sub.favori DESC, sub.date_analyse DESC'
+
+            # Tri par pertinence si recherche textuelle présente
+            if filters and filters.get('search'):
+                search_full = str(filters['search']).strip().lower()
+                prefix = f"{search_full}%"
+                like_full = f"%{search_full}%"
+                query += '''
+                    ORDER BY
+                        sub.favori DESC,
+                        CASE
+                            WHEN LOWER(sub.nom) = ? THEN 5
+                            WHEN LOWER(sub.nom) LIKE ? THEN 4
+                            WHEN LOWER(COALESCE(sub.website, '')) LIKE ? THEN 3
+                            WHEN LOWER(COALESCE(sub.address_1, '')) LIKE ?
+                                 OR LOWER(COALESCE(sub.address_2, '')) LIKE ? THEN 2
+                            ELSE 0
+                        END DESC,
+                        sub.date_analyse DESC
+                '''
+                params.extend([search_full, prefix, like_full, like_full, like_full])
+            else:
+                query += ' ORDER BY sub.favori DESC, sub.date_analyse DESC'
         else:
-            query = inner_query + ' ORDER BY e.favori DESC, e.date_analyse DESC'
+            # Pas de sous-requête: mêmes règles de tri mais en se basant directement sur e.*
+            if filters and filters.get('search'):
+                search_full = str(filters['search']).strip().lower()
+                prefix = f"{search_full}%"
+                like_full = f"%{search_full}%"
+                query = inner_query + '''
+                    ORDER BY
+                        e.favori DESC,
+                        CASE
+                            WHEN LOWER(e.nom) = ? THEN 5
+                            WHEN LOWER(e.nom) LIKE ? THEN 4
+                            WHEN LOWER(COALESCE(e.website, '')) LIKE ? THEN 3
+                            WHEN LOWER(COALESCE(e.address_1, '')) LIKE ?
+                                 OR LOWER(COALESCE(e.address_2, '')) LIKE ? THEN 2
+                            ELSE 0
+                        END DESC,
+                        e.date_analyse DESC
+                '''
+                params.extend([search_full, prefix, like_full, like_full, like_full])
+            else:
+                query = inner_query + ' ORDER BY e.favori DESC, e.date_analyse DESC'
 
         if limit:
             query += ' LIMIT ?'
@@ -768,40 +833,60 @@ class EntrepriseManager(DatabaseBase):
                 params.append(filters['opportunite'])
             if filters.get('favori'):
                 inner_query += ' AND e.favori = 1'
+            # Filtrer par appartenance à un groupe spécifique
+            if filters.get('groupe_id') is not None:
+                inner_query += ' AND e.id IN (SELECT entreprise_id FROM entreprise_groupes WHERE groupe_id = ?)'
+                params.append(filters['groupe_id'])
+            # Filtrer les entreprises qui n'appartiennent à aucun groupe
+            if str(filters.get('no_group', '')).lower() in ('1', 'true', 'yes'):
+                inner_query += ' AND e.id NOT IN (SELECT entreprise_id FROM entreprise_groupes)'
             if str(filters.get('has_email', '')).lower() in ('1', 'true', 'yes'):
                 inner_query += " AND e.email_principal IS NOT NULL AND TRIM(e.email_principal) <> ''"
             if filters.get('search'):
-                search_term = f"%{filters['search']}%"
-                inner_query += ' AND (e.nom LIKE ? OR e.secteur LIKE ? OR e.email_principal LIKE ? OR e.responsable LIKE ?)'
-                params.extend([search_term, search_term, search_term, search_term])
+                # Même logique de recherche que dans get_entreprises :
+                # multi-mots, insensible à la casse, plusieurs champs.
+                raw_search = str(filters['search']).strip()
+                tokens = [t.lower() for t in re.split(r'\s+', raw_search) if t.strip()]
+                for token in tokens:
+                    like = f"%{token}%"
+                    inner_query += '''
+                        AND (
+                            LOWER(e.nom) LIKE ?
+                            OR LOWER(e.secteur) LIKE ?
+                            OR LOWER(COALESCE(e.email_principal, '')) LIKE ?
+                            OR LOWER(COALESCE(e.responsable, '')) LIKE ?
+                            OR LOWER(COALESCE(e.website, '')) LIKE ?
+                            OR LOWER(COALESCE(e.address_1, '')) LIKE ?
+                            OR LOWER(COALESCE(e.address_2, '')) LIKE ?
+                        )
+                    '''
+                    params.extend([like] * 7)
 
-        if wrap_subquery:
-            query = 'SELECT COUNT(*) as count FROM (' + inner_query + ') sub WHERE 1=1'
-            if has_security_filters:
-                if filters.get('security_min') is not None:
-                    query += ' AND (sub.score_securite IS NOT NULL AND sub.score_securite >= ?)'
-                    params.append(filters['security_min'])
-                if filters.get('security_max') is not None:
-                    query += ' AND (sub.score_securite IS NOT NULL AND sub.score_securite <= ?)'
-                    params.append(filters['security_max'])
-            if has_pentest_filters:
-                if filters.get('pentest_min') is not None:
-                    query += ' AND (sub.score_pentest IS NOT NULL AND sub.score_pentest >= ?)'
-                    params.append(filters['pentest_min'])
-                if filters.get('pentest_max') is not None:
-                    query += ' AND (sub.score_pentest IS NOT NULL AND sub.score_pentest <= ?)'
-                    params.append(filters['pentest_max'])
-            if has_seo_filters:
-                if filters.get('seo_min') is not None:
-                    query += ' AND (sub.score_seo IS NOT NULL AND sub.score_seo >= ?)'
-                    params.append(filters['seo_min'])
-                if filters.get('seo_max') is not None:
-                    query += ' AND (sub.score_seo IS NOT NULL AND sub.score_seo <= ?)'
-                    params.append(filters['seo_max'])
-        else:
-            query = 'SELECT COUNT(*) as count FROM entreprises e WHERE 1=1'
-            # Re-appliquer les mêmes filtres que dans inner_query
-            # (analyse_id et filtres "simples" ont déjà été appliqués sur inner_query)
+        # Pour éviter toute divergence avec get_entreprises, on compte
+        # toujours à partir de la même sous-requête (inner_query) qui
+        # applique déjà TOUS les filtres, y compris la recherche multi-mots.
+        query = 'SELECT COUNT(*) as count FROM (' + inner_query + ') sub WHERE 1=1'
+        if has_security_filters:
+            if filters.get('security_min') is not None:
+                query += ' AND (sub.score_securite IS NOT NULL AND sub.score_securite >= ?)'
+                params.append(filters['security_min'])
+            if filters.get('security_max') is not None:
+                query += ' AND (sub.score_securite IS NOT NULL AND sub.score_securite <= ?)'
+                params.append(filters['security_max'])
+        if has_pentest_filters:
+            if filters.get('pentest_min') is not None:
+                query += ' AND (sub.score_pentest IS NOT NULL AND sub.score_pentest >= ?)'
+                params.append(filters['pentest_min'])
+            if filters.get('pentest_max') is not None:
+                query += ' AND (sub.score_pentest IS NOT NULL AND sub.score_pentest <= ?)'
+                params.append(filters['pentest_max'])
+        if has_seo_filters:
+            if filters.get('seo_min') is not None:
+                query += ' AND (sub.score_seo IS NOT NULL AND sub.score_seo >= ?)'
+                params.append(filters['seo_min'])
+            if filters.get('seo_max') is not None:
+                query += ' AND (sub.score_seo IS NOT NULL AND sub.score_seo <= ?)'
+                params.append(filters['seo_max'])
 
         self.execute_sql(cursor, query, params)
         row = cursor.fetchone()
@@ -1653,9 +1738,24 @@ class EntrepriseManager(DatabaseBase):
             if filters.get('favori'):
                 base_sql += ' AND e.favori = 1'
             if filters.get('search'):
-                term = '%' + str(filters['search']) + '%'
-                base_sql += ' AND (e.nom LIKE ? OR e.secteur LIKE ? OR e.email_principal LIKE ? OR e.responsable LIKE ?)'
-                params.extend([term, term, term, term])
+                # Même logique de recherche que sur la liste d'entreprises :
+                # insensible à la casse, multi-mots, plusieurs colonnes.
+                raw_search = str(filters['search']).strip()
+                tokens = [t.lower() for t in re.split(r'\s+', raw_search) if t.strip()]
+                for token in tokens:
+                    like = f"%{token}%"
+                    base_sql += '''
+                        AND (
+                            LOWER(e.nom) LIKE ?
+                            OR LOWER(e.secteur) LIKE ?
+                            OR LOWER(COALESCE(e.email_principal, '')) LIKE ?
+                            OR LOWER(COALESCE(e.responsable, '')) LIKE ?
+                            OR LOWER(COALESCE(e.website, '')) LIKE ?
+                            OR LOWER(COALESCE(e.address_1, '')) LIKE ?
+                            OR LOWER(COALESCE(e.address_2, '')) LIKE ?
+                        )
+                    '''
+                    params.extend([like] * 7)
             if filters.get('score_securite_max') is not None:
                 base_sql += ' AND e.score_securite IS NOT NULL AND e.score_securite <= ?'
                 params.append(int(filters['score_securite_max']))
