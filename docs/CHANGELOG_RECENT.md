@@ -9,10 +9,16 @@ Ce document résume les changements techniques importants pour la maintenance et
   - Détection de la langue principale du contenu dans `services/technical_analyzer.py` (heuristique stopwords) ; tags `lang_fr`, `lang_en`, etc. gérés dans `services/database/entreprises.py`.  
   - Affichage des tags avec libellés lisibles et styles dédiés (refonte, risque, SEO, perf, HTTPS, langue) sur les cartes et lignes entreprises ; filtre par tags dans les filtres avancés.
 
-- **Relance des analyses depuis les vues cartes et liste**  
-  - Bouton “Relancer Pentest” opérationnel sur les cartes et en vue liste (émission WebSocket `start_pentest_analysis`, loader puis mise à jour du score).  
-  - Vue liste : refonte de l’affichage linéaire avec graphiques circulaires (Sécurité, SEO, Risque/Pentest) et boutons de relance par type d’analyse ; animation d’entrée en escalier, hover et styles cohérents (clair/sombre).  
-  - Merge des scores (`score_pentest` inclus) après rafraîchissement pour mise à jour temps réel.
+- **Vue entreprises (grille + liste) et relance analyses**  
+  - Vue liste : refonte complète avec logo à gauche, tags sous le nom, mini-jauges circulaires (Sécurité, SEO, Risque/Pentest) et boutons de relance par type ; animations d’entrée en escalier, hover et thèmes clair/sombre alignés avec les cartes.  
+  - Vue cartes : mêmes jauges circulaires + boutons de relance, et nouveaux emplacements “Lancer” pour les analyses jamais effectuées (technique, SEO, Pentest) qui se transforment automatiquement en jauge dès que l’analyse est terminée.  
+  - Les filtres “Score sécurité / SEO / Risque (Pentest)” considèrent désormais les analyses non faites comme score 0 (via `COALESCE` en SQL), ce qui permet de filtrer facilement les entreprises jamais analysées en mettant un seuil minimum > 0.  
+  - Après chaque `*_analysis_complete`, les scores sont rafraîchis côté frontend via le pipeline d’audit (`/api/entreprise/<id>/audit-pipeline`) afin que les jauges et les filtres reflètent immédiatement les nouvelles valeurs (y compris `score_pentest`).
+
+- **Sélection multiple et actions de masse**  
+  - Ajout de cases à cocher sur les cartes et lignes entreprises, avec liens “Tous / Aucun” et compteur de sélection.  
+  - Menu d’actions de masse : lancer/relancer les analyses (technique, SEO, Pentest ou toutes), ajouter/retirer les entreprises sélectionnées à/depuis un groupe, avec chargement dynamique de la liste des groupes.  
+  - Les actions de relance réutilisent exactement la logique existante (WebSocket, loaders, notifications, rafraîchissement temps réel), appliquée à toutes les entreprises sélectionnées.
 
 - **Notifications**  
   - Bouton “Tout effacer” à la place de “Tout marquer comme lu” : méthode `clearAll()` dans `static/js/modules/utils/notifications.js`, panneau vidé au clic.  

@@ -17,7 +17,7 @@ Cette roadmap regroupe les grandes idées de développement orientées prospecti
 ### 2. Segmentation avancée des prospects
 
 - **Statut**: ✅ Largement implémenté (liste entreprises + campagnes)  
-  Filtres avancés et segments de ciblage déjà disponibles dans la page `campagnes` et l’API de ciblage des entreprises.
+  Filtres avancés et segments de ciblage déjà disponibles dans la page `campagnes` et l’API de ciblage des entreprises. La liste des entreprises intègre désormais une sélection multiple (checkbox, liens Tous/Aucun) et des actions de masse (relance d’analyses, ajout/retrait de groupes).
 
 - Filtres combinés dans la liste d’entreprises et le ciblage campagnes :
   - Secteur.

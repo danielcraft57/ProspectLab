@@ -229,13 +229,42 @@
 <div class="results-section">
     <div class="results-header">
         <h3 id="results-count">Chargement...</h3>
-        <div class="view-options">
-            <button id="btn-view-grid" class="view-btn active" title="Vue grille">
-                <i class="fas fa-th"></i>
-            </button>
-            <button id="btn-view-list" class="view-btn" title="Vue liste">
-                <i class="fas fa-bars"></i>
-            </button>
+        <div class="results-header-right">
+            <div class="bulk-actions" aria-label="Actions de masse sur les entreprises">
+                <span class="bulk-select-links">
+                    <button type="button" class="link-button" id="bulk-select-all">Tous</button>
+                    <span class="separator">·</span>
+                    <button type="button" class="link-button" id="bulk-select-none">Aucun</button>
+                </span>
+                <span id="bulk-selected-count" class="bulk-selected-count">Aucune entreprise sélectionnée</span>
+                <div class="bulk-actions-controls">
+                    <select id="bulk-action-select" class="form-select bulk-action-select">
+                        <option value="">Action...</option>
+                        <optgroup label="Analyses">
+                            <option value="launch-technique">Lancer / relancer analyse technique</option>
+                            <option value="launch-seo">Lancer / relancer analyse SEO</option>
+                            <option value="launch-pentest">Lancer / relancer analyse Pentest</option>
+                            <option value="launch-all">Lancer / relancer toutes les analyses</option>
+                        </optgroup>
+                        <optgroup label="Groupes">
+                            <option value="group-add">Ajouter au groupe...</option>
+                            <option value="group-remove">Retirer du groupe...</option>
+                        </optgroup>
+                    </select>
+                    <select id="bulk-group-select" class="form-select bulk-group-select" style="display:none;">
+                        <option value="">Choisir un groupe...</option>
+                    </select>
+                    <button type="button" class="btn btn-small btn-primary" id="bulk-apply-btn">Appliquer</button>
+                </div>
+            </div>
+            <div class="view-options">
+                <button id="btn-view-grid" class="view-btn active" title="Vue grille">
+                    <i class="fas fa-th"></i>
+                </button>
+                <button id="btn-view-list" class="view-btn" title="Vue liste">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
         </div>
     </div>
     

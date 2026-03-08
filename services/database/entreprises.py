@@ -675,27 +675,29 @@ class EntrepriseManager(DatabaseBase):
                     params.extend([like] * 8)
 
         if wrap_subquery:
+            # Important : pour les filtres, on considère les analyses non faites comme score 0
+            # via COALESCE(score, 0), afin de pouvoir les exclure avec un seuil minimum > 0.
             query = 'SELECT sub.* FROM (' + inner_query + ') sub WHERE 1=1'
             if has_security_filters:
                 if filters.get('security_min') is not None:
-                    query += ' AND (sub.score_securite IS NOT NULL AND sub.score_securite >= ?)'
+                    query += ' AND (COALESCE(sub.score_securite, 0) >= ?)'
                     params.append(filters['security_min'])
                 if filters.get('security_max') is not None:
-                    query += ' AND (sub.score_securite IS NOT NULL AND sub.score_securite <= ?)'
+                    query += ' AND (COALESCE(sub.score_securite, 0) <= ?)'
                     params.append(filters['security_max'])
             if has_pentest_filters:
                 if filters.get('pentest_min') is not None:
-                    query += ' AND (sub.score_pentest IS NOT NULL AND sub.score_pentest >= ?)'
+                    query += ' AND (COALESCE(sub.score_pentest, 0) >= ?)'
                     params.append(filters['pentest_min'])
                 if filters.get('pentest_max') is not None:
-                    query += ' AND (sub.score_pentest IS NOT NULL AND sub.score_pentest <= ?)'
+                    query += ' AND (COALESCE(sub.score_pentest, 0) <= ?)'
                     params.append(filters['pentest_max'])
             if has_seo_filters:
                 if filters.get('seo_min') is not None:
-                    query += ' AND (sub.score_seo IS NOT NULL AND sub.score_seo >= ?)'
+                    query += ' AND (COALESCE(sub.score_seo, 0) >= ?)'
                     params.append(filters['seo_min'])
                 if filters.get('seo_max') is not None:
-                    query += ' AND (sub.score_seo IS NOT NULL AND sub.score_seo <= ?)'
+                    query += ' AND (COALESCE(sub.score_seo, 0) <= ?)'
                     params.append(filters['seo_max'])
 
             # Tri par pertinence si recherche textuelle présente

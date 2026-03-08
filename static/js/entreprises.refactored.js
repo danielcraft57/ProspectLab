@@ -77,22 +77,24 @@ async function init() {
         if (!items.length) return;
         items.forEach(item => {
             const btn = item.querySelector('.score-relaunch-btn');
-            const chart = item.querySelector('.circular-chart-container');
             const loader = item.querySelector('.score-loader');
-            if (!chart || !loader) return;
-            
+            if (!loader) return;
             if (isLoading) {
                 if (btn) {
                     btn.disabled = true;
                     btn.setAttribute('aria-busy', 'true');
                 }
                 loader.style.display = 'flex';
+                const emptyVisual = item.querySelector('.row-score-empty-visual');
+                if (emptyVisual) emptyVisual.classList.add('is-loading');
             } else {
                 if (btn) {
                     btn.disabled = false;
                     btn.removeAttribute('aria-busy');
                 }
                 loader.style.display = 'none';
+                const emptyVisual = item.querySelector('.row-score-empty-visual');
+                if (emptyVisual) emptyVisual.classList.remove('is-loading');
             }
         });
     }
@@ -135,6 +137,7 @@ async function init() {
     let currentModalEntrepriseData = null;
     let currentModalPentestScore = null;
     const entrepriseGroupsCache = {};
+    const selectedEntreprises = new Set();
     
     function getEntrepriseNom(entrepriseId) {
         if (entrepriseId == null) return 'Entreprise';
@@ -328,6 +331,18 @@ async function init() {
         pageEntreprises.forEach(entreprise => {
             setupEntrepriseActions(entreprise.id);
         });
+
+        // Appliquer la sélection existante (checkbox + surbrillance)
+        pageEntreprises.forEach(entreprise => {
+            const id = entreprise.id;
+            const selected = selectedEntreprises.has(id);
+            const checkboxes = document.querySelectorAll(`.entreprise-select-checkbox[data-entreprise-id="${id}"]`);
+            checkboxes.forEach(cb => { cb.checked = selected; });
+            const nodes = document.querySelectorAll(`.entreprise-card[data-id="${id}"], .entreprise-row[data-id="${id}"]`);
+            nodes.forEach(el => el.classList.toggle('entreprise-selected', selected));
+        });
+
+        updateBulkSelectionUI();
         
         // Animer les graphiques circulaires après le rendu
         setTimeout(() => {
@@ -350,6 +365,30 @@ async function init() {
         await new Promise(r => setTimeout(r, 600));
         try {
             const updated = await EntreprisesAPI.loadDetails(entrepriseId);
+            // Compléter avec les scores d'analyse (SEO, Pentest, etc.) depuis le pipeline d'audit
+            try {
+                const audit = await EntreprisesAPI.loadAuditPipeline(entrepriseId);
+                if (audit) {
+                    const pipeline = audit.pipeline || audit;
+                    if (pipeline) {
+                        if (pipeline.seo && typeof pipeline.seo.score === 'number') {
+                            updated.score_seo = pipeline.seo.score;
+                        }
+                        if (pipeline.pentest && typeof pipeline.pentest.risk_score === 'number') {
+                            updated.score_pentest = pipeline.pentest.risk_score;
+                        }
+                        if (pipeline.technical && typeof pipeline.technical.security_score === 'number') {
+                            // Sécurité globale, utile si elle n'est pas encore remontée via la colonne score_securite
+                            if (typeof updated.score_securite === 'undefined' || updated.score_securite === null) {
+                                updated.score_securite = pipeline.technical.security_score;
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                // Non bloquant : si le pipeline échoue, on garde au moins les données de base
+                console.warn('Erreur lors du chargement du pipeline audit pour la mise à jour de la ligne:', e);
+            }
             if (!updated || !updated.id) return;
 
             const mergeEntrepriseObjects = (existing, updatedData) => {
@@ -575,75 +614,61 @@ async function init() {
             }
         }
         
-        // Générer les graphiques circulaires pour Sécurité, SEO et Risque (Pentest)
+        // Générer les graphiques circulaires pour Sécurité, SEO et Risque (Pentest),
+        // avec emplacements « Lancer » pour les analyses non encore effectuées.
         const hasSecurityScore = typeof entreprise.score_securite !== 'undefined' && entreprise.score_securite !== null;
         const hasSeoScore = typeof entreprise.score_seo !== 'undefined' && entreprise.score_seo !== null;
         const hasPentestScore = typeof entreprise.score_pentest !== 'undefined' && entreprise.score_pentest !== null;
 
-        const scoresSection = (hasSecurityScore || hasSeoScore || hasPentestScore) ? `
+        function cardScoreSlot(type, label, hasScore, scoreValue, color, size = 60) {
+            if (hasScore) {
+                return `
+                <div class="score-chart-item" data-analysis-type="${type}" data-entreprise-id="${entreprise.id}" style="position: relative; display: inline-flex; align-items: center; justify-content: center;">
+                    <div class="score-chart-visual" style="position: relative; width: ${size}px; height: ${size}px; display: flex; align-items: center; justify-content: center;">
+                        ${createCircularChart(scoreValue, label, color, size)}
+                        <div class="score-loader" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,0.35);border-radius:999px;">
+                            <i class="fas fa-circle-notch fa-spin" style="font-size:1.1rem;color:#e5e7eb;"></i>
+                        </div>
+                    </div>
+                    <button 
+                        class="score-relaunch-btn"
+                        type="button"
+                        data-analysis-type="${type}"
+                        data-entreprise-id="${entreprise.id}"
+                        title="Relancer l'analyse ${label}"
+                        style="position: absolute; right: -6px; bottom: -6px; width: 22px; height: 22px; border-radius: 999px; border: none; background: #1e293b; color: #e5e7eb; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 0 2px rgba(15,23,42,0.7); cursor: pointer; font-size: 0.7rem;"
+                    >
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                </div>`;
+            }
+            return `
+                <div class="score-chart-item row-score-item--empty" data-analysis-type="${type}" data-entreprise-id="${entreprise.id}" style="position: relative; display: inline-flex; align-items: center; justify-content: center;">
+                    <div class="row-score-empty-visual">
+                        <i class="fas fa-play" aria-hidden="true"></i>
+                        <span class="row-score-empty-label">Lancer</span>
+                        <div class="score-loader row-score-loader"><i class="fas fa-circle-notch fa-spin"></i></div>
+                    </div>
+                    <button 
+                        class="score-relaunch-btn row-launch-btn"
+                        type="button"
+                        data-analysis-type="${type}"
+                        data-entreprise-id="${entreprise.id}"
+                        title="Lancer l'analyse ${label}"
+                        style="position: absolute; right: -6px; bottom: -6px; width: 22px; height: 22px; border-radius: 999px; border: none; cursor: pointer;"
+                    >
+                        <i class="fas fa-play"></i>
+                    </button>
+                </div>`;
+        }
+
+        const scoresSection = `
             <div class="card-scores-section">
-                ${hasSecurityScore ? `
-                <div class="score-chart-item" data-analysis-type="technique" data-entreprise-id="${entreprise.id}" style="position: relative; display: inline-flex; align-items: center; justify-content: center;">
-                    <div class="score-chart-visual" style="position: relative; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center;">
-                        ${createCircularChart(entreprise.score_securite, 'Sécurité', null, 60)}
-                        <div class="score-loader" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,0.35);border-radius:999px;">
-                            <i class="fas fa-circle-notch fa-spin" style="font-size:1.1rem;color:#e5e7eb;"></i>
-                        </div>
-                    </div>
-                    <button 
-                        class="score-relaunch-btn"
-                        type="button"
-                        data-analysis-type="technique"
-                        data-entreprise-id="${entreprise.id}"
-                        title="Relancer l'analyse technique"
-                        style="position: absolute; right: -6px; bottom: -6px; width: 22px; height: 22px; border-radius: 999px; border: none; background: #1e293b; color: #e5e7eb; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 0 2px rgba(15,23,42,0.7); cursor: pointer; font-size: 0.7rem;"
-                    >
-                        <i class="fas fa-sync-alt"></i>
-                    </button>
-                </div>
-                ` : ''}
-                ${hasSeoScore ? `
-                <div class="score-chart-item" data-analysis-type="seo" data-entreprise-id="${entreprise.id}" style="position: relative; display: inline-flex; align-items: center; justify-content: center;">
-                    <div class="score-chart-visual" style="position: relative; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center;">
-                        ${createCircularChart(entreprise.score_seo, 'SEO', null, 60)}
-                        <div class="score-loader" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,0.35);border-radius:999px;">
-                            <i class="fas fa-circle-notch fa-spin" style="font-size:1.1rem;color:#e5e7eb;"></i>
-                        </div>
-                    </div>
-                    <button 
-                        class="score-relaunch-btn"
-                        type="button"
-                        data-analysis-type="seo"
-                        data-entreprise-id="${entreprise.id}"
-                        title="Relancer l'analyse SEO"
-                        style="position: absolute; right: -6px; bottom: -6px; width: 22px; height: 22px; border-radius: 999px; border: none; background: #1e293b; color: #e5e7eb; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 0 2px rgba(15,23,42,0.7); cursor: pointer; font-size: 0.7rem;"
-                    >
-                        <i class="fas fa-sync-alt"></i>
-                    </button>
-                </div>
-                ` : ''}
-                ${hasPentestScore ? `
-                <div class="score-chart-item" data-analysis-type="pentest" data-entreprise-id="${entreprise.id}" style="position: relative; display: inline-flex; align-items: center; justify-content: center;">
-                    <div class="score-chart-visual" style="position: relative; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center;">
-                        ${createCircularChart(entreprise.score_pentest, 'Risque', '#ef4444', 60)}
-                        <div class="score-loader" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,0.35);border-radius:999px;">
-                            <i class="fas fa-circle-notch fa-spin" style="font-size:1.1rem;color:#e5e7eb;"></i>
-                        </div>
-                    </div>
-                    <button
-                        class="score-relaunch-btn"
-                        type="button"
-                        data-analysis-type="pentest"
-                        data-entreprise-id="${entreprise.id}"
-                        title="Relancer l'analyse Pentest"
-                        style="position: absolute; right: -6px; bottom: -6px; width: 22px; height: 22px; border-radius: 999px; border: none; background: #1e293b; color: #e5e7eb; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 0 2px rgba(15,23,42,0.7); cursor: pointer; font-size: 0.7rem;"
-                    >
-                        <i class="fas fa-sync-alt"></i>
-                    </button>
-                </div>
-                ` : ''}
+                ${cardScoreSlot('technique', 'technique', hasSecurityScore, entreprise.score_securite, null)}
+                ${cardScoreSlot('seo', 'SEO', hasSeoScore, entreprise.score_seo, null)}
+                ${cardScoreSlot('pentest', 'Pentest', hasPentestScore, entreprise.score_pentest, '#ef4444')}
             </div>
-        ` : '';
+        `;
         
         const domain = getDisplayDomain(entreprise.website || mainImage || '');
         const initials = getInitials(entreprise.nom || '');
@@ -651,8 +676,10 @@ async function init() {
         const fallbackGoogle = faviconFallbackUrl(domain, 'google');
         const fallbackDdg = faviconFallbackUrl(domain, 'ddg');
 
+        const isSelected = selectedEntreprises.has(entreprise.id);
+
         return `
-            <div class="entreprise-card" data-id="${entreprise.id}">
+            <div class="entreprise-card${isSelected ? ' entreprise-selected' : ''}" data-id="${entreprise.id}">
                 <div class="card-header-with-logo">
                     <div class="card-logo-container">
                         <img
@@ -681,9 +708,18 @@ async function init() {
                             ` : ''}
                             <h3 style="white-space:nowrap; text-overflow:ellipsis; overflow:hidden;">${Formatters.escapeHtml(entreprise.nom || 'Sans nom')}</h3>
                         </div>
+                        <div style="display:flex; align-items:center; gap:0.25rem;">
+                            <input 
+                                type="checkbox" 
+                                class="entreprise-select-checkbox" 
+                                data-entreprise-id="${entreprise.id}" 
+                                ${isSelected ? 'checked' : ''} 
+                                title="Sélectionner cette entreprise"
+                            >
                         <button class="btn-favori ${entreprise.favori ? 'active' : ''}" data-id="${entreprise.id}" title="Favori">
                             <i class="fas fa-star"></i>
                         </button>
+                        </div>
                     </div>
                 </div>
                 <div class="card-body">
@@ -774,40 +810,82 @@ async function init() {
         const hasPentestScore = typeof entreprise.score_pentest !== 'undefined' && entreprise.score_pentest !== null;
         const chartSize = 44;
 
-        const rowScoresSection = (hasSecurityScore || hasSeoScore || hasPentestScore) ? `
+        function rowScoreSlot(type, label, hasScore, scoreValue, color) {
+            if (hasScore) {
+                return `
+                <div class="score-chart-item row-score-item" data-analysis-type="${type}" data-entreprise-id="${entreprise.id}">
+                    <div class="score-chart-visual row-score-visual">
+                        ${createCircularChart(scoreValue, label, color, chartSize)}
+                        <div class="score-loader row-score-loader"><i class="fas fa-circle-notch fa-spin"></i></div>
+                    </div>
+                    <button type="button" class="score-relaunch-btn row-relaunch-btn" data-analysis-type="${type}" data-entreprise-id="${entreprise.id}" title="Relancer l'analyse ${label}"><i class="fas fa-sync-alt"></i></button>
+                </div>`;
+            }
+            return `
+                <div class="score-chart-item row-score-item row-score-item--empty" data-analysis-type="${type}" data-entreprise-id="${entreprise.id}">
+                    <div class="row-score-empty-visual">
+                        <i class="fas fa-play" aria-hidden="true"></i>
+                        <span class="row-score-empty-label">Lancer</span>
+                        <div class="score-loader row-score-loader"><i class="fas fa-circle-notch fa-spin"></i></div>
+                    </div>
+                    <button type="button" class="score-relaunch-btn row-launch-btn" data-analysis-type="${type}" data-entreprise-id="${entreprise.id}" title="Lancer l'analyse ${label}"><i class="fas fa-play"></i></button>
+                </div>`;
+        }
+
+        const rowScoresSection = `
             <div class="row-scores-section">
-                ${hasSecurityScore ? `
-                <div class="score-chart-item row-score-item" data-analysis-type="technique" data-entreprise-id="${entreprise.id}">
-                    <div class="score-chart-visual row-score-visual">
-                        ${createCircularChart(entreprise.score_securite, 'Séc.', null, chartSize)}
-                        <div class="score-loader row-score-loader"><i class="fas fa-circle-notch fa-spin"></i></div>
-                    </div>
-                    <button type="button" class="score-relaunch-btn row-relaunch-btn" data-analysis-type="technique" data-entreprise-id="${entreprise.id}" title="Relancer l'analyse technique"><i class="fas fa-sync-alt"></i></button>
-                </div>
-                ` : ''}
-                ${hasSeoScore ? `
-                <div class="score-chart-item row-score-item" data-analysis-type="seo" data-entreprise-id="${entreprise.id}">
-                    <div class="score-chart-visual row-score-visual">
-                        ${createCircularChart(entreprise.score_seo, 'SEO', null, chartSize)}
-                        <div class="score-loader row-score-loader"><i class="fas fa-circle-notch fa-spin"></i></div>
-                    </div>
-                    <button type="button" class="score-relaunch-btn row-relaunch-btn" data-analysis-type="seo" data-entreprise-id="${entreprise.id}" title="Relancer l'analyse SEO"><i class="fas fa-sync-alt"></i></button>
-                </div>
-                ` : ''}
-                ${hasPentestScore ? `
-                <div class="score-chart-item row-score-item" data-analysis-type="pentest" data-entreprise-id="${entreprise.id}">
-                    <div class="score-chart-visual row-score-visual">
-                        ${createCircularChart(entreprise.score_pentest, 'Risque', '#ef4444', chartSize)}
-                        <div class="score-loader row-score-loader"><i class="fas fa-circle-notch fa-spin"></i></div>
-                    </div>
-                    <button type="button" class="score-relaunch-btn row-relaunch-btn" data-analysis-type="pentest" data-entreprise-id="${entreprise.id}" title="Relancer l'analyse Pentest"><i class="fas fa-sync-alt"></i></button>
-                </div>
-                ` : ''}
+                ${rowScoreSlot('technique', 'technique', hasSecurityScore, entreprise.score_securite, null)}
+                ${rowScoreSlot('seo', 'SEO', hasSeoScore, entreprise.score_seo, null)}
+                ${rowScoreSlot('pentest', 'Pentest', hasPentestScore, entreprise.score_pentest, '#ef4444')}
             </div>
-        ` : '';
+        `;
+
+        let rowMainImage = entreprise.og_image || entreprise.logo || entreprise.favicon || null;
+        if (!rowMainImage && entreprise.og_data) {
+            const ogDataList = Array.isArray(entreprise.og_data) ? entreprise.og_data : [entreprise.og_data];
+            for (const ogData of ogDataList) {
+                if (ogData && ogData.images && ogData.images.length > 0 && ogData.images[0].image_url) {
+                    rowMainImage = ogData.images[0].image_url;
+                    break;
+                }
+            }
+        }
+        const rowDomain = getDisplayDomain(entreprise.website || rowMainImage || '');
+        const rowInitials = getInitials(entreprise.nom || '');
+        const rowSafeImage = rowMainImage ? normalizeToHttps(rowMainImage) : '';
+        const rowFallbackGoogle = faviconFallbackUrl(rowDomain, 'google');
+        const rowFallbackDdg = faviconFallbackUrl(rowDomain, 'ddg');
+
+        const isSelected = selectedEntreprises.has(entreprise.id);
 
         return `
-            <div class="entreprise-row" data-id="${entreprise.id}">
+            <div class="entreprise-row${isSelected ? ' entreprise-selected' : ''}" data-id="${entreprise.id}">
+                <div class="row-logo" aria-hidden="true">
+                    <input 
+                        type="checkbox" 
+                        class="entreprise-select-checkbox" 
+                        data-entreprise-id="${entreprise.id}" 
+                        ${isSelected ? 'checked' : ''} 
+                        title="Sélectionner cette entreprise"
+                        style="position:absolute; top:-6px; left:-6px; width:16px; height:16px;"
+                    >
+                    <img
+                        src="${rowSafeImage || rowFallbackGoogle}"
+                        alt=""
+                        class="row-logo-img"
+                        loading="lazy"
+                        referrerpolicy="no-referrer"
+                        data-fallback-step="0"
+                        onload="if (this.nextElementSibling) this.nextElementSibling.style.display='none';"
+                        onerror="
+                            var step = (this.dataset && this.dataset.fallbackStep) ? this.dataset.fallbackStep : '0';
+                            if (step === '0' && '${rowFallbackGoogle}') { this.dataset.fallbackStep = '1'; this.src='${rowFallbackGoogle}'; return; }
+                            if (step === '1' && '${rowFallbackDdg}') { this.dataset.fallbackStep = '2'; this.src='${rowFallbackDdg}'; return; }
+                            this.style.display='none'; if (this.nextElementSibling) this.nextElementSibling.style.display='flex';
+                        "
+                    >
+                    <div class="row-logo-placeholder" style="display: ${rowSafeImage || rowFallbackGoogle ? 'none' : 'flex'};">${Formatters.escapeHtml(rowInitials)}</div>
+                </div>
                 <div class="row-main">
                     <div class="row-name">
                         <div class="row-name-line">
@@ -1001,6 +1079,17 @@ async function init() {
             });
         }
         
+        const selectCheckboxes = document.querySelectorAll(`.entreprise-select-checkbox[data-entreprise-id="${entrepriseId}"]`);
+        if (selectCheckboxes.length) {
+            selectCheckboxes.forEach(cb => {
+                cb.addEventListener('change', (e) => {
+                    e.stopPropagation();
+                    const selected = cb.checked;
+                    setEntrepriseSelected(entrepriseId, selected);
+                });
+            });
+        }
+
         const scoreButtons = document.querySelectorAll(`.score-relaunch-btn[data-entreprise-id="${entrepriseId}"]`);
         if (scoreButtons.length) {
             scoreButtons.forEach(btn => {
@@ -1009,35 +1098,66 @@ async function init() {
                     e.stopPropagation();
                     
                     const analysisType = btn.getAttribute('data-analysis-type');
-                    const entreprise = allEntreprises.find(e => e && e.id === entrepriseId);
-                    const url = entreprise && entreprise.website ? String(entreprise.website).trim() : '';
-                    if (!url) {
-                        Notifications.show('Aucune URL de site pour relancer l\'analyse.', 'warning');
-                        return;
-                    }
-                    
-                    const socket = window.wsManager && window.wsManager.socket;
-                    if (!socket) {
-                        Notifications.show('Connexion temps réel non disponible. Rechargez la page.', 'warning');
-                        return;
-                    }
-                    
-                    ensureModalWebSocketListeners();
-                    setScoreRelaunchLoading(entrepriseId, analysisType, true);
-                    
-                    const launchLabels = { technique: 'technique', seo: 'SEO', pentest: 'Pentest' };
-                    const nom = entreprise && entreprise.nom ? entreprise.nom : getEntrepriseNom(entrepriseId);
-                    Notifications.show(nom + ' — Analyse ' + (launchLabels[analysisType] || analysisType) + ' lancée...', 'info', 'fa-play-circle');
-                    
-                    if (analysisType === 'technique') {
-                        socket.emit('start_technical_analysis', { url, entreprise_id: entrepriseId });
-                    } else if (analysisType === 'seo') {
-                        socket.emit('start_seo_analysis', { url, entreprise_id: entrepriseId, use_lighthouse: true });
-                    } else if (analysisType === 'pentest') {
-                        socket.emit('start_pentest_analysis', { url, entreprise_id: entrepriseId });
-                    }
+                    triggerAnalysisRelaunch(entrepriseId, analysisType);
                 });
             });
+        }
+    }
+
+    function setEntrepriseSelected(entrepriseId, selected) {
+        if (selected) {
+            selectedEntreprises.add(entrepriseId);
+        } else {
+            selectedEntreprises.delete(entrepriseId);
+        }
+        const nodes = document.querySelectorAll(`.entreprise-card[data-id="${entrepriseId}"], .entreprise-row[data-id="${entrepriseId}"]`);
+        nodes.forEach(el => el.classList.toggle('entreprise-selected', selected));
+        const checkboxes = document.querySelectorAll(`.entreprise-select-checkbox[data-entreprise-id="${entrepriseId}"]`);
+        checkboxes.forEach(cb => { cb.checked = selected; });
+        updateBulkSelectionUI();
+    }
+
+    function updateBulkSelectionUI() {
+        const countEl = document.getElementById('bulk-selected-count');
+        if (!countEl) return;
+        const count = selectedEntreprises.size;
+        if (count === 0) {
+            countEl.textContent = 'Aucune entreprise sélectionnée';
+        } else if (count === 1) {
+            countEl.textContent = '1 entreprise sélectionnée';
+        } else {
+            countEl.textContent = `${count} entreprises sélectionnées`;
+        }
+    }
+
+    async function triggerAnalysisRelaunch(entrepriseId, analysisType) {
+        const entreprise = allEntreprises.find(e => e && e.id === entrepriseId)
+            || filteredEntreprises.find(e => e && e.id === entrepriseId);
+        const url = entreprise && entreprise.website ? String(entreprise.website).trim() : '';
+        if (!url) {
+            Notifications.show('Aucune URL de site pour relancer l\'analyse.', 'warning');
+            return;
+        }
+
+        const socket = window.wsManager && window.wsManager.socket;
+        if (!socket) {
+            Notifications.show('Connexion temps réel non disponible. Rechargez la page.', 'warning');
+            return;
+        }
+
+        ensureModalWebSocketListeners();
+        setScoreRelaunchLoading(entrepriseId, analysisType, true);
+
+        const launchLabels = { technique: 'technique', seo: 'SEO', pentest: 'Pentest' };
+        const nom = entreprise && entreprise.nom ? entreprise.nom : getEntrepriseNom(entrepriseId);
+        Notifications.show(nom + ' — Analyse ' + (launchLabels[analysisType] || analysisType) + ' lancée...', 'info', 'fa-play-circle');
+
+        if (analysisType === 'technique') {
+            socket.emit('start_technical_analysis', { url, entreprise_id: entrepriseId });
+        } else if (analysisType === 'seo') {
+            socket.emit('start_seo_analysis', { url, entreprise_id: entrepriseId, use_lighthouse: true });
+        } else if (analysisType === 'pentest') {
+            socket.emit('start_pentest_analysis', { url, entreprise_id: entrepriseId });
         }
     }
 
@@ -1423,6 +1543,109 @@ async function init() {
             pentestSliderMax.addEventListener('input', () => {
                 pentestLabelMax.textContent = formatScoreMaxLabel(pentestSliderMax.value);
                 updateAdvancedFiltersBadge();
+            });
+        }
+
+        // Actions de masse (sélection, relance, groupes)
+        const bulkSelectAllBtn = document.getElementById('bulk-select-all');
+        const bulkSelectNoneBtn = document.getElementById('bulk-select-none');
+        const bulkActionSelect = document.getElementById('bulk-action-select');
+        const bulkGroupSelect = document.getElementById('bulk-group-select');
+        const bulkApplyBtn = document.getElementById('bulk-apply-btn');
+
+        async function ensureBulkGroupsLoaded() {
+            if (!bulkGroupSelect || bulkGroupSelect.dataset.loaded === '1') return;
+            try {
+                const groupes = await EntreprisesAPI.loadGroupes();
+                bulkGroupSelect.innerHTML = '<option value=\"\">Choisir un groupe...</option>';
+                (groupes || []).forEach(g => {
+                    bulkGroupSelect.insertAdjacentHTML('beforeend',
+                        `<option value=\"${g.id}\">${Formatters.escapeHtml(g.nom || 'Groupe #' + g.id)}</option>`);
+                });
+                bulkGroupSelect.dataset.loaded = '1';
+            } catch (e) {
+                console.error('Erreur chargement groupes (bulk):', e);
+                Notifications.show('Erreur lors du chargement des groupes', 'error');
+            }
+        }
+
+        if (bulkSelectAllBtn) {
+            bulkSelectAllBtn.addEventListener('click', () => {
+                if (!Array.isArray(filteredEntreprises)) return;
+                filteredEntreprises.forEach(e => {
+                    if (e && e.id != null) setEntrepriseSelected(e.id, true);
+                });
+            });
+        }
+
+        if (bulkSelectNoneBtn) {
+            bulkSelectNoneBtn.addEventListener('click', () => {
+                const ids = Array.from(selectedEntreprises);
+                ids.forEach(id => setEntrepriseSelected(id, false));
+            });
+        }
+
+        if (bulkActionSelect && bulkGroupSelect) {
+            bulkActionSelect.addEventListener('change', async () => {
+                const val = bulkActionSelect.value;
+                if (val === 'group-add' || val === 'group-remove') {
+                    bulkGroupSelect.style.display = 'inline-block';
+                    await ensureBulkGroupsLoaded();
+                } else {
+                    bulkGroupSelect.style.display = 'none';
+                }
+            });
+        }
+
+        if (bulkApplyBtn) {
+            bulkApplyBtn.addEventListener('click', async () => {
+                const action = bulkActionSelect ? bulkActionSelect.value : '';
+                const ids = Array.from(selectedEntreprises);
+                if (!ids.length) {
+                    Notifications.show('Sélectionnez au moins une entreprise', 'warning');
+                    return;
+                }
+                if (!action) {
+                    Notifications.show('Choisissez une action à appliquer', 'warning');
+                    return;
+                }
+
+                try {
+                    if (action === 'launch-technique' || action === 'launch-seo' || action === 'launch-pentest' || action === 'launch-all') {
+                        const types = action === 'launch-all'
+                            ? ['technique', 'seo', 'pentest']
+                            : [action.replace('launch-', '')];
+                        ids.forEach(id => {
+                            types.forEach(t => triggerAnalysisRelaunch(id, t));
+                        });
+                    } else if (action === 'group-add' || action === 'group-remove') {
+                        const groupId = bulkGroupSelect && bulkGroupSelect.value ? parseInt(bulkGroupSelect.value, 10) : null;
+                        if (!groupId) {
+                            Notifications.show('Choisissez un groupe', 'warning');
+                            return;
+                        }
+                        const isAdd = action === 'group-add';
+                        for (const id of ids) {
+                            try {
+                                if (isAdd) {
+                                    await EntreprisesAPI.addEntrepriseToGroupe(id, groupId);
+                                } else {
+                                    await EntreprisesAPI.removeEntrepriseFromGroupe(id, groupId);
+                                }
+                            } catch (e) {
+                                console.error('Erreur mise à jour groupe pour entreprise', id, e);
+                            }
+                        }
+                        Notifications.show(
+                            `${ids.length} entreprise${ids.length > 1 ? 's' : ''} ${isAdd ? 'ajoutée(s) au' : 'retirée(s) du'} groupe`,
+                            'success'
+                        );
+                        await applyFilters();
+                    }
+                } catch (e) {
+                    console.error('Erreur action de masse:', e);
+                    Notifications.show('Erreur lors de l\'action de masse', 'error');
+                }
             });
         }
         
