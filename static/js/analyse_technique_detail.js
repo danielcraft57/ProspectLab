@@ -576,6 +576,7 @@
                     <h2>Structure du contenu</h2>
                     <div class="info-grid">
                         ${createInfoRow('Langue HTML', techDetails.html_language)}
+                        ${createInfoRow('Langue principale détectée', techDetails.main_language)}
                         ${createInfoRow('Encodage', techDetails.charset)}
                         ${techDetails.semantic_html_tags ? `
                             <div class="info-row">

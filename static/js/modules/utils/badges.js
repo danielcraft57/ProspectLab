@@ -95,6 +95,57 @@
                 'Perdu': 'danger'
             };
             return classes[statut] || 'secondary';
+        },
+
+        /**
+         * Calcule les infos pour un badge d'opportunité
+         * @param {string|null} niveau - 'Très élevée', 'Élevée', 'Moyenne', 'Faible', 'Très faible'
+         * @param {number|null|undefined} score - Score numérique 0-100 (facultatif)
+         * @returns {{label: string, className: string}}
+         */
+        getOpportunityInfo(niveau, score) {
+            const s = (score === null || score === undefined || Number.isNaN(Number(score)))
+                ? null
+                : Math.max(0, Math.min(100, Number(score)));
+
+            let labelBase = niveau || 'Non calculée';
+            if (s !== null) {
+                labelBase = `${labelBase} (${s}/100)`;
+            }
+
+            let className = 'secondary';
+            switch (niveau) {
+                case 'Très élevée':
+                    className = 'success';
+                    break;
+                case 'Élevée':
+                    className = 'primary';
+                    break;
+                case 'Moyenne':
+                    className = 'warning';
+                    break;
+                case 'Faible':
+                case 'Très faible':
+                    className = 'secondary';
+                    break;
+                default:
+                    className = 'secondary';
+            }
+
+            return { label: labelBase, className };
+        },
+
+        /**
+         * Génère un badge HTML pour l'opportunité
+         * @param {string|null} niveau
+         * @param {number|null|undefined} score
+         * @param {string|null} id
+         * @returns {string}
+         */
+        getOpportunityBadge(niveau, score, id = null) {
+            const info = this.getOpportunityInfo(niveau, score);
+            const idAttr = id ? ` id="${id}"` : '';
+            return `<span${idAttr} class="badge badge-${info.className}">${info.label}</span>`;
         }
     };
     

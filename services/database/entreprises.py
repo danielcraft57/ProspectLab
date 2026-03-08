@@ -668,10 +668,11 @@ class EntrepriseManager(DatabaseBase):
                             OR LOWER(COALESCE(e.website, '')) LIKE ?
                             OR LOWER(COALESCE(e.address_1, '')) LIKE ?
                             OR LOWER(COALESCE(e.address_2, '')) LIKE ?
+                            OR LOWER(COALESCE(e.tags, '')) LIKE ?
                         )
                     '''
                     # Même token appliqué sur tous les champs cibles
-                    params.extend([like] * 7)
+                    params.extend([like] * 8)
 
         if wrap_subquery:
             query = 'SELECT sub.* FROM (' + inner_query + ') sub WHERE 1=1'
@@ -998,10 +999,153 @@ class EntrepriseManager(DatabaseBase):
             
             logger.info(f'Opportunité mise à jour pour entreprise {entreprise_id}: {opportunity_result["opportunity"]} (score: {opportunity_result["score"]})')
             
+            # Mettre à jour des tags intelligents basés sur les analyses (SEO, Pentest, technique)
+            try:
+                self._update_intelligent_tags_from_analyses(entreprise_id, opportunity_result)
+            except Exception as tag_err:
+                logger.warning(f"Erreur lors de la mise à jour des tags intelligents pour entreprise {entreprise_id}: {tag_err}")
+            
             return opportunity_result
         except Exception as e:
             logger.error(f'Erreur lors du calcul de l\'opportunité pour entreprise {entreprise_id}: {e}', exc_info=True)
             return None
+    
+    def _update_intelligent_tags_from_analyses(self, entreprise_id, opportunity_result=None):
+        """
+        Met à jour automatiquement certains tags d'entreprise à partir des dernières analyses.
+        
+        Tags gérés ici (ajout/suppression automatique) :
+        - risque_cyber_eleve
+        - seo_a_ameliorer
+        - perf_lente
+        - site_sans_https
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Charger les tags existants
+        self.execute_sql(cursor, 'SELECT tags FROM entreprises WHERE id = ?', (entreprise_id,))
+        row = cursor.fetchone()
+        raw_tags = None
+        if row:
+            try:
+                raw_tags = row['tags'] if isinstance(row, dict) else row[0]
+            except Exception:
+                raw_tags = None
+        
+        tags = []
+        if raw_tags:
+            try:
+                tags = json.loads(raw_tags) if isinstance(raw_tags, str) else list(raw_tags)
+            except Exception:
+                tags = []
+        if not isinstance(tags, list):
+            tags = []
+        
+        intelligent_tags = {
+            'risque_cyber_eleve',
+            'seo_a_ameliorer',
+            'perf_lente',
+            'site_sans_https',
+            'lang_fr',
+            'lang_en',
+            'lang_de',
+            'lang_es',
+            'lang_it',
+            'lang_nl',
+            'lang_pt',
+            'lang_autre',
+        }
+        
+        # Retirer d'abord tous les anciens tags "intelligents" pour les recalculer proprement
+        tags = [t for t in tags if t not in intelligent_tags]
+        
+        # 1) Pentest : risque_cyber_eleve
+        try:
+            pentest_risk_high = False
+            if hasattr(self, 'get_pentest_analysis_by_entreprise'):
+                pentest = self.get_pentest_analysis_by_entreprise(entreprise_id)
+                if pentest:
+                    rs = pentest.get('risk_score')
+                    if isinstance(rs, (int, float)) and rs >= 70:
+                        pentest_risk_high = True
+            if pentest_risk_high:
+                tags.append('risque_cyber_eleve')
+        except Exception:
+            pass
+        
+        # 2) SEO : seo_a_ameliorer
+        try:
+            seo_low = False
+            if hasattr(self, 'get_seo_analyses_by_entreprise'):
+                try:
+                    seo_list = self.get_seo_analyses_by_entreprise(entreprise_id, limit=1)
+                except TypeError:
+                    seo_list = self.get_seo_analyses_by_entreprise(entreprise_id)
+                if seo_list:
+                    seo_score = seo_list[0].get('score')
+                    if isinstance(seo_score, (int, float)) and seo_score < 50:
+                        seo_low = True
+            if seo_low:
+                tags.append('seo_a_ameliorer')
+        except Exception:
+            pass
+        
+        # 3) Performance / HTTPS / langue principale
+        try:
+            perf_lente = False
+            site_sans_https = False
+            main_lang = None
+            if hasattr(self, 'get_technical_analysis'):
+                tech = self.get_technical_analysis(entreprise_id)
+                if tech:
+                    perf_score = tech.get('performance_score')
+                    if isinstance(perf_score, (int, float)) and perf_score < 50:
+                        perf_lente = True
+                    ssl_valid = tech.get('ssl_valid')
+                    tech_url = tech.get('url') or ''
+                    if ssl_valid is False or (isinstance(tech_url, str) and tech_url.startswith('http://')):
+                        site_sans_https = True
+                    # Langue principale détectée (depuis technical_details.main_language)
+                    details = tech.get('technical_details')
+                    if isinstance(details, dict):
+                        main_lang = details.get('main_language')
+            if perf_lente:
+                tags.append('perf_lente')
+            if site_sans_https:
+                tags.append('site_sans_https')
+            if main_lang:
+                code = str(main_lang).split('-', 1)[0].lower()
+                lang_tag_map = {
+                    'fr': 'lang_fr',
+                    'en': 'lang_en',
+                    'de': 'lang_de',
+                    'es': 'lang_es',
+                    'it': 'lang_it',
+                    'nl': 'lang_nl',
+                    'pt': 'lang_pt',
+                }
+                tags.append(lang_tag_map.get(code, 'lang_autre'))
+        except Exception:
+            pass
+        
+        # Nettoyer les doublons
+        seen = set()
+        deduped = []
+        for t in tags:
+            if t not in seen:
+                seen.add(t)
+                deduped.append(t)
+        tags = deduped
+        
+        # Sauvegarder les tags mis à jour
+        self.execute_sql(
+            cursor,
+            'UPDATE entreprises SET tags = ? WHERE id = ?',
+            (json.dumps(tags) if tags else None, entreprise_id)
+        )
+        conn.commit()
+        conn.close()
     
     def update_entreprise_tags(self, entreprise_id, tags):
         """

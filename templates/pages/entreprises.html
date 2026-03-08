@@ -162,6 +162,62 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Jauge de score Risque (Pentest) -->
+            <div class="filter-group">
+                <label class="filter-label" for="filter-pentest-min">Score Risque (Pentest)</label>
+                <div class="score-slider">
+                    <div class="score-slider-row">
+                        <div class="score-slider-header">
+                            <span class="score-slider-label">À partir de</span>
+                            <span id="filter-pentest-min-value" class="score-slider-value">0 (tous)</span>
+                        </div>
+                        <input
+                            type="range"
+                            id="filter-pentest-min"
+                            min="0"
+                            max="100"
+                            step="5"
+                            value="0"
+                            class="score-range-input"
+                        >
+                    </div>
+                    <div class="score-slider-row">
+                        <div class="score-slider-header">
+                            <span class="score-slider-label">Jusqu'à</span>
+                            <span id="filter-pentest-max-value" class="score-slider-value">100 (tous)</span>
+                        </div>
+                        <input
+                            type="range"
+                            id="filter-pentest-max"
+                            min="0"
+                            max="100"
+                            step="5"
+                            value="100"
+                            class="score-range-input"
+                        >
+                    </div>
+                    <div class="score-slider-scale">
+                        <span>0</span>
+                        <span>25</span>
+                        <span>50</span>
+                        <span>75</span>
+                        <span>100</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Filtre Tags intelligents -->
+            <div class="filter-group">
+                <label class="filter-label" for="filter-tags">Tags</label>
+                <input
+                    type="text"
+                    id="filter-tags"
+                    class="form-input"
+                    placeholder="Ex: refonte, risque, https, SEO..."
+                    autocomplete="off"
+                >
+            </div>
         </div>
 
         <div class="filters-actions">

@@ -511,25 +511,21 @@
 
         const name = item.name || 'Entreprise';
 
-        // Ordre des analyses : SEO -> OSINT -> Pentest
-        const sequence = [
-            () => {
-                socket.emit('start_seo_analysis', { url: url, entreprise_id: entrepriseId, use_lighthouse: true });
-                showNotification(name + ' — Analyse SEO lancée…', 'info', 'fa-play-circle');
-            },
-            () => {
-                socket.emit('start_osint_analysis', { url: url, entreprise_id: entrepriseId });
-                showNotification(name + ' — Analyse OSINT lancée…', 'info', 'fa-play-circle');
-            },
-            () => {
-                socket.emit('start_pentest_analysis', { url: url, entreprise_id: entrepriseId });
-                showNotification(name + ' — Analyse Pentest lancée…', 'info', 'fa-play-circle');
-            }
-        ];
+        // 1) Lancer SEO directement (peut fonctionner sans scraping)
+        socket.emit('start_seo_analysis', { url: url, entreprise_id: entrepriseId, use_lighthouse: true });
+        showNotification(name + ' — Analyse SEO lancée…', 'info', 'fa-play-circle');
 
-        sequence.forEach((fn, idx) => {
-            setTimeout(fn, idx * 500);
+        // 2) Lancer le scraping ; OSINT et Pentest seront déclenchés automatiquement
+        //    depuis le listener WebSocket "scraping_complete" une fois le site scrapé.
+        socket.emit('start_scraping', {
+            url: url,
+            entreprise_id: entrepriseId,
+            max_depth: 2,
+            max_workers: 4,
+            max_time: 180,
+            max_pages: 30
         });
+        showNotification(name + ' — Scraping du site lancé…', 'info', 'fa-play-circle');
     }
 
     function ensureGMapWsListeners() {
@@ -539,6 +535,11 @@
         const getName = (entrepriseId) => {
             const item = state.entrepriseById[entrepriseId];
             return (item && item.name) ? item.name : 'Entreprise';
+        };
+
+        const getUrl = (entrepriseId) => {
+            const item = state.entrepriseById[entrepriseId];
+            return (item && item.website) ? item.website : '';
         };
 
         s.on('seo_analysis_complete', function (data) {
@@ -573,6 +574,47 @@
             if (data && data.entreprise_id != null) {
                 const nom = getName(data.entreprise_id);
                 showNotification(nom + ' — ' + (data.error || 'Erreur analyse Pentest'), 'error', 'fa-exclamation-circle');
+            }
+        });
+
+        // Scraping dédié à une entreprise (lancé depuis la page Google Maps)
+        s.on('scraping_started', function (data) {
+            if (!data || data.entreprise_id == null) return;
+            const nom = getName(data.entreprise_id);
+            showNotification(nom + ' — Scraping démarré…', 'info', 'fa-spinner');
+        });
+
+        s.on('scraping_error', function (data) {
+            if (!data || data.entreprise_id == null) return;
+            const nom = getName(data.entreprise_id);
+            showNotification(nom + ' — ' + (data.error || 'Erreur scraping'), 'error', 'fa-exclamation-circle');
+        });
+
+        // Quand le scraping est terminé pour une entreprise, lancer OSINT puis Pentest
+        s.on('scraping_complete', function (data) {
+            if (!data || data.entreprise_id == null) return;
+            const entrepriseId = data.entreprise_id;
+            const nom = getName(entrepriseId);
+            const url = (getUrl(entrepriseId) || '').trim();
+            if (!url) {
+                showNotification(nom + ' — Scraping terminé mais aucune URL valide trouvée.', 'warning', 'fa-exclamation-circle');
+                return;
+            }
+
+            // Éviter de lancer plusieurs fois pour la même entreprise
+            if (!state._osintLaunched) state._osintLaunched = {};
+            if (!state._pentestLaunched) state._pentestLaunched = {};
+
+            if (!state._osintLaunched[entrepriseId]) {
+                state._osintLaunched[entrepriseId] = true;
+                s.emit('start_osint_analysis', { url: url, entreprise_id: entrepriseId });
+                showNotification(nom + ' — Analyse OSINT lancée (après scraping)…', 'info', 'fa-play-circle');
+            }
+
+            if (!state._pentestLaunched[entrepriseId]) {
+                state._pentestLaunched[entrepriseId] = true;
+                s.emit('start_pentest_analysis', { url: url, entreprise_id: entrepriseId });
+                showNotification(nom + ' — Analyse Pentest lancée (après scraping)…', 'info', 'fa-play-circle');
             }
         });
 
@@ -633,7 +675,7 @@
                 const baseMsg = r.created
                     ? 'Entreprise importée dans ProspectLab.'
                     : 'Entreprise déjà présente dans ProspectLab.';
-                showNotification(baseMsg + ' Analyses SEO, OSINT et Pentest lancées.', 'success');
+                showNotification(baseMsg + ' Scraping + analyses SEO, OSINT et Pentest planifiés.', 'success');
 
                 // Lancer automatiquement les analyses en arrière-plan (Celery via WebSocket)
                 launchAnalysesForImported(item);

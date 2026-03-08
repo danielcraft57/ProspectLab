@@ -65,6 +65,17 @@ def entreprise_detail(entreprise_id):
     return render_page('entreprise_detail.html', entreprise_id=entreprise_id)
 
 
+@main_bp.route('/entreprise/<int:entreprise_id>/rapport-audit')
+@login_required
+def entreprise_rapport_audit(entreprise_id):
+    """
+    Page de rapport d'audit commercial pour une entreprise.
+    Utilise les analyses existantes (technique, SEO, OSINT, Pentest, scraping)
+    et le score d'opportunité composite.
+    """
+    return render_page('entreprise_rapport_audit.html', entreprise_id=entreprise_id)
+
+
 @main_bp.route('/analyses-techniques')
 @login_required
 def liste_analyses_techniques():

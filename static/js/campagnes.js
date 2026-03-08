@@ -258,6 +258,12 @@ async function loadTemplates() {
     } catch (e) {
         templatesData = [];
     }
+    renderTemplateSelect();
+}
+
+function renderTemplateSelect() {
+    var select = document.getElementById('campagne-template');
+    if (!select) return;
     select.innerHTML = '<option value="">Aucun (message personnalisé)</option>';
     templatesData.forEach(function(template) {
         var option = document.createElement('option');
@@ -320,6 +326,98 @@ function onCampagneTemplateChange() {
         messageTextarea.style.display = 'block';
         messageTextarea.value = '';
         if (previewDiv) previewDiv.style.display = 'none';
+    }
+}
+
+/**
+ * Charge et affiche les suggestions de templates pour la sélection actuelle
+ * (basé sur la première entreprise sélectionnée quand il y en a au moins une).
+ */
+async function loadTemplateSuggestionsForSelection() {
+    const container = document.getElementById('template-suggestions');
+    if (!container) return;
+
+    // Nettoyer / état initial
+    container.innerHTML = '';
+
+    if (!Array.isArray(selectedEntrepriseIds) || selectedEntrepriseIds.length === 0) {
+        container.innerHTML = '<p class="template-suggestions-hint">Sélectionnez au moins une entreprise à l\'étape 1 pour obtenir des suggestions de modèles adaptées.</p>';
+        return;
+    }
+
+    // Utiliser la première entreprise sélectionnée comme "profil type"
+    const targetId = selectedEntrepriseIds[0];
+    const entreprise = entreprisesData.find(function (e) { return e.id === targetId; });
+    const nom = entreprise && entreprise.nom ? entreprise.nom : ('Entreprise #' + targetId);
+
+    try {
+        container.innerHTML = '<div class="template-suggestions-loading"><i class="fa-solid fa-spinner fa-spin"></i> Analyse de vos données d\'audit…</div>';
+        const response = await fetch('/api/entreprise/' + targetId + '/template-suggestions?limit=3');
+        if (!response.ok) {
+            container.innerHTML = '<p class="template-suggestions-error">Impossible de récupérer les suggestions pour le moment.</p>';
+            return;
+        }
+        const suggestions = await response.json();
+        if (!Array.isArray(suggestions) || suggestions.length === 0) {
+            container.innerHTML = '<p class="template-suggestions-hint">Aucune suggestion spécifique. Vous pouvez choisir librement un modèle dans la liste.</p>';
+            return;
+        }
+
+        const itemsHtml = suggestions.map(function (sug) {
+            const title = sug.name || sug.id;
+            const subject = sug.subject || '';
+            const reason = sug.reason || '';
+            return `
+                <article class="template-suggestion-card" data-template-id="${sug.id}">
+                    <div class="template-suggestion-header">
+                        <h4>${escapeHtml(title)}</h4>
+                        <span class="template-suggestion-score">${Math.round((sug.score || 0) * 100)}%</span>
+                    </div>
+                    ${subject ? `<p class="template-suggestion-subject">${escapeHtml(subject)}</p>` : ''}
+                    ${reason ? `<p class="template-suggestion-reason">${escapeHtml(reason)}</p>` : ''}
+                    <button type="button" class="template-suggestion-cta" data-template-id="${sug.id}">
+                        Utiliser ce modèle pour ${escapeHtml(nom)}
+                    </button>
+                </article>
+            `;
+        }).join('');
+
+        container.innerHTML = `
+            <div class="template-suggestions-header">
+                <span class="template-suggestions-title">Suggestions basées sur vos analyses</span>
+                <button type="button" class="template-suggestions-refresh" id="template-suggestions-refresh">
+                    <i class="fa-solid fa-rotate-right"></i> Rafraîchir
+                </button>
+            </div>
+            <div class="template-suggestions-list">
+                ${itemsHtml}
+            </div>
+        `;
+
+        // Attacher les events sur les suggestions
+        container.querySelectorAll('.template-suggestion-cta').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                const tplId = this.getAttribute('data-template-id');
+                const select = document.getElementById('campagne-template');
+                if (select && tplId) {
+                    select.value = tplId;
+                    onCampagneTemplateChange();
+                    // Animation visuelle rapide sur le select
+                    select.classList.add('template-select-highlight');
+                    setTimeout(function () { select.classList.remove('template-select-highlight'); }, 600);
+                }
+            });
+        });
+
+        const refreshBtn = document.getElementById('template-suggestions-refresh');
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', function () {
+                loadTemplateSuggestionsForSelection();
+            });
+        }
+    } catch (e) {
+        console.error('Erreur lors du chargement des suggestions de templates:', e);
+        container.innerHTML = '<p class="template-suggestions-error">Erreur lors de la récupération des suggestions.</p>';
     }
 }
 
@@ -588,6 +686,7 @@ function showCampagneStep(stepNum) {
     if (stepNum === 3) {
         loadTemplates();
         setScheduleDateTimeToNow();
+        loadTemplateSuggestionsForSelection();
     }
 }
 

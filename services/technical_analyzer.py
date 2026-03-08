@@ -1801,9 +1801,74 @@ def analyze_content_structure(soup, html_content):
         iframes = soup.find_all('iframe')
         if iframes:
             content_info['iframes_count'] = len(iframes)
+
+        # Détecter la langue principale du contenu
+        try:
+            text = soup.get_text(separator=' ', strip=True)
+            lang_info = detect_main_human_language(text, content_info.get('html_language'))
+            if lang_info.get('code'):
+                content_info['main_language'] = lang_info['code']
+                content_info['main_language_source'] = lang_info.get('source')
+        except Exception:
+            pass
     except Exception:
         pass
     return content_info
+
+
+def detect_main_human_language(text, html_lang=None):
+    """
+    Détecte la langue principale du contenu à partir du texte et de la balise html[lang].
+    Heuristique légère basée sur des stopwords pour éviter les dépendances externes.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return {'code': None, 'source': None}
+
+    # Normaliser
+    sample = text[:20000].lower()  # limiter pour les très longues pages
+
+    # Langue suggérée par la balise HTML
+    code_from_html = None
+    if html_lang:
+        lang_norm = str(html_lang).split('-', 1)[0].lower()
+        if lang_norm:
+            code_from_html = lang_norm
+
+    # Petits jeux de stopwords pour quelques langues clés
+    stopwords = {
+        'fr': [' le ', ' la ', ' les ', ' des ', ' une ', ' pour ', ' avec ', ' sur ', ' pas '],
+        'en': [' the ', ' and ', ' for ', ' with ', ' you ', ' your ', ' our '],
+        'de': [' der ', ' die ', ' das ', ' und ', ' mit ', ' nicht '],
+        'es': [' el ', ' la ', ' los ', ' las ', ' para ', ' con ', ' no '],
+        'it': [' il ', ' lo ', ' la ', ' per ', ' con ', ' non '],
+        'nl': [' de ', ' het ', ' een ', ' voor ', ' met ', ' niet '],
+        'pt': [' o ', ' a ', ' os ', ' as ', ' para ', ' com ', ' não '],
+    }
+
+    scores = {}
+    for code, words in stopwords.items():
+        count = 0
+        for w in words:
+            if w in sample:
+                count += 1
+        scores[code] = count
+
+    best_code = max(scores, key=lambda c: scores[c]) if scores else None
+    best_score = scores.get(best_code, 0) if best_code else 0
+
+    # Si le texte donne un signal fort, on le prend en priorité
+    if best_code and best_score >= 3:
+        return {'code': best_code, 'source': 'text'}
+
+    # Sinon on se rabat sur la balise html[lang] si elle existe
+    if code_from_html:
+        return {'code': code_from_html, 'source': 'html'}
+
+    # Signal faible : on garde quand même l'info mais en marquant la faiblesse
+    if best_code and best_score > 0:
+        return {'code': best_code, 'source': 'text_weak'}
+
+    return {'code': code_from_html, 'source': None}
 
 
 def analyze_dns_advanced(domain):

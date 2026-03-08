@@ -252,6 +252,22 @@ def api_template_detail(template_id):
     return jsonify({'error': 'Template introuvable'}), 404
 
 
+@other_bp.route('/api/entreprise/<int:entreprise_id>/template-suggestions', methods=['GET'])
+@login_required
+def api_entreprise_template_suggestions(entreprise_id):
+    """
+    API: Suggestions de templates pour une entreprise donnée.
+    
+    Retourne une liste de templates recommandés avec une raison et un score.
+    """
+    try:
+        max_results = request.args.get('limit', type=int) or 3
+        suggestions = template_manager.suggest_templates_for_entreprise(entreprise_id, max_results=max_results)
+        return jsonify(suggestions)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # ==================== ROUTES POUR LES CAMPAGNES EMAIL ====================
 
 @other_bp.route('/campagnes', methods=['GET'])

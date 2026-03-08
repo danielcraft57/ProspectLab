@@ -52,6 +52,19 @@
             if (!response.ok) throw new Error('Erreur lors du chargement des détails');
             return await response.json();
         },
+
+        /**
+         * Recalcule le score d'opportunité d'une entreprise et retourne le détail.
+         * @param {number} id
+         * @returns {Promise<{success: boolean, opportunity?: string, score?: number, breakdown?: Object, indicators?: Array}>}
+         */
+        async recalculateOpportunity(id) {
+            const response = await fetch(`/api/entreprise/${id}/recalculate-opportunity`, {
+                method: 'POST'
+            });
+            if (!response.ok) throw new Error('Erreur lors du recalcul de l\'opportunité');
+            return await response.json();
+        },
         
         /**
          * Toggle le statut favori d'une entreprise
@@ -135,6 +148,17 @@
         async loadScrapingResults(id) {
             const response = await fetch(`/api/entreprise/${id}/scrapers`);
             if (!response.ok) return [];
+            return await response.json();
+        },
+
+        /**
+         * Charge le résumé du pipeline d'audit pour une entreprise.
+         * @param {number} id
+         * @returns {Promise<{entreprise_id: number, pipeline: Object}>}
+         */
+        async loadAuditPipeline(id) {
+            const response = await fetch(`/api/entreprise/${id}/audit-pipeline`);
+            if (!response.ok) throw new Error('Erreur lors du chargement du pipeline d\'audit');
             return await response.json();
         },
         

@@ -211,11 +211,16 @@ async function init() {
         const securityMaxRaw = get('filter-security-max') || '100';
         const seoMinRaw = get('filter-seo-min') || '0';
         const seoMaxRaw = get('filter-seo-max') || '100';
+        const pentestMinRaw = get('filter-pentest-min') || '0';
+        const pentestMaxRaw = get('filter-pentest-max') || '100';
+        const tagsText = (get('filter-tags') || '').trim();
 
         let securityMin = parseInt(securityMinRaw, 10);
         let securityMax = parseInt(securityMaxRaw, 10);
         let seoMin = parseInt(seoMinRaw, 10);
         let seoMax = parseInt(seoMaxRaw, 10);
+        let pentestMin = parseInt(pentestMinRaw, 10);
+        let pentestMax = parseInt(pentestMaxRaw, 10);
 
         // Corriger si min > max (on swap pour éviter des requêtes vides)
         if (!Number.isNaN(securityMin) && !Number.isNaN(securityMax) && securityMin > securityMax) {
@@ -254,6 +259,15 @@ async function init() {
         }
         if (!Number.isNaN(seoMax) && seoMax < 100) {
             filters.seo_max = seoMax;
+        }
+        if (!Number.isNaN(pentestMin) && pentestMin > 0) {
+            filters.pentest_min = pentestMin;
+        }
+        if (!Number.isNaN(pentestMax) && pentestMax < 100) {
+            filters.pentest_max = pentestMax;
+        }
+        if (tagsText) {
+            filters.tags_contains = tagsText;
         }
         return filters;
     }
@@ -341,7 +355,7 @@ async function init() {
             const mergeEntrepriseObjects = (existing, updatedData) => {
                 if (!existing) return updatedData;
                 const merged = Object.assign({}, existing, updatedData);
-                ['score_securite', 'score_seo'].forEach((key) => {
+                ['score_securite', 'score_seo', 'score_pentest'].forEach((key) => {
                     if ((updatedData[key] === null || typeof updatedData[key] === 'undefined') &&
                         typeof existing[key] !== 'undefined' && existing[key] !== null) {
                         merged[key] = existing[key];
@@ -481,7 +495,63 @@ async function init() {
     
     function createEntrepriseCard(entreprise) {
         const tagsHtml = entreprise.tags && entreprise.tags.length > 0
-            ? entreprise.tags.map(tag => `<span class="tag">${Formatters.escapeHtml(tag)}</span>`).join('')
+            ? entreprise.tags.map(tag => {
+                const base = 'tag';
+                const extra =
+                    tag === 'fort_potentiel_refonte' ? ' tag-refonte' :
+                    tag === 'risque_cyber_eleve' ? ' tag-risk' :
+                    tag === 'seo_a_ameliorer' ? ' tag-seo' :
+                    tag === 'perf_lente' ? ' tag-perf' :
+                    tag === 'site_sans_https' ? ' tag-https' :
+                    '';
+
+                let label;
+                switch (tag) {
+                    case 'fort_potentiel_refonte':
+                        label = 'Fort potentiel refonte';
+                        break;
+                    case 'risque_cyber_eleve':
+                        label = 'Risque cyber élevé';
+                        break;
+                    case 'seo_a_ameliorer':
+                        label = 'SEO à améliorer';
+                        break;
+                    case 'perf_lente':
+                        label = 'Site lent';
+                        break;
+                    case 'site_sans_https':
+                        label = 'Sans HTTPS';
+                        break;
+                    case 'lang_fr':
+                        label = 'FR';
+                        break;
+                    case 'lang_en':
+                        label = 'EN';
+                        break;
+                    case 'lang_de':
+                        label = 'DE';
+                        break;
+                    case 'lang_es':
+                        label = 'ES';
+                        break;
+                    case 'lang_it':
+                        label = 'IT';
+                        break;
+                    case 'lang_nl':
+                        label = 'NL';
+                        break;
+                    case 'lang_pt':
+                        label = 'PT';
+                        break;
+                    case 'lang_autre':
+                        label = 'Autre langue';
+                        break;
+                    default:
+                        label = tag.replace(/_/g, ' ');
+                }
+
+                return `<span class="${base}${extra}">${Formatters.escapeHtml(label)}</span>`;
+            }).join('')
             : '';
         
         let resumePreview = '';
@@ -505,10 +575,12 @@ async function init() {
             }
         }
         
-        // Générer les graphiques circulaires pour Sécurité et SEO
+        // Générer les graphiques circulaires pour Sécurité, SEO et Risque (Pentest)
         const hasSecurityScore = typeof entreprise.score_securite !== 'undefined' && entreprise.score_securite !== null;
         const hasSeoScore = typeof entreprise.score_seo !== 'undefined' && entreprise.score_seo !== null;
-        const scoresSection = (hasSecurityScore || hasSeoScore) ? `
+        const hasPentestScore = typeof entreprise.score_pentest !== 'undefined' && entreprise.score_pentest !== null;
+
+        const scoresSection = (hasSecurityScore || hasSeoScore || hasPentestScore) ? `
             <div class="card-scores-section">
                 ${hasSecurityScore ? `
                 <div class="score-chart-item" data-analysis-type="technique" data-entreprise-id="${entreprise.id}" style="position: relative; display: inline-flex; align-items: center; justify-content: center;">
@@ -544,6 +616,26 @@ async function init() {
                         data-analysis-type="seo"
                         data-entreprise-id="${entreprise.id}"
                         title="Relancer l'analyse SEO"
+                        style="position: absolute; right: -6px; bottom: -6px; width: 22px; height: 22px; border-radius: 999px; border: none; background: #1e293b; color: #e5e7eb; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 0 2px rgba(15,23,42,0.7); cursor: pointer; font-size: 0.7rem;"
+                    >
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                </div>
+                ` : ''}
+                ${hasPentestScore ? `
+                <div class="score-chart-item" data-analysis-type="pentest" data-entreprise-id="${entreprise.id}" style="position: relative; display: inline-flex; align-items: center; justify-content: center;">
+                    <div class="score-chart-visual" style="position: relative; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center;">
+                        ${createCircularChart(entreprise.score_pentest, 'Risque', '#ef4444', 60)}
+                        <div class="score-loader" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,0.35);border-radius:999px;">
+                            <i class="fas fa-circle-notch fa-spin" style="font-size:1.1rem;color:#e5e7eb;"></i>
+                        </div>
+                    </div>
+                    <button
+                        class="score-relaunch-btn"
+                        type="button"
+                        data-analysis-type="pentest"
+                        data-entreprise-id="${entreprise.id}"
+                        title="Relancer l'analyse Pentest"
                         style="position: absolute; right: -6px; bottom: -6px; width: 22px; height: 22px; border-radius: 999px; border: none; background: #1e293b; color: #e5e7eb; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 0 2px rgba(15,23,42,0.7); cursor: pointer; font-size: 0.7rem;"
                     >
                         <i class="fas fa-sync-alt"></i>
@@ -618,33 +710,121 @@ async function init() {
     
     function createEntrepriseRow(entreprise) {
         const tagsHtml = entreprise.tags && entreprise.tags.length > 0
-            ? entreprise.tags.map(tag => `<span class="tag">${Formatters.escapeHtml(tag)}</span>`).join('')
+            ? entreprise.tags.map(tag => {
+                const base = 'tag';
+                const extra =
+                    tag === 'fort_potentiel_refonte' ? ' tag-refonte' :
+                    tag === 'risque_cyber_eleve' ? ' tag-risk' :
+                    tag === 'seo_a_ameliorer' ? ' tag-seo' :
+                    tag === 'perf_lente' ? ' tag-perf' :
+                    tag === 'site_sans_https' ? ' tag-https' :
+                    '';
+
+                let label;
+                switch (tag) {
+                    case 'fort_potentiel_refonte':
+                        label = 'Fort potentiel refonte';
+                        break;
+                    case 'risque_cyber_eleve':
+                        label = 'Risque cyber élevé';
+                        break;
+                    case 'seo_a_ameliorer':
+                        label = 'SEO à améliorer';
+                        break;
+                    case 'perf_lente':
+                        label = 'Site lent';
+                        break;
+                    case 'site_sans_https':
+                        label = 'Sans HTTPS';
+                        break;
+                    case 'lang_fr':
+                        label = 'FR';
+                        break;
+                    case 'lang_en':
+                        label = 'EN';
+                        break;
+                    case 'lang_de':
+                        label = 'DE';
+                        break;
+                    case 'lang_es':
+                        label = 'ES';
+                        break;
+                    case 'lang_it':
+                        label = 'IT';
+                        break;
+                    case 'lang_nl':
+                        label = 'NL';
+                        break;
+                    case 'lang_pt':
+                        label = 'PT';
+                        break;
+                    case 'lang_autre':
+                        label = 'Autre langue';
+                        break;
+                    default:
+                        label = tag.replace(/_/g, ' ');
+                }
+
+                return `<span class="${base}${extra}">${Formatters.escapeHtml(label)}</span>`;
+            }).join('')
             : '';
-        
+
+        const hasSecurityScore = typeof entreprise.score_securite !== 'undefined' && entreprise.score_securite !== null;
+        const hasSeoScore = typeof entreprise.score_seo !== 'undefined' && entreprise.score_seo !== null;
+        const hasPentestScore = typeof entreprise.score_pentest !== 'undefined' && entreprise.score_pentest !== null;
+        const chartSize = 44;
+
+        const rowScoresSection = (hasSecurityScore || hasSeoScore || hasPentestScore) ? `
+            <div class="row-scores-section">
+                ${hasSecurityScore ? `
+                <div class="score-chart-item row-score-item" data-analysis-type="technique" data-entreprise-id="${entreprise.id}">
+                    <div class="score-chart-visual row-score-visual">
+                        ${createCircularChart(entreprise.score_securite, 'Séc.', null, chartSize)}
+                        <div class="score-loader row-score-loader"><i class="fas fa-circle-notch fa-spin"></i></div>
+                    </div>
+                    <button type="button" class="score-relaunch-btn row-relaunch-btn" data-analysis-type="technique" data-entreprise-id="${entreprise.id}" title="Relancer l'analyse technique"><i class="fas fa-sync-alt"></i></button>
+                </div>
+                ` : ''}
+                ${hasSeoScore ? `
+                <div class="score-chart-item row-score-item" data-analysis-type="seo" data-entreprise-id="${entreprise.id}">
+                    <div class="score-chart-visual row-score-visual">
+                        ${createCircularChart(entreprise.score_seo, 'SEO', null, chartSize)}
+                        <div class="score-loader row-score-loader"><i class="fas fa-circle-notch fa-spin"></i></div>
+                    </div>
+                    <button type="button" class="score-relaunch-btn row-relaunch-btn" data-analysis-type="seo" data-entreprise-id="${entreprise.id}" title="Relancer l'analyse SEO"><i class="fas fa-sync-alt"></i></button>
+                </div>
+                ` : ''}
+                ${hasPentestScore ? `
+                <div class="score-chart-item row-score-item" data-analysis-type="pentest" data-entreprise-id="${entreprise.id}">
+                    <div class="score-chart-visual row-score-visual">
+                        ${createCircularChart(entreprise.score_pentest, 'Risque', '#ef4444', chartSize)}
+                        <div class="score-loader row-score-loader"><i class="fas fa-circle-notch fa-spin"></i></div>
+                    </div>
+                    <button type="button" class="score-relaunch-btn row-relaunch-btn" data-analysis-type="pentest" data-entreprise-id="${entreprise.id}" title="Relancer l'analyse Pentest"><i class="fas fa-sync-alt"></i></button>
+                </div>
+                ` : ''}
+            </div>
+        ` : '';
+
         return `
             <div class="entreprise-row" data-id="${entreprise.id}">
                 <div class="row-main">
                     <div class="row-name">
-                        <div style="display:flex; align-items:center; gap:0.5rem;">
-                        <h3>${Formatters.escapeHtml(entreprise.nom || 'Sans nom')}</h3>
+                        <div class="row-name-line">
+                            <h3>${Formatters.escapeHtml(entreprise.nom || 'Sans nom')}</h3>
                             ${typeof entreprise.score_pentest !== 'undefined' && entreprise.score_pentest !== null && entreprise.score_pentest >= 40 ? `
-                            <i class="fas fa-exclamation-triangle" style="color: ${entreprise.score_pentest >= 70 ? '#e74c3c' : '#f39c12'}; font-size: 1.1rem;" title="Score Pentest: ${entreprise.score_pentest}/100"></i>
+                            <i class="fas fa-exclamation-triangle row-pentest-warn" style="color: ${entreprise.score_pentest >= 70 ? '#ef4444' : '#f59e0b'};" title="Score Pentest: ${entreprise.score_pentest}/100"></i>
                             ` : ''}
                         </div>
                         ${tagsHtml ? `<div class="tags-container">${tagsHtml}</div>` : ''}
                     </div>
-                    <div class="row-info">
-                        ${entreprise.secteur ? `<span>${Formatters.escapeHtml(entreprise.secteur)}</span>` : ''}
-                        ${entreprise.statut ? `<span>${Badges.getStatusBadge(entreprise.statut)}</span>` : ''}
-                        ${typeof entreprise.score_securite !== 'undefined' && entreprise.score_securite !== null ? `<span>${Badges.getSecurityScoreBadge(entreprise.score_securite)}</span>` : ''}
-                        ${typeof entreprise.score_pentest !== 'undefined' && entreprise.score_pentest !== null ? `
-                        <span>
-                            <span class="badge badge-${entreprise.score_pentest >= 70 ? 'danger' : entreprise.score_pentest >= 40 ? 'warning' : 'success'}">Pentest: ${entreprise.score_pentest}/100</span>
-                        </span>
-                        ` : ''}
-                        ${entreprise.email_principal ? `<span>${Formatters.escapeHtml(entreprise.email_principal)}</span>` : ''}
+                    <div class="row-meta">
+                        ${entreprise.secteur ? `<span class="row-meta-item">${Formatters.escapeHtml(entreprise.secteur)}</span>` : ''}
+                        ${entreprise.statut ? `<span class="row-meta-item">${Badges.getStatusBadge(entreprise.statut)}</span>` : ''}
+                        ${entreprise.email_principal ? `<span class="row-meta-item row-meta-email">${Formatters.escapeHtml(entreprise.email_principal)}</span>` : ''}
                     </div>
                 </div>
+                ${rowScoresSection}
                 <div class="row-actions">
                     <button class="btn-icon btn-groups" data-id="${entreprise.id}" title="Gérer les groupes"><i class="fas fa-layer-group"></i></button>
                     <button class="btn-favori ${entreprise.favori ? 'active' : ''}" data-id="${entreprise.id}" title="Favori"><i class="fas fa-star"></i></button>
@@ -845,7 +1025,7 @@ async function init() {
                     ensureModalWebSocketListeners();
                     setScoreRelaunchLoading(entrepriseId, analysisType, true);
                     
-                    const launchLabels = { technique: 'technique', seo: 'SEO' };
+                    const launchLabels = { technique: 'technique', seo: 'SEO', pentest: 'Pentest' };
                     const nom = entreprise && entreprise.nom ? entreprise.nom : getEntrepriseNom(entrepriseId);
                     Notifications.show(nom + ' — Analyse ' + (launchLabels[analysisType] || analysisType) + ' lancée...', 'info', 'fa-play-circle');
                     
@@ -853,6 +1033,8 @@ async function init() {
                         socket.emit('start_technical_analysis', { url, entreprise_id: entrepriseId });
                     } else if (analysisType === 'seo') {
                         socket.emit('start_seo_analysis', { url, entreprise_id: entrepriseId, use_lighthouse: true });
+                    } else if (analysisType === 'pentest') {
+                        socket.emit('start_pentest_analysis', { url, entreprise_id: entrepriseId });
                     }
                 });
             });
@@ -1170,10 +1352,14 @@ async function init() {
         const securitySliderMax = document.getElementById('filter-security-max');
         const seoSliderMin = document.getElementById('filter-seo-min');
         const seoSliderMax = document.getElementById('filter-seo-max');
+        const pentestSliderMin = document.getElementById('filter-pentest-min');
+        const pentestSliderMax = document.getElementById('filter-pentest-max');
         const securityLabelMin = document.getElementById('filter-security-min-value');
         const securityLabelMax = document.getElementById('filter-security-max-value');
         const seoLabelMin = document.getElementById('filter-seo-min-value');
         const seoLabelMax = document.getElementById('filter-seo-max-value');
+        const pentestLabelMin = document.getElementById('filter-pentest-min-value');
+        const pentestLabelMax = document.getElementById('filter-pentest-max-value');
 
         function formatScoreMinLabel(value) {
             const v = parseInt(value, 10) || 0;
@@ -1220,6 +1406,22 @@ async function init() {
             seoLabelMax.textContent = formatScoreMaxLabel(seoSliderMax.value);
             seoSliderMax.addEventListener('input', () => {
                 seoLabelMax.textContent = formatScoreMaxLabel(seoSliderMax.value);
+                updateAdvancedFiltersBadge();
+            });
+        }
+
+        if (pentestSliderMin && pentestLabelMin) {
+            pentestLabelMin.textContent = formatScoreMinLabel(pentestSliderMin.value);
+            pentestSliderMin.addEventListener('input', () => {
+                pentestLabelMin.textContent = formatScoreMinLabel(pentestSliderMin.value);
+                updateAdvancedFiltersBadge();
+            });
+        }
+
+        if (pentestSliderMax && pentestLabelMax) {
+            pentestLabelMax.textContent = formatScoreMaxLabel(pentestSliderMax.value);
+            pentestSliderMax.addEventListener('input', () => {
+                pentestLabelMax.textContent = formatScoreMaxLabel(pentestSliderMax.value);
                 updateAdvancedFiltersBadge();
             });
         }
@@ -1316,6 +1518,8 @@ async function init() {
             loadTechnicalAnalysis(entrepriseId);
             loadOSINTAnalysis(entrepriseId);
             loadPentestAnalysis(entrepriseId);
+            loadAuditPipeline(entrepriseId);
+            refreshOpportunityScore(entrepriseId);
         } catch (error) {
             console.error('Erreur lors du chargement:', error);
             modalBody.innerHTML = `
@@ -1334,6 +1538,160 @@ async function init() {
         if (!btn) return;
         const labels = { images: 'Images', pages: 'Pages' };
         btn.textContent = (labels[tabKey] || tabKey) + ' (' + (count || 0) + ')';
+    }
+
+    /**
+     * Charge et affiche le pipeline d'audit (Scraping → Technique → SEO → OSINT → Pentest)
+     * dans l'onglet dédié de la modale.
+     * @param {number} entrepriseId
+     */
+    async function loadAuditPipeline(entrepriseId) {
+        const container = document.getElementById('entreprise-pipeline-container');
+        if (!container) return;
+        try {
+            container.innerHTML = '<p class="loading">Chargement du pipeline d\'audit...</p>';
+            const data = await EntreprisesAPI.loadAuditPipeline(entrepriseId);
+            const pipeline = data && data.pipeline ? data.pipeline : {};
+            container.innerHTML = renderAuditPipeline(pipeline);
+        } catch (e) {
+            console.error('Erreur lors du chargement du pipeline d\'audit:', e);
+            container.innerHTML = '<p class="error">Erreur lors du chargement du pipeline d\'audit.</p>';
+        }
+    }
+
+    /**
+     * Génère le HTML du pipeline d'audit à partir du résumé backend.
+     * @param {Object} pipeline
+     * @returns {string}
+     */
+    function renderAuditPipeline(pipeline) {
+        if (!pipeline) {
+            return '<p class="empty-state">Aucune donnée d\'audit disponible pour le moment.</p>';
+        }
+
+        const steps = [
+            { key: 'scraping', label: 'Scraping', icon: 'fa-spider' },
+            { key: 'technical', label: 'Analyse technique', icon: 'fa-microchip' },
+            { key: 'seo', label: 'Analyse SEO', icon: 'fa-search' },
+            { key: 'osint', label: 'Analyse OSINT', icon: 'fa-user-secret' },
+            { key: 'pentest', label: 'Analyse Pentest', icon: 'fa-shield-alt' }
+        ];
+
+        const toDate = (value) => {
+            if (!value) return null;
+            try {
+                const d = new Date(value);
+                if (Number.isNaN(d.getTime())) return null;
+                return d.toLocaleString();
+            } catch {
+                return null;
+            }
+        };
+
+        const escape = (text) => Formatters && typeof Formatters.escapeHtml === 'function'
+            ? Formatters.escapeHtml(text)
+            : String(text || '');
+
+        const rows = steps.map((step, idx) => {
+            const item = pipeline[step.key] || { status: 'never' };
+            const status = item.status || 'never';
+            const dateStr = toDate(item.last_date);
+
+            let statusLabel = 'Jamais lancée';
+            let statusClass = 'secondary';
+            if (status === 'done') {
+                statusLabel = 'Terminé';
+                statusClass = 'success';
+            } else if (status === 'running') {
+                statusLabel = 'En cours';
+                statusClass = 'warning';
+            }
+
+            const metaParts = [];
+            if (step.key === 'scraping' && status === 'done') {
+                if (typeof item.emails_count === 'number') metaParts.push(`${item.emails_count} email(s)`);
+                if (typeof item.people_count === 'number') metaParts.push(`${item.people_count} personne(s)`);
+                if (typeof item.phones_count === 'number') metaParts.push(`${item.phones_count} téléphone(s)`);
+            } else if (step.key === 'technical' && status === 'done') {
+                if (typeof item.security_score === 'number') metaParts.push(`Sécurité: ${item.security_score}/100`);
+                if (typeof item.performance_score === 'number') metaParts.push(`Perf: ${item.performance_score}/100`);
+            } else if (step.key === 'seo' && status === 'done') {
+                if (typeof item.score === 'number') metaParts.push(`Score SEO: ${item.score}/100`);
+            } else if (step.key === 'osint' && status === 'done') {
+                if (typeof item.emails_count === 'number') metaParts.push(`${item.emails_count} email(s) OSINT`);
+                if (typeof item.people_count === 'number') metaParts.push(`${item.people_count} personne(s) enrichie(s)`);
+            } else if (step.key === 'pentest' && status === 'done') {
+                if (typeof item.risk_score === 'number') metaParts.push(`Risque: ${item.risk_score}/100`);
+                if (typeof item.critical_count === 'number' && item.critical_count > 0) {
+                    metaParts.push(`${item.critical_count} critique(s)`);
+                } else if (typeof item.high_count === 'number' && item.high_count > 0) {
+                    metaParts.push(`${item.high_count} haute(s)`);
+                }
+            }
+
+            const metaHtml = metaParts.length
+                ? `<div class="pipeline-meta">${metaParts.map(m => `<span>${escape(m)}</span>`).join('')}</div>`
+                : '';
+
+            return `
+                <li class="pipeline-step">
+                    <div class="pipeline-step-icon">
+                        <span class="pipeline-step-index">${idx + 1}</span>
+                        <i class="fas ${step.icon}"></i>
+                    </div>
+                    <div class="pipeline-step-body">
+                        <div class="pipeline-step-header">
+                            <h4>${escape(step.label)}</h4>
+                            <span class="badge badge-${statusClass}">${escape(statusLabel)}</span>
+                        </div>
+                        ${dateStr ? `<div class="pipeline-date">Dernière exécution : ${escape(dateStr)}</div>` : ''}
+                        ${metaHtml}
+                    </div>
+                </li>
+            `;
+        }).join('');
+
+        return `
+            <div class="pipeline-timeline">
+                <ol class="pipeline-steps">
+                    ${rows}
+                </ol>
+            </div>
+        `;
+    }
+
+    /**
+     * Recalcule le score d'opportunité pour une entreprise et met à jour la modale.
+     * Utilise l'endpoint /api/entreprise/<id>/recalculate-opportunity.
+     */
+    async function refreshOpportunityScore(entrepriseId) {
+        if (!entrepriseId || !window.EntreprisesAPI || !window.Badges) return;
+        const row = document.getElementById('opportunity-row');
+        const valueEl = document.getElementById('opportunity-value');
+        if (!row || !valueEl) return;
+
+        try {
+            valueEl.innerHTML = '<span class="badge badge-secondary"><i class="fas fa-spinner fa-spin"></i> Calcul en cours…</span>';
+            const result = await EntreprisesAPI.recalculateOpportunity(entrepriseId);
+            if (!result || result.success === false) {
+                const message = (result && result.error) ? result.error : 'Impossible de calculer l\'opportunité';
+                valueEl.innerHTML = `<span class="badge badge-secondary">${Formatters.escapeHtml(message)}</span>`;
+                return;
+            }
+
+            const niveau = result.opportunity || (currentModalEntrepriseData && currentModalEntrepriseData.opportunite) || 'Non calculée';
+            const score = (typeof result.score === 'number') ? result.score : null;
+            valueEl.innerHTML = Badges.getOpportunityBadge(niveau, score, null);
+
+            // Mettre à jour les données courantes en mémoire
+            if (currentModalEntrepriseData) {
+                currentModalEntrepriseData.opportunite = niveau;
+                currentModalEntrepriseData.opportunity_score = score;
+            }
+        } catch (e) {
+            console.error('Erreur lors du recalcul de l\'opportunité:', e);
+            valueEl.innerHTML = '<span class="badge badge-secondary">Erreur lors du calcul</span>';
+        }
     }
     
     function createModalContent(entreprise) {
@@ -1360,6 +1718,7 @@ async function init() {
                         <button class="tab-btn" data-tab="images">Images (${nbImages})</button>
                         <button class="tab-btn" data-tab="pages">Pages (${nbPages})</button>
                         <button class="tab-btn" data-tab="scraping">Résultats scraping</button>
+                        <button class="tab-btn" data-tab="pipeline">Pipeline d'audit</button>
                         <button class="tab-btn" data-tab="technique">Analyse technique</button>
                         <button class="tab-btn" data-tab="seo">Analyse SEO</button>
                         <button class="tab-btn" data-tab="osint">Analyse OSINT</button>
@@ -1436,7 +1795,12 @@ async function init() {
                                 <span class="info-label">Score Pentest:</span>
                                 <span class="info-value" id="pentest-score-value"></span>
                             </div>
-                            ${createInfoRow('Opportunité', entreprise.opportunite)}
+                            <div class="info-row" id="opportunity-row">
+                                <span class="info-label">Opportunité:</span>
+                                <span class="info-value" id="opportunity-value">
+                                    ${entreprise.opportunite ? Badges.getOpportunityBadge(entreprise.opportunite, null) : 'Non calculée'}
+                                </span>
+                            </div>
                             ${createInfoRow('Taille estimée', entreprise.taille_estimee)}
                             ${createInfoRow('Adresse 1', entreprise.address_1)}
                             ${createInfoRow('Adresse 2', entreprise.address_2)}
@@ -1505,6 +1869,12 @@ async function init() {
                             <div id="tab-metadata-modal" class="tab-content" style="display: none;">
                                 <div id="metadata-list-modal" class="results-list" style="display: grid; gap: 1rem;"></div>
                             </div>
+                        </div>
+                    </div>
+                    
+                    <div class="tab-panel" id="tab-pipeline">
+                        <div id="entreprise-pipeline-container" class="pipeline-tab-content">
+                            <p class="empty-state">Chargement du pipeline d'audit...</p>
                         </div>
                     </div>
                     
@@ -1646,6 +2016,7 @@ async function init() {
         });
         s.on('pentest_analysis_complete', function(data) {
             if (!data || data.entreprise_id == null) return;
+            setScoreRelaunchLoading(data.entreprise_id, 'pentest', false);
             refreshEntrepriseFromServer(data.entreprise_id);
             const nom = getEntrepriseNom(data.entreprise_id);
             Notifications.show(nom + ' — Analyse Pentest terminée', 'success', 'fa-check-circle');
@@ -1655,6 +2026,7 @@ async function init() {
         });
         s.on('pentest_analysis_error', function(data) {
             if (data && data.entreprise_id != null) {
+                setScoreRelaunchLoading(data.entreprise_id, 'pentest', false);
                 const nom = getEntrepriseNom(data.entreprise_id);
                 Notifications.show(nom + ' — ' + (data.error || 'Erreur analyse Pentest'), 'error', 'fa-exclamation-circle');
             }

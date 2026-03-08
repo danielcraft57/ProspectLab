@@ -28,7 +28,8 @@ class OpportunityCalculator:
                                    technical_analysis: Optional[Dict] = None,
                                    pentest_analysis: Optional[Dict] = None,
                                    osint_analysis: Optional[Dict] = None,
-                                   scraping_data: Optional[Dict] = None) -> Dict:
+                                   scraping_data: Optional[Dict] = None,
+                                   seo_analysis: Optional[Dict] = None) -> Dict:
         """
         Calcule le score d'opportunité global en combinant tous les facteurs
         
@@ -76,6 +77,16 @@ class OpportunityCalculator:
                             'people': latest_scraper.get('people', []),
                             'phones': latest_scraper.get('phones', [])
                         }
+
+            # Charger l'analyse SEO si disponible
+            if seo_analysis is None:
+                if hasattr(self.database, 'get_seo_analyses_by_entreprise'):
+                    try:
+                        seo_list = self.database.get_seo_analyses_by_entreprise(entreprise_id, limit=1)
+                        if seo_list:
+                            seo_analysis = seo_list[0]
+                    except Exception:
+                        seo_analysis = None
         
         breakdown = {}
         indicators = []
@@ -201,6 +212,24 @@ class OpportunityCalculator:
             breakdown['scraping'] = scraping_score
             total_score += scraping_score
             max_score += 10
+
+        # 7. Score SEO global (0-10 points)
+        # Plus le score SEO est faible, plus l'opportunité est élevée
+        if seo_analysis:
+            seo_score = seo_analysis.get('score')
+            if seo_score is not None:
+                try:
+                    s = max(0, min(100, int(seo_score)))
+                    seo_opportunity = max(0, (100 - s) / 10.0)  # Max 10 points
+                    breakdown['seo'] = seo_opportunity
+                    total_score += seo_opportunity
+                    max_score += 10
+                    if s < 50:
+                        indicators.append('SEO faible détecté')
+                    elif s < 70:
+                        indicators.append('SEO perfectible')
+                except Exception:
+                    pass
         
         # Calculer le score final (0-100)
         if max_score > 0:
@@ -267,5 +296,6 @@ class OpportunityCalculator:
             technical_analysis=None,  # Sera chargé automatiquement
             pentest_analysis=None,    # Sera chargé automatiquement
             osint_analysis=None,      # Sera chargé automatiquement
-            scraping_data=None        # Sera chargé automatiquement
+            scraping_data=None,       # Sera chargé automatiquement
+            seo_analysis=None         # Sera chargé automatiquement
         )

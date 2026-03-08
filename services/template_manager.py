@@ -220,6 +220,8 @@ class TemplateManager:
                     'hosting_provider': entreprise.get('hosting_provider', ''),
                     'responsable': entreprise.get('responsable') or '',
                     'email_principal': entreprise.get('email_principal') or '',
+                    'opportunite': entreprise.get('opportunite') or '',
+                    'statut': entreprise.get('statut') or '',
                 })
             conn.close()
             
@@ -551,4 +553,135 @@ class TemplateManager:
                 pass
         
         return content, is_html
+
+    def suggest_templates_for_entreprise(self, entreprise_id: int, max_results: int = 3) -> List[Dict]:
+        """
+        Propose les templates les plus pertinents pour une entreprise donnée,
+        en fonction des résultats d'analyse (performance, sécurité, scraping, opportunité, etc.).
+        
+        Args:
+            entreprise_id: ID de l'entreprise
+            max_results: Nombre maximal de suggestions
+        
+        Returns:
+            Liste triée de suggestions:
+            [
+              { "id": "<template_id>", "name": "...", "subject": "...", "reason": "...", "score": float }
+            ]
+        """
+        from math import isnan
+
+        if not entreprise_id:
+            return []
+
+        # Récupérer les données étendues (analyse technique, scraping, etc.)
+        extended = self._get_entreprise_extended_data(entreprise_id) or {}
+        performance_score = extended.get('performance_score')
+        security_score = extended.get('security_score')
+        total_emails = extended.get('total_emails') or 0
+        total_people = extended.get('total_people') or 0
+        secteur = extended.get('secteur') or ''
+        website = extended.get('website') or ''
+        opportunite = extended.get('opportunite') or ''
+
+        def safe_num(x):
+            try:
+                v = float(x)
+                return None if isnan(v) else v
+            except Exception:
+                return None
+
+        perf = safe_num(performance_score)
+        sec = safe_num(security_score)
+        has_contacts = (total_emails or 0) > 0 or (total_people or 0) > 0
+
+        suggestions = []
+
+        def add_suggestion(tpl_id, base_score, reason):
+            tpl = self.get_template(tpl_id)
+            if not tpl:
+                return
+            suggestions.append({
+                'id': tpl['id'],
+                'name': tpl.get('name'),
+                'subject': tpl.get('subject'),
+                'reason': reason,
+                'score': float(base_score)
+            })
+
+        # 1) Cas "analyse complète" (perf + sécu + contacts) => audit complet
+        if perf is not None and sec is not None and has_contacts:
+            score = 1.0
+            if opportunite in ('Très élevée', 'Élevée'):
+                score += 0.2
+            add_suggestion(
+                'html_audit_complet',
+                score,
+                "Analyse technique + sécurité + contacts disponibles, opportunité adaptée à un audit complet."
+            )
+
+        # 2) Focus performance
+        if perf is not None and perf < 70:
+            if perf < 50:
+                score = 0.95
+                reason = f"Score de performance faible (~{int(perf)}/100)."
+            else:
+                score = 0.8
+                reason = f"Score de performance perfectible (~{int(perf)}/100)."
+            add_suggestion('html_optimisation_performance', score, reason)
+
+        # 3) Focus sécurité
+        if sec is not None and sec < 70:
+            if sec < 50:
+                score = 0.95
+                reason = f"Score de sécurité faible (~{int(sec)}/100)."
+            else:
+                score = 0.8
+                reason = f"Score de sécurité perfectible (~{int(sec)}/100)."
+            add_suggestion('html_securite_conformite', score, reason)
+
+        # 4) Présence digitale / contacts (scraping)
+        if has_contacts:
+            score = 0.75
+            add_suggestion(
+                'html_contacts',
+                score,
+                "Plusieurs contacts/emails trouvés via scraping, email axé présence et contacts."
+            )
+
+        # 5) Secteur présent mais peu de data technique => template par secteur
+        if secteur and not suggestions:
+            add_suggestion(
+                'html_secteur',
+                0.7,
+                "Secteur identifié, peu de données techniques disponibles."
+            )
+
+        # 6) Aucune donnée particulière => email de découverte
+        if not suggestions:
+            score = 0.6
+            reason = "Peu de données d'analyse disponibles, proposer un email de découverte."
+            add_suggestion('html_decouverte_hero', score, reason)
+
+        # 7) Pour les séquences, ajouter une relance courte si fort potentiel
+        if opportunite in ('Très élevée', 'Élevée'):
+            add_suggestion(
+                'html_relance',
+                0.5,
+                "Prévoir une relance courte si aucune réponse au premier message."
+            )
+
+        # Trier par score décroissant et dédoublonner par id
+        suggestions.sort(key=lambda x: x['score'], reverse=True)
+        seen = set()
+        unique = []
+        for s in suggestions:
+            if s['id'] in seen:
+                continue
+            seen.add(s['id'])
+            unique.append(s)
+            if len(unique) >= max_results:
+                break
+
+        return unique
 

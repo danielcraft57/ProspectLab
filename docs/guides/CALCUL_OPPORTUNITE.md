@@ -37,6 +37,14 @@ Le système calcule automatiquement un score d'opportunité pour chaque entrepri
 - Points pour les personnes : max 3 points
 - Points pour les téléphones : max 3 points
 
+### 7. Score SEO global (0-10 points)
+- **Score SEO** : Score global issu de l’analyse SEO (0-100)
+- Plus le score SEO est faible, plus l'opportunité est élevée
+- Score inversé : `(100 - seo_score) / 10`
+
+> Remarque : la somme théorique maximale de tous les sous‑scores peut dépasser 100.  
+> Le score final est **normalisé sur 0-100** en fonction du total maximum possible (`max_score`).
+
 ## Niveaux d'opportunité
 
 Le score final (0-100) détermine le niveau :
@@ -76,7 +84,8 @@ La réponse inclut le breakdown détaillé :
     "performance": 8,
     "pentest": 15,
     "osint": 5,
-    "scraping": 5
+    "scraping": 5,
+    "seo": 10
   },
   "indicators": [
     "Site obsolète",

@@ -1858,6 +1858,204 @@ body[data-theme="dark"] .campagnes-filters input::placeholder {
     color: #94a3b8;
 }
 
+/* Suggestions de templates (étape 3) */
+.template-suggestions {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid #e5e7eb;
+    font-size: 0.9rem;
+    color: #4b5563;
+}
+
+.template-suggestions-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.template-suggestions-title {
+    font-weight: 600;
+    color: #111827;
+}
+
+.template-suggestions-refresh {
+    border: none;
+    background: transparent;
+    color: #6b7280;
+    font-size: 0.8rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    cursor: pointer;
+    padding: 0.2rem 0.4rem;
+    border-radius: 999px;
+    transition: background-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+.template-suggestions-refresh:hover {
+    background: #f3f4f6;
+    color: #111827;
+    transform: translateY(-1px);
+}
+
+.template-suggestions-loading,
+.template-suggestions-hint,
+.template-suggestions-error {
+    margin-top: 0.25rem;
+    color: #6b7280;
+}
+
+.template-suggestions-error {
+    color: #b91c1c;
+}
+
+.template-suggestions-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+}
+
+.template-suggestion-card {
+    background: #ffffff;
+    border-radius: 0.75rem;
+    padding: 0.75rem 0.9rem;
+    box-shadow: 0 3px 10px rgba(15, 23, 42, 0.06);
+    border: 1px solid #e5e7eb;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+
+.template-suggestion-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+    border-color: #6366f1;
+}
+
+.template-suggestion-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.template-suggestion-header h4 {
+    margin: 0;
+    font-size: 0.95rem;
+    color: #111827;
+}
+
+.template-suggestion-score {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    background: #eef2ff;
+    color: #4338ca;
+}
+
+.template-suggestion-subject {
+    margin: 0;
+    font-size: 0.85rem;
+    color: #4b5563;
+}
+
+.template-suggestion-reason {
+    margin: 0;
+    font-size: 0.8rem;
+    color: #6b7280;
+}
+
+.template-suggestion-cta {
+    margin-top: 0.4rem;
+    align-self: flex-start;
+    padding: 0.3rem 0.7rem;
+    border-radius: 999px;
+    border: 1px solid #e5e7eb;
+    background: #f9fafb;
+    color: #111827;
+    font-size: 0.8rem;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+.template-suggestion-cta:hover {
+    background: #4f46e5;
+    border-color: #4f46e5;
+    color: #f9fafb;
+    box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35);
+    transform: translateY(-1px);
+}
+
+.template-select-highlight {
+    box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.5);
+    border-color: #4f46e5 !important;
+    transition: box-shadow 0.4s ease;
+}
+
+/* Mode dark – suggestions templates */
+body[data-theme="dark"] .template-suggestions {
+    border-top-color: #374151;
+    color: #9ca3af;
+}
+
+body[data-theme="dark"] .template-suggestions-title {
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] .template-suggestions-refresh {
+    color: #9ca3af;
+}
+
+body[data-theme="dark"] .template-suggestions-refresh:hover {
+    background: #111827;
+    color: #f9fafb;
+}
+
+body[data-theme="dark"] .template-suggestion-card {
+    background: #111827;
+    border-color: #1f2937;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);
+}
+
+body[data-theme="dark"] .template-suggestion-card:hover {
+    border-color: #6366f1;
+}
+
+body[data-theme="dark"] .template-suggestion-header h4 {
+    color: #f9fafb;
+}
+
+body[data-theme="dark"] .template-suggestion-score {
+    background: rgba(79, 70, 229, 0.15);
+    color: #a5b4fc;
+}
+
+body[data-theme="dark"] .template-suggestion-subject {
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] .template-suggestion-reason {
+    color: #9ca3af;
+}
+
+body[data-theme="dark"] .template-suggestion-cta {
+    background: #020617;
+    border-color: #1f2937;
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] .template-suggestion-cta:hover {
+    background: #4f46e5;
+    border-color: #4f46e5;
+    color: #f9fafb;
+}
+
 body[data-theme="dark"] .filter-group select,
 body[data-theme="dark"] .filter-group input[type="date"] {
     background-color: #0f172a;

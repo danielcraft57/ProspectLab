@@ -65,33 +65,32 @@
             return icons[type] || icons.info;
         },
         /**
-         * Affiche une notification
+         * Affiche une notification (toast)
          * @param {string} message
          * @param {string} type - 'info', 'success', 'error', 'warning'
          * @param {string} [icon] - classe FontAwesome (ex: 'fa-play-circle') ou null pour l'icône par défaut
          */
         show(message, type = 'info', icon = null) {
             const iconClass = icon || this.getDefaultIcon(type);
-            const iconHtml = `<i class="fas ${iconClass}" style="margin-right: 0.5rem; opacity: 0.95;"></i>`;
-            const notification = document.createElement('div');
-            notification.className = `notification notification-${type}`;
-            notification.style.cssText = `
-                position: fixed;
-                top: 20px;
-                right: 20px;
-                padding: 1rem 1.5rem;
-                background: ${this.getColor(type)};
-                color: white;
-                border-radius: 6px;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-                z-index: 10000;
-                animation: slideIn 0.3s ease;
-                max-width: 400px;
-                display: flex;
-                align-items: center;
+            let container = document.getElementById('notifications-toast-container');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'notifications-toast-container';
+                document.body.appendChild(container);
+            }
+
+            const toast = document.createElement('div');
+            toast.className = `notification-toast notification-toast--${type}`;
+            toast.setAttribute('role', 'alert');
+            toast.innerHTML = `
+                <div class="notification-toast__icon">
+                    <i class="fas ${iconClass}"></i>
+                </div>
+                <div class="notification-toast__content">
+                    <div class="notification-toast__message">${this.escapeHtml(message)}</div>
+                </div>
             `;
-            notification.innerHTML = iconHtml + '<span>' + this.escapeHtml(message) + '</span>';
-            
+
             // Enregistrer dans l'historique
             const item = {
                 id: Date.now() + '-' + Math.random().toString(36).slice(2),
@@ -109,18 +108,18 @@
 
             try {
                 document.dispatchEvent(new CustomEvent('notifications:new', { detail: { item, unreadCount: this._counter } }));
-            } catch (e) {
-                // best-effort
-            }
+            } catch (e) {}
 
             this._persist();
 
-            document.body.appendChild(notification);
-            
+            container.appendChild(toast);
+
             setTimeout(() => {
-                notification.style.animation = 'slideOut 0.3s ease';
-                setTimeout(() => notification.remove(), 300);
-            }, 3000);
+                toast.classList.add('toast-exit');
+                setTimeout(() => {
+                    if (toast.parentNode) toast.remove();
+                }, 250);
+            }, 3500);
         },
         
         /**
@@ -155,6 +154,18 @@
             this._items = this._items.map(n => Object.assign({}, n, { read: true }));
             this._counter = 0;
             this._persist();
+        },
+
+        /**
+         * Efface toutes les notifications (vide la liste et réinitialise le compteur).
+         */
+        clearAll() {
+            this._items = [];
+            this._counter = 0;
+            this._persist();
+            try {
+                document.dispatchEvent(new CustomEvent('notifications:cleared'));
+            } catch (e) {}
         }
     };
     

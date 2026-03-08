@@ -63,6 +63,7 @@ def osint_analysis_task(self, url, entreprise_id=None, people_from_scrapers=None
         )
         
         analyzer = OSINTAnalyzer()
+        diag = None
         try:
             diag = analyzer.get_diagnostic()
             logger.info(f'Diagnostic OSINT: {diag.get("message", "")} (WSL={diag.get("wsl_available")}, outils={len(diag.get("tools_available", []))})')
@@ -260,6 +261,9 @@ def osint_analysis_task(self, url, entreprise_id=None, people_from_scrapers=None
             phones_from_scrapers=phones_from_scrapers,
             names_from_scraper_emails=names_from_scraper_emails  # Passer les noms extraits des emails
         )
+        # Attacher le diagnostic d'outils pour faciliter le debug et le suivi en BDD
+        if diag is not None and isinstance(osint_data, dict):
+            osint_data['tools_diagnostic'] = diag
         
         if osint_data.get('error'):
             logger.error(f'Erreur analyse OSINT pour {url}: {osint_data["error"]}')

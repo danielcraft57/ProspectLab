@@ -455,6 +455,125 @@ def entreprise_seo_analysis(entreprise_id):
         return jsonify({'error': str(e)}), 500
 
 
+@api_extended_bp.route('/entreprise/<int:entreprise_id>/audit-pipeline')
+@login_required
+def entreprise_audit_pipeline(entreprise_id):
+    """
+    API: Résumé du pipeline d'audit d'une entreprise
+    
+    Retourne, pour chaque brique (Scraping, Technique, SEO, OSINT, Pentest),
+    le dernier état connu et quelques métriques clés.
+    """
+    try:
+        pipeline = {}
+
+        # Scraping (données issues du scraper le plus récent)
+        try:
+            scrapers = database.get_scrapers_by_entreprise(entreprise_id)
+        except Exception:
+            scrapers = []
+        if scrapers:
+            latest_scraper = scrapers[0]
+            emails = latest_scraper.get('emails') or []
+            people = latest_scraper.get('people') or []
+            phones = latest_scraper.get('phones') or []
+            pipeline['scraping'] = {
+                'status': 'done',
+                'last_date': latest_scraper.get('date_modification') or latest_scraper.get('date_creation'),
+                'url': latest_scraper.get('url'),
+                'emails_count': len(emails),
+                'people_count': len(people),
+                'phones_count': len(phones),
+            }
+        else:
+            pipeline['scraping'] = {'status': 'never'}
+
+        # Analyse technique
+        try:
+            technical = database.get_technical_analysis(entreprise_id)
+        except Exception:
+            technical = None
+        if technical:
+            pipeline['technical'] = {
+                'status': 'done',
+                'last_date': technical.get('date_analyse'),
+                'url': technical.get('url'),
+                'security_score': technical.get('security_score'),
+                'performance_score': technical.get('performance_score'),
+            }
+        else:
+            pipeline['technical'] = {'status': 'never'}
+
+        # Analyse SEO
+        seo_summary = {'status': 'never'}
+        try:
+            seo_list = database.get_seo_analyses_by_entreprise(entreprise_id, limit=1)
+            if seo_list:
+                seo = seo_list[0]
+                seo_summary = {
+                    'status': 'done',
+                    'last_date': seo.get('date_analyse'),
+                    'url': seo.get('url'),
+                    'score': seo.get('score'),
+                }
+        except Exception:
+            pass
+        pipeline['seo'] = seo_summary
+
+        # Analyse OSINT
+        try:
+            osint = database.get_osint_analysis_by_entreprise(entreprise_id)
+        except Exception:
+            osint = None
+        if osint:
+            emails = osint.get('emails') or []
+            social_media = osint.get('social_media') or {}
+            people_data = osint.get('people') or {}
+            enriched_people = []
+            if isinstance(people_data, dict):
+                # Plusieurs formats possibles, on normalise grossièrement
+                enriched_people = people_data.get('enriched') or people_data.get('people') or []
+            elif isinstance(people_data, list):
+                enriched_people = people_data
+            pipeline['osint'] = {
+                'status': 'done',
+                'last_date': osint.get('date_analyse'),
+                'url': osint.get('url'),
+                'emails_count': len(emails),
+                'people_count': len(enriched_people),
+                'social_platforms_count': len(social_media.keys()) if isinstance(social_media, dict) else 0,
+            }
+        else:
+            pipeline['osint'] = {'status': 'never'}
+
+        # Analyse Pentest
+        try:
+            pentest = database.get_pentest_analysis_by_entreprise(entreprise_id)
+        except Exception:
+            pentest = None
+        if pentest:
+            vulnerabilities = pentest.get('vulnerabilities') or []
+            critical_count = len([v for v in vulnerabilities if v.get('severity') == 'Critical'])
+            high_count = len([v for v in vulnerabilities if v.get('severity') == 'High'])
+            pipeline['pentest'] = {
+                'status': 'done',
+                'last_date': pentest.get('date_analyse'),
+                'url': pentest.get('url'),
+                'risk_score': pentest.get('risk_score'),
+                'vulnerabilities_count': len(vulnerabilities),
+                'critical_count': critical_count,
+                'high_count': high_count,
+            }
+        else:
+            pipeline['pentest'] = {'status': 'never'}
+
+        return jsonify({
+            'entreprise_id': entreprise_id,
+            'pipeline': pipeline
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @api_extended_bp.route('/entreprise/<int:entreprise_id>/scrapers')
 @login_required
 def get_scrapers(entreprise_id):

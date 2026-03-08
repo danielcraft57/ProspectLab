@@ -140,7 +140,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             items.forEach(item => {
                 const el = document.createElement('div');
-                el.className = 'notification-item' + (item.read ? '' : ' notification-item-unread');
+                el.className = 'notification-item notification-item--' + (item.type || 'info') + (item.read ? '' : ' notification-item-unread');
 
                 const icon = document.createElement('div');
                 icon.className = 'notification-item-icon';
@@ -208,8 +208,8 @@ document.addEventListener('DOMContentLoaded', function() {
         if (clearBtn) {
             clearBtn.addEventListener('click', function (e) {
                 e.stopPropagation();
-                if (window.Notifications && typeof window.Notifications.markAllAsRead === 'function') {
-                    window.Notifications.markAllAsRead();
+                if (window.Notifications && typeof window.Notifications.clearAll === 'function') {
+                    window.Notifications.clearAll();
                 }
                 renderList();
                 updateBadge(0);
@@ -237,6 +237,8 @@ document.addEventListener('DOMContentLoaded', function() {
         // Initial render (au cas où des notifs ont été générées très tôt)
         renderList();
         updateBadge();
+        // Fermer le panneau par défaut au chargement (au cas où le CSS l’afficherait)
+        closePanel();
     })();
 });
 

@@ -5,6 +5,8 @@ Contient toutes les méthodes liées aux analyses techniques
 
 import json
 import logging
+import re
+from datetime import datetime
 from .base import DatabaseBase
 
 logger = logging.getLogger(__name__)
@@ -18,6 +20,185 @@ class TechnicalManager(DatabaseBase):
     def __init__(self, *args, **kwargs):
         """Initialise le module technical"""
         super().__init__(*args, **kwargs)
+
+    def _compute_obsolescence_indicators(self, tech_data, url):
+        """
+        Détermine les signaux d'obsolescence de la stack à partir des données techniques.
+        
+        Returns:
+            tuple[list[str], bool]: (liste d'indicateurs, fort_potentiel_refonte)
+        """
+        indicators = []
+        data = tech_data or {}
+
+        def _parse_version(value):
+            if not value:
+                return None
+            try:
+                match = re.search(r'(\d+(?:\.\d+)*)', str(value))
+                if not match:
+                    return None
+                parts = match.group(1).split('.')
+                major = int(parts[0]) if parts else 0
+                minor = int(parts[1]) if len(parts) > 1 else 0
+                patch = int(parts[2]) if len(parts) > 2 else 0
+                return major, minor, patch
+            except Exception:
+                return None
+
+        # 1) CMS très ancien (focus WordPress)
+        cms = data.get('cms')
+        cms_version = data.get('cms_version')
+        if isinstance(cms, str) and cms.lower() == 'wordpress':
+            v = _parse_version(cms_version)
+            if v:
+                major, minor, _ = v
+                # WordPress 4.x ou moins considéré comme très ancien
+                if major <= 4:
+                    indicators.append('wordpress_ancien')
+                elif major == 5 and minor < 5:
+                    indicators.append('wordpress_a_mettre_a_jour')
+
+        # 2) Bootstrap 3 et jQuery anciens
+        css_framework = data.get('css_framework') or ''
+        js_library = data.get('js_library') or ''
+
+        if isinstance(css_framework, str) and 'bootstrap' in css_framework.lower():
+            v = _parse_version(css_framework)
+            if v:
+                major, _, _ = v
+                if major <= 3:
+                    indicators.append('bootstrap_ancien')
+
+        if isinstance(js_library, str) and 'jquery' in js_library.lower():
+            v = _parse_version(js_library)
+            if v:
+                major, minor, _ = v
+                if major < 3 or (major == 3 and minor < 5):
+                    indicators.append('jquery_lourd')
+
+        # 3) HTTP uniquement / HTTPS mal configuré
+        ssl_valid = data.get('ssl_valid')
+        mixed_content = data.get('mixed_content_detected')
+
+        if isinstance(url, str) and url.startswith('http://'):
+            indicators.append('http_sans_https')
+        if ssl_valid is False and 'http_sans_https' not in indicators:
+            indicators.append('http_sans_https')
+        if mixed_content:
+            indicators.append('https_mixed_content')
+
+        # 4) Domaine très ancien et peu mis à jour
+        creation = data.get('domain_creation_date')
+        updated = data.get('domain_updated_date')
+
+        def _parse_date(value):
+            if not value or not isinstance(value, str):
+                return None
+            candidates = [
+                '%Y-%m-%d',
+                '%Y-%m-%d %H:%M:%S',
+                '%d-%m-%Y',
+                '%Y/%m/%d',
+            ]
+            for fmt in candidates:
+                try:
+                    return datetime.strptime(value[:19], fmt)
+                except Exception:
+                    continue
+            return None
+
+        creation_dt = _parse_date(creation)
+        updated_dt = _parse_date(updated)
+        if creation_dt:
+            try:
+                if creation_dt.year <= 2014:
+                    if not updated_dt or updated_dt.year <= 2018:
+                        indicators.append('domaine_tres_ancien')
+            except Exception:
+                pass
+
+        # 5) Scores globaux faibles (sécurité / performance)
+        security_score = data.get('security_score')
+        performance_score = data.get('performance_score')
+        if isinstance(security_score, (int, float)) and security_score < 40:
+            indicators.append('securite_faible')
+        if isinstance(performance_score, (int, float)) and performance_score < 40:
+            indicators.append('performance_faible')
+
+        strong_signals = {
+            'wordpress_ancien',
+            'bootstrap_ancien',
+            'jquery_lourd',
+            'http_sans_https',
+            'https_mixed_content',
+            'domaine_tres_ancien',
+        }
+        has_strong = any(sig in indicators for sig in strong_signals)
+
+        low_scores = 0
+        if isinstance(security_score, (int, float)) and security_score < 50:
+            low_scores += 1
+        if isinstance(performance_score, (int, float)) and performance_score < 50:
+            low_scores += 1
+        has_refonte_potential = has_strong or (low_scores >= 2)
+
+        # Enrichir les données brutes pour exploitation ultérieure
+        if tech_data is not None:
+            tech_data.setdefault('obsolescence', {})
+            tech_data['obsolescence']['indicators'] = indicators
+            tech_data['obsolescence']['fort_potentiel_refonte'] = has_refonte_potential
+
+        return indicators, has_refonte_potential
+
+    def _update_entreprise_obsolescence_tags(self, cursor, entreprise_id, indicators, has_refonte_potential):
+        """
+        Met à jour les tags d'une entreprise en fonction des signaux d'obsolescence.
+        Ajoute / retire le tag fort_potentiel_refonte de manière idempotente.
+        """
+        if not entreprise_id:
+            return
+        try:
+            self.execute_sql(cursor, 'SELECT tags FROM entreprises WHERE id = ?', (entreprise_id,))
+            row = cursor.fetchone()
+            raw_tags = None
+            if row is not None:
+                if isinstance(row, dict):
+                    raw_tags = row.get('tags')
+                else:
+                    raw_tags = row[0]
+            tags = []
+            if raw_tags:
+                try:
+                    tags = json.loads(raw_tags) if isinstance(raw_tags, str) else list(raw_tags)
+                except Exception:
+                    tags = []
+            if not isinstance(tags, list):
+                tags = []
+
+            tag_refonte = 'fort_potentiel_refonte'
+            if has_refonte_potential:
+                if tag_refonte not in tags:
+                    tags.append(tag_refonte)
+            else:
+                tags = [t for t in tags if t != tag_refonte]
+
+            # Dé-doublonnage tout en conservant l'ordre
+            seen = set()
+            deduped = []
+            for t in tags:
+                if t not in seen:
+                    seen.add(t)
+                    deduped.append(t)
+            tags = deduped
+
+            self.execute_sql(
+                cursor,
+                'UPDATE entreprises SET tags = ? WHERE id = ?',
+                (json.dumps(tags) if tags else None, entreprise_id)
+            )
+        except Exception as e:
+            logger.warning(f"Erreur lors de la mise à jour des tags d'obsolescence pour entreprise {entreprise_id}: {e}")
     
     def save_technical_analysis(self, entreprise_id, url, tech_data):
         """
@@ -43,6 +224,9 @@ class TechnicalManager(DatabaseBase):
         performance_score = tech_data.get('performance_score')
         trackers_count = tech_data.get('trackers_count')
         pages_count = tech_data.get('pages_count') or (len(pages) if pages else None)
+
+        # Calculer les signaux d'obsolescence et enrichir les données avant sauvegarde
+        indicators, has_refonte_potential = self._compute_obsolescence_indicators(tech_data, url)
         
         # Sauvegarder l'analyse principale
         if self.is_postgresql():
@@ -289,6 +473,10 @@ class TechnicalManager(DatabaseBase):
                 )
             except Exception:
                 pass
+
+        # Mettre à jour les tags d'obsolescence liés à la refonte potentielle
+        if entreprise_id:
+            self._update_entreprise_obsolescence_tags(cursor, entreprise_id, indicators, has_refonte_potential)
         
         conn.commit()
         conn.close()
@@ -737,6 +925,11 @@ class TechnicalManager(DatabaseBase):
                 )
             except Exception:
                 pass
+
+        # Recalculer les signaux d'obsolescence et les tags associés
+        if entreprise_id:
+            indicators, has_refonte_potential = self._compute_obsolescence_indicators(tech_data, url)
+            self._update_entreprise_obsolescence_tags(cursor, entreprise_id, indicators, has_refonte_potential)
         
         conn.commit()
         conn.close()

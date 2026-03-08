@@ -1373,13 +1373,34 @@ def register_websocket_handlers(socketio, app):
                     'error': error_msg
                 }, room=session_id)
                 return
+
+            # Récupérer les formulaires depuis les scrapers si disponibles (pour tester les formulaires côté Pentest)
+            forms_from_scrapers = None
+            if entreprise_id:
+                try:
+                    scrapers = database.get_scrapers_by_entreprise(entreprise_id)
+                    all_forms = []
+                    for scraper in scrapers:
+                        scraper_id = scraper.get('id') if isinstance(scraper, dict) else None
+                        if scraper_id:
+                            try:
+                                forms = database.get_scraper_forms(scraper_id)
+                                if forms:
+                                    all_forms.extend(forms)
+                            except Exception:
+                                continue
+                    if all_forms:
+                        forms_from_scrapers = all_forms
+                except Exception:
+                    forms_from_scrapers = None
             
             # Lancer la tâche Celery
             try:
                 task = pentest_analysis_task.delay(
                     url=url,
                     entreprise_id=entreprise_id,
-                    options=options
+                    options=options,
+                    forms_from_scrapers=forms_from_scrapers
                 )
             except Exception as e:
                 safe_emit(socketio, 'pentest_analysis_error', {

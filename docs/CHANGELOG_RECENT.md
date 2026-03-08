@@ -2,6 +2,23 @@
 
 Ce document résume les changements techniques importants pour la maintenance et le déploiement.
 
+## UI Entreprises, notifications et relance analyses (mars 2026)
+
+- **Détection d’obsolescence et tags intelligents**  
+  - Calcul des signaux d’obsolescence (WordPress ancien, Bootstrap 3, jQuery lourd, HTTP only, mixed content, domaine très ancien, scores faibles) dans `services/database/technical.py` ; tag `fort_potentiel_refonte` mis à jour automatiquement à chaque analyse technique.  
+  - Détection de la langue principale du contenu dans `services/technical_analyzer.py` (heuristique stopwords) ; tags `lang_fr`, `lang_en`, etc. gérés dans `services/database/entreprises.py`.  
+  - Affichage des tags avec libellés lisibles et styles dédiés (refonte, risque, SEO, perf, HTTPS, langue) sur les cartes et lignes entreprises ; filtre par tags dans les filtres avancés.
+
+- **Relance des analyses depuis les vues cartes et liste**  
+  - Bouton “Relancer Pentest” opérationnel sur les cartes et en vue liste (émission WebSocket `start_pentest_analysis`, loader puis mise à jour du score).  
+  - Vue liste : refonte de l’affichage linéaire avec graphiques circulaires (Sécurité, SEO, Risque/Pentest) et boutons de relance par type d’analyse ; animation d’entrée en escalier, hover et styles cohérents (clair/sombre).  
+  - Merge des scores (`score_pentest` inclus) après rafraîchissement pour mise à jour temps réel.
+
+- **Notifications**  
+  - Bouton “Tout effacer” à la place de “Tout marquer comme lu” : méthode `clearAll()` dans `static/js/modules/utils/notifications.js`, panneau vidé au clic.  
+  - Nouveau style des toasts et du panneau : couleurs par type (info/success/error/warning), icônes dans pastilles, animations slide ; panneau avec en-tête et liste harmonisés, thème sombre pris en charge (`static/css/modules/notifications.css`).  
+  - Panneau fermé par défaut au chargement : règle `.notifications-panel[hidden] { display: none !important; }` et appel à `closePanel()` en fin d’init dans `static/js/main.js`.
+
 ## Tables BDD : quand sont-elles remplies ?
 
 Beaucoup de tables restent à 0 enregistrement tant que l’usage ou les outils ne les alimentent pas. Résumé utile :
