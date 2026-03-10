@@ -5,6 +5,7 @@ Contient toutes les méthodes liées aux scrapers et leurs données normalisées
 
 import json
 import logging
+from urllib.parse import urljoin
 from .base import DatabaseBase
 
 logger = logging.getLogger(__name__)
@@ -847,20 +848,22 @@ class ScraperManager(DatabaseBase):
         og_rows = cursor.fetchall()
         for row in og_rows:
             img = self.clean_row_dict(dict(row))
-            # S'assurer que l'URL est complète
+            # S'assurer que l'URL est présente (la normalisation se fera plus bas)
             if img.get('url'):
                 images.append(img)
         
         # 3. Récupérer les images depuis les champs de la table entreprises
         self.execute_sql(cursor,'''
-            SELECT og_image, logo, favicon
+            SELECT website, og_image, logo, favicon
             FROM entreprises
             WHERE id = ?
         ''', (entreprise_id,))
         
         entreprise_row = cursor.fetchone()
+        base_website = None
         if entreprise_row:
             entreprise_data = self.clean_row_dict(dict(entreprise_row))
+            base_website = entreprise_data.get('website') or None
             
             if entreprise_data.get('og_image'):
                 images.append({
@@ -880,6 +883,38 @@ class ScraperManager(DatabaseBase):
                     'alt_text': 'Favicon',
                     'source': 'favicon'
                 })
+        
+        # Normaliser les URLs d'images (éviter les chemins relatifs du site remontant sur 127.0.0.1)
+        def normalize_image_url(raw_url, page_url=None):
+            if not raw_url:
+                return raw_url
+            url = str(raw_url)
+            # Déjà absolue
+            if url.startswith('http://') or url.startswith('https://'):
+                return url
+            # Si page_url connue (cas des images scrapées)
+            if page_url and (str(page_url).startswith('http://') or str(page_url).startswith('https://')):
+                try:
+                    return urljoin(str(page_url), url)
+                except Exception:
+                    pass
+            # Sinon, fallback sur le website de l'entreprise
+            if base_website:
+                base = str(base_website)
+                if not base.startswith(('http://', 'https://')):
+                    base = 'https://' + base
+                try:
+                    return urljoin(base, url)
+                except Exception:
+                    return url
+            return url
+
+        for img in images:
+            if not isinstance(img, dict):
+                continue
+            original_url = img.get('url')
+            page_url = img.get('page_url')
+            img['url'] = normalize_image_url(original_url, page_url)
         
         conn.close()
         

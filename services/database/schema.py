@@ -87,10 +87,21 @@ class DatabaseSchema(DatabaseBase):
             ('longitude', 'REAL'),
             ('latitude', 'REAL'),
             ('note_google', 'REAL'),
-            ('nb_avis_google', 'INTEGER')
+            ('nb_avis_google', 'INTEGER'),
         ]
         
         for col_name, col_type in new_columns:
+            self.safe_execute_sql(cursor, f'ALTER TABLE entreprises ADD COLUMN {col_name} {col_type}')
+        
+        # Ajouter les colonnes de résumé / segmentation si elles n'existent pas
+        segmentation_columns = [
+            ('cms', 'TEXT'),
+            ('has_blog', 'INTEGER'),
+            ('has_contact_form', 'INTEGER'),
+            ('has_checkout', 'INTEGER'),
+            ('performance_score', 'INTEGER'),
+        ]
+        for col_name, col_type in segmentation_columns:
             self.safe_execute_sql(cursor, f'ALTER TABLE entreprises ADD COLUMN {col_name} {col_type}')
         
         # Ajouter la colonne resume si elle n'existe pas
@@ -100,7 +111,7 @@ class DatabaseSchema(DatabaseBase):
         icon_columns = [
             ('og_image', 'TEXT'),
             ('favicon', 'TEXT'),
-            ('logo', 'TEXT')
+            ('logo', 'TEXT'),
         ]
         for col_name, col_type in icon_columns:
             self.safe_execute_sql(cursor, f'ALTER TABLE entreprises ADD COLUMN {col_name} {col_type}')
@@ -242,6 +253,28 @@ class DatabaseSchema(DatabaseBase):
         ''')
         self.safe_execute_sql(cursor, 'ALTER TABLE campagnes_email ADD COLUMN scheduled_at TEXT')
         self.safe_execute_sql(cursor, 'ALTER TABLE campagnes_email ADD COLUMN campaign_params_json TEXT')
+
+        # Table des modèles d'emails (templates) - stockage en BDD (remplace progressivement templates_data.json)
+        self.execute_sql(cursor, '''
+            CREATE TABLE IF NOT EXISTS email_templates (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'cold_email',
+                subject TEXT,
+                content TEXT NOT NULL,
+                is_html INTEGER DEFAULT 0,
+                is_active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        self.execute_sql(cursor, 'CREATE INDEX IF NOT EXISTS idx_email_templates_category ON email_templates(category)')
+        self.execute_sql(cursor, 'CREATE INDEX IF NOT EXISTS idx_email_templates_updated_at ON email_templates(updated_at)')
+
+        # Migrations simples (si la table existe déjà mais pas certaines colonnes)
+        self.safe_execute_sql(cursor, "ALTER TABLE email_templates ADD COLUMN is_active INTEGER DEFAULT 1")
+        self.safe_execute_sql(cursor, "ALTER TABLE email_templates ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        self.safe_execute_sql(cursor, "ALTER TABLE email_templates ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
         
         # Table des emails envoyés
         self.execute_sql(cursor, '''

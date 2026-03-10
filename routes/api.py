@@ -166,16 +166,23 @@ def entreprises():
             'groupe_id': request.args.get('groupe_id', type=int),
             'no_group': request.args.get('no_group'),
             'has_email': request.args.get('has_email'),
+            # Filtres de segmentation avancée
+            'cms': request.args.get('cms'),
+            'framework': request.args.get('framework'),
+            'has_blog': request.args.get('has_blog'),
+            'has_form': request.args.get('has_form'),
+            'has_tunnel': request.args.get('has_tunnel'),
+            'performance_min': request.args.get('performance_min', type=int),
+            'performance_max': request.args.get('performance_max', type=int),
         }
         # Ne pas retirer les entiers 0 (valides pour min/max)
         def keep_filter(k, v):
             if v is None:
                 return False
-            if k in ('security_min', 'security_max', 'pentest_min', 'pentest_max', 'seo_min', 'seo_max'):
+            if k in ('security_min', 'security_max', 'pentest_min', 'pentest_max', 'seo_min', 'seo_max',
+                     'performance_min', 'performance_max'):
                 return 0 <= v <= 100
-            if k == 'has_email':
-                return str(v).lower() in ('1', 'true', 'yes')
-            if k == 'no_group':
+            if k in ('has_email', 'no_group', 'has_blog', 'has_form', 'has_tunnel'):
                 return str(v).lower() in ('1', 'true', 'yes')
             return v != ''
         filters = {k: v for k, v in filters.items() if keep_filter(k, v)}

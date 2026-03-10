@@ -353,6 +353,65 @@
     }
     
     /**
+     * Affiche le bloc Issues / Points d'attention du scraping (chips + cartes, même pattern que Pentest/Technique/SEO)
+     * @param {Object} stats - { emails, people, phones, social, technologies, metadata }
+     */
+    function displayScrapingIssues(stats) {
+        const container = document.getElementById('scraping-issues-content');
+        if (!container) return;
+        const issues = [];
+        if ((stats.emails || 0) === 0) {
+            issues.push({ severity: 'info', title: 'Aucun email trouvé', description: 'Le scraping n\'a pas collecté d\'adresses email.', recommendation: 'Vérifier les pages contact / à propos ou lancer un scraping ciblé.' });
+        }
+        if ((stats.people || 0) === 0) {
+            issues.push({ severity: 'info', title: 'Aucune personne identifiée', description: 'Aucun nom ou contact de personne n\'a été extrait.', recommendation: 'Enrichir avec une page équipe ou LinkedIn.' });
+        }
+        if ((stats.phones || 0) === 0) {
+            issues.push({ severity: 'low', title: 'Aucun numéro de téléphone', description: 'Aucun numéro de téléphone trouvé sur le site.', recommendation: 'Vérifier la page contact et les pieds de page.' });
+        }
+        if ((stats.social || 0) === 0) {
+            issues.push({ severity: 'info', title: 'Aucun lien réseau social', description: 'Aucun lien vers les réseaux sociaux n\'a été détecté.', recommendation: 'Rechercher manuellement les profils ou relancer le scraping.' });
+        }
+        if ((stats.technologies || 0) === 0) {
+            issues.push({ severity: 'low', title: 'Aucune technologie détectée', description: 'Aucune technologie (CMS, framework) n\'a été identifiée.', recommendation: 'L\'analyse technique peut compléter cette donnée.' });
+        }
+        const counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+        issues.forEach(i => { if (counts[i.severity] !== undefined) counts[i.severity]++; });
+        const borderColors = { critical: '#e74c3c', high: '#e67e22', medium: '#f39c12', low: '#3498db', info: '#6b7280' };
+        if (issues.length === 0) {
+            container.innerHTML = '';
+            container.style.display = 'none';
+            return;
+        }
+        container.style.display = 'block';
+        container.innerHTML = `
+            <div class="scraping-issues-block">
+                <h3 class="scraping-issues-title"><i class="fas fa-exclamation-triangle"></i> Points d'attention scraping <span class="badge badge-warning">${issues.length}</span></h3>
+                <div class="scraping-summary-chips">
+                    ${counts.critical ? `<span class="scraping-chip scraping-chip-critical">${counts.critical} critique${counts.critical > 1 ? 's' : ''}</span>` : ''}
+                    ${counts.high ? `<span class="scraping-chip scraping-chip-high">${counts.high} haute${counts.high > 1 ? 's' : ''}</span>` : ''}
+                    ${counts.medium ? `<span class="scraping-chip scraping-chip-medium">${counts.medium} moyenne${counts.medium > 1 ? 's' : ''}</span>` : ''}
+                    ${counts.low ? `<span class="scraping-chip scraping-chip-low">${counts.low} faible${counts.low > 1 ? 's' : ''}</span>` : ''}
+                    ${counts.info ? `<span class="scraping-chip scraping-chip-info">${counts.info} info</span>` : ''}
+                </div>
+                <div class="scraping-issues-list">
+                    ${issues.map(issue => {
+                        const color = borderColors[issue.severity] || '#6b7280';
+                        return `<div class="scraping-issue-card" style="border-left: 4px solid ${color};">
+                            <div class="scraping-issue-header">
+                                <strong class="scraping-issue-title">${Formatters.escapeHtml(issue.title)}</strong>
+                                <span class="scraping-chip scraping-chip-${issue.severity}">${Formatters.escapeHtml(issue.severity)}</span>
+                            </div>
+                            <div class="scraping-issue-desc">${Formatters.escapeHtml(issue.description)}</div>
+                            ${issue.recommendation ? `<div class="scraping-issue-reco"><strong><i class="fas fa-lightbulb"></i> Recommandation:</strong> ${Formatters.escapeHtml(issue.recommendation)}</div>` : ''}
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>
+        `;
+    }
+    
+    /**
      * Affiche tous les résultats de scraping
      * @param {Object} data - Données de scraping complètes
      */
@@ -364,15 +423,20 @@
         const technologies = data.technologies || {};
         const metadata = data.metadata || {};
         
-        // Afficher les statistiques
-        displayScrapingStats({
+        const stats = {
             emails: emails.length,
             people: people.length,
             phones: phones.length,
             social: Object.keys(social).length,
             technologies: Object.keys(technologies).length,
             metadata: Object.keys(metadata).length
-        });
+        };
+        
+        // Afficher les statistiques
+        displayScrapingStats(stats);
+        
+        // Afficher le bloc Issues (chips + cartes)
+        displayScrapingIssues(stats);
         
         // Afficher chaque section
         displayEmails(emails);
@@ -393,6 +457,7 @@
         displayTechnologies,
         displayMetadata,
         displayStats: displayScrapingStats,
+        displayScrapingIssues,
         updateCount: updateModalCount
     };
     

@@ -1268,6 +1268,36 @@ body[data-theme="dark"] .campagnes-search-input i {
     text-align: center;
 }
 
+.campagne-message-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 0.4rem;
+}
+
+.btn-generate-contact-email {
+    border: none;
+    border-radius: 999px;
+    padding: 0.45rem 0.9rem;
+    font-size: 0.85rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    cursor: pointer;
+    background: rgba(37, 99, 235, 0.08);
+    color: #1f2933;
+    transition: background-color 0.15s ease, transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.btn-generate-contact-email i {
+    font-size: 0.9rem;
+}
+
+.btn-generate-contact-email:hover {
+    background: rgba(37, 99, 235, 0.16);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.12);
+}
+
 .modal-footer {
     padding: 20px 30px;
     border-top: 1px solid #e0e0e0;
@@ -2308,6 +2338,15 @@ body[data-theme="dark"] .selected-count {
     background: #1e293b;
     color: #93c5fd;
     border: 1px solid #334155;
+}
+
+body[data-theme="dark"] .btn-generate-contact-email {
+    background: rgba(59, 130, 246, 0.14);
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] .btn-generate-contact-email:hover {
+    background: rgba(59, 130, 246, 0.24);
 }
 
 body[data-theme="dark"] .results-count {

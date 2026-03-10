@@ -43,6 +43,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initStep1Search();
     initCampagnesFilters();
     initWebSocket();
+    initGenerateContactEmailButton();
 });
 
 // Charger les campagnes
@@ -1317,12 +1318,62 @@ function updateSelectedCount() {
     const countDiv = document.getElementById('selected-count');
     const count = selectedRecipients.length;
     
-    if (count > 0) {
-        countDiv.style.display = 'block';
-        countDiv.textContent = `${count} destinataire(s) sélectionné(s)`;
-    } else {
-        countDiv.style.display = 'none';
+    if (countDiv) {
+        if (count > 0) {
+            countDiv.style.display = 'block';
+            countDiv.textContent = `${count} destinataire(s) sélectionné(s)`;
+        } else {
+            countDiv.style.display = 'none';
+        }
     }
+}
+
+/**
+ * Initialise le bouton "Générer un email de prise de contact" (étape 3).
+ * Utilise la première entreprise des destinataires sélectionnés pour générer un brouillon.
+ */
+function initGenerateContactEmailButton() {
+    const btn = document.getElementById('btn-generate-contact-email');
+    if (!btn) return;
+
+    btn.addEventListener('click', async function () {
+        if (!selectedRecipients || selectedRecipients.length === 0) {
+            alert('Sélectionne au moins un destinataire à l\'étape 2 pour générer un email personnalisé.');
+            return;
+        }
+        const first = selectedRecipients[0];
+        const entrepriseId = first.entreprise_id;
+        if (!entrepriseId) {
+            alert('Impossible d\'identifier l\'entreprise pour ce destinataire.');
+            return;
+        }
+
+        btn.disabled = true;
+        const originalText = btn.textContent;
+        btn.textContent = 'Génération en cours...';
+
+        try {
+            const res = await fetch(`/api/entreprise/${entrepriseId}/generate-contact-email`);
+            const data = await res.json();
+            if (!res.ok || !data || data.error) {
+                throw new Error(data && data.error ? data.error : 'Erreur lors de la génération');
+            }
+            const sujetInput = document.getElementById('campagne-sujet');
+            const messageTextarea = document.getElementById('campagne-message');
+            if (sujetInput && (!sujetInput.value || sujetInput.value.trim() === '')) {
+                sujetInput.value = data.subject || '';
+            }
+            if (messageTextarea) {
+                messageTextarea.value = data.body || '';
+                messageTextarea.focus();
+            }
+        } catch (e) {
+            alert('Erreur: ' + (e && e.message ? e.message : e));
+        } finally {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
+    });
 }
 
 // Actions rapides sur la sélection d'entreprises (étape 1)

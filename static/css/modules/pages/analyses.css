@@ -245,3 +245,505 @@ body[data-theme="dark"] .badge-error {
     background: #450a0a;
     color: #fecaca;
 }
+
+/* Pentest – onglet dans la modale entreprise (dark mode & chips) */
+
+body[data-theme="dark"] #pentest-results-content .detail-section {
+    background: #020617 !important;
+    border-color: #1e293b !important;
+    box-shadow: 0 2px 10px rgba(15,23,42,0.9);
+}
+
+body[data-theme="dark"] #pentest-results-content .detail-section h3 {
+    color: #e5e7eb !important;
+}
+
+body[data-theme="dark"] #pentest-results-content .detail-section a {
+    color: #38bdf8 !important;
+}
+
+/* Cartes de vulnérabilités Pentest */
+#pentest-results-content .pentest-vuln-card {
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 0.75rem;
+    background: #ffffff;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+body[data-theme="dark"] #pentest-results-content .pentest-vuln-card {
+    background: #020617;
+    box-shadow: 0 2px 8px rgba(15,23,42,0.9);
+}
+
+body[data-theme="dark"] #pentest-results-content .pentest-vuln-card strong {
+    color: #e5e7eb !important;
+}
+
+/* Bloc recommandation dans une vulnérabilité */
+#pentest-results-content .pentest-vuln-reco {
+    background: #f0f9ff;
+    border-left: 3px solid #3498db;
+}
+
+body[data-theme="dark"] #pentest-results-content .pentest-vuln-reco {
+    background: #0b1120;
+    border-left-color: #38bdf8;
+    color: #e5e7eb;
+}
+
+/* Chips de résumé Pentest (critique / élevé / moyen / faible) */
+#pentest-results-content .pentest-summary-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.6rem;
+}
+
+#pentest-results-content .pentest-chip {
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    background: rgba(15,23,42,0.08);
+    color: #111827;
+}
+
+body[data-theme="dark"] #pentest-results-content .pentest-chip {
+    background: rgba(15,23,42,0.9);
+    color: #e5e7eb;
+}
+
+#pentest-results-content .pentest-chip-critical {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
+body[data-theme="dark"] #pentest-results-content .pentest-chip-critical {
+    background: #7f1d1d;
+    color: #fecaca;
+}
+
+#pentest-results-content .pentest-chip-high {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+body[data-theme="dark"] #pentest-results-content .pentest-chip-high {
+    background: #78350f;
+    color: #fef3c7;
+}
+
+#pentest-results-content .pentest-chip-medium {
+    background: #e0f2fe;
+    color: #075985;
+}
+
+body[data-theme="dark"] #pentest-results-content .pentest-chip-medium {
+    background: #0c4a6e;
+    color: #e0f2fe;
+}
+
+#pentest-results-content .pentest-chip-low {
+    background: #ecfdf5;
+    color: #047857;
+}
+
+body[data-theme="dark"] #pentest-results-content .pentest-chip-low {
+    background: #064e3b;
+    color: #bbf7d0;
+}
+
+/* ========== Analyse technique (modal entreprise) – issues + dark ========== */
+#technique-results-content .detail-section {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+#technique-results-content .technical-issue-card {
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+    background: #ffffff;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+}
+
+#technique-results-content .technical-issue-desc {
+    color: #555;
+    margin-bottom: 0.35rem;
+    line-height: 1.5;
+}
+
+#technique-results-content .technical-issue-reco {
+    padding: 0.75rem;
+    border-radius: 6px;
+    margin-top: 0.5rem;
+    background: #f0f9ff;
+    border-left: 3px solid #3498db;
+    color: #1e3a8a;
+}
+
+#technique-results-content .technical-summary-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+#technique-results-content .technical-chip {
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    background: rgba(15,23,42,0.08);
+    color: #111827;
+}
+
+#technique-results-content .technical-chip-critical { background: #fee2e2; color: #b91c1c; }
+#technique-results-content .technical-chip-high { background: #fef3c7; color: #92400e; }
+#technique-results-content .technical-chip-medium { background: #e0f2fe; color: #075985; }
+#technique-results-content .technical-chip-low { background: #ecfdf5; color: #047857; }
+
+body[data-theme="dark"] #technique-results-content .detail-section {
+    background: #020617 !important;
+    border-color: #1e293b !important;
+}
+
+body[data-theme="dark"] #technique-results-content .detail-section h3,
+body[data-theme="dark"] #technique-results-content .technical-issue-title {
+    color: #e5e7eb !important;
+}
+
+body[data-theme="dark"] #technique-results-content .technical-issue-card {
+    background: #020617;
+    box-shadow: 0 2px 8px rgba(15,23,42,0.9);
+}
+
+body[data-theme="dark"] #technique-results-content .technical-issue-desc {
+    color: #cbd5e1;
+}
+
+body[data-theme="dark"] #technique-results-content .technical-issue-reco {
+    background: #0b1120;
+    border-left-color: #38bdf8;
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] #technique-results-content .technical-chip {
+    background: rgba(15,23,42,0.9);
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] #technique-results-content .technical-chip-critical { background: #7f1d1d; color: #fecaca; }
+body[data-theme="dark"] #technique-results-content .technical-chip-high { background: #78350f; color: #fef3c7; }
+body[data-theme="dark"] #technique-results-content .technical-chip-medium { background: #0c4a6e; color: #e0f2fe; }
+body[data-theme="dark"] #technique-results-content .technical-chip-low { background: #064e3b; color: #bbf7d0; }
+
+/* ========== Analyse SEO (modal entreprise) – issues + dark ========== */
+#seo-results-content .seo-details {
+    color: #1f2937;
+}
+
+#seo-results-content .seo-section {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+#seo-results-content .seo-issue-card {
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 0.75rem;
+    background: #ffffff;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+}
+
+#seo-results-content .seo-issue-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.35rem;
+}
+
+#seo-results-content .seo-issue-desc {
+    color: #555;
+    line-height: 1.5;
+}
+
+#seo-results-content .seo-issue-reco {
+    padding: 0.75rem;
+    border-radius: 6px;
+    margin-top: 0.5rem;
+    background: #f0f9ff;
+    border-left: 3px solid #3498db;
+    color: #1e3a8a;
+}
+
+#seo-results-content .seo-summary-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 0.75rem;
+}
+
+#seo-results-content .seo-chip {
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    background: rgba(15,23,42,0.08);
+    color: #111827;
+}
+
+#seo-results-content .seo-chip-critical { background: #fee2e2; color: #b91c1c; }
+#seo-results-content .seo-chip-high { background: #fef3c7; color: #92400e; }
+#seo-results-content .seo-chip-medium { background: #e0f2fe; color: #075985; }
+#seo-results-content .seo-chip-low { background: #ecfdf5; color: #047857; }
+#seo-results-content .seo-chip-info { background: #f3f4f6; color: #4b5563; }
+
+body[data-theme="dark"] #seo-results-content .seo-details {
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] #seo-results-content .seo-section {
+    background: #020617 !important;
+    border-color: #1e293b !important;
+}
+
+body[data-theme="dark"] #seo-results-content .seo-section h3 {
+    color: #e5e7eb !important;
+}
+
+body[data-theme="dark"] #seo-results-content .seo-issue-card {
+    background: #020617;
+    box-shadow: 0 2px 8px rgba(15,23,42,0.9);
+}
+
+body[data-theme="dark"] #seo-results-content .seo-issue-title {
+    color: #e5e7eb !important;
+}
+
+body[data-theme="dark"] #seo-results-content .seo-issue-desc {
+    color: #cbd5e1;
+}
+
+body[data-theme="dark"] #seo-results-content .seo-issue-reco {
+    background: #0b1120;
+    border-left-color: #38bdf8;
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] #seo-results-content .seo-chip {
+    background: rgba(15,23,42,0.9);
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] #seo-results-content .seo-chip-critical { background: #7f1d1d; color: #fecaca; }
+body[data-theme="dark"] #seo-results-content .seo-chip-high { background: #78350f; color: #fef3c7; }
+body[data-theme="dark"] #seo-results-content .seo-chip-medium { background: #0c4a6e; color: #e0f2fe; }
+body[data-theme="dark"] #seo-results-content .seo-chip-low { background: #064e3b; color: #bbf7d0; }
+body[data-theme="dark"] #seo-results-content .seo-chip-info { background: #1e293b; color: #94a3b8; }
+
+/* ========== Analyse OSINT (modal entreprise) – issues + dark ========== */
+#osint-results-content .detail-section {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+#osint-results-content .osint-issue-card {
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+    background: #ffffff;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+}
+
+#osint-results-content .osint-issue-desc {
+    color: #555;
+    margin-bottom: 0.35rem;
+    line-height: 1.5;
+}
+
+#osint-results-content .osint-issue-reco {
+    padding: 0.75rem;
+    border-radius: 6px;
+    margin-top: 0.5rem;
+    background: #f0f9ff;
+    border-left: 3px solid #3498db;
+    color: #1e3a8a;
+}
+
+#osint-results-content .osint-summary-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+#osint-results-content .osint-chip {
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    background: rgba(15,23,42,0.08);
+    color: #111827;
+}
+
+#osint-results-content .osint-chip-critical { background: #fee2e2; color: #b91c1c; }
+#osint-results-content .osint-chip-high { background: #fef3c7; color: #92400e; }
+#osint-results-content .osint-chip-medium { background: #e0f2fe; color: #075985; }
+#osint-results-content .osint-chip-low { background: #ecfdf5; color: #047857; }
+#osint-results-content .osint-chip-info { background: #f3f4f6; color: #4b5563; }
+
+body[data-theme="dark"] #osint-results-content .detail-section {
+    background: #020617 !important;
+    border-color: #1e293b !important;
+}
+
+body[data-theme="dark"] #osint-results-content .detail-section h3,
+body[data-theme="dark"] #osint-results-content .osint-issue-title {
+    color: #e5e7eb !important;
+}
+
+body[data-theme="dark"] #osint-results-content .osint-issue-card {
+    background: #020617;
+    box-shadow: 0 2px 8px rgba(15,23,42,0.9);
+}
+
+body[data-theme="dark"] #osint-results-content .osint-issue-desc {
+    color: #cbd5e1;
+}
+
+body[data-theme="dark"] #osint-results-content .osint-issue-reco {
+    background: #0b1120;
+    border-left-color: #38bdf8;
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] #osint-results-content .osint-chip {
+    background: rgba(15,23,42,0.9);
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] #osint-results-content .osint-chip-critical { background: #7f1d1d; color: #fecaca; }
+body[data-theme="dark"] #osint-results-content .osint-chip-high { background: #78350f; color: #fef3c7; }
+body[data-theme="dark"] #osint-results-content .osint-chip-medium { background: #0c4a6e; color: #e0f2fe; }
+body[data-theme="dark"] #osint-results-content .osint-chip-low { background: #064e3b; color: #bbf7d0; }
+body[data-theme="dark"] #osint-results-content .osint-chip-info { background: #1e293b; color: #94a3b8; }
+
+/* ========== Scraping (modal entreprise) – issues + dark ========== */
+.scraping-issues-section {
+    margin-top: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+#scraping-results .scraping-issues-block {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 1rem;
+}
+
+#scraping-results .scraping-issues-title {
+    margin: 0 0 0.75rem 0;
+    color: #2c3e50;
+    font-size: 1.1rem;
+    border-bottom: 2px solid #667eea;
+    padding-bottom: 0.5rem;
+}
+
+#scraping-results .scraping-issue-card {
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 0.75rem;
+    background: #ffffff;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+}
+
+#scraping-results .scraping-issue-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.35rem;
+}
+
+#scraping-results .scraping-issue-desc {
+    color: #555;
+    line-height: 1.5;
+}
+
+#scraping-results .scraping-issue-reco {
+    padding: 0.75rem;
+    border-radius: 6px;
+    margin-top: 0.5rem;
+    background: #f0f9ff;
+    border-left: 3px solid #3498db;
+    color: #1e3a8a;
+}
+
+#scraping-results .scraping-summary-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 0.75rem;
+}
+
+#scraping-results .scraping-chip {
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    background: rgba(15,23,42,0.08);
+    color: #111827;
+}
+
+#scraping-results .scraping-chip-critical { background: #fee2e2; color: #b91c1c; }
+#scraping-results .scraping-chip-high { background: #fef3c7; color: #92400e; }
+#scraping-results .scraping-chip-medium { background: #e0f2fe; color: #075985; }
+#scraping-results .scraping-chip-low { background: #ecfdf5; color: #047857; }
+#scraping-results .scraping-chip-info { background: #f3f4f6; color: #4b5563; }
+
+body[data-theme="dark"] #scraping-results .scraping-issues-block {
+    background: #020617 !important;
+    border-color: #1e293b !important;
+}
+
+body[data-theme="dark"] #scraping-results .scraping-issues-title {
+    color: #e5e7eb !important;
+}
+
+body[data-theme="dark"] #scraping-results .scraping-issue-card {
+    background: #020617;
+    box-shadow: 0 2px 8px rgba(15,23,42,0.9);
+}
+
+body[data-theme="dark"] #scraping-results .scraping-issue-title {
+    color: #e5e7eb !important;
+}
+
+body[data-theme="dark"] #scraping-results .scraping-issue-desc {
+    color: #cbd5e1;
+}
+
+body[data-theme="dark"] #scraping-results .scraping-issue-reco {
+    background: #0b1120;
+    border-left-color: #38bdf8;
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] #scraping-results .scraping-chip {
+    background: rgba(15,23,42,0.9);
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] #scraping-results .scraping-chip-critical { background: #7f1d1d; color: #fecaca; }
+body[data-theme="dark"] #scraping-results .scraping-chip-high { background: #78350f; color: #fef3c7; }
+body[data-theme="dark"] #scraping-results .scraping-chip-medium { background: #0c4a6e; color: #e0f2fe; }
+body[data-theme="dark"] #scraping-results .scraping-chip-low { background: #064e3b; color: #bbf7d0; }
+body[data-theme="dark"] #scraping-results .scraping-chip-info { background: #1e293b; color: #94a3b8; }

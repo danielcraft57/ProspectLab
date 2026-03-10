@@ -27,6 +27,42 @@ Cette roadmap regroupe les grandes idées de développement orientées prospecti
   - Présence ou non de formulaires / tunnel e‑commerce / blog.
 - Sauvegarde de **segments** (ex: “PME BTP avec WordPress ancien, mauvais mobile”).
 
+- **Compléments backend à prévoir**  
+  - Unifier les filtres de la liste entreprises et ceux du ciblage campagnes :
+    - Étendre `EntrepriseManager` (`get_entreprises` / `get_entreprises_for_campagne`) pour exploiter les tables `analyses_techniques`, `analyses_seo`, `analyses_osint` (JOIN sur `entreprise_id`) et exposer :
+      - `cms`, `cms_version`, `framework`, `performance_score`, `security_score`, `has_blog`, `has_form`, `has_checkout`, etc.
+    - Normaliser les noms de paramètres API (`cms`, `tech_front`, `tech_back`, `seo_min`, `perf_min`, `has_blog`, `has_form`, `has_tunnel`…) et les documenter.
+  - Consolider la gestion des segments dans `CampagneManager` :
+    - Valider/typer le JSON de `criteres_json` (schéma de critères supportés).
+    - Ajouter un endpoint de *prévisualisation* d’un segment (`/api/ciblage/segments/<id>/preview`) qui renvoie un échantillon d’entreprises + total.
+    - Prévoir la duplication/mise à jour de segments (v2) pour itérer facilement sur un ciblage.
+  - Optimisation perf :
+    - Index dédiés sur les colonnes les plus filtrées (secteur, opportunité, statut, scores, cms, framework).
+    - Limiter la taille des réponses (pagination, champs minimaux côté liste, détails complets en lazy‑load).
+
+- **Front – liste entreprises (UX/UI + anims)**  
+  - Transformer le panneau de filtres avancés existant en *palette de segmentation* :
+    - Regrouper visuellement les critères par bloc : “Profil business”, “Technos & CMS”, “Scores”, “Comportements / contenu”.
+    - Utiliser des *chips/pills* cliquables pour les valeurs fréquentes (WordPress, PrestaShop, SPA, etc.) avec micro‑animations (scale / fade).
+  - Micro‑interactions :
+    - Animation d’ouverture/fermeture du panneau avancé (slide + légère ombre + fade sur le fond).
+    - Compteur de filtres actifs avec highlight pulsé lors de l’activation/désactivation d’un critère.
+    - Skeletons / shimmer sur la grille pendant le rechargement (au lieu d’un simple “Chargement…”).
+  - Multi‑sélection et actions de masse :
+    - Cases à cocher persistantes entre les pages avec un résumé “X entreprises sélectionnées sur Y résultats”.
+    - Snackbars / toasts pour confirmer les actions de masse (ajout à un groupe, relance d’analyses) avec *undo* simple quand c’est possible.
+
+- **Front – builder de segments (campagnes + modal dédiée)**  
+  - Dans l’étape 1 des campagnes, enrichir le mode “Segment sauvegardé” :
+    - Afficher, sous le select, un *résumé lisible* des critères du segment (“Secteur contient BTP · CMS = WordPress · SEO < 50 · Sans HTTPS”).
+    - Bouton “Voir les entreprises de ce segment” ouvrant une mini‑liste en slide‑over (scrollable, sans quitter le wizard).
+  - Ajouter un *mode créateur de segment* (v2) :
+    - UI type “builder de règles” : chaque ligne = [Champ] [Opérateur] [Valeur], avec apparition/disparition animée (slide + opacity).
+    - Bouton “Enregistrer comme segment” (nom + description) depuis soit la page entreprises, soit l’étape 1 des campagnes.
+  - Cohérence visuelle :
+    - Réutiliser les mêmes composants (pills, sliders de scores, champs tags avec autocomplétion + compteur) entre la page entreprises et le wizard campagnes.
+    - Design responsive : filtres empilés en accordéon sur mobile, avec badge de nombre de filtres actifs sur chaque section.
+
 ### 3. Workflows de prospection intégrés (Kanban)
 
 - **Statut**: 🔴 À faire (UI Kanban + persistance par entreprise)

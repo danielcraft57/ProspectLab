@@ -41,16 +41,81 @@ class TemplateManager:
             json.dump(default_templates, f, ensure_ascii=False, indent=2)
     
     def _load_templates(self) -> Dict:
-        """Charge les templates depuis le fichier JSON"""
+        """Charge les templates depuis la BDD si disponible, sinon depuis le JSON."""
+        # 1) Essayer la BDD (source de vérité)
+        try:
+            from services.database import Database
+            db = Database()
+            # Si la table existe mais qu'elle est vide, seed depuis le JSON (si présent)
+            try:
+                if hasattr(db, 'count_email_templates') and db.count_email_templates() == 0:
+                    self._seed_db_from_json(db)
+            except Exception:
+                # Ne pas bloquer le chargement si le seed échoue
+                pass
+
+            if hasattr(db, 'list_email_templates'):
+                rows = db.list_email_templates(active_only=True)
+                if rows is not None:
+                    # Harmoniser les types
+                    normalized = []
+                    for r in rows:
+                        d = dict(r)
+                        d['is_html'] = bool(d.get('is_html'))
+                        normalized.append(d)
+                    return normalized
+        except Exception:
+            # Fallback JSON
+            pass
+
+        # 2) Fallback: JSON
         try:
             with open(self.templates_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 return data.get('templates', [])
         except Exception as e:
             return []
+
+    def _seed_db_from_json(self, db) -> None:
+        """
+        Seed la BDD à partir du fichier JSON local si la table est vide.
+        But: garder les templates par défaut au premier lancement sans action manuelle.
+        """
+        try:
+            if not self.templates_file.exists():
+                return
+            with open(self.templates_file, 'r', encoding='utf-8') as f:
+                data = json.load(f) or {}
+            templates = data.get('templates') or []
+            for tpl in templates:
+                try:
+                    tpl_id = tpl.get('id')
+                    if not tpl_id:
+                        continue
+                    category = tpl.get('category') or 'cold_email'
+                    is_html = bool(tpl.get('is_html')) or category == 'html_email'
+                    subject = tpl.get('subject') or ''
+                    name = tpl.get('name') or tpl_id
+                    content = tpl.get('content') or ''
+                    if hasattr(db, 'upsert_email_template'):
+                        db.upsert_email_template(
+                            template_id=tpl_id,
+                            name=name,
+                            category=category,
+                            subject=subject,
+                            content=content,
+                            is_html=is_html,
+                            is_active=True
+                        )
+                except Exception:
+                    continue
+        except Exception:
+            return
     
     def _save_templates(self):
-        """Sauvegarde les templates dans le fichier JSON"""
+        """Sauvegarde les templates (BDD si dispo, sinon JSON)."""
+        # On évite d'écraser en masse la BDD ici: le CRUD passe par create/update/delete.
+        # Fallback JSON seulement.
         data = {'templates': self.templates}
         with open(self.templates_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -92,12 +157,26 @@ class TemplateManager:
         Returns:
             Template ou None
         """
+        # BDD d'abord
+        try:
+            from services.database import Database
+            db = Database()
+            if hasattr(db, 'get_email_template'):
+                tpl = db.get_email_template(template_id)
+                if tpl:
+                    d = dict(tpl)
+                    d['is_html'] = bool(d.get('is_html'))
+                    return d
+        except Exception:
+            pass
+
         for template in self.templates:
             if template.get('id') == template_id:
                 return template.copy()
         return None
     
-    def create_template(self, name: str, subject: str, content: str, category: str = 'cold_email') -> Dict:
+    def create_template(self, name: str, subject: str, content: str, category: str = 'cold_email',
+                        template_id: Optional[str] = None) -> Dict:
         """
         Crée un nouveau template
         
@@ -110,7 +189,10 @@ class TemplateManager:
         Returns:
             Template créé
         """
-        template_id = f"template_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        if template_id:
+            template_id = str(template_id).strip()
+        if not template_id:
+            template_id = f"template_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
         template = {
             'id': template_id,
@@ -123,9 +205,26 @@ class TemplateManager:
             'updated_at': datetime.now().isoformat()
         }
         
+        # BDD si dispo
+        try:
+            from services.database import Database
+            db = Database()
+            if hasattr(db, 'upsert_email_template'):
+                saved = db.upsert_email_template(
+                    template_id=template_id,
+                    name=name,
+                    category=category,
+                    subject=subject,
+                    content=content,
+                    is_html=(category == 'html_email'),
+                    is_active=True
+                )
+                return dict(saved)
+        except Exception:
+            pass
+
         self.templates.append(template)
         self._save_templates()
-        
         return template
     
     def update_template(self, template_id: str, name: str = None, subject: str = None,
@@ -143,6 +242,31 @@ class TemplateManager:
         Returns:
             Template mis à jour ou None
         """
+        # BDD si dispo
+        try:
+            from services.database import Database
+            db = Database()
+            if hasattr(db, 'get_email_template') and hasattr(db, 'upsert_email_template'):
+                existing = db.get_email_template(template_id)
+                if existing:
+                    existing = dict(existing)
+                    new_name = name if name is not None else existing.get('name', template_id)
+                    new_category = category if category is not None else existing.get('category', 'cold_email')
+                    new_subject = subject if subject is not None else existing.get('subject', '')
+                    new_content = content if content is not None else existing.get('content', '')
+                    saved = db.upsert_email_template(
+                        template_id=template_id,
+                        name=new_name,
+                        category=new_category,
+                        subject=new_subject,
+                        content=new_content,
+                        is_html=(new_category == 'html_email'),
+                        is_active=bool(existing.get('is_active', 1))
+                    )
+                    return dict(saved)
+        except Exception:
+            pass
+
         for template in self.templates:
             if template.get('id') == template_id:
                 if name is not None:
@@ -169,13 +293,24 @@ class TemplateManager:
         Returns:
             True si supprimé, False sinon
         """
+        # BDD si dispo
+        try:
+            from services.database import Database
+            db = Database()
+            if hasattr(db, 'delete_email_template'):
+                deleted = db.delete_email_template(template_id)
+                if deleted:
+                    return True
+        except Exception:
+            pass
+
         initial_count = len(self.templates)
         self.templates = [t for t in self.templates if t.get('id') != template_id]
-        
+
         if len(self.templates) < initial_count:
             self._save_templates()
             return True
-        
+
         return False
     
     def _get_entreprise_extended_data(self, entreprise_id: int = None) -> dict:
@@ -393,6 +528,118 @@ class TemplateManager:
             import logging
             logging.getLogger(__name__).warning(f'Erreur lors de la récupération des données étendues pour entreprise {entreprise_id}: {e}')
             return {}
+
+    def generate_contact_email_draft(self, entreprise_id: int, max_problems: int = 3, max_quick_wins: int = 2) -> Dict[str, str]:
+        """
+        Génère un brouillon d'email de prise de contact basé sur l'audit d'une entreprise.
+
+        Objectif: 2–3 problèmes concrets + 1–2 quick wins + CTA.
+        """
+        data = self._get_entreprise_extended_data(entreprise_id)
+        if not data:
+            return {
+                "subject": "Un mot pour votre site",
+                "body": (
+                    "Bonjour,\n\n"
+                    "J'ai jeté un oeil à votre site et je vois plusieurs opportunités d'amélioration "
+                    "(performance, SEO, expérience utilisateur). Si vous le souhaitez, je peux vous proposer "
+                    "un audit rapide et quelques pistes concrètes.\n\n"
+                    "Cordialement,\nVotre nom"
+                )
+            }
+
+        nom_entreprise = data.get('entreprise_nom') or data.get('entreprise') or ''
+        website = data.get('website') or ''
+        secteur = data.get('secteur') or ''
+
+        # On a stocké les listes SEO/sécurité sous forme de <li>...</li> dans data.
+        # Pour un brouillon texte, on nettoie un peu.
+        def extract_plain_list(value: str) -> list[str]:
+            if not value:
+                return []
+            items: list[str] = []
+            for line in str(value).splitlines():
+                txt = line.strip()
+                if not txt:
+                    continue
+                # enlever <li> et </li> si présent
+                if txt.startswith("<li>") and txt.endswith("</li>"):
+                    txt = txt[4:-5]
+                items.append(txt)
+            return items
+
+        seo_issues_raw = data.get('seo_issues') or ''
+        security_issues_raw = data.get('security_issues') or ''
+        seo_issues = extract_plain_list(seo_issues_raw)
+        security_issues = extract_plain_list(security_issues_raw)
+
+        problems: list[str] = []
+        for lst in (seo_issues, security_issues):
+            for item in lst:
+                if item not in problems:
+                    problems.append(item)
+                if len(problems) >= max_problems:
+                    break
+            if len(problems) >= max_problems:
+                break
+
+        quick_wins: list[str] = []
+        perf = data.get('performance_score')
+        sec_score = data.get('security_score')
+
+        if isinstance(perf, (int, float)) and perf < 70:
+            quick_wins.append("optimiser le poids des pages et certains scripts pour accélérer le chargement")
+        if isinstance(sec_score, (int, float)) and sec_score < 70:
+            quick_wins.append("durcir la configuration HTTPS et les en-têtes de sécurité")
+        if not data.get('sitemap_exists'):
+            quick_wins.append("ajouter un sitemap.xml propre pour faciliter l'indexation")
+        if not data.get('meta_description'):
+            quick_wins.append("poser des meta descriptions plus claires sur les pages clés")
+
+        quick_wins = quick_wins[:max_quick_wins]
+
+        lignes: list[str] = []
+
+        destinataire = (data.get('responsable') or '').strip()
+        if not destinataire:
+            destinataire = "Madame, Monsieur"
+        lignes.append(f"Bonjour {destinataire},")
+
+        intro_parts = []
+        if nom_entreprise:
+            intro_parts.append(f"le site de {nom_entreprise}")
+        if website:
+            intro_parts.append(f"({website})")
+        if secteur:
+            intro_parts.append(f"dans le secteur {secteur}")
+        intro_str = " ".join([p for p in intro_parts if p])
+        if intro_str:
+            lignes.append(f"\nJe me permets de vous écrire après avoir analysé rapidement {intro_str}.")
+        else:
+            lignes.append("\nJe me permets de vous écrire après avoir analysé rapidement votre site.")
+
+        if problems:
+            lignes.append("\nVoici quelques points concrets qui ressortent de l'audit :")
+            for p in problems:
+                lignes.append(f"- {p}")
+
+        if quick_wins:
+            lignes.append("\nAvec quelques ajustements ciblés, on peut déjà obtenir des résultats rapides, par exemple :")
+            for q in quick_wins:
+                lignes.append(f"- {q}")
+
+        lignes.append(
+            "\nJe peux vous proposer un court échange (15–20 minutes) pour vous montrer plus en détail ce que j'ai vu "
+            "et ce que l'on peut améliorer ensemble."
+        )
+        lignes.append("\nCordialement,\nVotre nom")
+
+        subject = f"Quelques pistes d'amélioration pour votre site - {nom_entreprise or 'votre site'}"
+
+        return {
+            "subject": subject,
+            "body": "\n".join(lignes)
+        }
     
     def render_template(self, template_id: str, nom: str = '', entreprise: str = '', email: str = '', 
                        entreprise_id: int = None):

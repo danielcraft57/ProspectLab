@@ -255,6 +255,12 @@
                         </div>
                         <div class="form-group">
                             <label for="campagne-message">Message personnalisé (si aucun modèle)</label>
+                            <div class="campagne-message-toolbar">
+                                <button type="button" id="btn-generate-contact-email" class="btn-generate-contact-email">
+                                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                                    Générer un email de prise de contact
+                                </button>
+                            </div>
                             <textarea id="campagne-message" name="custom_message" rows="8" placeholder="Votre message... (peut contenir {nom}, {entreprise}, {email})"></textarea>
                             <div id="template-preview" style="display: none;"></div>
                             <div class="form-hint">Les modèles HTML sont affichés en aperçu. Le contenu sera utilisé lors de l'envoi.</div>

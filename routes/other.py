@@ -194,6 +194,16 @@ def manage_templates():
     return render_page('templates.html', templates=templates)
 
 
+@other_bp.route('/emails/templates', methods=['GET'])
+@login_required
+def manage_templates_db_page():
+    """
+    Nouvelle page de gestion des modèles (stockage BDD).
+    UI moderne + CRUD via API /api/templates.
+    """
+    return render_page('email_templates_manager.html')
+
+
 @other_bp.route('/download/<filename>')
 @login_required
 def download_file(filename):
@@ -221,7 +231,7 @@ def download_file(filename):
                              back_url=url_for('main.index'))
 
 
-@other_bp.route('/api/templates')
+@other_bp.route('/api/templates', methods=['GET', 'POST'])
 @login_required
 def api_templates():
     """
@@ -230,11 +240,32 @@ def api_templates():
     Returns:
         JSON: Liste des templates
     """
-    templates = template_manager.list_templates()
-    return jsonify(templates)
+    if request.method == 'GET':
+        templates = template_manager.list_templates()
+        return jsonify(templates)
+
+    # POST: créer un template (REST)
+    data = request.get_json() or {}
+    explicit_id = (data.get('id') or '').strip()
+    name = (data.get('name') or '').strip()
+    category = (data.get('category') or 'cold_email').strip()
+    subject = (data.get('subject') or '').strip()
+    content = data.get('content') or ''
+
+    if not name or not content:
+        return jsonify({'error': 'Champs requis: name, content'}), 400
+
+    tpl = template_manager.create_template(
+        name=name,
+        subject=subject,
+        content=content,
+        category=category,
+        template_id=explicit_id or None
+    )
+    return jsonify({'success': True, 'template': tpl}), 201
 
 
-@other_bp.route('/api/templates/<template_id>')
+@other_bp.route('/api/templates/<template_id>', methods=['GET', 'PUT', 'DELETE'])
 @login_required
 def api_template_detail(template_id):
     """
@@ -246,9 +277,29 @@ def api_template_detail(template_id):
     Returns:
         JSON: Détails du template ou erreur 404
     """
-    template = template_manager.get_template(template_id)
-    if template:
-        return jsonify(template)
+    if request.method == 'GET':
+        template = template_manager.get_template(template_id)
+        if template:
+            return jsonify(template)
+        return jsonify({'error': 'Template introuvable'}), 404
+
+    if request.method == 'DELETE':
+        ok = template_manager.delete_template(template_id)
+        if ok:
+            return jsonify({'success': True})
+        return jsonify({'error': 'Template introuvable'}), 404
+
+    # PUT: update
+    data = request.get_json() or {}
+    tpl = template_manager.update_template(
+        template_id=template_id,
+        name=data.get('name'),
+        subject=data.get('subject'),
+        content=data.get('content'),
+        category=data.get('category')
+    )
+    if tpl:
+        return jsonify({'success': True, 'template': tpl})
     return jsonify({'error': 'Template introuvable'}), 404
 
 
@@ -264,6 +315,22 @@ def api_entreprise_template_suggestions(entreprise_id):
         max_results = request.args.get('limit', type=int) or 3
         suggestions = template_manager.suggest_templates_for_entreprise(entreprise_id, max_results=max_results)
         return jsonify(suggestions)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@other_bp.route('/api/entreprise/<int:entreprise_id>/generate-contact-email', methods=['GET'])
+@login_required
+def api_generate_contact_email(entreprise_id):
+    """
+    API: Génère un brouillon d'email de prise de contact basé sur l'audit.
+
+    Returns:
+        JSON: {subject, body}
+    """
+    try:
+        draft = template_manager.generate_contact_email_draft(entreprise_id)
+        return jsonify(draft)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -525,6 +592,22 @@ def api_ciblage_entreprises():
         try:
             groupe_ids = [int(s.strip()) for s in request.args.get('groupe_ids').split(',') if s.strip()]
             filters['groupe_ids'] = groupe_ids
+        except ValueError:
+            pass
+    # Filtres de segmentation avancée réutilisables dans les campagnes
+    if request.args.get('cms'):
+        filters['cms'] = request.args.get('cms')
+    if request.args.get('framework'):
+        filters['framework'] = request.args.get('framework')
+    if request.args.get('has_blog') in ('1', 'true', 'True'):
+        filters['has_blog'] = True
+    if request.args.get('has_form') in ('1', 'true', 'True'):
+        filters['has_form'] = True
+    if request.args.get('has_tunnel') in ('1', 'true', 'True'):
+        filters['has_tunnel'] = True
+    if request.args.get('performance_max'):
+        try:
+            filters['performance_max'] = int(request.args.get('performance_max'))
         except ValueError:
             pass
     entreprise_manager = EntrepriseManager()

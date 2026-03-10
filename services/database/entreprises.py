@@ -652,6 +652,37 @@ class EntrepriseManager(DatabaseBase):
                 inner_query += ' AND e.id NOT IN (SELECT entreprise_id FROM entreprise_groupes)'
             if str(filters.get('has_email', '')).lower() in ('1', 'true', 'yes'):
                 inner_query += " AND e.email_principal IS NOT NULL AND TRIM(e.email_principal) <> ''"
+            # Nouveaux filtres de segmentation
+            if filters.get('cms'):
+                cms_val = filters['cms']
+                if isinstance(cms_val, (list, tuple, set)):
+                    placeholders = ','.join(['?' for _ in cms_val])
+                    inner_query += f' AND e.cms IN ({placeholders})'
+                    params.extend(list(cms_val))
+                else:
+                    inner_query += ' AND e.cms = ?'
+                    params.append(cms_val)
+            if filters.get('framework'):
+                fw_val = filters['framework']
+                if isinstance(fw_val, (list, tuple, set)):
+                    placeholders = ','.join(['?' for _ in fw_val])
+                    inner_query += f' AND e.framework IN ({placeholders})'
+                    params.extend(list(fw_val))
+                else:
+                    inner_query += ' AND e.framework = ?'
+                    params.append(fw_val)
+            if str(filters.get('has_blog', '')).lower() in ('1', 'true', 'yes'):
+                inner_query += ' AND e.has_blog = 1'
+            if str(filters.get('has_form', '')).lower() in ('1', 'true', 'yes'):
+                inner_query += ' AND e.has_contact_form = 1'
+            if str(filters.get('has_tunnel', '')).lower() in ('1', 'true', 'yes'):
+                inner_query += ' AND e.has_checkout = 1'
+            if filters.get('performance_min') is not None:
+                inner_query += ' AND e.performance_score IS NOT NULL AND e.performance_score >= ?'
+                params.append(int(filters['performance_min']))
+            if filters.get('performance_max') is not None:
+                inner_query += ' AND e.performance_score IS NOT NULL AND e.performance_score <= ?'
+                params.append(int(filters['performance_max']))
             if filters.get('search'):
                 # Recherche full-text simple, insensible à la casse, multi-mots.
                 # Exemple: "boulanger metz" doit matcher nom + ville/adresse.
@@ -845,6 +876,37 @@ class EntrepriseManager(DatabaseBase):
                 inner_query += ' AND e.id NOT IN (SELECT entreprise_id FROM entreprise_groupes)'
             if str(filters.get('has_email', '')).lower() in ('1', 'true', 'yes'):
                 inner_query += " AND e.email_principal IS NOT NULL AND TRIM(e.email_principal) <> ''"
+            # Nouveaux filtres de segmentation (même logique que get_entreprises)
+            if filters.get('cms'):
+                cms_val = filters['cms']
+                if isinstance(cms_val, (list, tuple, set)):
+                    placeholders = ','.join(['?' for _ in cms_val])
+                    inner_query += f' AND e.cms IN ({placeholders})'
+                    params.extend(list(cms_val))
+                else:
+                    inner_query += ' AND e.cms = ?'
+                    params.append(cms_val)
+            if filters.get('framework'):
+                fw_val = filters['framework']
+                if isinstance(fw_val, (list, tuple, set)):
+                    placeholders = ','.join(['?' for _ in fw_val])
+                    inner_query += f' AND e.framework IN ({placeholders})'
+                    params.extend(list(fw_val))
+                else:
+                    inner_query += ' AND e.framework = ?'
+                    params.append(fw_val)
+            if str(filters.get('has_blog', '')).lower() in ('1', 'true', 'yes'):
+                inner_query += ' AND e.has_blog = 1'
+            if str(filters.get('has_form', '')).lower() in ('1', 'true', 'yes'):
+                inner_query += ' AND e.has_contact_form = 1'
+            if str(filters.get('has_tunnel', '')).lower() in ('1', 'true', 'yes'):
+                inner_query += ' AND e.has_checkout = 1'
+            if filters.get('performance_min') is not None:
+                inner_query += ' AND e.performance_score IS NOT NULL AND e.performance_score >= ?'
+                params.append(int(filters['performance_min']))
+            if filters.get('performance_max') is not None:
+                inner_query += ' AND e.performance_score IS NOT NULL AND e.performance_score <= ?'
+                params.append(int(filters['performance_max']))
             if filters.get('search'):
                 # Même logique de recherche que dans get_entreprises :
                 # multi-mots, insensible à la casse, plusieurs champs.
@@ -1883,6 +1945,34 @@ class EntrepriseManager(DatabaseBase):
                 params.append('%' + str(filters['tags_contains']) + '%')
             if filters.get('favori'):
                 base_sql += ' AND e.favori = 1'
+            # Nouveaux filtres de segmentation réutilisés pour les campagnes
+            if filters.get('cms'):
+                cms_val = filters['cms']
+                if isinstance(cms_val, (list, tuple, set)):
+                    placeholders = ','.join(['?' for _ in cms_val])
+                    base_sql += f' AND e.cms IN ({placeholders})'
+                    params.extend(list(cms_val))
+                else:
+                    base_sql += ' AND e.cms = ?'
+                    params.append(cms_val)
+            if filters.get('framework'):
+                fw_val = filters['framework']
+                if isinstance(fw_val, (list, tuple, set)):
+                    placeholders = ','.join(['?' for _ in fw_val])
+                    base_sql += f' AND e.framework IN ({placeholders})'
+                    params.extend(list(fw_val))
+                else:
+                    base_sql += ' AND e.framework = ?'
+                    params.append(fw_val)
+            if str(filters.get('has_blog', '')).lower() in ('1', 'true', 'yes'):
+                base_sql += ' AND e.has_blog = 1'
+            if str(filters.get('has_form', '')).lower() in ('1', 'true', 'yes'):
+                base_sql += ' AND e.has_contact_form = 1'
+            if str(filters.get('has_tunnel', '')).lower() in ('1', 'true', 'yes'):
+                base_sql += ' AND e.has_checkout = 1'
+            if filters.get('performance_max') is not None:
+                base_sql += ' AND e.performance_score IS NOT NULL AND e.performance_score <= ?'
+                params.append(int(filters['performance_max']))
             if filters.get('search'):
                 # Même logique de recherche que sur la liste d'entreprises :
                 # insensible à la casse, multi-mots, plusieurs colonnes.

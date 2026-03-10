@@ -65,6 +65,37 @@
         }
         const securityInfo = Badges.getSecurityScoreInfo(securityScore);
         
+        // Construire la liste d'issues techniques (alignée sur le pattern Pentest)
+        const importantHeaders = ['Content-Security-Policy', 'Strict-Transport-Security', 'X-Frame-Options', 'X-Content-Type-Options', 'Referrer-Policy'];
+        const technicalIssues = [];
+        if (!analysis.ssl_valid) {
+            technicalIssues.push({ severity: 'critical', title: 'SSL non valide', description: 'Le certificat SSL est absent ou invalide.', recommendation: 'Configurer un certificat SSL valide (ex. Let\'s Encrypt) et forcer HTTPS.' });
+        }
+        if (analysis.security_headers && typeof analysis.security_headers === 'object') {
+            const missing = importantHeaders.filter(name => !analysis.security_headers[name] || (analysis.security_headers[name] && typeof analysis.security_headers[name] === 'object' && !analysis.security_headers[name].value && analysis.security_headers[name].status !== 'present'));
+            if (missing.length) {
+                technicalIssues.push({ severity: 'high', title: 'En-têtes de sécurité manquants', description: `En-têtes absents ou non configurés : ${missing.join(', ')}.`, recommendation: 'Ajouter les en-têtes de sécurité recommandés (CSP, HSTS, X-Frame-Options, etc.) dans la configuration du serveur.' });
+            }
+        }
+        if (!analysis.waf) {
+            technicalIssues.push({ severity: 'medium', title: 'Aucun WAF détecté', description: 'Aucun Web Application Firewall n\'a été détecté.', recommendation: 'Envisager un WAF (Cloudflare, AWS WAF, ModSecurity) pour renforcer la protection.' });
+        }
+        const perfNum = typeof perfScore === 'number' ? perfScore : (analysis.performance_grade ? parseInt(analysis.performance_grade, 10) : null);
+        if (perfNum !== null && perfNum < 50) {
+            technicalIssues.push({ severity: 'medium', title: 'Performance faible', description: `Score performance ${perfNum}/100. Le site peut être lent pour les utilisateurs.`, recommendation: 'Optimiser les ressources (images, cache, compression), réduire le JavaScript et les requêtes.' });
+        }
+        if (analysis.seo_meta && typeof analysis.seo_meta === 'object') {
+            if (!analysis.seo_meta.meta_title || !analysis.seo_meta.meta_title.trim()) {
+                technicalIssues.push({ severity: 'low', title: 'Meta titre manquant', description: 'La balise meta title est absente ou vide.', recommendation: 'Ajouter un titre unique et descriptif (50–60 caractères) sur chaque page.' });
+            }
+            if (!analysis.seo_meta.meta_description || !analysis.seo_meta.meta_description.trim()) {
+                technicalIssues.push({ severity: 'low', title: 'Meta description manquante', description: 'La balise meta description est absente ou vide.', recommendation: 'Ajouter une description concise (150–160 caractères) pour le référencement.' });
+            }
+        }
+        const techIssueCounts = { critical: 0, high: 0, medium: 0, low: 0 };
+        technicalIssues.forEach(i => { if (techIssueCounts[i.severity] !== undefined) techIssueCounts[i.severity]++; });
+        const hasTechnicalIssues = technicalIssues.length > 0;
+        
         let html = `
             <div class="analysis-details" style="display: flex; flex-direction: column; gap: 1.5rem;">
                 <div class="detail-section" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1.5rem; border-radius: 8px;">
@@ -105,6 +136,32 @@
                         </div>
                     </div>
                 </div>
+                
+                ${hasTechnicalIssues ? `
+                <div class="detail-section technical-issues-section">
+                    <h3 style="margin: 0 0 1rem 0; color: #2c3e50; border-bottom: 2px solid #667eea; padding-bottom: 0.5rem;"><i class="fas fa-exclamation-triangle"></i> Issues techniques <span class="badge badge-danger">${technicalIssues.length}</span></h3>
+                    <div class="technical-summary-chips">
+                        ${techIssueCounts.critical ? `<span class="technical-chip technical-chip-critical">${techIssueCounts.critical} critique${techIssueCounts.critical > 1 ? 's' : ''}</span>` : ''}
+                        ${techIssueCounts.high ? `<span class="technical-chip technical-chip-high">${techIssueCounts.high} haute${techIssueCounts.high > 1 ? 's' : ''}</span>` : ''}
+                        ${techIssueCounts.medium ? `<span class="technical-chip technical-chip-medium">${techIssueCounts.medium} moyenne${techIssueCounts.medium > 1 ? 's' : ''}</span>` : ''}
+                        ${techIssueCounts.low ? `<span class="technical-chip technical-chip-low">${techIssueCounts.low} faible${techIssueCounts.low > 1 ? 's' : ''}</span>` : ''}
+                    </div>
+                    <div class="technical-issues-list" style="display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1rem;">
+                        ${technicalIssues.map(issue => {
+                            const borderColors = { critical: '#e74c3c', high: '#e67e22', medium: '#f39c12', low: '#3498db' };
+                            const color = borderColors[issue.severity] || '#6b7280';
+                            return `<div class="technical-issue-card" style="border-left: 4px solid ${color};">
+                                <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem;">
+                                    <strong class="technical-issue-title">${Formatters.escapeHtml(issue.title)}</strong>
+                                    <span class="technical-chip technical-chip-${issue.severity}" style="font-size: 0.75rem;">${Formatters.escapeHtml(issue.severity)}</span>
+                                </div>
+                                ${issue.description ? `<div class="technical-issue-desc">${Formatters.escapeHtml(issue.description)}</div>` : ''}
+                                ${issue.recommendation ? `<div class="technical-issue-reco"><strong><i class="fas fa-lightbulb"></i> Recommandation:</strong> ${Formatters.escapeHtml(issue.recommendation)}</div>` : ''}
+                            </div>`;
+                        }).join('')}
+                    </div>
+                </div>
+                ` : ''}
                 
                 ${(() => {
                     const pagesCount = pagesSummary.pages_count || pagesSummary.pages_scanned || pagesList.length || 0;

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Rapport d'audit - ProspectLab{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="header-actions">
+        <a href="{{ url_for('main.entreprise_detail', entreprise_id=entreprise_id) }}" class="btn btn-secondary">← Fiche entreprise</a>
+        <a href="{{ url_for('main.liste_entreprises') }}" class="btn btn-outline">← Liste des entreprises</a>
+    </div>
+    <h1>Rapport d'audit</h1>
+    <p>Vue synthétique pour la prospection commerciale.</p>
+</div>
+
+<div id="audit-report-root" class="audit-report-root" data-entreprise-id="{{ entreprise_id }}">
+    <div class="loading">Préparation du rapport...</div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<!-- Utilitaires & API nécessaires -->
+<script src="{{ url_for('static', filename='js/modules/utils/formatters.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/utils/badges.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/utils/notifications.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/entreprises/api.js') }}"></script>
+<!-- Script de génération du rapport -->
+<script src="{{ url_for('static', filename='js/entreprise_rapport_audit.js') }}" defer></script>
+{% endblock %}
+

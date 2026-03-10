@@ -316,6 +316,75 @@ class TechnicalManager(DatabaseBase):
             ))
             analysis_id = cursor.lastrowid
         
+        # Mettre à jour le résumé de l'entreprise pour la segmentation (si entreprise connue)
+        if entreprise_id:
+            try:
+                cms_value = tech_data.get('cms')
+                framework_value = tech_data.get('framework')
+                perf_value = performance_score
+
+                # Détection simple des comportements / contenu à partir du résumé de pages
+                has_blog = False
+                has_form = False
+                has_checkout = False
+
+                # Utiliser pages_summary si disponible
+                if isinstance(pages_summary, dict):
+                    pages_meta = pages_summary.get('pages') or pages_summary
+                else:
+                    pages_meta = {}
+
+                def safe_lower(s):
+                    return str(s or '').lower()
+
+                # Parcourir quelques URLs/titres pour inférer blog / formulaire / tunnel
+                candidates = []
+                if isinstance(pages, list):
+                    candidates = pages[:20]
+                if isinstance(pages_meta, dict):
+                    # pages_summary peut contenir un dict {url: {...}}
+                    for k, v in list(pages_meta.items())[:20]:
+                        candidates.append({'url': k, **(v if isinstance(v, dict) else {})})
+
+                for p in candidates:
+                    url_p = safe_lower(p.get('page_url') or p.get('url'))
+                    title_p = safe_lower(p.get('title') or '')
+                    # Blog
+                    if any(x in url_p for x in ['/blog', '/actualites', '/actus']) or 'blog' in title_p:
+                        has_blog = True
+                    # Formulaire de contact
+                    if any(x in url_p for x in ['/contact', '/contactez-nous']) or 'contact' in title_p:
+                        has_form = True
+                    # Tunnel e‑commerce (cart/checkout)
+                    if any(x in url_p for x in ['/panier', '/cart', '/checkout', '/commande']):
+                        has_checkout = True
+
+                # Mettre à jour les colonnes de résumé de l'entreprise
+                self.execute_sql(
+                    cursor,
+                    '''
+                    UPDATE entreprises
+                    SET cms = COALESCE(?, cms),
+                        framework = COALESCE(?, framework),
+                        has_blog = COALESCE(?, has_blog),
+                        has_contact_form = COALESCE(?, has_contact_form),
+                        has_checkout = COALESCE(?, has_checkout),
+                        performance_score = COALESCE(?, performance_score)
+                    WHERE id = ?
+                    ''',
+                    (
+                        cms_value,
+                        framework_value,
+                        int(has_blog) if has_blog else None,
+                        int(has_form) if has_form else None,
+                        int(has_checkout) if has_checkout else None,
+                        int(perf_value) if isinstance(perf_value, (int, float)) else None,
+                        entreprise_id,
+                    ),
+                )
+            except Exception as e:
+                logger.warning(f"Erreur lors de la mise à jour du résumé technique pour entreprise {entreprise_id}: {e}")
+
         # Sauvegarder les plugins CMS dans la table normalisée
         cms_plugins = tech_data.get('cms_plugins', [])
         if cms_plugins:

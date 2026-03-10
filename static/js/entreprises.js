@@ -2996,7 +2996,7 @@
         // Fonction helper pour formater les vulnérabilités normalisées
         function formatVulnerability(vuln) {
             if (typeof vuln === 'string') {
-                return `<div style="padding: 0.75rem; background: #fee; border-left: 3px solid #e74c3c; border-radius: 6px; margin-bottom: 0.5rem;">
+                return `<div class="pentest-vuln-card" style="border-left: 3px solid #e74c3c;">
                     <strong style="color: #c33;"><i class="fas fa-exclamation-triangle"></i></strong> ${escapeHtml(vuln)}
                 </div>`;
             }
@@ -3006,13 +3006,13 @@
             const recommendation = vuln.recommendation || vuln.fix || '';
             const severityColor = getSeverityColor(severity);
             
-            return `<div style="padding: 1rem; background: #fff; border-left: 4px solid ${severityColor}; border-radius: 8px; margin-bottom: 0.75rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            return `<div class="pentest-vuln-card" style="border-left: 4px solid ${severityColor};">
                 <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
                     <strong style="color: #2c3e50; font-size: 1rem;">${escapeHtml(name)}</strong>
                     <span style="background: ${severityColor}; color: white; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase;">${escapeHtml(severity)}</span>
                 </div>
                 ${description ? `<div style="color: #555; margin-bottom: 0.5rem; line-height: 1.5;">${escapeHtml(description)}</div>` : ''}
-                ${recommendation ? `<div style="background: #f0f9ff; padding: 0.75rem; border-radius: 6px; border-left: 3px solid #3498db; margin-top: 0.5rem;">
+                ${recommendation ? `<div class="pentest-vuln-reco" style="padding: 0.75rem; border-radius: 6px; margin-top: 0.5rem;">
                     <strong style="color: #1e40af; font-size: 0.85rem;"><i class="fas fa-lightbulb"></i> Recommandation:</strong>
                     <div style="color: #1e3a8a; margin-top: 0.25rem;">${escapeHtml(recommendation)}</div>
                 </div>` : ''}
@@ -3038,6 +3038,23 @@
                                 ${riskScore}/100
                             </div>
                             <div style="font-size: 0.85rem; margin-top: 0.25rem; opacity: 0.9;">${riskLabel}</div>
+                            ${(() => {
+                                const summary = analysis.summary || {};
+                                const totalVulns = summary.total_vulnerabilities || (analysis.vulnerabilities ? analysis.vulnerabilities.length : 0);
+                                const criticalCount = summary.critical_count || (analysis.vulnerabilities || []).filter(v => v.severity === 'Critical').length;
+                                const highCount = summary.high_count || (analysis.vulnerabilities || []).filter(v => v.severity === 'High').length;
+                                const mediumCount = summary.medium_count || (analysis.vulnerabilities || []).filter(v => v.severity === 'Medium').length;
+                                const lowCount = summary.low_count || (analysis.vulnerabilities || []).filter(v => v.severity === 'Low').length;
+                                if (!totalVulns) return '';
+                                return `
+                                    <div class="pentest-summary-chips">
+                                        <span class="pentest-chip pentest-chip-critical">${criticalCount} critique${criticalCount > 1 ? 's' : ''}</span>
+                                        <span class="pentest-chip pentest-chip-high">${highCount} haute${highCount > 1 ? 's' : ''}</span>
+                                        <span class="pentest-chip pentest-chip-medium">${mediumCount} moyenne${mediumCount > 1 ? 's' : ''}</span>
+                                        <span class="pentest-chip pentest-chip-low">${lowCount} faible${lowCount > 1 ? 's' : ''}</span>
+                                    </div>
+                                `;
+                            })()}
                         </div>
                     </div>
                 </div>
@@ -3139,39 +3156,44 @@
                 </div>
                 ` : ''}
                 
-                ${forms_checks.length > 0 ? `
+                ${(() => {
+                    if (forms_checks.length === 0) return '';
+                    const formKey = (f) => (f.action || f.action_url || '').toString() + '|' + (f.method || 'GET').toUpperCase();
+                    const byKey = {};
+                    forms_checks.forEach(f => { const k = formKey(f); if (!byKey[k]) byKey[k] = { form: f, count: 0 }; byKey[k].count++; });
+                    const uniqueForms = Object.values(byKey);
+                    return `
                 <div class="detail-section" style="background: #fff; padding: 1.5rem; border-radius: 10px; border-left: 5px solid #10b981; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
                     <h3 style="margin: 0 0 1.25rem 0; color: #2c3e50; font-size: 1.2rem; display: flex; align-items: center; gap: 0.75rem;">
                         <span style="font-size: 1.5rem;">📝</span>
                         Formulaires testés
-                        <span style="background: #f0fdf4; color: #059669; padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.85rem; font-weight: 700;">${forms_checks.length}</span>
+                        <span style="background: #f0fdf4; color: #059669; padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.85rem; font-weight: 700;">${uniqueForms.length}</span>
+                        ${forms_checks.length > uniqueForms.length ? `<span style="background: #e5e7eb; color: #4b5563; padding: 0.2rem 0.5rem; border-radius: 8px; font-size: 0.8rem;">${forms_checks.length} occurrence(s) dédupliquées</span>` : ''}
                     </h3>
                     <div style="display: flex; flex-direction: column; gap: 0.75rem;">
-                        ${forms_checks.map((form, idx) => {
+                        ${uniqueForms.map((item, idx) => {
+                            const form = item.form;
+                            const count = item.count;
                             const hasError = form.error;
                             const isOk = form.ok === true || form.status_code === 200;
                             const statusColor = hasError ? '#ef4444' : (isOk ? '#10b981' : '#f59e0b');
-                            const statusText = hasError ? '<i class="fas fa-times"></i> Erreur' : (isOk ? '<i class="fas fa-check"></i> Accessible' : `<i class="fas fa-exclamation-triangle"></i> ${form.status_code || 'Inconnu'}`);
-                            return `<div style="padding: 1rem; background: ${hasError ? '#fef2f2' : (isOk ? '#f0fdf4' : '#fffbeb')}; border-left: 4px solid ${statusColor}; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                                <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; flex-wrap: wrap;">
-                                    <strong style="color: #1f2937;">Formulaire #${idx + 1}</strong>
-                                    <span style="background: ${statusColor}; color: white; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600;">${statusText}</span>
-                                    <span style="background: #e5e7eb; color: #4b5563; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase;">${escapeHtml(form.method || 'GET')}</span>
-                                </div>
-                                <div style="color: #6b7280; font-size: 0.9rem; word-break: break-all;">
-                                    <strong>Action:</strong> ${escapeHtml(form.action || 'N/A')}
-                                </div>
-                                ${form.status_code ? `<div style="color: #6b7280; font-size: 0.9rem; margin-top: 0.25rem;">
-                                    <strong>Code HTTP:</strong> ${form.status_code}
-                                </div>` : ''}
-                                ${form.error ? `<div style="color: #dc2626; font-size: 0.85rem; margin-top: 0.5rem; padding: 0.5rem; background: #fee; border-radius: 4px;">
-                                    <strong>Erreur:</strong> ${escapeHtml(form.error)}
-                                </div>` : ''}
-                            </div>`;
+                            const statusText = hasError ? '<i class="fas fa-times"></i> Erreur' : (isOk ? '<i class="fas fa-check"></i> Accessible' : '<i class="fas fa-exclamation-triangle"></i> ' + (form.status_code || 'Inconnu'));
+                            return '<div style="padding: 1rem; background: ' + (hasError ? '#fef2f2' : (isOk ? '#f0fdf4' : '#fffbeb')) + '; border-left: 4px solid ' + statusColor + '; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">' +
+                                '<div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; flex-wrap: wrap;">' +
+                                    '<strong style="color: #1f2937;">Formulaire ' + (idx + 1) + '</strong>' +
+                                    (count > 1 ? '<span style="background: #e0f2fe; color: #0369a1; padding: 0.2rem 0.5rem; border-radius: 8px; font-size: 0.75rem;">Présent sur ' + count + ' page(s)</span>' : '') +
+                                    '<span style="background: ' + statusColor + '; color: white; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600;">' + statusText + '</span>' +
+                                    '<span style="background: #e5e7eb; color: #4b5563; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase;">' + escapeHtml(form.method || 'GET') + '</span>' +
+                                '</div>' +
+                                '<div style="color: #6b7280; font-size: 0.9rem; word-break: break-all;"><strong>Action:</strong> ' + escapeHtml(form.action || form.action_url || 'N/A') + '</div>' +
+                                (form.status_code ? '<div style="color: #6b7280; font-size: 0.9rem; margin-top: 0.25rem;"><strong>Code HTTP:</strong> ' + form.status_code + '</div>' : '') +
+                                (form.error ? '<div style="color: #dc2626; font-size: 0.85rem; margin-top: 0.5rem; padding: 0.5rem; background: #fee; border-radius: 4px;"><strong>Erreur:</strong> ' + escapeHtml(form.error) + '</div>' : '') +
+                            '</div>';
                         }).join('')}
                     </div>
                 </div>
-                ` : ''}
+                    `;
+                })()}
                 
                 ${analysis.sql_injection ? `
                 <div class="detail-section" style="background: #fff; padding: 1.5rem; border-radius: 10px; border-left: 5px solid #e74c3c; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">

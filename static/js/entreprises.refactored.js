@@ -217,6 +217,8 @@ async function init() {
         const pentestMinRaw = get('filter-pentest-min') || '0';
         const pentestMaxRaw = get('filter-pentest-max') || '100';
         const tagsText = (get('filter-tags') || '').trim();
+        const cms = (get('filter-cms') || '').trim();
+        const framework = (get('filter-framework') || '').trim();
 
         let securityMin = parseInt(securityMinRaw, 10);
         let securityMax = parseInt(securityMaxRaw, 10);
@@ -271,6 +273,24 @@ async function init() {
         }
         if (tagsText) {
             filters.tags_contains = tagsText;
+        }
+        if (cms) {
+            filters.cms = cms;
+        }
+        if (framework) {
+            filters.framework = framework;
+        }
+        const hasBlogCheckbox = document.getElementById('filter-has-blog');
+        if (hasBlogCheckbox && hasBlogCheckbox.checked) {
+            filters.has_blog = 'true';
+        }
+        const hasFormCheckbox = document.getElementById('filter-has-form');
+        if (hasFormCheckbox && hasFormCheckbox.checked) {
+            filters.has_form = 'true';
+        }
+        const hasTunnelCheckbox = document.getElementById('filter-has-tunnel');
+        if (hasTunnelCheckbox && hasTunnelCheckbox.checked) {
+            filters.has_tunnel = 'true';
         }
         return filters;
     }
@@ -2062,6 +2082,7 @@ async function init() {
                                 <div id="scraping-stats" class="scraping-stats-summary">
                                     <!-- Les statistiques seront injectées ici -->
                                 </div>
+                                <div id="scraping-issues-content" class="scraping-issues-section"></div>
                             </div>
                             <div id="scraping-search-container" style="margin-bottom: 1rem; display: none;">
                                 <div style="position: relative;">
@@ -2900,20 +2921,50 @@ async function init() {
                 </div>
                 ` : ''}
                 
-                ${issues.length > 0 ? `
-                <div class="seo-section">
-                    <h3>Problèmes SEO clés</h3>
-                    <ul class="issues-list">
-                        ${issues.map(issue => `
-                            <li class="issue-${issue.type || 'info'}">
-                                <strong>${Formatters.escapeHtml(issue.category || 'Général')}:</strong>
-                                ${Formatters.escapeHtml(issue.message || '')}
-                                ${issue.impact ? `<span class="impact-${issue.impact}">(${Formatters.escapeHtml(issue.impact)})</span>` : ''}
-                            </li>
-                        `).join('')}
-                    </ul>
+                ${(() => {
+                    if (issues.length === 0) return '';
+                    const normalizeSeverity = (imp) => {
+                        const i = (imp || 'info').toLowerCase();
+                        if (i === 'critical' || i === 'critique') return 'critical';
+                        if (i === 'high' || i === 'haute') return 'high';
+                        if (i === 'medium' || i === 'moyen') return 'medium';
+                        if (i === 'low' || i === 'faible') return 'low';
+                        return 'info';
+                    };
+                    const counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+                    issues.forEach(issue => { const s = normalizeSeverity(issue.impact || issue.type); counts[s]++; });
+                    const getSeverityClass = normalizeSeverity;
+                    const borderColors = { critical: '#e74c3c', high: '#e67e22', medium: '#f39c12', low: '#3498db', info: '#6b7280' };
+                    return `
+                <div class="seo-section seo-issues-section">
+                    <h3><i class="fas fa-exclamation-triangle"></i> Problèmes SEO clés <span class="badge badge-danger">${issues.length}</span></h3>
+                    <div class="seo-summary-chips">
+                        ${counts.critical ? `<span class="seo-chip seo-chip-critical">${counts.critical} critique${counts.critical > 1 ? 's' : ''}</span>` : ''}
+                        ${counts.high ? `<span class="seo-chip seo-chip-high">${counts.high} haute${counts.high > 1 ? 's' : ''}</span>` : ''}
+                        ${counts.medium ? `<span class="seo-chip seo-chip-medium">${counts.medium} moyenne${counts.medium > 1 ? 's' : ''}</span>` : ''}
+                        ${counts.low ? `<span class="seo-chip seo-chip-low">${counts.low} faible${counts.low > 1 ? 's' : ''}</span>` : ''}
+                        ${counts.info ? `<span class="seo-chip seo-chip-info">${counts.info} info</span>` : ''}
+                    </div>
+                    <div class="seo-issues-list">
+                        ${issues.map(issue => {
+                            const sev = getSeverityClass(issue.impact || issue.type);
+                            const color = borderColors[sev] || '#6b7280';
+                            const category = Formatters.escapeHtml(issue.category || 'Général');
+                            const message = Formatters.escapeHtml(issue.message || '');
+                            const recommendation = issue.recommendation ? Formatters.escapeHtml(issue.recommendation) : '';
+                            return `<div class="seo-issue-card" style="border-left: 4px solid ${color};">
+                                <div class="seo-issue-header">
+                                    <strong class="seo-issue-title">${category}</strong>
+                                    <span class="seo-chip seo-chip-${sev}">${Formatters.escapeHtml(issue.impact || issue.type || 'info')}</span>
+                                </div>
+                                <div class="seo-issue-desc">${message}</div>
+                                ${recommendation ? `<div class="seo-issue-reco"><strong><i class="fas fa-lightbulb"></i> Recommandation:</strong> ${recommendation}</div>` : ''}
+                            </div>`;
+                        }).join('')}
+                    </div>
                 </div>
-                ` : ''}
+                    `;
+                })()}
             </div>
         `;
     }
@@ -2987,12 +3038,13 @@ async function init() {
             'phones-list-modal': '<div class="empty-state">Aucun téléphone trouvé</div>',
             'social-list-modal': '<div class="empty-state">Aucun réseau social trouvé</div>',
             'technologies-list-modal': '<div class="empty-state">Aucune technologie détectée</div>',
-            'metadata-list-modal': '<div class="empty-state">Aucune métadonnée extraite</div>'
+            'metadata-list-modal': '<div class="empty-state">Aucune métadonnée extraite</div>',
+            'scraping-issues-content': ''
         };
         
         Object.entries(containers).forEach(([id, html]) => {
             const el = document.getElementById(id);
-            if (el) el.innerHTML = html;
+            if (el) { el.innerHTML = html; if (id === 'scraping-issues-content') el.style.display = 'none'; }
         });
         
         // Réinitialiser les compteurs via le module

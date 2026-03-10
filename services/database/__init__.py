@@ -29,6 +29,7 @@ from .osint import OSINTManager
 from .technical import TechnicalManager
 from .pentest import PentestManager
 from .seo import SEOManager
+from .email_templates import EmailTemplateManager
 
 
 class Database(
@@ -39,6 +40,7 @@ class Database(
     ScraperManager,
     PersonneManager,
     CampagneManager,
+    EmailTemplateManager,
     OSINTManager,
     TechnicalManager,
     PentestManager,

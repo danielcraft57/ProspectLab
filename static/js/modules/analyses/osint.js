@@ -45,6 +45,30 @@
             return sum + techs.length;
         }, 0);
         
+        // Points d'attention OSINT (même pattern que Pentest / Technique / SEO)
+        const osintIssues = [];
+        if (subdomains.length === 0) {
+            osintIssues.push({ severity: 'info', title: 'Aucun sous-domaine détecté', description: 'Aucun sous-domaine n\'a été trouvé pour ce domaine.', recommendation: 'Vérifier la configuration DNS ou étendre la recherche.' });
+        } else if (subdomains.length > 10) {
+            osintIssues.push({ severity: 'medium', title: 'Surface d\'attaque étendue', description: `${subdomains.length} sous-domaines exposés. Chaque sous-domaine peut être un point d'entrée.`, recommendation: 'Auditer la nécessité de chaque sous-domaine et sécuriser les services exposés.' });
+        }
+        if (emailCount === 0) {
+            osintIssues.push({ severity: 'info', title: 'Aucun email collecté', description: 'Aucune adresse email trouvée en open source.', recommendation: 'Enrichir avec d\'autres sources (scraping site, LinkedIn, etc.).' });
+        }
+        if (socialCount === 0) {
+            osintIssues.push({ severity: 'info', title: 'Aucun réseau social lié', description: 'Aucun profil réseau social identifié pour ce domaine.', recommendation: 'Rechercher manuellement le nom de l\'entreprise sur les plateformes sociales.' });
+        }
+        if (techCount === 0 && (subdomains.length > 0 || emailCount > 0)) {
+            osintIssues.push({ severity: 'low', title: 'Technologies non identifiées', description: 'Aucune technologie détectée malgré des données présentes.', recommendation: 'Relancer une analyse avec détection technologies activée.' });
+        }
+        const whoisKeys = Object.keys(whoisInfo).filter(k => whoisInfo[k] && typeof whoisInfo[k] !== 'object');
+        if (whoisKeys.length === 0 && (analysis.domain || analysis.url)) {
+            osintIssues.push({ severity: 'low', title: 'WHOIS non disponible', description: 'Les données WHOIS n\'ont pas été récupérées.', recommendation: 'Vérifier la disponibilité WHOIS du TLD ou utiliser un autre outil.' });
+        }
+        const osintCounts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+        osintIssues.forEach(i => { if (osintCounts[i.severity] !== undefined) osintCounts[i.severity]++; });
+        const hasOsintIssues = osintIssues.length > 0;
+        
         const createStatCard = (icon, label, value, color = '#9333ea') => `
             <div style="background: white; padding: 1rem; border-radius: 8px; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
                 <div style="display: flex; align-items: center; gap: 0.75rem;">
@@ -87,6 +111,33 @@
                         </div>
                     ` : ''}
                 </div>
+                
+                ${hasOsintIssues ? `
+                <div class="detail-section osint-issues-section">
+                    <h3 style="margin: 0 0 1rem 0; color: #2c3e50; border-bottom: 2px solid #667eea; padding-bottom: 0.5rem;"><i class="fas fa-exclamation-triangle"></i> Points d'attention OSINT <span class="badge badge-warning">${osintIssues.length}</span></h3>
+                    <div class="osint-summary-chips">
+                        ${osintCounts.critical ? `<span class="osint-chip osint-chip-critical">${osintCounts.critical} critique${osintCounts.critical > 1 ? 's' : ''}</span>` : ''}
+                        ${osintCounts.high ? `<span class="osint-chip osint-chip-high">${osintCounts.high} haute${osintCounts.high > 1 ? 's' : ''}</span>` : ''}
+                        ${osintCounts.medium ? `<span class="osint-chip osint-chip-medium">${osintCounts.medium} moyenne${osintCounts.medium > 1 ? 's' : ''}</span>` : ''}
+                        ${osintCounts.low ? `<span class="osint-chip osint-chip-low">${osintCounts.low} faible${osintCounts.low > 1 ? 's' : ''}</span>` : ''}
+                        ${osintCounts.info ? `<span class="osint-chip osint-chip-info">${osintCounts.info} info</span>` : ''}
+                    </div>
+                    <div class="osint-issues-list" style="display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1rem;">
+                        ${osintIssues.map(issue => {
+                            const borderColors = { critical: '#e74c3c', high: '#e67e22', medium: '#f39c12', low: '#3498db', info: '#6b7280' };
+                            const color = borderColors[issue.severity] || '#6b7280';
+                            return `<div class="osint-issue-card" style="border-left: 4px solid ${color};">
+                                <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem;">
+                                    <strong class="osint-issue-title">${Formatters.escapeHtml(issue.title)}</strong>
+                                    <span class="osint-chip osint-chip-${issue.severity}" style="font-size: 0.75rem;">${Formatters.escapeHtml(issue.severity)}</span>
+                                </div>
+                                ${issue.description ? `<div class="osint-issue-desc">${Formatters.escapeHtml(issue.description)}</div>` : ''}
+                                ${issue.recommendation ? `<div class="osint-issue-reco"><strong><i class="fas fa-lightbulb"></i> Recommandation:</strong> ${Formatters.escapeHtml(issue.recommendation)}</div>` : ''}
+                            </div>`;
+                        }).join('')}
+                    </div>
+                </div>
+                ` : ''}
                 
                 ${subdomains.length > 0 ? `
                 <div class="detail-section" style="background: white; padding: 1.5rem; border-radius: 12px; border: 1px solid #e5e7eb; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">

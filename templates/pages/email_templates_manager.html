@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+
+{% block title %}Modèles d'emails - ProspectLab{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/modules/pages/email_templates_manager.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="etm-page">
+    <div class="etm-header">
+        <div class="etm-title">
+            <h1>Modèles d'emails</h1>
+            <p>Crée, modifie et organise tes templates. Tout est enregistré en base.</p>
+        </div>
+        <div class="etm-header-actions">
+            <button class="btn btn-secondary" id="etm-import-btn" type="button">
+                <i class="fa-solid fa-file-import"></i>
+                Importer (JSON)
+            </button>
+            <button class="btn btn-primary" id="etm-new-btn" type="button">
+                <i class="fa-solid fa-plus"></i>
+                Nouveau
+            </button>
+        </div>
+    </div>
+
+    <div class="etm-layout">
+        <aside class="etm-sidebar">
+            <div class="etm-search">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input id="etm-search-input" type="text" placeholder="Rechercher (nom, sujet, id)..." autocomplete="off">
+                <button class="etm-clear" id="etm-clear-search" type="button" title="Effacer">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div class="etm-filters">
+                <div class="etm-filter-row">
+                    <label for="etm-category">Catégorie</label>
+                    <select id="etm-category">
+                        <option value="">Toutes</option>
+                        <option value="cold_email">Cold Email</option>
+                        <option value="html_email">Email HTML</option>
+                        <option value="linkedin">LinkedIn</option>
+                        <option value="malt">Malt</option>
+                        <option value="other">Autre</option>
+                    </select>
+                </div>
+                <div class="etm-filter-row">
+                    <label for="etm-sort">Tri</label>
+                    <select id="etm-sort">
+                        <option value="updated_desc">Modifié récemment</option>
+                        <option value="name_asc">Nom (A-Z)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="etm-list" id="etm-list" aria-label="Liste des modèles"></div>
+        </aside>
+
+        <section class="etm-editor">
+            <div class="etm-editor-top">
+                <div class="etm-editor-top-left">
+                    <div class="etm-badge" id="etm-status-badge">Prêt</div>
+                </div>
+                <div class="etm-editor-top-right">
+                    <button class="btn btn-secondary btn-small" id="etm-preview-toggle" type="button">
+                        <i class="fa-regular fa-eye"></i>
+                        Aperçu
+                    </button>
+                    <button class="btn btn-danger btn-small" id="etm-delete-btn" type="button" disabled>
+                        <i class="fa-regular fa-trash-can"></i>
+                        Supprimer
+                    </button>
+                    <button class="btn btn-primary btn-small" id="etm-save-btn" type="button" disabled>
+                        <i class="fa-regular fa-floppy-disk"></i>
+                        Enregistrer
+                    </button>
+                </div>
+            </div>
+
+            <div class="etm-form">
+                <div class="etm-grid">
+                    <div class="form-group">
+                        <label for="etm-id">ID</label>
+                        <input id="etm-id" type="text" placeholder="Laisse vide pour auto" autocomplete="off">
+                        <small class="etm-hint">L'ID sert dans les campagnes. Si vide, il est généré automatiquement.</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="etm-name">Nom</label>
+                        <input id="etm-name" type="text" placeholder="Ex: HTML - Refonte globale" autocomplete="off" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="etm-category-edit">Catégorie</label>
+                        <select id="etm-category-edit">
+                            <option value="cold_email">Cold Email</option>
+                            <option value="html_email">Email HTML</option>
+                            <option value="linkedin">LinkedIn</option>
+                            <option value="malt">Malt</option>
+                            <option value="other">Autre</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="etm-subject">Sujet</label>
+                        <input id="etm-subject" type="text" placeholder="Ex: Refonte globale - {entreprise}" autocomplete="off">
+                    </div>
+                </div>
+
+                <div class="etm-body">
+                    <div class="etm-body-head">
+                        <div class="etm-body-title">
+                            <h2>Contenu</h2>
+                            <div class="etm-chips">
+                                <span class="etm-chip" data-insert="{nom}">{nom}</span>
+                                <span class="etm-chip" data-insert="{entreprise}">{entreprise}</span>
+                                <span class="etm-chip" data-insert="{email}">{email}</span>
+                                {% raw %}
+                                <span class="etm-chip" data-insert="{#if_tech_data}\n\n{#endif}">{#if_tech_data}</span>
+                                <span class="etm-chip" data-insert="{#if_performance}\n\n{#endif}">{#if_performance}</span>
+                                <span class="etm-chip" data-insert="{#if_security}\n\n{#endif}">{#if_security}</span>
+                                <span class="etm-chip" data-insert="{#if_scraping_data}\n\n{#endif}">{#if_scraping_data}</span>
+                                {% endraw %}
+                            </div>
+                        </div>
+                        <div class="etm-body-actions">
+                            <label class="etm-switch">
+                                <input id="etm-is-html" type="checkbox">
+                                <span class="etm-slider"></span>
+                                <span class="etm-switch-label">HTML</span>
+                            </label>
+                        </div>
+                    </div>
+                    <textarea id="etm-content" rows="18" placeholder="Bonjour {nom}, ..." spellcheck="false"></textarea>
+                </div>
+
+                <div class="etm-preview" id="etm-preview" hidden>
+                    <div class="etm-preview-head">
+                        <h2>Aperçu</h2>
+                        <p>Le rendu exact dépend des données entreprise, mais ça te permet de valider le HTML vite fait.</p>
+                    </div>
+                    <div class="etm-preview-body">
+                        <iframe id="etm-preview-iframe" title="Aperçu du template" sandbox=""></iframe>
+                        <pre id="etm-preview-text" class="etm-preview-text" hidden></pre>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <div class="etm-toast" id="etm-toast" aria-live="polite" aria-atomic="true" hidden></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/email_templates_manager.js') }}"></script>
+{% endblock %}
+

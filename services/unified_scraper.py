@@ -75,6 +75,7 @@ class UnifiedScraper:
         self.og_data_by_page: Dict[str, Dict] = {}  # OG de toutes les pages scrapées {page_url: og_tags}
         self.images: List[Dict] = []  # Liste des images trouvées avec {url, alt, page_url, width, height}
         self.forms: List[Dict] = []  # Points d'entrée (formulaires) trouvés sur les pages
+        self._seen_form_keys: Set[str] = set()  # Clés (action_url|method) pour dédupliquer les formulaires entre pages
         
         # État du scraping
         self.visited_urls: Set[str] = set()
@@ -1090,7 +1091,7 @@ class UnifiedScraper:
             page_forms = []
             try:
                 forms = soup.find_all('form')
-                seen_forms = set()  # Pour dédupliquer les formulaires
+                seen_forms_this_page = set()  # Doublons sur la même page
                 for form in forms:
                     action = form.get('action', '')
                     method = form.get('method', 'get').upper()
@@ -1105,11 +1106,15 @@ class UnifiedScraper:
                     else:
                         action_url = url
                     
-                    # Créer une clé unique pour dédupliquer (action + method)
+                    # Clé unique : dédupliquer sur la page ET globalement (éviter 1 entrée par page pour le même formulaire)
                     form_key = f"{action_url}|{method}"
-                    if form_key in seen_forms:
-                        continue  # Ignorer les doublons
-                    seen_forms.add(form_key)
+                    if form_key in seen_forms_this_page:
+                        continue
+                    seen_forms_this_page.add(form_key)
+                    with self.lock:
+                        if form_key in self._seen_form_keys:
+                            continue
+                        self._seen_form_keys.add(form_key)
                     
                     inputs = form.find_all(['input', 'textarea', 'select', 'button'])
                     fields = []
