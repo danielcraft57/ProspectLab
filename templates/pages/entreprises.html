@@ -261,13 +261,17 @@
             <!-- Filtre Tags intelligents -->
             <div class="filter-group">
                 <label class="filter-label" for="filter-tags">Tags</label>
-                <input
-                    type="text"
-                    id="filter-tags"
-                    class="form-input"
-                    placeholder="Ex: refonte, risque, https, SEO..."
-                    autocomplete="off"
-                >
+                <div class="tags-filter-wrapper">
+                    <div id="filter-tags-chips" class="tags-filter-chips"></div>
+                    <input
+                        type="text"
+                        id="filter-tags"
+                        class="form-input"
+                        placeholder="Ex: refonte, risque, https, SEO..."
+                        autocomplete="off"
+                    >
+                    <div id="filter-tags-suggestions" class="tags-filter-suggestions"></div>
+                </div>
             </div>
         </div>
 
@@ -295,6 +299,7 @@
                             <option value="launch-technique">Lancer / relancer analyse technique</option>
                             <option value="launch-seo">Lancer / relancer analyse SEO</option>
                             <option value="launch-pentest">Lancer / relancer analyse Pentest</option>
+                            <option value="launch-scraping">Lancer / relancer le scraping</option>
                             <option value="launch-all">Lancer / relancer toutes les analyses</option>
                         </optgroup>
                         <optgroup label="Groupes">

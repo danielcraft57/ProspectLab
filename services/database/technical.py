@@ -382,6 +382,95 @@ class TechnicalManager(DatabaseBase):
                         entreprise_id,
                     ),
                 )
+
+                # Mettre à jour automatiquement les tags d'entreprise en fonction des données techniques
+                try:
+                    self.execute_sql(
+                        cursor,
+                        'SELECT tags, cms, framework, has_blog, has_contact_form, has_checkout, performance_score FROM entreprises WHERE id = ?',
+                        (entreprise_id,),
+                    )
+                    fetched = cursor.fetchone()
+                    row = dict(fetched) if fetched is not None else None
+                except Exception:
+                    row = None
+
+                existing_tags = []
+                if row and row.get('tags'):
+                    raw_tags = row.get('tags')
+                    try:
+                        if isinstance(raw_tags, str):
+                            existing_tags = json.loads(raw_tags)
+                        elif isinstance(raw_tags, list):
+                            existing_tags = raw_tags
+                    except Exception:
+                        existing_tags = []
+
+                tags_set = set(t for t in existing_tags if isinstance(t, str) and t.strip())
+
+                def add_tag(tag):
+                    if tag and isinstance(tag, str):
+                        tags_set.add(tag.strip())
+
+                # Blog / formulaire / tunnel e‑commerce
+                effective_has_blog = bool(has_blog or (row and row.get('has_blog')))
+                effective_has_form = bool(has_form or (row and row.get('has_contact_form')))
+                effective_has_checkout = bool(has_checkout or (row and row.get('has_checkout')))
+
+                if effective_has_blog:
+                    add_tag('blog')
+                if effective_has_form:
+                    add_tag('contact_form')
+                if effective_has_checkout:
+                    add_tag('ecommerce')
+
+                # CMS / framework
+                effective_cms = cms_value or (row and row.get('cms'))
+                effective_framework = framework_value or (row and row.get('framework'))
+
+                if effective_cms:
+                    cms_tag = safe_lower(effective_cms)
+                    add_tag(f'cms:{cms_tag}')
+                if effective_framework:
+                    fw_tag = safe_lower(effective_framework)
+                    add_tag(f'framework:{fw_tag}')
+
+                # Performance
+                effective_perf = perf_value if isinstance(perf_value, (int, float)) else (row and row.get('performance_score'))
+                if isinstance(effective_perf, (int, float)):
+                    if effective_perf < 40:
+                        add_tag('perf:low')
+                    elif effective_perf >= 70:
+                        add_tag('perf:good')
+
+                # Langue principale (à partir de cette analyse technique)
+                try:
+                    details = tech_data if isinstance(tech_data, dict) else None
+                    main_lang = None
+                    if isinstance(details, dict):
+                        main_lang = details.get('main_language')
+                    if main_lang:
+                        code = str(main_lang).split('-', 1)[0].lower()
+                        lang_tag_map = {
+                            'fr': 'lang_fr',
+                            'en': 'lang_en',
+                            'de': 'lang_de',
+                            'es': 'lang_es',
+                            'it': 'lang_it',
+                            'nl': 'lang_nl',
+                            'pt': 'lang_pt',
+                        }
+                        add_tag(lang_tag_map.get(code, 'lang_autre'))
+                except Exception:
+                    pass
+
+                # Sauvegarder les tags fusionnés (sans écraser de tags manuels existants)
+                if tags_set:
+                    self.execute_sql(
+                        cursor,
+                        'UPDATE entreprises SET tags = ? WHERE id = ?',
+                        (json.dumps(sorted(tags_set)), entreprise_id),
+                    )
             except Exception as e:
                 logger.warning(f"Erreur lors de la mise à jour du résumé technique pour entreprise {entreprise_id}: {e}")
 

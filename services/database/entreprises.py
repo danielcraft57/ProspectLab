@@ -705,6 +705,28 @@ class EntrepriseManager(DatabaseBase):
                     # Même token appliqué sur tous les champs cibles
                     params.extend([like] * 8)
 
+            # Filtres sur les tags (JSON/texte)
+            if filters.get('tags_contains'):
+                inner_query += ' AND e.tags LIKE ?'
+                params.append('%' + str(filters['tags_contains']) + '%')
+            if filters.get('tags_any'):
+                values = filters['tags_any']
+                if isinstance(values, str):
+                    values = [v.strip() for v in values.split(',') if v.strip()]
+                conditions = []
+                for v in values:
+                    conditions.append('e.tags LIKE ?')
+                    params.append('%' + str(v) + '%')
+                if conditions:
+                    inner_query += ' AND (' + ' OR '.join(conditions) + ')'
+            if filters.get('tags_all'):
+                values = filters['tags_all']
+                if isinstance(values, str):
+                    values = [v.strip() for v in values.split(',') if v.strip()]
+                for v in values:
+                    inner_query += ' AND e.tags LIKE ?'
+                    params.append('%' + str(v) + '%')
+
         if wrap_subquery:
             # Important : pour les filtres, on considère les analyses non faites comme score 0
             # via COALESCE(score, 0), afin de pouvoir les exclure avec un seuil minimum > 0.
@@ -926,6 +948,28 @@ class EntrepriseManager(DatabaseBase):
                         )
                     '''
                     params.extend([like] * 7)
+
+            # Filtres sur les tags (même logique que get_entreprises)
+            if filters.get('tags_contains'):
+                inner_query += ' AND e.tags LIKE ?'
+                params.append('%' + str(filters['tags_contains']) + '%')
+            if filters.get('tags_any'):
+                values = filters['tags_any']
+                if isinstance(values, str):
+                    values = [v.strip() for v in values.split(',') if v.strip()]
+                conditions = []
+                for v in values:
+                    conditions.append('e.tags LIKE ?')
+                    params.append('%' + str(v) + '%')
+                if conditions:
+                    inner_query += ' AND (' + ' OR '.join(conditions) + ')'
+            if filters.get('tags_all'):
+                values = filters['tags_all']
+                if isinstance(values, str):
+                    values = [v.strip() for v in values.split(',') if v.strip()]
+                for v in values:
+                    inner_query += ' AND e.tags LIKE ?'
+                    params.append('%' + str(v) + '%')
 
         # Pour éviter toute divergence avec get_entreprises, on compte
         # toujours à partir de la même sous-requête (inner_query) qui
@@ -1943,6 +1987,16 @@ class EntrepriseManager(DatabaseBase):
             if filters.get('tags_contains'):
                 base_sql += ' AND e.tags LIKE ?'
                 params.append('%' + str(filters['tags_contains']) + '%')
+            if filters.get('tags_any'):
+                values = filters['tags_any']
+                if isinstance(values, str):
+                    values = [v.strip() for v in values.split(',') if v.strip()]
+                conditions = []
+                for v in values:
+                    conditions.append('e.tags LIKE ?')
+                    params.append('%' + str(v) + '%')
+                if conditions:
+                    base_sql += ' AND (' + ' OR '.join(conditions) + ')'
             if filters.get('favori'):
                 base_sql += ' AND e.favori = 1'
             # Nouveaux filtres de segmentation réutilisés pour les campagnes

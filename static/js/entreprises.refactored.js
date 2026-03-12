@@ -6,7 +6,7 @@
 'use strict';
 
 // Attendre que les modules soient chargés
-async function init() {
+    async function init() {
     // S'assurer que l'API principale est disponible
     if (typeof window.EntreprisesAPI === 'undefined') {
         console.error('[entreprises] EntreprisesAPI non chargé. Vérifiez que js/modules/entreprises/api.js est bien inclus avant ce script.');
@@ -138,6 +138,8 @@ async function init() {
     let currentModalPentestScore = null;
     const entrepriseGroupsCache = {};
     const selectedEntreprises = new Set();
+    let tagsSuggestions = [];
+    let activeTagFilters = [];
     
     function getEntrepriseNom(entrepriseId) {
         if (entrepriseId == null) return 'Entreprise';
@@ -145,6 +147,43 @@ async function init() {
             || filteredEntreprises.find(x => x && x.id === entrepriseId)
             || (currentModalEntrepriseData && currentModalEntrepriseData.id === entrepriseId ? currentModalEntrepriseData : null);
         return (e && e.nom) ? String(e.nom) : 'Entreprise';
+    }
+    
+    async function triggerScrapingRelaunch(entrepriseId) {
+        const entreprise = allEntreprises.find(e => e && e.id === entrepriseId)
+            || filteredEntreprises.find(e => e && e.id === entrepriseId);
+        const url = entreprise && entreprise.website ? String(entreprise.website).trim() : '';
+        if (!url) {
+            Notifications.show('Aucune URL de site pour relancer le scraping.', 'warning');
+            return;
+        }
+
+        const socket = window.wsManager && window.wsManager.socket;
+        if (!socket) {
+            Notifications.show('Connexion temps réel non disponible. Rechargez la page.', 'warning');
+            return;
+        }
+
+        // S'assurer que les listeners WebSocket scraping (notifications, refresh) sont en place
+        try {
+            if (typeof ensureModalWebSocketListeners === 'function') {
+                ensureModalWebSocketListeners();
+            }
+        } catch (e) {
+            // silencieux : au pire on n'a que les notifs globales websocket
+        }
+
+        const nom = entreprise && entreprise.nom ? entreprise.nom : getEntrepriseNom(entrepriseId);
+        Notifications.show(nom + ' — Scraping lancé...', 'info', 'fa-spider');
+
+        socket.emit('start_scraping', {
+            url: url,
+            max_depth: 3,
+            max_workers: 5,
+            max_time: 300,
+            max_pages: 50,
+            entreprise_id: entrepriseId
+        });
     }
     
     // Charger les secteurs pour le filtre
@@ -160,6 +199,99 @@ async function init() {
             });
         } catch (error) {
             console.error('Erreur lors du chargement des secteurs:', error);
+        }
+    }
+
+    function renderTagFilterChips() {
+        const chipsContainer = document.getElementById('filter-tags-chips');
+        if (!chipsContainer) return;
+        if (!Array.isArray(activeTagFilters)) activeTagFilters = [];
+        chipsContainer.innerHTML = activeTagFilters.map(tag => `
+            <span class="tags-filter-chip" data-tag="${Formatters.escapeHtml(tag)}">
+                <i class="fas fa-tag" aria-hidden="true"></i>
+                <span>${Formatters.escapeHtml(tag)}</span>
+                <button type="button" class="tags-filter-chip-remove" aria-label="Retirer le tag" data-remove-tag="${Formatters.escapeHtml(tag)}">
+                    <i class="fas fa-times"></i>
+                </button>
+            </span>
+        `).join('');
+    }
+
+    function renderTagSuggestions(filterText) {
+        const container = document.getElementById('filter-tags-suggestions');
+        if (!container) return;
+        const query = (filterText || '').toLowerCase().trim();
+        if (!tagsSuggestions || !tagsSuggestions.length) {
+            container.classList.add('hidden');
+            container.innerHTML = '';
+            return;
+        }
+        const available = tagsSuggestions
+            .map(item => (typeof item === 'string' ? { value: item, count: null } : item))
+            .filter(item => item && item.value && !activeTagFilters.includes(item.value));
+        const filtered = query
+            ? available.filter(item => item.value.toLowerCase().includes(query))
+            : available;
+        if (!filtered.length) {
+            container.classList.add('hidden');
+            container.innerHTML = '';
+            return;
+        }
+        const maxToShow = 20;
+        container.innerHTML = filtered.slice(0, maxToShow).map(item => {
+            const value = item.value;
+            const count = item.count;
+            return `<button type="button" class="tag-suggestion" data-tag="${Formatters.escapeHtml(value)}">
+                <span>${Formatters.escapeHtml(value)}</span>
+                ${typeof count === 'number' ? `<small>${count}</small>` : ''}
+            </button>`;
+        }).join('');
+        container.classList.remove('hidden');
+    }
+
+    function syncTagFilterInputAndApply() {
+        const input = document.getElementById('filter-tags');
+        if (input) {
+            if (Array.isArray(activeTagFilters) && activeTagFilters.length) {
+                input.value = activeTagFilters.join(', ');
+            } else {
+                input.value = '';
+            }
+        }
+        renderTagFilterChips();
+        if (typeof applyFilters === 'function') {
+            applyFilters();
+        }
+        renderTagSuggestions(input ? input.value : '');
+    }
+
+    function addTagToFilter(rawTag) {
+        const value = String(rawTag || '').trim();
+        if (!value) return;
+        if (!Array.isArray(activeTagFilters)) activeTagFilters = [];
+        if (activeTagFilters.includes(value)) {
+            return;
+        }
+        activeTagFilters.push(value);
+        syncTagFilterInputAndApply();
+    }
+
+    function removeTagFromFilter(rawTag) {
+        const value = String(rawTag || '').trim();
+        if (!value || !Array.isArray(activeTagFilters)) return;
+        activeTagFilters = activeTagFilters.filter(t => t !== value);
+        syncTagFilterInputAndApply();
+    }
+
+    async function loadTagsSuggestions() {
+        try {
+            const response = await fetch('/api/ciblage/suggestions?with_counts=1');
+            if (!response.ok) return;
+            const data = await response.json();
+            tagsSuggestions = (data && data.tags) || [];
+            renderTagSuggestions('');
+        } catch (e) {
+            console.error('Erreur chargement tags suggestions:', e);
         }
     }
 
@@ -271,8 +403,24 @@ async function init() {
         if (!Number.isNaN(pentestMax) && pentestMax < 100) {
             filters.pentest_max = pentestMax;
         }
+        const hasActiveTags = Array.isArray(activeTagFilters) && activeTagFilters.length > 0;
+        let partsFromInput = [];
         if (tagsText) {
-            filters.tags_contains = tagsText;
+            partsFromInput = tagsText.split(/[, ]+/).map(s => s.trim()).filter(Boolean);
+        }
+        if (hasActiveTags) {
+            const combined = Array.from(new Set([...activeTagFilters, ...partsFromInput])).filter(Boolean);
+            if (combined.length === 1) {
+                filters.tags_contains = combined[0];
+            } else if (combined.length > 1) {
+                filters.tags_all = combined;
+            }
+        } else if (partsFromInput.length) {
+            if (partsFromInput.length === 1) {
+                filters.tags_contains = partsFromInput[0];
+            } else {
+                filters.tags_any = partsFromInput;
+            }
         }
         if (cms) {
             filters.cms = cms;
@@ -554,14 +702,43 @@ async function init() {
     
     function createEntrepriseCard(entreprise) {
         const tagsHtml = entreprise.tags && entreprise.tags.length > 0
-            ? entreprise.tags.map(tag => {
+            ? entreprise.tags
+                .slice() // ne pas muter l'array originale
+                .sort((a, b) => {
+                    const priority = (t) => {
+                        if (!t) return 999;
+                        if (t === 'fort_potentiel_refonte') return 1;
+                        if (t === 'risque_cyber_eleve') return 2;
+                        if (t === 'seo_a_ameliorer') return 3;
+                        if (t === 'perf_lente' || t === 'perf:low') return 4;
+                        if (t === 'perf:good') return 5;
+                        if (t === 'site_sans_https') return 6;
+                        if (t.startsWith('cms:')) return 7;
+                        if (t.startsWith('framework:')) return 8;
+                        if (t === 'blog' || t === 'contact_form' || t === 'ecommerce') return 9;
+                        if (String(t).startsWith('lang_')) return 10;
+                        return 50;
+                    };
+                    return priority(a) - priority(b);
+                })
+                .map(tag => {
                 const base = 'tag';
+                const isCms = typeof tag === 'string' && tag.startsWith('cms:');
+                const isFramework = typeof tag === 'string' && tag.startsWith('framework:');
+                const isPerf = typeof tag === 'string' && tag.startsWith('perf:');
                 const extra =
                     tag === 'fort_potentiel_refonte' ? ' tag-refonte' :
                     tag === 'risque_cyber_eleve' ? ' tag-risk' :
                     tag === 'seo_a_ameliorer' ? ' tag-seo' :
                     tag === 'perf_lente' ? ' tag-perf' :
                     tag === 'site_sans_https' ? ' tag-https' :
+                    tag === 'blog' ? ' tag-blog' :
+                    tag === 'contact_form' ? ' tag-form' :
+                    tag === 'ecommerce' ? ' tag-ecommerce' :
+                    (isCms ? ' tag-cms' : '') +
+                    (isFramework ? ' tag-framework' : '') +
+                    (isPerf && tag.endsWith('good') ? ' tag-perf-good' : '') +
+                    (isPerf && tag.endsWith('low') ? ' tag-perf-low' : '') +
                     '';
 
                 let label;
@@ -580,6 +757,15 @@ async function init() {
                         break;
                     case 'site_sans_https':
                         label = 'Sans HTTPS';
+                        break;
+                    case 'blog':
+                        label = 'Blog';
+                        break;
+                    case 'contact_form':
+                        label = 'Formulaire';
+                        break;
+                    case 'ecommerce':
+                        label = 'E‑commerce';
                         break;
                     case 'lang_fr':
                         label = 'FR';
@@ -606,10 +792,19 @@ async function init() {
                         label = 'Autre langue';
                         break;
                     default:
-                        label = tag.replace(/_/g, ' ');
+                        if (isCms) {
+                            label = 'CMS: ' + tag.slice('cms:'.length);
+                        } else if (isFramework) {
+                            label = 'FW: ' + tag.slice('framework:'.length);
+                        } else if (isPerf) {
+                            const v = tag.slice('perf:'.length);
+                            label = v === 'good' ? 'Perf OK' : v === 'low' ? 'Perf faible' : ('Perf: ' + v);
+                        } else {
+                            label = tag.replace(/_/g, ' ');
+                        }
                 }
 
-                return `<span class="${base}${extra}">${Formatters.escapeHtml(label)}</span>`;
+                return `<span class="${base}${extra}" data-tag="${Formatters.escapeHtml(tag)}">${Formatters.escapeHtml(label)}</span>`;
             }).join('')
             : '';
         
@@ -765,15 +960,62 @@ async function init() {
     }
     
     function createEntrepriseRow(entreprise) {
+        let langChipLabel = null;
+        if (entreprise.tags && Array.isArray(entreprise.tags)) {
+            for (const t of entreprise.tags) {
+                switch (t) {
+                    case 'lang_fr': langChipLabel = 'FR'; break;
+                    case 'lang_en': langChipLabel = 'EN'; break;
+                    case 'lang_de': langChipLabel = 'DE'; break;
+                    case 'lang_es': langChipLabel = 'ES'; break;
+                    case 'lang_it': langChipLabel = 'IT'; break;
+                    case 'lang_nl': langChipLabel = 'NL'; break;
+                    case 'lang_pt': langChipLabel = 'PT'; break;
+                    case 'lang_autre': langChipLabel = 'Autre'; break;
+                    default: break;
+                }
+                if (langChipLabel) break;
+            }
+        }
+
         const tagsHtml = entreprise.tags && entreprise.tags.length > 0
-            ? entreprise.tags.map(tag => {
+            ? entreprise.tags
+                .slice()
+                .sort((a, b) => {
+                    const priority = (t) => {
+                        if (!t) return 999;
+                        if (t === 'fort_potentiel_refonte') return 1;
+                        if (t === 'risque_cyber_eleve') return 2;
+                        if (t === 'seo_a_ameliorer') return 3;
+                        if (t === 'perf_lente' || t === 'perf:low') return 4;
+                        if (t === 'perf:good') return 5;
+                        if (t === 'site_sans_https') return 6;
+                        if (t.startsWith('cms:')) return 7;
+                        if (t.startsWith('framework:')) return 8;
+                        if (t === 'blog' || t === 'contact_form' || t === 'ecommerce') return 9;
+                        if (String(t).startsWith('lang_')) return 10;
+                        return 50;
+                    };
+                    return priority(a) - priority(b);
+                })
+                .map(tag => {
                 const base = 'tag';
+                const isCms = typeof tag === 'string' && tag.startsWith('cms:');
+                const isFramework = typeof tag === 'string' && tag.startsWith('framework:');
+                const isPerf = typeof tag === 'string' && tag.startsWith('perf:');
                 const extra =
                     tag === 'fort_potentiel_refonte' ? ' tag-refonte' :
                     tag === 'risque_cyber_eleve' ? ' tag-risk' :
                     tag === 'seo_a_ameliorer' ? ' tag-seo' :
                     tag === 'perf_lente' ? ' tag-perf' :
                     tag === 'site_sans_https' ? ' tag-https' :
+                    tag === 'blog' ? ' tag-blog' :
+                    tag === 'contact_form' ? ' tag-form' :
+                    tag === 'ecommerce' ? ' tag-ecommerce' :
+                    (isCms ? ' tag-cms' : '') +
+                    (isFramework ? ' tag-framework' : '') +
+                    (isPerf && tag.endsWith('good') ? ' tag-perf-good' : '') +
+                    (isPerf && tag.endsWith('low') ? ' tag-perf-low' : '') +
                     '';
 
                 let label;
@@ -792,6 +1034,15 @@ async function init() {
                         break;
                     case 'site_sans_https':
                         label = 'Sans HTTPS';
+                        break;
+                    case 'blog':
+                        label = 'Blog';
+                        break;
+                    case 'contact_form':
+                        label = 'Formulaire';
+                        break;
+                    case 'ecommerce':
+                        label = 'E‑commerce';
                         break;
                     case 'lang_fr':
                         label = 'FR';
@@ -818,10 +1069,19 @@ async function init() {
                         label = 'Autre langue';
                         break;
                     default:
-                        label = tag.replace(/_/g, ' ');
+                        if (isCms) {
+                            label = 'CMS: ' + tag.slice('cms:'.length);
+                        } else if (isFramework) {
+                            label = 'FW: ' + tag.slice('framework:'.length);
+                        } else if (isPerf) {
+                            const v = tag.slice('perf:'.length);
+                            label = v === 'good' ? 'Perf OK' : v === 'low' ? 'Perf faible' : ('Perf: ' + v);
+                        } else {
+                            label = tag.replace(/_/g, ' ');
+                        }
                 }
 
-                return `<span class="${base}${extra}">${Formatters.escapeHtml(label)}</span>`;
+                return `<span class="${base}${extra}" data-tag="${Formatters.escapeHtml(tag)}">${Formatters.escapeHtml(label)}</span>`;
             }).join('')
             : '';
 
@@ -917,8 +1177,19 @@ async function init() {
                         ${tagsHtml ? `<div class="tags-container">${tagsHtml}</div>` : ''}
                     </div>
                     <div class="row-meta">
-                        ${entreprise.secteur ? `<span class="row-meta-item">${Formatters.escapeHtml(entreprise.secteur)}</span>` : ''}
-                        ${entreprise.statut ? `<span class="row-meta-item">${Badges.getStatusBadge(entreprise.statut)}</span>` : ''}
+                        ${entreprise.secteur ? `<span class="row-chip row-chip-sector" title="Secteur"><i class="fas fa-industry" aria-hidden="true"></i> ${Formatters.escapeHtml(entreprise.secteur)}</span>` : ''}
+                        ${langChipLabel ? `<span class="row-chip row-chip-lang" title="Langue principale"><i class="fas fa-language" aria-hidden="true"></i> ${Formatters.escapeHtml(langChipLabel)}</span>` : ''}
+                        ${entreprise.statut ? (() => {
+                            const statut = String(entreprise.statut || '').trim();
+                            const cls = (Badges && typeof Badges.getStatusClass === 'function') ? Badges.getStatusClass(statut) : 'secondary';
+                            const icon = statut === 'Nouveau' ? 'fa-bolt'
+                                : statut === 'À qualifier' ? 'fa-question-circle'
+                                : statut === 'Relance' ? 'fa-phone'
+                                : statut === 'Gagné' ? 'fa-trophy'
+                                : statut === 'Perdu' ? 'fa-times-circle'
+                                : 'fa-tag';
+                            return `<span class="row-chip row-chip-status badge badge-${cls}" title="Statut"><i class="fas ${icon}" aria-hidden="true"></i> ${Formatters.escapeHtml(statut)}</span>`;
+                        })() : ''}
                         ${entreprise.email_principal ? `<span class="row-meta-item row-meta-email">${Formatters.escapeHtml(entreprise.email_principal)}</span>` : ''}
                     </div>
                 </div>
@@ -1137,16 +1408,60 @@ async function init() {
         updateBulkSelectionUI();
     }
 
+    function setupClickToSelectCards() {
+        const container = document.getElementById('entreprises-container');
+        if (!container) return;
+        if (container.dataset.clickSelectSetup === '1') return;
+        container.dataset.clickSelectSetup = '1';
+
+        const isInteractiveTarget = (el) => {
+            if (!el) return false;
+            return Boolean(
+                el.closest('button, a, input, select, textarea, label, details, summary, .btn, .btn-icon, .btn-view-details, .btn-delete-entreprise, .btn-favori, .btn-groups, .score-relaunch-btn')
+            );
+        };
+
+        container.addEventListener('click', (e) => {
+            const tagEl = e.target.closest('.tags-container .tag');
+            if (tagEl) {
+                const raw = tagEl.getAttribute('data-tag') || '';
+                addTagToFilter(raw);
+                const input = document.getElementById('filter-tags');
+                if (input) input.focus();
+                return;
+            }
+            if (isInteractiveTarget(e.target)) return;
+            // Sélection uniquement en vue liste (ligne)
+            if (typeof currentView !== 'undefined' && currentView !== 'list') return;
+            const row = e.target.closest('.entreprise-row');
+            if (!row) return;
+            const rawId = row.getAttribute('data-id');
+            const id = rawId ? parseInt(rawId, 10) : NaN;
+            if (Number.isNaN(id)) return;
+            const selected = selectedEntreprises.has(id);
+            setEntrepriseSelected(id, !selected);
+        });
+    }
+
     function updateBulkSelectionUI() {
         const countEl = document.getElementById('bulk-selected-count');
+        const bulkActionsEl = document.querySelector('.bulk-actions');
+        const applyBtn = document.getElementById('bulk-apply-btn');
+        const actionSelect = document.getElementById('bulk-action-select');
         if (!countEl) return;
         const count = selectedEntreprises.size;
         if (count === 0) {
             countEl.textContent = 'Aucune entreprise sélectionnée';
+            if (bulkActionsEl) bulkActionsEl.classList.add('disabled');
+            if (applyBtn) applyBtn.disabled = true;
         } else if (count === 1) {
             countEl.textContent = '1 entreprise sélectionnée';
+            if (bulkActionsEl) bulkActionsEl.classList.remove('disabled');
+            if (applyBtn) applyBtn.disabled = !actionSelect || !actionSelect.value;
         } else {
             countEl.textContent = `${count} entreprises sélectionnées`;
+            if (bulkActionsEl) bulkActionsEl.classList.remove('disabled');
+            if (applyBtn) applyBtn.disabled = !actionSelect || !actionSelect.value;
         }
     }
 
@@ -1608,11 +1923,16 @@ async function init() {
         if (bulkActionSelect && bulkGroupSelect) {
             bulkActionSelect.addEventListener('change', async () => {
                 const val = bulkActionSelect.value;
+                const applyBtn = document.getElementById('bulk-apply-btn');
                 if (val === 'group-add' || val === 'group-remove') {
                     bulkGroupSelect.style.display = 'inline-block';
                     await ensureBulkGroupsLoaded();
                 } else {
                     bulkGroupSelect.style.display = 'none';
+                }
+                if (applyBtn) {
+                    const hasSelection = selectedEntreprises.size > 0;
+                    applyBtn.disabled = !val || !hasSelection;
                 }
             });
         }
@@ -1638,6 +1958,10 @@ async function init() {
                         ids.forEach(id => {
                             types.forEach(t => triggerAnalysisRelaunch(id, t));
                         });
+                    } else if (action === 'launch-scraping') {
+                        for (const id of ids) {
+                            await triggerScrapingRelaunch(id);
+                        }
                     } else if (action === 'group-add' || action === 'group-remove') {
                         const groupId = bulkGroupSelect && bulkGroupSelect.value ? parseInt(bulkGroupSelect.value, 10) : null;
                         if (!groupId) {
@@ -1668,6 +1992,53 @@ async function init() {
                 }
             });
         }
+
+        // Sélection par clic sur la card / ligne
+        setupClickToSelectCards();
+
+        // Suggestions de tags + chips sélectionnés
+        loadTagsSuggestions().then(() => {
+            const suggestionsContainer = document.getElementById('filter-tags-suggestions');
+            const tagsInput = document.getElementById('filter-tags');
+            const chipsContainer = document.getElementById('filter-tags-chips');
+
+            if (tagsInput) {
+                tagsInput.addEventListener('input', () => {
+                    renderTagSuggestions(tagsInput.value || '');
+                });
+                tagsInput.addEventListener('focus', () => {
+                    renderTagSuggestions(tagsInput.value || '');
+                });
+            }
+
+            if (suggestionsContainer) {
+                suggestionsContainer.addEventListener('click', (e) => {
+                    const btn = e.target.closest('.tag-suggestion');
+                    if (!btn) return;
+                    const tag = btn.getAttribute('data-tag') || '';
+                    if (!tag) return;
+                    addTagToFilter(tag);
+                    if (tagsInput) {
+                        tagsInput.focus();
+                    }
+                });
+            }
+
+            if (chipsContainer) {
+                chipsContainer.addEventListener('click', (e) => {
+                    const removeBtn = e.target.closest('.tags-filter-chip-remove');
+                    if (!removeBtn) return;
+                    const tag = removeBtn.getAttribute('data-remove-tag') || '';
+                    if (!tag) return;
+                    removeTagFromFilter(tag);
+                    if (tagsInput) {
+                        tagsInput.focus();
+                    }
+                });
+            }
+        }).catch((e) => {
+            console.error('Erreur suggestions tags:', e);
+        });
         
         // Ouverture / fermeture des filtres avancés
         const advancedFiltersEl = document.getElementById('advanced-filters');

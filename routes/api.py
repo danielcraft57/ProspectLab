@@ -174,6 +174,10 @@ def entreprises():
             'has_tunnel': request.args.get('has_tunnel'),
             'performance_min': request.args.get('performance_min', type=int),
             'performance_max': request.args.get('performance_max', type=int),
+            'tags_contains': request.args.get('tags_contains'),
+            'tags_any': request.args.get('tags_any'),
+            # tags_all = entreprises qui possèdent TOUS les tags listés (AND logique)
+            'tags_all': request.args.get('tags_all'),
         }
         # Ne pas retirer les entiers 0 (valides pour min/max)
         def keep_filter(k, v):

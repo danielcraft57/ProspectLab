@@ -18,7 +18,15 @@
             const params = new URLSearchParams();
             Object.keys(filters).forEach(key => {
                 const v = filters[key];
-                if (v !== undefined && v !== null && v !== '') params.set(key, String(v));
+                if (v === undefined || v === null || v === '') return;
+                if (Array.isArray(v)) {
+                    if (!v.length) return;
+                    if (key === 'tags_any' || key === 'tags_all') {
+                        params.set(key, v.join(','));
+                        return;
+                    }
+                }
+                params.set(key, String(v));
             });
             params.set('page', String(page));
             params.set('page_size', String(pageSize));
