@@ -25,6 +25,40 @@
         </div>
     </div>
 
+    <div class="etm-import-panel" id="etm-import-panel">
+        <div class="etm-import-panel-inner">
+            <h2>Import de modèles (JSON)</h2>
+            <p class="etm-import-help">
+                Charge un fichier ou colle un JSON contenant un tableau de templates, ou un objet <code>{"templates": [...]}</code>.
+                La syntaxe est vérifiée, ainsi que les champs manquants et les doublons d'ID.
+            </p>
+            <div class="etm-import-grid">
+                <div class="form-group">
+                    <label for="etm-import-file">Fichier JSON</label>
+                    <input id="etm-import-file" type="file" accept=".json,application/json">
+                    <small class="etm-hint">Optionnel : le contenu sera aussi recopié dans la zone ci-dessous.</small>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="etm-import-text">Zone JSON</label>
+                <textarea id="etm-import-text" rows="8" placeholder='{"templates": [...]} ou [...]' spellcheck="false"></textarea>
+            </div>
+            <div id="etm-import-result" class="etm-import-result" aria-live="polite"></div>
+            <div class="etm-import-actions-bottom">
+                <div class="etm-import-buttons">
+                    <button class="btn btn-secondary btn-small" id="etm-import-parse-btn" type="button">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        Analyser le JSON
+                    </button>
+                    <button class="btn btn-primary btn-small" id="etm-import-apply-btn" type="button" disabled>
+                        <i class="fa-solid fa-file-import"></i>
+                        Importer les modèles
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="etm-layout">
         <aside class="etm-sidebar">
             <div class="etm-search">

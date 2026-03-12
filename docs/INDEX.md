@@ -78,7 +78,7 @@ Bienvenue dans la documentation de ProspectLab. Cette documentation est organis√
 - **technical_analyses** : Analyses techniques (frameworks, serveurs)
 - **osint_analyses** : Analyses OSINT (recherche responsables)
 - **pentest_analyses** : Analyses Pentest (securite)
-- **templates** : Modeles d'emails
+- **email_templates** : Modeles d'emails (templates HTML / texte stock√©s en base)
 - **campagnes_email** : Campagnes email avec metadonnees
 - **emails_envoyes** : Details des emails envoyes avec tracking_token
 - **email_tracking_events** : Evenements de tracking (ouvertures, clics)

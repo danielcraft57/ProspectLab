@@ -46,14 +46,6 @@ class TemplateManager:
         try:
             from services.database import Database
             db = Database()
-            # Si la table existe mais qu'elle est vide, seed depuis le JSON (si présent)
-            try:
-                if hasattr(db, 'count_email_templates') and db.count_email_templates() == 0:
-                    self._seed_db_from_json(db)
-            except Exception:
-                # Ne pas bloquer le chargement si le seed échoue
-                pass
-
             if hasattr(db, 'list_email_templates'):
                 rows = db.list_email_templates(active_only=True)
                 if rows is not None:
@@ -139,11 +131,18 @@ class TemplateManager:
         
         for template in templates:
             if 'content' in template:
-                content = template['content']
+                content = template['content'] or ''
+                # Détection automatique des modèles HTML même si la catégorie n'est pas "html_email"
+                if not template.get('is_html') and isinstance(content, str):
+                    snippet = content.strip()[:256].lower()
+                    if snippet.startswith('<!doctype html') or snippet.startswith('<html') or '<body' in snippet:
+                        template['is_html'] = True
+
                 if template.get('is_html'):
                     template['preview'] = 'Modèle HTML avec variables dynamiques. {{nom}} = nom du contact ou responsable entreprise si inconnu ; {{entreprise}}, {{email}}, {{responsable}}, blocs conditionnels.'
                 else:
-                    template['preview'] = content[:100] + '...' if len(content) > 100 else content
+                    text = content if isinstance(content, str) else str(content)
+                    template['preview'] = text[:100] + '...' if len(text) > 100 else text
         
         return templates
     

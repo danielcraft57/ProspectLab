@@ -44,8 +44,8 @@ class EmailTemplateManager(DatabaseBase):
                 sql += " WHERE " + " AND ".join(where)
             sql += " ORDER BY updated_at DESC"
 
-            sql = self.adapt_sql(sql)
-            cursor.execute(sql, params)
+            # Utiliser execute_sql pour gérer SQLite/PostgreSQL (placeholders, adaptations).
+            self.execute_sql(cursor, sql, params or None)
             rows = cursor.fetchall() or []
             return [dict(r) for r in rows]
         finally:
@@ -58,11 +58,11 @@ class EmailTemplateManager(DatabaseBase):
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
-            sql = self.adapt_sql(
+            sql = (
                 "SELECT id, name, category, subject, content, is_html, is_active, created_at, updated_at "
                 "FROM email_templates WHERE id = ?"
             )
-            cursor.execute(sql, (template_id,))
+            self.execute_sql(cursor, sql, (template_id,))
             row = cursor.fetchone()
             return dict(row) if row else None
         finally:
@@ -88,26 +88,28 @@ class EmailTemplateManager(DatabaseBase):
 
             existing = self.get_email_template(template_id)
             if existing:
-                sql = self.adapt_sql(
-                    "UPDATE email_templates SET name = ?, category = ?, subject = ?, content = ?, is_html = ?, is_active = ?, updated_at = ? "
-                    "WHERE id = ?"
+                sql = (
+                    "UPDATE email_templates SET name = ?, category = ?, subject = ?, content = ?, "
+                    "is_html = ?, is_active = ?, updated_at = ? WHERE id = ?"
                 )
-                cursor.execute(
+                self.execute_sql(
+                    cursor,
                     sql,
                     (name, category, subject, content, 1 if is_html else 0, 1 if is_active else 0, now, template_id),
                 )
             else:
-                sql = self.adapt_sql(
+                sql = (
                     "INSERT INTO email_templates (id, name, category, subject, content, is_html, is_active, created_at, updated_at) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 )
-                cursor.execute(
+                self.execute_sql(
+                    cursor,
                     sql,
                     (template_id, name, category, subject, content, 1 if is_html else 0, 1 if is_active else 0, now, now),
                 )
 
-            if not self.is_postgresql():
-                conn.commit()
+            # Toujours valider la transaction, SQLite ou PostgreSQL.
+            conn.commit()
 
             tpl = self.get_email_template(template_id)
             return tpl or {
@@ -131,10 +133,10 @@ class EmailTemplateManager(DatabaseBase):
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
-            sql = self.adapt_sql("DELETE FROM email_templates WHERE id = ?")
-            cursor.execute(sql, (template_id,))
-            if not self.is_postgresql():
-                conn.commit()
+            sql = "DELETE FROM email_templates WHERE id = ?"
+            self.execute_sql(cursor, sql, (template_id,))
+            # Valider la suppression dans tous les cas.
+            conn.commit()
             return cursor.rowcount > 0
         finally:
             conn.close()
@@ -146,8 +148,8 @@ class EmailTemplateManager(DatabaseBase):
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
-            sql = self.adapt_sql("SELECT COUNT(*) as n FROM email_templates")
-            cursor.execute(sql)
+            sql = "SELECT COUNT(*) as n FROM email_templates"
+            self.execute_sql(cursor, sql)
             row = cursor.fetchone()
             if not row:
                 return 0

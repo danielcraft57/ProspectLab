@@ -134,16 +134,20 @@ L'application sera accessible sur http://localhost:5000
 
 ### Envoi d'emails
 
-1. Allez sur "Envoyer Emails"
-2. Sélectionnez un modèle (optionnel) ou créez un message personnalisé
-3. Entrez les destinataires au format JSON
-4. Envoyez les emails
+1. Allez sur la page **« Campagnes email »**
+2. Utilisez le wizard en **3 étapes** :
+   - Étape 1 : cibler les entreprises (toutes, par objectifs, par critères, par groupes, par segments sauvegardés)
+   - Étape 2 : choisir les destinataires email par entreprise
+   - Étape 3 : sélectionner un template HTML (optionnel), le sujet et un message personnalisé
+3. Configurez les **paramètres d'envoi** (mode immédiat ou programmé, délai entre envois, suggestions intelligentes de date/heure)
+4. Lancez la campagne et suivez la progression en temps réel (WebSocket + logs dédiés)
 
 ### Gestion de modèles
 
-1. Allez sur "Modèles"
-2. Créez, modifiez ou supprimez vos modèles de messages
-3. Utilisez les variables {nom}, {entreprise}, {email} pour personnaliser
+1. Allez sur **« Modèles d'emails »**
+2. Créez, importez (JSON), modifiez ou supprimez vos modèles stockés en base (`email_templates`)
+3. Utilisez les variables dynamiques (données d'entreprise, analyses techniques/SEO/OSINT, etc.) pour personnaliser le contenu
+4. Profitez de l'aperçu HTML, des catégories dynamiques et de la détection automatique des doublons lors des imports
 
 ## Structure du projet
 
