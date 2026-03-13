@@ -1,0 +1,29 @@
+{
+  "notes": [
+    "Groupes de secteurs pour le ciblage commercial.",
+    "Chaque groupe liste les secteurs tels qu'ils apparaissent dans secteurs_economiques.txt.",
+    "Tu peux librement ajuster les groupes/sectors selon ta strategie."
+  ],
+  "groups": [
+    {
+      "group": "BTP_Artisanat_Travaux_maison",
+      "sectors": [
+        "Artisanat",
+        "Artisanat du batiment",
+        "BTP construction",
+        "Chauffage climatisation",
+        "Installation electrique",
+        "Menuiserie",
+        "Peinture revetements",
+        "Plomberie",
+        "Depannage a domicile",
+        "Travaux publics",
+        "Habitat",
+        "Jardinage",
+        "Paysagiste",
+        "Bricolage"
+      ]
+    }
+  ]
+}
+

@@ -7,6 +7,7 @@ Cette documentation détaille l'utilisation et la maintenance des scripts utilit
 Les scripts sont organisés par plateforme dans le dossier `scripts/` :
 - **Windows** : Scripts PowerShell (.ps1) pour la gestion de Redis/Celery et les tests
 - **Linux** : Scripts Bash (.sh) pour l'installation (OSINT/Pentest) et la gestion Redis/Celery/maintenance
+- **Google Maps** : Scripts Python dans `scripts/google_maps_tools/` pour l'extraction d'entreprises via l'API Google Places (exports Excel par ville/secteur)
 
 ## Scripts Windows
 

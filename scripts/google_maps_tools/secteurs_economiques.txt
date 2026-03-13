@@ -1,0 +1,194 @@
+# Copie independante pour tools Google Maps (pas de donnees privees ici).
+Agriculture et elevage
+Agroalimentaire
+Alimentation et epicerie
+Artisanat
+Artisanat du batiment
+Association
+Automobile
+Banque
+Bar cafe brasserie
+Beaute esthetique
+Bien etre
+Bricolage
+BTP construction
+Cabinet medical
+Centre de formation
+Chauffage climatisation
+Commerce de proximite
+Commerce de gros
+Commerce de detail
+Communication
+Comptabilite
+Conseil
+Conseil entreprise
+Culture loisirs
+Decoration ameublement
+Depannage a domicile
+Developpement logiciel
+Distribution
+E commerce
+Energie
+Enseignement
+Entretien nettoyage
+Evenementiel
+Finance
+Fleuriste jardinerie
+Food restauration
+Fournitures bureau
+Garage automobile
+Grande distribution
+Habitat
+Hebergement
+Hotellerie
+Immobilier
+Industrie
+Informatique
+Installation electrique
+Jardinage
+Juridique
+Location
+Logistique
+Maintenance industrielle
+Marketing
+Medias
+Menuiserie
+Metalurgie
+Mode habillement
+Organisation religieuse
+Particulier employeur
+Paysagiste
+Peinture revetements
+Pharmacie parapharmacie
+Photographie
+Plomberie
+Prestataire de services
+Production audiovisuelle
+Profession liberale
+Promotion immobiliere
+Proprete
+Restauration
+Restauration rapide
+Sante
+Securite
+Services a la personne
+Services aux entreprises
+Services informatiques
+Sport
+Superette
+Taxi VTC
+Telecom
+Tourisme
+Transport
+Travaux publics
+Veterinaire
+Voyage
+
+Assurance
+Courtier
+Banque assurance
+Agence de voyage
+Agence d'interim
+Recrutement
+Ressources humaines
+Entreprise de demenagement
+Location de voiture
+VTC
+Taxi
+Transporteur
+Agence de communication
+Agence marketing
+Agence web
+Imprimerie
+Photographe
+Videaste
+Salle de reception
+Traiteur evenementiel
+Organisateur d'evenements
+Centre commercial
+Boutique
+Bijouterie
+Librairie
+Papeterie
+Magasin de sport
+Magasin d'electromenager
+Magasin informatique
+Electronique
+Telephonie
+Pressing
+Blanchisserie
+Cordonnerie
+Fleuriste
+Salon de coiffure
+Barbier
+Institut de beaute
+Spa
+Salle de sport
+Yoga
+Osteopathe
+Psychologue
+Kinesitherapeute
+Infirmier
+Creche
+Ecole
+College
+Lycee
+Universite
+Auto ecole
+Centre de controle technique
+Concessionnaire
+Carrosserie
+Pneus
+Depannage auto
+Station service
+Hotel restaurant
+Chambre d'hotes
+Camping
+Boulangerie patisserie
+Boucherie
+Poissonnerie
+Fromagerie
+Supermarche
+Mairie
+Administration
+
+Agences immobilieres
+Artisans
+Bars
+Cabinets dentaires
+Cabinets d'avocats
+Cabinets comptables
+Carrosserie
+Coiffeurs
+Controle technique
+Depannage informatique
+Electriciens
+Hotels
+Kinesitherapeutes
+Notaires
+Opticiens
+Pharmacies
+Pizzerias
+Restaurants
+Salles de sport
+Serruriers
+Supermarches
+Traiteurs
+Vendeurs automobiles
+Agences d'assurance
+Agences d'interim
+Auto ecoles
+Boulangeries
+Boucheries
+Campings
+Centres commerciaux
+Creches
+Ecoles
+Garages
+Imprimeries
+Kinesitherapeutes (sante)
+Osteopathes
+Psychologues
+Spas
+Stations service
+
