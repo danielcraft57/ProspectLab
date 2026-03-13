@@ -106,7 +106,7 @@ class SEOAnalyzer:
         }
         
         try:
-            # Normaliser l'URL
+            # Normaliser l'URL de départ
             if not url.startswith(('http://', 'https://')):
                 url = 'https://' + url
             
@@ -116,16 +116,60 @@ class SEOAnalyzer:
             if progress_callback:
                 progress_callback('Récupération de la page principale...')
             
-            # Récupérer la page HTML
-            try:
-                response = requests.get(url, headers=self.headers, timeout=30, allow_redirects=True)
-                response.raise_for_status()
-                html_content = response.text
-                final_url = response.url
-            except Exception as e:
-                results['error'] = f'Erreur lors de la récupération de la page: {str(e)}'
-                logger.error(f'Erreur récupération {url}: {e}')
+            # Stratégie de récupération avec fallback http→https ou https→http en cas de blocage
+            candidates = [url]
+            if parsed.scheme == 'http':
+                candidates.append('https://' + parsed.netloc + parsed.path or '')
+            elif parsed.scheme == 'https':
+                # Certains sites bloquent https mais laissent passer http (rare mais possible)
+                candidates.append('http://' + parsed.netloc + parsed.path or '')
+            
+            response = None
+            last_error: Optional[Exception] = None
+            for idx, candidate in enumerate(candidates):
+                try:
+                    resp = requests.get(candidate, headers=self.headers, timeout=30, allow_redirects=True)
+                    resp.raise_for_status()
+                    response = resp
+                    url = candidate  # garder la version réellement utilisée
+                    break
+                except requests.HTTPError as e:
+                    last_error = e
+                    status = e.response.status_code if e.response is not None else None
+                    logger.warning(f'HTTP {status} pour {candidate} lors de l\'analyse SEO')
+                    # En cas de 403/401 sur le premier candidat, on tente le suivant
+                    if idx == 0 and status in (401, 403) and idx + 1 < len(candidates):
+                        if progress_callback:
+                            progress_callback('Accès refusé, nouvelle tentative avec un autre protocole...')
+                        continue
+                    break
+                except Exception as e:
+                    last_error = e
+                    logger.error(f'Erreur récupération {candidate}: {e}')
+                    # Si c'est la première tentative, on tente la suivante, sinon on arrête
+                    if idx + 1 < len(candidates):
+                        continue
+                    break
+            
+            if response is None:
+                # Message plus lisible pour l’utilisateur
+                if isinstance(last_error, requests.HTTPError):
+                    status = last_error.response.status_code if last_error.response is not None else None
+                    if status in (401, 403):
+                        msg = (
+                            f'Le site a refusé l\'accès (HTTP {status}). '
+                            f'Certaines protections bloquent les robots : l’analyse SEO détaillée n’est pas possible.'
+                        )
+                    else:
+                        msg = f'Erreur HTTP {status} lors de la récupération de la page.'
+                else:
+                    msg = f'Erreur lors de la récupération de la page: {str(last_error)}'
+                results['error'] = msg
+                logger.error(f'Erreur récupération {url}: {last_error}')
                 return results
+            
+            html_content = response.text
+            final_url = response.url
             
             if progress_callback:
                 progress_callback('Analyse des meta tags...')

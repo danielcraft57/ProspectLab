@@ -137,8 +137,8 @@ set -a
 source "$PROJECT_DIR/.env" 2>/dev/null || true
 set +a
 
-# Tester la connexion PostgreSQL
-python3 << EOF
+# Tester la connexion PostgreSQL avec l'environnement Conda de l'app
+"$ENV_DIR/bin/python" << EOF
 import os
 import sys
 from dotenv import load_dotenv
@@ -185,8 +185,8 @@ fi
 echo ""
 echo "[*] Étape 6/7: Initialisation du schéma de base de données..."
 
-# Initialiser le schéma
-python3 << EOF
+# Initialiser le schéma avec l'environnement Conda de l'app
+"$ENV_DIR/bin/python" << EOF
 import os
 import sys
 from dotenv import load_dotenv
@@ -255,7 +255,7 @@ Type=notify
 User=pi
 Group=pi
 WorkingDirectory=/opt/prospectlab
-Environment="PATH=/opt/prospectlab/env/bin"
+Environment="PATH=/opt/prospectlab/env/bin:/usr/local/bin:/usr/bin:/bin"
 EnvironmentFile=/opt/prospectlab/.env
 ExecStart=/opt/prospectlab/env/bin/gunicorn -k eventlet -w 1 -b 0.0.0.0:5000 --timeout 120 --access-logfile /opt/prospectlab/logs/gunicorn_access.log --error-logfile /opt/prospectlab/logs/gunicorn_error.log app:app
 ExecReload=/bin/kill -s HUP $MAINPID
@@ -277,7 +277,7 @@ Type=forking
 User=pi
 Group=pi
 WorkingDirectory=/opt/prospectlab
-Environment="PATH=/opt/prospectlab/env/bin"
+Environment="PATH=/opt/prospectlab/env/bin:/usr/local/bin:/usr/bin:/bin"
 EnvironmentFile=/opt/prospectlab/.env
 ExecStart=/opt/prospectlab/scripts/linux/start_celery_worker.sh
 ExecStop=/bin/kill -s TERM `cat /opt/prospectlab/celery_worker.pid 2>/dev/null` || true
@@ -299,7 +299,7 @@ Type=forking
 User=pi
 Group=pi
 WorkingDirectory=/opt/prospectlab
-Environment="PATH=/opt/prospectlab/env/bin"
+Environment="PATH=/opt/prospectlab/env/bin:/usr/local/bin:/usr/bin:/bin"
 ExecStart=/opt/prospectlab/env/bin/celery -A celery_app beat --loglevel=info --logfile=/opt/prospectlab/logs/celery_beat.log --pidfile=/opt/prospectlab/celery_beat.pid --detach
 ExecStop=/bin/kill -s TERM $MAINPID
 Restart=always

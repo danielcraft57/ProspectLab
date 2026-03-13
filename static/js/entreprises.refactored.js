@@ -129,7 +129,16 @@
     // Variables d'état
     let currentView = 'grid';
     let currentPage = 1;
-    const itemsPerPage = 20;
+    let itemsPerPage = (() => {
+        try {
+            const stored = window.localStorage && window.localStorage.getItem('entreprises_page_size');
+            const n = stored ? parseInt(stored, 10) : NaN;
+            if (!Number.isFinite(n)) return 20;
+            return Math.min(200, Math.max(10, n));
+        } catch (e) {
+            return 20;
+        }
+    })();
     let allEntreprises = [];        // entreprises de la page courante
     let filteredEntreprises = [];   // idem (après éventuels filtres client si on en ajoute)
     let totalEntreprises = 0;       // total tous résultats côté serveur
@@ -1238,6 +1247,14 @@
             html += `<input type="number" id="pagination-jump-input" min="1" max="${totalPages}" value="${currentPage}" aria-label="Page">`;
             html += '</div>';
         }
+        html += '<div class="pagination-page-size">';
+        html += '<label for="page-size-select">Par page</label>';
+        html += '<select id="page-size-select" class="form-select form-select-compact">';
+        html += '<option value="20">20</option>';
+        html += '<option value="50">50</option>';
+        html += '<option value="100">100</option>';
+        html += '</select>';
+        html += '</div>';
         html += '</div>';
         pagination.innerHTML = html;
         
@@ -1270,6 +1287,32 @@
                     e.preventDefault();
                     goToPage();
                 }
+            });
+        }
+
+        const pageSizeSelect = document.getElementById('page-size-select');
+        if (pageSizeSelect) {
+            try {
+                const initial = itemsPerPage || 20;
+                if ([...pageSizeSelect.options].some(o => parseInt(o.value, 10) === initial)) {
+                    pageSizeSelect.value = String(initial);
+                }
+            } catch (e) {
+                // ignore
+            }
+            pageSizeSelect.addEventListener('change', () => {
+                const value = parseInt(pageSizeSelect.value, 10);
+                if (!Number.isFinite(value)) return;
+                itemsPerPage = Math.min(200, Math.max(10, value));
+                try {
+                    if (window.localStorage) {
+                        window.localStorage.setItem('entreprises_page_size', String(itemsPerPage));
+                    }
+                } catch (e) {
+                    // ignore
+                }
+                currentPage = 1;
+                loadEntreprises();
             });
         }
     }
@@ -1771,6 +1814,8 @@
             'filter-security-max',
             'filter-seo-min',
             'filter-seo-max',
+            'filter-pentest-min',
+            'filter-pentest-max',
             'filter-has-email'
         ];
 
@@ -2081,6 +2126,8 @@
         const securityMax = document.getElementById('filter-security-max')?.value;
         const seoMin = document.getElementById('filter-seo-min')?.value;
         const seoMax = document.getElementById('filter-seo-max')?.value;
+        const pentestMin = document.getElementById('filter-pentest-min')?.value;
+        const pentestMax = document.getElementById('filter-pentest-max')?.value;
         const hasEmail = document.getElementById('filter-has-email')?.checked;
 
         if (secteur) count += 1;
@@ -2090,6 +2137,8 @@
         if (securityMax && parseInt(securityMax, 10) < 100) count += 1;
         if (seoMin && parseInt(seoMin, 10) > 0) count += 1;
         if (seoMax && parseInt(seoMax, 10) < 100) count += 1;
+        if (pentestMin && parseInt(pentestMin, 10) > 0) count += 1;
+        if (pentestMax && parseInt(pentestMax, 10) < 100) count += 1;
         if (hasEmail) count += 1;
 
         if (count > 0) {

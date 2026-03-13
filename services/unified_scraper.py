@@ -130,6 +130,52 @@ class UnifiedScraper:
             'reddit': ['reddit.com'],
             'discord': ['discord.gg', 'discord.com']
         }
+
+    def _fetch_with_protocol_fallback(self, url: str, timeout: int = 15) -> Optional[requests.Response]:
+        """
+        Récupère une page avec fallback http/https en cas de blocage (403/401, etc.).
+        Ne lève pas d'exception : renvoie None si toutes les tentatives échouent.
+        """
+        try:
+            parsed = urlparse(url)
+        except Exception:
+            return None
+
+        # Normaliser si aucun schéma
+        if not parsed.scheme:
+            url = 'https://' + url
+            parsed = urlparse(url)
+
+        candidates = [url]
+        if parsed.scheme == 'http':
+            candidates.append('https://' + parsed.netloc + (parsed.path or ''))
+        elif parsed.scheme == 'https':
+            candidates.append('http://' + parsed.netloc + (parsed.path or ''))
+
+        last_error: Optional[Exception] = None
+        for idx, candidate in enumerate(candidates):
+            try:
+                resp = requests.get(candidate, headers=self.headers, timeout=timeout)
+                resp.raise_for_status()
+                return resp
+            except requests.HTTPError as e:
+                last_error = e
+                status = e.response.status_code if e.response is not None else None
+                logger.warning(f'[scraper] HTTP {status} pour {candidate}')
+                if idx == 0 and status in (401, 403) and idx + 1 < len(candidates):
+                    # tenter le protocole alternatif
+                    continue
+                break
+            except Exception as e:
+                last_error = e
+                logger.warning(f'[scraper] Erreur récupération {candidate}: {e}')
+                if idx + 1 < len(candidates):
+                    continue
+                break
+
+        if last_error:
+            logger.error(f'[scraper] Échec de récupération pour {url}: {last_error}')
+        return None
         
         # Patterns de détection de technologies
         self.technology_patterns = {
@@ -1006,10 +1052,14 @@ class UnifiedScraper:
                         sleep_time = self.request_delay - time_since_last
                         time.sleep(sleep_time)
                 
-                self.last_request_time[domain] = time.time()
+            self.last_request_time[domain] = time.time()
             
-            response = requests.get(url, headers=self.headers, timeout=15)  # Timeout augmenté à 15s
-            response.raise_for_status()
+            # Utiliser le helper avec fallback http/https
+            response = self._fetch_with_protocol_fallback(url, timeout=15)
+            if response is None:
+                # On journalise et on arrête proprement pour cette URL sans casser tout le scraping
+                logger.warning(f'[scraper] Impossible de récupérer {url}, page ignorée')
+                return
             
             soup = BeautifulSoup(response.text, 'html.parser')
             text = response.text

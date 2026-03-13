@@ -37,13 +37,20 @@ install_pkg curl
 install_pkg wget
 
 echo "[*] Bibliothèques Python pour SEO..."
-# Détecter si on est dans un venv
+# Détecter l'environnement Python cible :
+# 1) venv classique (VIRTUAL_ENV)
+# 2) env Conda avec préfixe fixe /opt/prospectlab/env (install_production_complete.sh)
+# 3) fallback installation --user
 if [ -n "$VIRTUAL_ENV" ]; then
-  echo "[*] Environnement virtuel détecté, installation dans le venv..."
+  echo "[*] Environnement virtuel détecté (venv), installation dans le venv..."
   pip3 install --upgrade beautifulsoup4 lxml requests html5lib || true
   pip3 install --upgrade urllib3 certifi || true
+elif [ -x "/opt/prospectlab/env/bin/pip" ]; then
+  echo "[*] Environnement Conda détecté (/opt/prospectlab/env), installation dans cet env..."
+  /opt/prospectlab/env/bin/pip install --upgrade beautifulsoup4 lxml requests html5lib || true
+  /opt/prospectlab/env/bin/pip install --upgrade urllib3 certifi || true
 else
-  echo "[*] Installation globale (--user)..."
+  echo "[*] Aucun venv/Conda détecté, installation globale (--user)..."
   pip3 install --user --upgrade beautifulsoup4 lxml requests html5lib || true
   pip3 install --user --upgrade urllib3 certifi || true
 fi

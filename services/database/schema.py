@@ -787,7 +787,8 @@ class DatabaseSchema(DatabaseBase):
                 description TEXT,
                 recommendation TEXT,
                 date_found TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (analysis_id) REFERENCES analyses_pentest(id) ON DELETE CASCADE
+                FOREIGN KEY (analysis_id) REFERENCES analyses_pentest(id) ON DELETE CASCADE,
+                UNIQUE(analysis_id, name)
             )
         ''')
         
@@ -829,6 +830,9 @@ class DatabaseSchema(DatabaseBase):
         
         # Index pour les analyses Pentest
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_pentest_vuln_analysis_id ON analysis_pentest_vulnerabilities(analysis_id)')
+        # Garantit la compatibilité PostgreSQL pour ON CONFLICT (analysis_id, name)
+        # (et sert de "migration" si la table existait déjà sans contrainte UNIQUE).
+        self.execute_sql(cursor,'CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_pentest_vuln_analysis_name ON analysis_pentest_vulnerabilities(analysis_id, name)')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_pentest_security_headers_analysis_id ON analysis_pentest_security_headers(analysis_id)')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_pentest_cms_vuln_analysis_id ON analysis_pentest_cms_vulnerabilities(analysis_id)')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_pentest_ports_analysis_id ON analysis_pentest_open_ports(analysis_id)')

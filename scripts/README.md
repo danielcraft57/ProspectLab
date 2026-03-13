@@ -8,6 +8,7 @@ Ce dossier contient tous les scripts utilitaires pour ProspectLab, organisés pa
 scripts/
 ├── windows/          # Scripts PowerShell pour Windows
 ├── linux/            # Scripts Bash pour Linux/WSL
+├── experiments/      # POC et essais (non prod)
 └── README.md         # Ce fichier
 ```
 

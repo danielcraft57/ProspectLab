@@ -102,3 +102,7 @@ deploy/
 templates_data.json
 templates_data.default.json
 templates_data.generated.json
+
+# Données locales / expérimentations (non versionnées)
+Data/
+scripts/experiments/
