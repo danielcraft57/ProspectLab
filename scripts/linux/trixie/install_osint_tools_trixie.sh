@@ -30,7 +30,9 @@ echo "[*] Outils APT (réseau / DNS / recon)..."
 install_pkg theharvester || true
 if ! command -v theharvester >/dev/null 2>&1; then
   echo "  - theharvester absent des dépôts, tentative via pipx..."
+  # Nom du paquet parfois sensible à la casse, on essaie plusieurs variantes
   pipx install theHarvester || true
+  pipx install theharvester || true
 fi
 install_pkg dnsrecon
 install_pkg whatweb
@@ -180,6 +182,20 @@ echo "  - spiderfoot peut être installé manuellement selon l'usage."
 
 # Module Python whois (optionnel)
 install_pkg python3-whois 2>/dev/null || true
+
+# Complément: installer python-whois comme module Python (import whois)
+if [ -x "/opt/prospectlab/env/bin/pip" ]; then
+  /opt/prospectlab/env/bin/pip install python-whois || true
+fi
+# Egalement côté Python système (utilisé par certains scripts de test)
+pip3 install --user python-whois || true
+
+# Complément: installer python-whois dans l'environnement ProspectLab si disponible
+if [ -x "/opt/prospectlab/env/bin/pip" ]; then
+  /opt/prospectlab/env/bin/pip install python-whois || true
+else
+  pip3 install --user python-whois || true
+fi
 
 echo "[*] Vérifications rapides..."
 export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"

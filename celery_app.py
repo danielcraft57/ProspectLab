@@ -46,6 +46,7 @@ celery.conf.update(
     # Importer automatiquement les tâches
     # Important : inclure explicitement toutes les tâches spécialisées
     imports=(
+        'tasks.debug_tasks',
         'tasks.analysis_tasks',
         'tasks.scraping_tasks',
         'tasks.technical_analysis_tasks',

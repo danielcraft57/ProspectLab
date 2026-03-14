@@ -6,6 +6,8 @@
 
 set -e
 
+export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
+
 echo "[*] Vérification des outils OSINT (prod Linux, natif)..."
 echo
 

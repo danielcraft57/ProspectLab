@@ -23,8 +23,17 @@ install_pkg wget
 install_pkg git
 install_pkg python3-pip
 install_pkg python3-venv
-install_pkg nodejs
-install_pkg npm
+
+echo "[*] Installation / mise à jour de Node.js (NodeSource 22.x)..."
+if ! command -v node >/dev/null 2>&1; then
+  echo "  - Node.js absent, ajout du dépôt NodeSource 22.x"
+  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+  sudo apt-get update
+  install_pkg nodejs
+else
+  echo "  - Node.js déjà présent: $(node --version)"
+fi
+# npm est livré avec nodejs (NodeSource), ne pas installer le paquet npm Debian qui entre en conflit
 
 # Mettre à jour npm si ancienne version
 if command -v npm >/dev/null 2>&1; then
