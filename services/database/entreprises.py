@@ -1555,6 +1555,45 @@ class EntrepriseManager(DatabaseBase):
         except Exception:
             stats['par_opportunite'] = {}
 
+        # Tags (champ JSON stocké en texte, agrégation côté Python pour compat SQLite/PostgreSQL)
+        try:
+            self.execute_sql(cursor, '''
+                SELECT tags
+                FROM entreprises
+                WHERE tags IS NOT NULL AND tags != ''
+            ''')
+            tags_count: dict[str, int] = {}
+            for row in cursor.fetchall() or []:
+                raw = None
+                try:
+                    raw = row['tags'] if isinstance(row, dict) else (row[0] if row else None)
+                except Exception:
+                    raw = None
+
+                if not raw:
+                    continue
+
+                tags_list = []
+                try:
+                    tags_list = json.loads(raw) if isinstance(raw, str) else (raw or [])
+                except Exception:
+                    tags_list = []
+
+                if not isinstance(tags_list, list):
+                    continue
+
+                for t in tags_list:
+                    tag = (str(t).strip() if t is not None else '')
+                    if not tag:
+                        continue
+                    tags_count[tag] = tags_count.get(tag, 0) + 1
+
+            stats['par_tags'] = dict(sorted(tags_count.items(), key=lambda kv: (-kv[1], kv[0].lower())))
+            stats['top_tags'] = [{'tag': k, 'count': v} for k, v in list(stats['par_tags'].items())[:20]]
+        except Exception:
+            stats['par_tags'] = {}
+            stats['top_tags'] = []
+
         # Secteurs les plus représentés parmi les prospects gagnés (optionnellement filtrés par période)
         try:
             base_sql = '''

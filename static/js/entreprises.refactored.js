@@ -149,6 +149,7 @@
     const selectedEntreprises = new Set();
     let tagsSuggestions = [];
     let activeTagFilters = [];
+    let initialAnalyseId = null;
     
     function getEntrepriseNom(entrepriseId) {
         if (entrepriseId == null) return 'Entreprise';
@@ -452,11 +453,91 @@
         return filters;
     }
 
+    /** Applique les filtres passés dans l'URL (?secteur=..., ?statut=..., ?tags_any=..., ?analyse_id=...). */
+    function applyInitialFiltersFromUrl() {
+        let hasAnyUrlFilter = false;
+        try {
+            const search = window.location ? window.location.search || '' : '';
+            if (!search) return;
+            const params = new URLSearchParams(search);
+
+            // analyse_id (filtre backend, pas de champ dédié dans l'UI)
+            const analyseParam = params.get('analyse_id') || params.get('analyse');
+            if (analyseParam) {
+                const id = Number.parseInt(analyseParam, 10);
+                if (!Number.isNaN(id) && id > 0) {
+                    initialAnalyseId = id;
+                    hasAnyUrlFilter = true;
+                }
+            }
+
+            // Secteur -> select
+            const secteurParam = params.get('secteur');
+            if (secteurParam) {
+                const secteurSelect = document.getElementById('filter-secteur');
+                if (secteurSelect) {
+                    secteurSelect.value = secteurParam;
+                }
+                hasAnyUrlFilter = true;
+            }
+
+            // Statut -> champ caché + pills
+            const statutParam = params.get('statut');
+            if (statutParam) {
+                const statutInput = document.getElementById('filter-statut');
+                if (statutInput) {
+                    statutInput.value = statutParam;
+                }
+                const pills = document.querySelectorAll('#filter-statut-pills .pill');
+                pills.forEach((pill) => {
+                    const v = pill.getAttribute('data-value') || '';
+                    pill.classList.toggle('active', v === statutParam);
+                });
+                hasAnyUrlFilter = true;
+            }
+
+            // Opportunité -> seulement backend (pas encore de champ dans le formulaire)
+            const opportuniteParam = params.get('opportunite');
+            if (opportuniteParam) {
+                // On encode dans un attribut data pour que getCurrentFilters puisse l'ajouter si besoin plus tard
+                const root = document.body;
+                if (root) root.dataset.initialOpportunite = opportuniteParam;
+                hasAnyUrlFilter = true;
+            }
+
+            // Tags_any -> initialisation des tags intelligents
+            const tagsAnyParam = params.get('tags_any');
+            if (tagsAnyParam) {
+                const parts = tagsAnyParam.split(',').map((s) => s.trim()).filter(Boolean);
+                if (parts.length) {
+                    activeTagFilters = Array.from(new Set([...(activeTagFilters || []), ...parts]));
+                    const input = document.getElementById('filter-tags');
+                    if (input) {
+                        input.value = activeTagFilters.join(', ');
+                    }
+                    renderTagFilterChips();
+                    hasAnyUrlFilter = true;
+                }
+            }
+        } catch (e) {
+            console.error('[entreprises] Erreur lors de la lecture des filtres URL:', e);
+        }
+
+        if (hasAnyUrlFilter) {
+            updateAdvancedFiltersBadge();
+        }
+    }
+
     /** Charge les entreprises avec les filtres courants (côté serveur, pagination). */
     async function loadEntreprises() {
         try {
             const filters = getCurrentFilters();
-            const data = await EntreprisesAPI.loadAll(filters, currentPage, itemsPerPage, false);
+            // Opportunité passée dans l'URL (data-attribute sur body)
+            const body = document.body;
+            if (body && body.dataset.initialOpportunite && !filters.opportunite) {
+                filters.opportunite = body.dataset.initialOpportunite;
+            }
+            const data = await EntreprisesAPI.loadAll(filters, currentPage, itemsPerPage, false, initialAnalyseId);
             const items = data && data.items ? data.items : [];
             allEntreprises = items;
             filteredEntreprises = [...items];
@@ -2502,7 +2583,6 @@
                                 <div id="scraping-stats" class="scraping-stats-summary">
                                     <!-- Les statistiques seront injectées ici -->
                                 </div>
-                                <div id="scraping-issues-content" class="scraping-issues-section"></div>
                             </div>
                             <div id="scraping-search-container" style="margin-bottom: 1rem; display: none;">
                                 <div style="position: relative;">
@@ -2533,6 +2613,7 @@
                             <div id="tab-metadata-modal" class="tab-content" style="display: none;">
                                 <div id="metadata-list-modal" class="results-list" style="display: grid; gap: 1rem;"></div>
                             </div>
+                            <div id="scraping-issues-content" class="scraping-issues-section"></div>
                         </div>
                     </div>
                     
@@ -3667,33 +3748,37 @@
     }
     
     // Initialisation
-    try {
-        loadSecteurs();
-    } catch (e) {
-        console.error('[entreprises] Erreur init secteurs:', e);
-    }
-    try {
-        loadGroupFilter();
-    } catch (e) {
-        console.error('[entreprises] Erreur init groupes filtre:', e);
-    }
-    try {
-        loadEntreprises();
-    } catch (e) {
-        console.error('[entreprises] Erreur init loadEntreprises (sync):', e);
-        const container = document.getElementById('entreprises-container');
-        if (container) container.innerHTML = '<p class="error">Erreur lors du chargement des entreprises</p>';
-    }
-    try {
-        setupEventListeners();
-    } catch (e) {
-        console.error('[entreprises] Erreur init event listeners:', e);
-    }
-    try {
-        setupPaginationKeyboard();
-    } catch (e) {
-        console.error('[entreprises] Erreur init pagination keyboard:', e);
-    }
+    (async () => {
+        try {
+            await loadSecteurs();
+        } catch (e) {
+            console.error('[entreprises] Erreur init secteurs:', e);
+        }
+        try {
+            await loadGroupFilter();
+        } catch (e) {
+            console.error('[entreprises] Erreur init groupes filtre:', e);
+        }
+        // Lire les filtres depuis l'URL (secteur, statut, tags_any, analyse_id...)
+        applyInitialFiltersFromUrl();
+        try {
+            await loadEntreprises();
+        } catch (e) {
+            console.error('[entreprises] Erreur init loadEntreprises (async):', e);
+            const container = document.getElementById('entreprises-container');
+            if (container) container.innerHTML = '<p class="error">Erreur lors du chargement des entreprises</p>';
+        }
+        try {
+            setupEventListeners();
+        } catch (e) {
+            console.error('[entreprises] Erreur init event listeners:', e);
+        }
+        try {
+            setupPaginationKeyboard();
+        } catch (e) {
+            console.error('[entreprises] Erreur init pagination keyboard:', e);
+        }
+    })();
 }
 
 // Initialisation lorsque le DOM est prêt (script chargé en defer)

@@ -12,9 +12,10 @@
          * @param {number} [page] - Numéro de page (1-based)
          * @param {number} [pageSize] - Taille de page
          * @param {boolean} [includeOg] - Inclure ou non les données OpenGraph (par défaut false pour la liste)
+         * @param {number|null} [analyseId] - Filtrer par ID d'analyse (optionnel)
          * @returns {Promise<{items: Array, total: number, page: number, page_size: number}>}
          */
-        async loadAll(filters = {}, page = 1, pageSize = 20, includeOg = false) {
+        async loadAll(filters = {}, page = 1, pageSize = 20, includeOg = false, analyseId = null) {
             const params = new URLSearchParams();
             Object.keys(filters).forEach(key => {
                 const v = filters[key];
@@ -28,6 +29,12 @@
                 }
                 params.set(key, String(v));
             });
+            if (analyseId !== null && analyseId !== undefined) {
+                const id = Number(analyseId);
+                if (!Number.isNaN(id)) {
+                    params.set('analyse_id', String(id));
+                }
+            }
             params.set('page', String(page));
             params.set('page_size', String(pageSize));
             if (includeOg) {

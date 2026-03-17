@@ -13,6 +13,8 @@
     border-radius: 8px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     text-align: center;
+    transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+    border: 1px solid transparent;
 }
 
 .stat-card h3 {
@@ -30,11 +32,50 @@
     margin: 0;
 }
 
+.stat-card-clickable {
+    cursor: pointer;
+}
+
+.stat-card-clickable:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18);
+    border-color: #e5e7eb;
+}
+
+.stat-card-clickable:active {
+    transform: translateY(0);
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.16);
+}
+
 .charts-section {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
     gap: 2rem;
     margin: 2rem 0;
+}
+
+.dashboard-loading .stat-card,
+.dashboard-loading .chart-card,
+.dashboard-loading .dashboard-card {
+    opacity: 0.55;
+    filter: blur(0.2px);
+    transition: opacity 160ms ease;
+}
+
+.dashboard-highlight {
+    animation: dashboardPulse 680ms ease-out 1;
+}
+
+@keyframes dashboardPulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.0);
+    }
+    40% {
+        box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.45);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.0);
+    }
 }
 
 .dashboard-period-switch {
@@ -68,6 +109,12 @@
     font-weight: 600;
     color: #111827;
     margin-bottom: 0.5rem;
+}
+
+.dashboard-muted {
+    color: #6b7280;
+    font-size: 0.9rem;
+    margin: 0;
 }
 
 .chart-card {
@@ -188,6 +235,62 @@
     font-size: 0.85rem;
 }
 
+/* Tags (chips) */
+.dashboard-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    min-height: 42px;
+}
+
+.tag-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.65rem;
+    border-radius: 999px;
+    border: 1px solid #e5e7eb;
+    background: #ffffff;
+    color: #111827;
+    font-size: 0.85rem;
+    line-height: 1;
+    cursor: pointer;
+    user-select: none;
+    transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, background 160ms ease;
+    will-change: transform;
+    animation: chipIn 260ms ease both;
+}
+
+.tag-chip:hover {
+    transform: translateY(-1px);
+    border-color: #cbd5e1;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.10);
+}
+
+.tag-chip:active {
+    transform: translateY(0);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.10);
+}
+
+.tag-chip-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 18px;
+    padding: 0 0.4rem;
+    border-radius: 999px;
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-weight: 600;
+    font-size: 0.75rem;
+}
+
+@keyframes chipIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
 /* Mode dark - Dashboard */
 body[data-theme="dark"] .stat-card {
     background: #0f172a;
@@ -247,4 +350,24 @@ body[data-theme="dark"] .dashboard-row-title {
 
 body[data-theme="dark"] .dashboard-row-meta {
     color: #94a3b8;
+}
+
+body[data-theme="dark"] .dashboard-muted {
+    color: #94a3b8;
+}
+
+body[data-theme="dark"] .tag-chip {
+    background: #0b1220;
+    border-color: #1e293b;
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] .tag-chip:hover {
+    border-color: #334155;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+}
+
+body[data-theme="dark"] .tag-chip-count {
+    background: rgba(59, 130, 246, 0.18);
+    color: #bfdbfe;
 }
