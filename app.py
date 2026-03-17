@@ -192,9 +192,12 @@ def restrict_to_local_network():
     - /track/... : tracking emails (appelé par les destinataires externes)
     - /api/public/... : API publique protégée par token
     """
-    try:
-        path = request.path or ''
+    path = request.path or ''
+    # Pour les endpoints API non-publics, on privilégie un comportement "fail-closed"
+    # (si la logique de restriction rencontre une erreur, on bloque au lieu d'autoriser).
+    is_private_api = path.startswith('/api/') and not path.startswith('/api/public')
 
+    try:
         # Tracking et API publique restent accessibles depuis l'extérieur
         if path.startswith('/track/'):
             return None
@@ -215,7 +218,14 @@ def restrict_to_local_network():
         logging.getLogger(__name__).error(
             f"Restriction IP: erreur dans before_request ({e}), accès autorisé par sécurité"
         )
-        # Fail-open pour ne pas bloquer l'app en cas de bug
+        # Fail-closed pour l'API privée (ex: /api/website-analysis)
+        if is_private_api:
+            try:
+                client_ip = _get_client_ip()
+                return render_template('restricted.html', client_ip=client_ip), 403
+            except Exception:
+                return "Accès restreint au réseau local", 403
+        # Fail-open pour le reste de l'app (évite un lock total)
         return None
 
 # Note: Certaines routes ne sont pas encore migrées vers les blueprints.

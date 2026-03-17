@@ -4,18 +4,109 @@ Blueprint pour les routes API étendues
 Contient les routes API supplémentaires pour les analyses, scrapers, exports, etc.
 """
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, session
 from services.database import Database
 from services.export_manager import ExportManager
 from services.auth import login_required
 import json
 import pandas as pd
+from urllib.parse import urlparse
 
 api_extended_bp = Blueprint('api_extended', __name__, url_prefix='/api')
 
 # Initialiser les services
 database = Database()
 export_manager = ExportManager()
+
+def _normalize_url_for_analysis(raw: str) -> str | None:
+    if not raw:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    if not s.startswith(('http://', 'https://')):
+        s = f'https://{s}'
+    try:
+        parsed = urlparse(s)
+        if not parsed.scheme or not parsed.netloc:
+            return None
+    except Exception:
+        return None
+    return s
+
+
+def _get_entreprise_id_for_website(database: Database, website: str) -> int | None:
+    # Réutilise la logique de déduplication basée sur le domaine
+    try:
+        return database.find_duplicate_entreprise(nom='', website=website)
+    except Exception:
+        return None
+
+
+def _build_website_analysis_report(database: Database, entreprise_id: int, full: bool = False) -> dict:
+    entreprise = database.get_entreprise(entreprise_id)
+    scrapers = []
+    try:
+        scrapers = database.get_scrapers_by_entreprise(entreprise_id) or []
+    except Exception:
+        scrapers = []
+
+    technical = None
+    try:
+        technical = database.get_technical_analysis(entreprise_id)
+    except Exception:
+        technical = None
+
+    seo = None
+    try:
+        seo_list = database.get_seo_analyses_by_entreprise(entreprise_id, limit=1) or []
+        seo = seo_list[0] if seo_list else None
+    except Exception:
+        seo = None
+
+    osint = None
+    try:
+        osint = database.get_osint_analysis_by_entreprise(entreprise_id)
+    except Exception:
+        osint = None
+
+    pentest = None
+    try:
+        pentest = database.get_pentest_analysis_by_entreprise(entreprise_id)
+    except Exception:
+        pentest = None
+
+    report = {
+        'success': True,
+        'entreprise_id': entreprise_id,
+        'entreprise': entreprise,
+        'scraping': {
+            'status': 'done' if scrapers else 'never',
+            'latest': scrapers[0] if scrapers else None,
+        },
+        'technical': {
+            'status': 'done' if technical else 'never',
+            'latest': technical,
+        },
+        'seo': {
+            'status': 'done' if seo else 'never',
+            'latest': seo,
+        },
+        'osint': {
+            'status': 'done' if osint else 'never',
+            'latest': osint,
+        },
+        'pentest': {
+            'status': 'done' if pentest else 'never',
+            'latest': pentest,
+        },
+    }
+
+    if full:
+        # Attention: peut être volumineux (emails/people/images). À utiliser côté intégration.
+        report['scraping']['items'] = scrapers
+        report['scraping']['count'] = len(scrapers)
+    return report
 
 
 @api_extended_bp.route('/analyses-techniques')
@@ -846,4 +937,149 @@ def export_data(format):
             
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@api_extended_bp.route('/website-analysis', methods=['GET', 'POST'])
+@login_required
+def website_analysis():
+    """
+    API: Analyse d'un site web (par URL).
+
+    GET:
+        Query params:
+            website (str, requis): URL ou domaine du site.
+        Retourne le rapport agrégé si disponible.
+
+    POST:
+        Corps JSON:
+            - website (str, requis): URL ou domaine du site.
+            - force (bool, optionnel): si true, relance les analyses même si un rapport existe.
+            - max_depth (int, optionnel): profondeur max de scraping (défaut 2).
+            - max_workers (int, optionnel): workers scraping (défaut 5).
+            - max_time (int, optionnel): temps max en secondes (défaut 180).
+            - max_pages (int, optionnel): pages max (défaut 30).
+            - enable_nmap (bool, optionnel): active Nmap dans l'analyse technique (défaut false).
+            - use_lighthouse (bool, optionnel): Lighthouse pour SEO (défaut true).
+
+        Comportement:
+            - si force=false et un rapport existe => retourne le rapport
+            - sinon => crée/associe une entreprise et lance les tâches (scraping/tech/seo/osint/pentest)
+    """
+    database = Database()
+
+    # IMPORTANT : cet endpoint /api/* est réservé à l'interface interne.
+    # L'accès public doit passer par /api/public/* (token).
+    # Comme l'auth utilisateur est partiellement désactivée dans ce projet,
+    # on verrouille ici en exigeant une session utilisateur active.
+    if not session.get('user_id'):
+        return jsonify({
+            'error': 'Authentification requise',
+            'message': 'Connectez-vous à ProspectLab (session) ou utilisez /api/public/website-analysis avec un token.'
+        }), 401
+
+    if request.method == 'GET':
+        website_raw = request.args.get('website', '')
+        website = _normalize_url_for_analysis(website_raw)
+        if not website:
+            return jsonify({'error': 'Paramètre "website" requis (URL ou domaine).'}), 400
+        full = str(request.args.get('full', '')).lower() in ('1', 'true', 'yes')
+
+        entreprise_id = _get_entreprise_id_for_website(database, website)
+        if not entreprise_id:
+            return jsonify({'error': 'Aucun rapport trouvé pour ce site.'}), 404
+
+        report = _build_website_analysis_report(database, entreprise_id, full=full)
+        report['website'] = website
+        return jsonify(report)
+
+    # POST
+    payload = request.get_json(silent=True) or {}
+    website_raw = (payload.get('website') or '').strip()
+    website = _normalize_url_for_analysis(website_raw)
+    if not website:
+        return jsonify({'error': 'Le champ "website" est requis (URL ou domaine).'}), 400
+
+    force = bool(payload.get('force', False))
+    full = bool(payload.get('full', False))
+    entreprise_id = _get_entreprise_id_for_website(database, website)
+
+    # Si on a déjà une entreprise, retourner le rapport si demandé
+    if entreprise_id and not force:
+        report = _build_website_analysis_report(database, entreprise_id, full=full)
+        report['website'] = website
+        return jsonify(report)
+
+    # Créer une entreprise minimale si nécessaire
+    if not entreprise_id:
+        entreprise_id = database.save_entreprise(
+            analyse_id=None,
+            entreprise_data={
+                'name': urlparse(website).netloc or website,
+                'website': website,
+                'statut': 'Nouveau',
+            },
+            skip_duplicates=True,
+        )
+
+    # Lancer les tâches d'analyse
+    max_depth = int(payload.get('max_depth', 2) or 2)
+    max_workers = int(payload.get('max_workers', 5) or 5)
+    max_time = int(payload.get('max_time', 180) or 180)
+    max_pages = int(payload.get('max_pages', 30) or 30)
+    enable_nmap = bool(payload.get('enable_nmap', False))
+    use_lighthouse = bool(payload.get('use_lighthouse', True))
+
+    from tasks.scraping_tasks import scrape_emails_task
+    from tasks.technical_analysis_tasks import technical_analysis_task
+    from tasks.seo_tasks import seo_analysis_task
+    from tasks.osint_tasks import osint_analysis_task
+    from tasks.pentest_tasks import pentest_analysis_task
+
+    tasks_launched = {}
+    try:
+        scraping_task = scrape_emails_task.delay(
+            url=website,
+            max_depth=max_depth,
+            max_workers=max_workers,
+            max_time=max_time,
+            max_pages=max_pages,
+            entreprise_id=entreprise_id,
+        )
+        tasks_launched['scraping_task_id'] = scraping_task.id
+    except Exception as e:
+        tasks_launched['scraping_error'] = str(e)
+
+    try:
+        tech_task = technical_analysis_task.delay(url=website, entreprise_id=entreprise_id, enable_nmap=enable_nmap)
+        tasks_launched['technical_task_id'] = tech_task.id
+    except Exception as e:
+        tasks_launched['technical_error'] = str(e)
+
+    try:
+        seo_task = seo_analysis_task.delay(url=website, entreprise_id=entreprise_id, use_lighthouse=use_lighthouse)
+        tasks_launched['seo_task_id'] = seo_task.id
+    except Exception as e:
+        tasks_launched['seo_error'] = str(e)
+
+    # OSINT/Pentest peuvent fonctionner sans attendre le scraping (ils récupèrent aussi les données en BDD si dispo)
+    try:
+        osint_task = osint_analysis_task.delay(url=website, entreprise_id=entreprise_id)
+        tasks_launched['osint_task_id'] = osint_task.id
+    except Exception as e:
+        tasks_launched['osint_error'] = str(e)
+
+    try:
+        pentest_task = pentest_analysis_task.delay(url=website, entreprise_id=entreprise_id, options={})
+        tasks_launched['pentest_task_id'] = pentest_task.id
+    except Exception as e:
+        tasks_launched['pentest_error'] = str(e)
+
+    return jsonify({
+        'success': True,
+        'website': website,
+        'entreprise_id': entreprise_id,
+        'launched': True,
+        'tasks': tasks_launched,
+        'message': 'Analyses lancées. Utilisez GET /api/website-analysis?website=... pour récupérer le rapport.',
+    }), 202
 

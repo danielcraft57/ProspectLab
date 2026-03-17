@@ -17,7 +17,9 @@ const API_DOC_FAMILIES = [
         { method: 'GET', path: '/campagnes', desc: 'Liste des campagnes email.', params: [{ name: 'limit', type: 'int' }, { name: 'offset', type: 'int' }, { name: 'statut', type: 'str' }] },
         { method: 'GET', path: '/campagnes/<id>', desc: 'Détails d\'une campagne.' },
         { method: 'GET', path: '/campagnes/<id>/emails', desc: 'Emails envoyés d\'une campagne.', params: [{ name: 'limit', type: 'int' }, { name: 'offset', type: 'int' }, { name: 'statut', type: 'str' }] },
-        { method: 'GET', path: '/campagnes/<id>/statistics', desc: 'Statistiques de tracking (ouvertures, clics).' }
+        { method: 'GET', path: '/campagnes/<id>/statistics', desc: 'Statistiques de tracking (ouvertures, clics).' },
+        { method: 'POST', path: '/website-analysis', desc: 'Lance une analyse complète d’un site (scraping + technique + SEO + OSINT + pentest) ou retourne le rapport existant.', body: 'JSON: website (requis), force?, full?, max_depth?, max_workers?, max_time?, max_pages?, enable_nmap?, use_lighthouse?' },
+        { method: 'GET', path: '/website-analysis', desc: 'Récupère un rapport d’analyse existant pour un site.', params: [{ name: 'website', type: 'str', desc: 'Requis (URL ou domaine)' }, { name: 'full', type: 'bool', desc: 'Optionnel (inclut items de scraping, volumineux)' }] }
     ]},
     { id: 'extended', name: 'API étendue', description: 'Analyses techniques, OSINT, Pentest, SEO, scrapers, export. Réservé aux utilisateurs connectés (session).', basePath: '/api', auth: 'Session ProspectLab (cookie) — login requis.', endpoints: [
         { method: 'GET', path: '/analyses-techniques', desc: 'Liste des analyses techniques.', params: [{ name: 'limit', type: 'int' }] },
@@ -44,7 +46,9 @@ const API_DOC_FAMILIES = [
         { method: 'GET', path: '/entreprise/<id>/organigramme', desc: 'Organigramme d\'une entreprise.' },
         { method: 'GET', path: '/entreprises/nearby', desc: 'Entreprises proches d\'un point.', params: [{ name: 'latitude', type: 'float' }, { name: 'longitude', type: 'float' }, { name: 'radius_km', type: 'float' }, { name: 'secteur', type: 'str' }, { name: 'limit', type: 'int' }] },
         { method: 'GET', path: '/entreprise/<id>/competition', desc: 'Concurrence locale.', params: [{ name: 'radius_km', type: 'float' }] },
-        { method: 'GET', path: '/export/<format>', desc: 'Export CSV/JSON/PDF.', params: [{ name: 'secteur', type: 'str' }, { name: 'statut', type: 'str' }, { name: 'opportunite', type: 'str' }, { name: 'search', type: 'str' }] }
+        { method: 'GET', path: '/export/<format>', desc: 'Export CSV/JSON/PDF.', params: [{ name: 'secteur', type: 'str' }, { name: 'statut', type: 'str' }, { name: 'opportunite', type: 'str' }, { name: 'search', type: 'str' }] },
+        { method: 'POST', path: '/website-analysis', desc: 'Lance une analyse complète d’un site (scraping + technique + SEO + OSINT + pentest) ou retourne le rapport existant.', body: 'JSON: website (requis), force?, max_depth?, max_workers?, max_time?, max_pages?, enable_nmap?, use_lighthouse?' },
+        { method: 'GET', path: '/website-analysis', desc: 'Récupère un rapport d’analyse existant pour un site.', params: [{ name: 'website', type: 'str', desc: 'Requis (URL ou domaine)' }] }
     ]},
     { id: 'integration', name: 'API intégration (Companies)', description: 'API normalisée « company » pour applications internes (Facturio, MailPilot, VocalGuard, CompetiScope). Authentification par clé API (header x-api-key).', basePath: '/api', auth: 'Header: x-api-key: <clé_application> ou ?api_key=<clé>.', endpoints: [
         { method: 'GET', path: '/companies/<id>', desc: 'Entreprise par ID ProspectLab.' },

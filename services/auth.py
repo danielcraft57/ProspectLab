@@ -6,7 +6,7 @@ Gère les utilisateurs, les sessions et la sécurité d'accès
 import bcrypt
 from functools import wraps
 from typing import Optional
-from flask import session, redirect, url_for, request, flash
+from flask import session, redirect, url_for, request, flash, jsonify
 from services.database import Database
 
 
@@ -67,8 +67,12 @@ class AuthManager:
         conn = self.db.get_connection()
         cursor = conn.cursor()
 
-        # Vérifier si l'utilisateur existe déjà
-        cursor.execute('SELECT id FROM users WHERE username = ? OR email = ?', (username, email))
+        # Vérifier si l'utilisateur existe déjà (placeholders compatibles SQLite/PostgreSQL)
+        placeholder = '%s' if self.db.is_postgresql() else '?'
+        cursor.execute(
+            f'SELECT id FROM users WHERE username = {placeholder} OR email = {placeholder}',
+            (username, email),
+        )
         if cursor.fetchone():
             conn.close()
             raise ValueError('Un utilisateur avec ce nom ou cet email existe déjà')
@@ -123,11 +127,12 @@ class AuthManager:
         conn = self.db.get_connection()
         cursor = conn.cursor()
         
-        # Chercher par username ou email
-        cursor.execute('''
+        # Chercher par username ou email (placeholders compatibles SQLite/PostgreSQL)
+        placeholder = '%s' if self.db.is_postgresql() else '?'
+        cursor.execute(f'''
             SELECT id, username, email, password_hash, is_admin, is_active
             FROM users
-            WHERE (username = ? OR email = ?) AND is_active = 1
+            WHERE (username = {placeholder} OR email = {placeholder}) AND is_active = 1
         ''', (username, username))
         
         user = cursor.fetchone()
@@ -136,14 +141,25 @@ class AuthManager:
         if not user:
             return None
         
-        user_dict = {
-            'id': user[0],
-            'username': user[1],
-            'email': user[2],
-            'password_hash': user[3],
-            'is_admin': bool(user[4]),
-            'is_active': bool(user[5])
-        }
+        # Support SQLite (tuple/Row) et PostgreSQL (RealDictRow)
+        if isinstance(user, dict):
+            user_dict = {
+                'id': user.get('id'),
+                'username': user.get('username'),
+                'email': user.get('email'),
+                'password_hash': user.get('password_hash'),
+                'is_admin': bool(user.get('is_admin')),
+                'is_active': bool(user.get('is_active')),
+            }
+        else:
+            user_dict = {
+                'id': user[0],
+                'username': user[1],
+                'email': user[2],
+                'password_hash': user[3],
+                'is_admin': bool(user[4]),
+                'is_active': bool(user[5]),
+            }
         
         # Vérifier le mot de passe
         if not self.verify_password(password, user_dict['password_hash']):
@@ -152,9 +168,11 @@ class AuthManager:
         # Mettre à jour la dernière connexion
         conn = self.db.get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
-            UPDATE users SET derniere_connexion = CURRENT_TIMESTAMP WHERE id = ?
-        ''', (user_dict['id'],))
+        placeholder = '%s' if self.db.is_postgresql() else '?'
+        cursor.execute(
+            f'UPDATE users SET derniere_connexion = CURRENT_TIMESTAMP WHERE id = {placeholder}',
+            (user_dict['id'],),
+        )
         conn.commit()
         conn.close()
         
@@ -173,10 +191,11 @@ class AuthManager:
         conn = self.db.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        placeholder = '%s' if self.db.is_postgresql() else '?'
+        cursor.execute(f'''
             SELECT id, username, email, is_admin, is_active
             FROM users
-            WHERE id = ? AND is_active = 1
+            WHERE id = {placeholder} AND is_active = 1
         ''', (user_id,))
         
         user = cursor.fetchone()
@@ -185,12 +204,20 @@ class AuthManager:
         if not user:
             return None
         
+        if isinstance(user, dict):
+            return {
+                'id': user.get('id'),
+                'username': user.get('username'),
+                'email': user.get('email'),
+                'is_admin': bool(user.get('is_admin')),
+                'is_active': bool(user.get('is_active')),
+            }
         return {
             'id': user[0],
             'username': user[1],
             'email': user[2],
             'is_admin': bool(user[3]),
-            'is_active': bool(user[4])
+            'is_active': bool(user[4]),
         }
     
     def login_user(self, user: dict):
@@ -214,15 +241,11 @@ class AuthManager:
     def is_authenticated(self) -> bool:
         """
         Indique si l'utilisateur est authentifié.
-        
-        Dans la configuration actuelle, l'accès est limité au réseau local
-        (voir RESTRICT_TO_LOCAL_NETWORK) et on considère donc que toute
-        requête autorisée au niveau réseau est "authentifiée".
-        
+
         Returns:
-            bool: Toujours True (auth désactivée)
+            bool: True si une session utilisateur est active
         """
-        return True
+        return bool(session.get('user_id'))
     
     def get_current_user(self) -> Optional[dict]:
         """
@@ -233,8 +256,11 @@ class AuthManager:
         """
         if not self.is_authenticated():
             return None
-        
-        return self.get_user(session['user_id'])
+
+        user_id = session.get('user_id')
+        if not user_id:
+            return None
+        return self.get_user(user_id)
     
     def require_admin(self):
         """
@@ -245,9 +271,9 @@ class AuthManager:
         (donc au réseau interne) peut accéder aux fonctions admin.
         
         Returns:
-            bool: Toujours True
+            bool: True si l'utilisateur est admin
         """
-        return True
+        return bool(session.get('is_admin'))
 
 
 def login_required(f):
@@ -265,8 +291,19 @@ def login_required(f):
     """
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # Auth désactivée: on laisse simplement passer la requête.
-        return f(*args, **kwargs)
+        if session.get('user_id'):
+            return f(*args, **kwargs)
+
+        # API: répondre en JSON plutôt que redirect HTML
+        if (request.path or '').startswith('/api/'):
+            return jsonify({
+                'error': 'Authentification requise',
+                'message': 'Connectez-vous à ProspectLab (session) ou utilisez /api/public/* avec un token si disponible.'
+            }), 401
+
+        # Pages: rediriger vers login
+        next_url = request.url
+        return redirect(url_for('auth.login', next=next_url))
     
     return decorated_function
 
@@ -281,8 +318,27 @@ def admin_required(f):
     """
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # Auth / rôles désactivés: on laisse passer la requête.
-        return f(*args, **kwargs)
+        if not session.get('user_id'):
+            # Réutiliser le même comportement que login_required
+            if (request.path or '').startswith('/api/'):
+                return jsonify({
+                    'error': 'Authentification requise',
+                    'message': 'Connectez-vous à ProspectLab (session).'
+                }), 401
+            next_url = request.url
+            return redirect(url_for('auth.login', next=next_url))
+
+        if session.get('is_admin'):
+            return f(*args, **kwargs)
+
+        if (request.path or '').startswith('/api/'):
+            return jsonify({
+                'error': 'Accès refusé',
+                'message': 'Droits administrateur requis.'
+            }), 403
+
+        flash('Accès refusé: droits administrateur requis.', 'error')
+        return redirect(url_for('main.home'))
     
     return decorated_function
 
