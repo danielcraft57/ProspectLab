@@ -2,7 +2,7 @@
 
 Ce document explique comment organiser ProspectLab en plusieurs environnements (dev / prod), gérer SQLite ou PostgreSQL, utiliser WSL ou Debian pour les outils OSINT / Pentest, et déployer l'application. Les noms de serveurs et domaines cités (ex. node12.lan, node15.lan, example.fr) sont des exemples à remplacer par vos propres valeurs.
 
-**Note** : Pour un guide détaillé du déploiement en production avec toutes les étapes, voir [DEPLOIEMENT_PRODUCTION.md](DEPLOIEMENT_PRODUCTION.md).
+**Note** : Pour un guide détaillé du déploiement en production avec toutes les étapes, voir [DEPLOIEMENT_PRODUCTION.md](DEPLOIEMENT_PRODUCTION.md). Pour lancer l’app en local tout en utilisant le cluster (Redis + workers sur les Raspberry), voir [UTILISER_CLUSTER_EN_LOCAL.md](UTILISER_CLUSTER_EN_LOCAL.md).
 
 L'objectif est que tu puisses:
 

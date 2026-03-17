@@ -18,6 +18,7 @@ from tasks.seo_tasks import seo_analysis_task
 import os
 import threading
 import logging
+import time
 from services.database import Database
 
 # Logger pour ce module
@@ -59,8 +60,25 @@ def register_websocket_handlers(socketio, app):
             session_id = request.sid
             
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            # Sur certains déploiements (volume réseau / IO lente / multi-instances),
+            # le fichier peut ne pas être visible immédiatement. Attente courte + retry.
+            timeout_s = float(os.environ.get('UPLOAD_VISIBILITY_TIMEOUT_S', '3.0'))
+            interval_s = float(os.environ.get('UPLOAD_VISIBILITY_INTERVAL_S', '0.2'))
+            deadline = time.time() + max(0.0, timeout_s)
+            while time.time() < deadline:
+                try:
+                    if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+                        break
+                except OSError:
+                    pass
+                time.sleep(interval_s)
             if not os.path.exists(filepath):
-                safe_emit(socketio, 'analysis_error', {'error': 'Fichier introuvable'}, room=session_id)
+                safe_emit(
+                    socketio,
+                    'analysis_error',
+                    {'error': f'Fichier introuvable: {filepath}'},
+                    room=session_id
+                )
                 return
             
             # Créer le fichier de sortie

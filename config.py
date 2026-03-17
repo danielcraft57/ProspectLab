@@ -19,8 +19,8 @@ APP_DIR = Path(__file__).parent
 
 # Configuration Flask
 SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
-UPLOAD_FOLDER = APP_DIR / 'uploads'
-EXPORT_FOLDER = APP_DIR / 'exports'
+UPLOAD_FOLDER = Path(os.environ.get('UPLOAD_FOLDER', str(APP_DIR / 'uploads')))
+EXPORT_FOLDER = Path(os.environ.get('EXPORT_FOLDER', str(APP_DIR / 'exports')))
 MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
 
 # Restriction optionnelle à un réseau local (similaire à MailPilot)
@@ -30,8 +30,8 @@ MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
 RESTRICT_TO_LOCAL_NETWORK = os.environ.get('RESTRICT_TO_LOCAL_NETWORK', 'false').lower() == 'true'
 
 # Créer les dossiers si nécessaire
-UPLOAD_FOLDER.mkdir(exist_ok=True)
-EXPORT_FOLDER.mkdir(exist_ok=True)
+UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
+EXPORT_FOLDER.mkdir(parents=True, exist_ok=True)
 
 # Configuration email (à configurer selon ton serveur)
 MAIL_SERVER = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')

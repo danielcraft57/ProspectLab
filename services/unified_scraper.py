@@ -130,6 +130,41 @@ class UnifiedScraper:
             'reddit': ['reddit.com'],
             'discord': ['discord.gg', 'discord.com']
         }
+        
+        # Patterns de détection de technologies
+        self.technology_patterns = {
+            'cms': {
+                'wordpress': [r'/wp-content/', r'/wp-includes/', r'wp-json', r'wordpress'],
+                'drupal': [r'/sites/', r'/modules/', r'/themes/', r'drupal'],
+                'joomla': [r'/administrator/', r'/components/', r'/templates/', r'joomla'],
+                'prestashop': [r'/prestashop/', r'/modules/', r'prestashop'],
+                'magento': [r'/magento/', r'/skin/', r'magento'],
+                'shopify': [r'shopify', r'cdn.shopify.com'],
+                'wix': [r'wix.com', r'wixstatic.com'],
+                'squarespace': [r'squarespace.com', r'sqspcdn.com']
+            },
+            'framework': {
+                'react': [r'react', r'__REACT_DEVTOOLS', r'ReactDOM'],
+                'vue': [r'vue', r'__VUE__', r'Vue.js'],
+                'angular': [r'angular', r'ng-', r'@angular'],
+                'jquery': [r'jquery', r'jQuery'],
+                'bootstrap': [r'bootstrap', r'bs-'],
+                'tailwind': [r'tailwindcss']
+            },
+            'analytics': {
+                'google_analytics': [r'google-analytics.com', r'ga.js', r'gtag'],
+                'google_tag_manager': [r'googletagmanager.com', r'GTM-'],
+                'facebook_pixel': [r'facebook.net', r'fbq'],
+                'hotjar': [r'hotjar.com'],
+                'mixpanel': [r'mixpanel.com']
+            },
+            'cdn': {
+                'cloudflare': [r'cloudflare.com', r'cf-ray'],
+                'cloudfront': [r'cloudfront.net'],
+                'fastly': [r'fastly.com'],
+                'akamai': [r'akamai.net']
+            }
+        }
 
     def _fetch_with_protocol_fallback(self, url: str, timeout: int = 15) -> Optional[requests.Response]:
         """
@@ -176,41 +211,6 @@ class UnifiedScraper:
         if last_error:
             logger.error(f'[scraper] Échec de récupération pour {url}: {last_error}')
         return None
-        
-        # Patterns de détection de technologies
-        self.technology_patterns = {
-            'cms': {
-                'wordpress': [r'/wp-content/', r'/wp-includes/', r'wp-json', r'wordpress'],
-                'drupal': [r'/sites/', r'/modules/', r'/themes/', r'drupal'],
-                'joomla': [r'/administrator/', r'/components/', r'/templates/', r'joomla'],
-                'prestashop': [r'/prestashop/', r'/modules/', r'prestashop'],
-                'magento': [r'/magento/', r'/skin/', r'magento'],
-                'shopify': [r'shopify', r'cdn.shopify.com'],
-                'wix': [r'wix.com', r'wixstatic.com'],
-                'squarespace': [r'squarespace.com', r'sqspcdn.com']
-            },
-            'framework': {
-                'react': [r'react', r'__REACT_DEVTOOLS', r'ReactDOM'],
-                'vue': [r'vue', r'__VUE__', r'Vue.js'],
-                'angular': [r'angular', r'ng-', r'@angular'],
-                'jquery': [r'jquery', r'jQuery'],
-                'bootstrap': [r'bootstrap', r'bs-'],
-                'tailwind': [r'tailwindcss']
-            },
-            'analytics': {
-                'google_analytics': [r'google-analytics.com', r'ga.js', r'gtag'],
-                'google_tag_manager': [r'googletagmanager.com', r'GTM-'],
-                'facebook_pixel': [r'facebook.net', r'fbq'],
-                'hotjar': [r'hotjar.com'],
-                'mixpanel': [r'mixpanel.com']
-            },
-            'cdn': {
-                'cloudflare': [r'cloudflare.com', r'cf-ray'],
-                'cloudfront': [r'cloudfront.net'],
-                'fastly': [r'fastly.com'],
-                'akamai': [r'akamai.net']
-            }
-        }
     
     def is_same_domain(self, url: str) -> bool:
         """Vérifie si l'URL appartient au même domaine"""
@@ -657,9 +657,10 @@ class UnifiedScraper:
     def detect_technologies(self, html: str, headers: Dict) -> None:
         """Détecte les technologies depuis le HTML et les headers"""
         html_lower = html.lower()
+        tech_patterns = getattr(self, 'technology_patterns', None) or {}
         
         # Détecter depuis le HTML
-        for category, techs in self.technology_patterns.items():
+        for category, techs in tech_patterns.items():
             for tech_name, patterns in techs.items():
                 for pattern in patterns:
                     if re.search(pattern, html_lower, re.IGNORECASE):

@@ -70,6 +70,18 @@ def analyze_entreprise_task(self, filepath, output_path, max_workers=4, delay=0.
         task_id = getattr(self.request, 'id', None)
         if not task_id:
             logger.warning('task_id introuvable au démarrage - progression websocket risque de manquer')
+        # En prod, le fichier peut apparaître avec un léger délai (volume réseau, rename atomique, etc.).
+        # On fait un retry court avant d'abandonner.
+        timeout_s = float(os.environ.get('UPLOAD_VISIBILITY_TIMEOUT_S', '5.0'))
+        interval_s = float(os.environ.get('UPLOAD_VISIBILITY_INTERVAL_S', '0.25'))
+        deadline = time.time() + max(0.0, timeout_s)
+        while time.time() < deadline:
+            try:
+                if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+                    break
+            except OSError:
+                pass
+            time.sleep(interval_s)
         if not os.path.exists(filepath):
             logger.error(f'Fichier introuvable (abandon): {filepath}')
             raise FileNotFoundError(f'Fichier introuvable: {filepath}')

@@ -22,7 +22,9 @@
     
     const progressFill = document.createElement('div');
     progressFill.className = 'progress-fill';
-    progressFill.style.cssText = 'height: 100%; background: linear-gradient(90deg, #3498db, #2980b9); width: 0%; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 12px;';
+    const DEFAULT_MAIN_PROGRESS_BG = 'linear-gradient(90deg, #3498db, #2980b9)';
+    const SUCCESS_MAIN_PROGRESS_BG = 'linear-gradient(90deg, #56ab2f 0%, #a8e063 100%)';
+    progressFill.style.cssText = 'height: 100%; background: ' + DEFAULT_MAIN_PROGRESS_BG + '; width: 0%; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 12px;';
     
     const progressText = document.createElement('div');
     progressText.className = 'progress-text';
@@ -318,6 +320,8 @@
         
         progressFill.style.width = '0%';
         progressFill.textContent = '0%';
+        // Important: réinitialiser la couleur si une analyse précédente a échoué (barre rouge)
+        progressFill.style.background = DEFAULT_MAIN_PROGRESS_BG;
         progressText.textContent = 'Connexion en cours...';
         
         // Désactiver le formulaire et afficher le bouton stop
@@ -360,6 +364,8 @@
         statusDiv.className = 'status-message status-info';
         statusDiv.textContent = e.detail.message || 'Analyse démarrée...';
         progressText.textContent = 'Analyse en cours...';
+        // Si on relance après une erreur, revenir au style normal
+        progressFill.style.background = DEFAULT_MAIN_PROGRESS_BG;
         pentestDone = false;
         pentestProgressContainer.style.display = 'none';
         
@@ -441,6 +447,10 @@
         const data = e.detail;
         const percentage = data.percentage || 0;
         
+        // Si une erreur précédente a coloré la barre en rouge, revenir au dégradé normal
+        if (progressFill.style.background === 'rgb(231, 76, 60)' || progressFill.style.background === '#e74c3c') {
+            progressFill.style.background = DEFAULT_MAIN_PROGRESS_BG;
+        }
         progressFill.style.width = percentage + '%';
         progressFill.textContent = percentage + '%';
         progressText.textContent = data.message || `${data.current}/${data.total} entreprises analysées`;
@@ -1694,6 +1704,7 @@
         
         progressFill.style.width = '100%';
         progressFill.textContent = '100%';
+        progressFill.style.background = SUCCESS_MAIN_PROGRESS_BG;
         const stats = data.stats || {};
         const inserted = typeof stats.inserted === 'number' ? stats.inserted : null;
         const totalProcessed = inserted !== null ? inserted : (data.total_processed || data.total || 0);

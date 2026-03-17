@@ -83,6 +83,8 @@ CELERY_RESULT_BACKEND=redis://node12.lan:6379/1
 
 Note: `Celery Beat` (les tâches planifiées) doit tourner sur une seule machine. Le plus simple: uniquement sur la machine centrale, pas sur les Raspberry.
 
+**Utiliser le cluster depuis ta machine Windows (app en local, workers sur le cluster)** : voir [UTILISER_CLUSTER_EN_LOCAL.md](../configuration/UTILISER_CLUSTER_EN_LOCAL.md) et le script `scripts/run_local_use_cluster.ps1`.
+
 #### 2) Déployer un worker sur un Raspberry (sans orchestration)
 
 Sur chaque Raspberry Pi (Debian/Raspberry Pi OS), tu fais une install "classique" et tu lances un service systemd.

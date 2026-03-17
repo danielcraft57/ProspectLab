@@ -63,7 +63,15 @@ def clear_all(confirm=True):
     if confirm:
         print('\n⚠️  ATTENTION: Cette opération est IRRÉVERSIBLE!')
         print('Toutes les données seront perdues.')
-        response = input('\nÊtes-vous sûr de vouloir continuer? (oui/non): ')
+        try:
+            response = input('\nÊtes-vous sûr de vouloir continuer? (oui/non) [oui]: ').strip()
+        except EOFError:
+            response = ''
+
+        # Par défaut: "oui" si l'utilisateur appuie juste sur Entrée
+        if response == '':
+            response = 'oui'
+
         if response.lower() not in ['oui', 'o', 'yes', 'y']:
             print('\nOpération annulée.')
             return False

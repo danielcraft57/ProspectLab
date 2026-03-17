@@ -2,7 +2,7 @@
 Blueprint pour les routes d'upload et prévisualisation de fichiers
 """
 
-from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash
+from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash, current_app
 from werkzeug.utils import secure_filename
 from datetime import datetime
 import os
@@ -10,7 +10,7 @@ import pandas as pd
 from services.entreprise_analyzer import EntrepriseAnalyzer
 from services.database import Database
 from utils.helpers import allowed_file, get_file_path
-from config import UPLOAD_FOLDER, CELERY_WORKERS
+from config import CELERY_WORKERS
 from utils.template_helpers import render_page
 from services.auth import login_required
 
@@ -203,8 +203,11 @@ def upload_file():
             filename = secure_filename(file.filename)
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             filename = f"{timestamp}_{filename}"
-            filepath = os.path.join(UPLOAD_FOLDER, filename)
-            file.save(filepath)
+            upload_dir = current_app.config.get('UPLOAD_FOLDER')
+            filepath = os.path.join(upload_dir, filename)
+            tmp_path = filepath + '.uploading'
+            file.save(tmp_path)
+            os.replace(tmp_path, filepath)
             
             # Lire le fichier Excel pour prévisualisation
             try:
@@ -261,7 +264,8 @@ def preview_file(filename):
         str: Template HTML de la prévisualisation ou page d'erreur
     """
     try:
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        upload_dir = current_app.config.get('UPLOAD_FOLDER')
+        filepath = os.path.join(upload_dir, filename)
         
         if not os.path.exists(filepath):
             # Fichier upload introuvable
@@ -346,8 +350,11 @@ def api_upload_file():
             filename = secure_filename(file.filename)
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             filename = f"{timestamp}_{filename}"
-            filepath = os.path.join(UPLOAD_FOLDER, filename)
-            file.save(filepath)
+            upload_dir = current_app.config.get('UPLOAD_FOLDER')
+            filepath = os.path.join(upload_dir, filename)
+            tmp_path = filepath + '.uploading'
+            file.save(tmp_path)
+            os.replace(tmp_path, filepath)
             
             # Lire le fichier Excel pour validation (avec gestion de progression)
             analyzer = EntrepriseAnalyzer(excel_file=filepath)

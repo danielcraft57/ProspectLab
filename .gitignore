@@ -106,3 +106,4 @@ templates_data.generated.json
 # Données locales / expérimentations (non versionnées)
 Data/
 scripts/experiments/
+deploy_cluster_worker/
