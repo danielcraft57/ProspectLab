@@ -219,6 +219,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     exported = 0
     exported_files: List[Path] = []
+    group_export_files: List[Path] = []
     errors: List[str] = []
     t0 = time.time()
 
@@ -291,6 +292,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                         f"Groupe termine: {current_group} -> {out_group} "
                         f"(brut: {len(merged_rows)}, apres dedup: {len(deduped)})\n\n"
                     )
+                    group_export_files.append(out_group)
 
                     _cleanup_group_dirs(out_city_dir, current_group)
                 except Exception as e:
@@ -412,6 +414,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 f"Groupe termine: {current_group} -> {out_group} "
                 f"(brut: {len(merged_rows)}, apres dedup: {len(deduped)})\n"
             )
+            group_export_files.append(out_group)
 
             _cleanup_group_dirs(out_city_dir, current_group)
         except Exception as e:
@@ -419,7 +422,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     try:
         merged_rows: List[dict] = []
-        for fpath in exported_files:
+        # En mode groupes, les fichiers secteurs sont supprimes. On reconstruit donc le global
+        # a partir des fichiers de groupes.
+        sources = group_export_files if groups_mode else exported_files
+        for fpath in sources:
             if fpath.exists():
                 merged_rows.extend(_load_rows_from_xlsx(fpath))
 

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
+from urllib.parse import quote
 
 
 class TemplateManager:
@@ -686,6 +687,16 @@ class TemplateManager:
         extended_flat = dict(extended_data)
         if 'total_social' in extended_flat and isinstance(extended_flat.get('total_social'), list):
             extended_flat['total_social_count'] = len(extended_flat['total_social'])
+
+        # Lien direct vers l'analyse en ligne du site (danielcraft.fr/analyse)
+        website_val = extended_flat.get('website') or ''
+        analysis_url = ''
+        if isinstance(website_val, str) and website_val.strip():
+            # URL-encode du website pour l'inclure dans la query string
+            encoded_website = quote(website_val.strip(), safe='')
+            analysis_url = f"https://danielcraft.fr/analyse?website={encoded_website}&full=1"
+        extended_flat['analysis_url'] = analysis_url
+
         variables = {
             'nom': formatted_nom,
             'entreprise': entreprise or 'votre entreprise',
@@ -696,6 +707,14 @@ class TemplateManager:
         
         # Remplacer les conditions {#if_xxx} ... {#endif}
         import re
+
+        # Compat: certains templates utilisent {{var}} et {{#if_x}} ... {{#endif}}.
+        # On normalise vers {var} et {#if_x} ... {#endif} pour réutiliser le même moteur.
+        if isinstance(content, str) and '{{' in content:
+            content = re.sub(r'\{\{#if_(\w+)\}\}', r'{#if_\1}', content)
+            content = content.replace('{{#endif}}', '{#endif}')
+            # Variables simples {{nom}} -> {nom}
+            content = re.sub(r'\{\{(\w+)\}\}', r'{\1}', content)
         
         # Gérer les conditions {#if_tech_data} ... {#endif}
         if '{#if_tech_data}' in content:

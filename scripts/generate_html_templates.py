@@ -23,6 +23,9 @@ def get_template_1_html():
     <title>Modernisation de votre site web</title>
 </head>
 <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: {COLOR_BG};">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        Analyse rapide + 2–3 améliorations concrètes pour moderniser votre site.
+    </div>
     <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: {COLOR_BG};">
         <tr>
             <td style="padding: 40px 20px;">
@@ -37,9 +40,15 @@ def get_template_1_html():
                             <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
                                 Bonjour {{nom}},
                             </p>
-                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
+                            <p style="margin: 0 0 16px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
                                 {{#if_secteur}}Dans le secteur <strong>{{secteur}}</strong>, {{#endif}}j'ai analysé {{#if_website}}le site <strong>{{website}}</strong> de {{#endif}}<strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong> et j'ai identifié plusieurs opportunités d'amélioration pour moderniser votre présence digitale.
                             </p>
+                            {{#if_website}}
+                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_MEDIUM}; font-size: 14px; line-height: 1.6;">
+                                Vous pouvez consulter un aperçu détaillé de cette analyse ici :
+                                <a href="{{analysis_url}}" style="color: {COLOR_PRIMARY}; text-decoration: none;">voir l'analyse de votre site</a>.
+                            </p>
+                            {{#endif}}
                             {{#if_tech_data}}
                             <div style="background-color: {COLOR_BG}; padding: 20px; border-radius: 6px; margin: 25px 0;">
                                 <h3 style="margin: 0 0 15px 0; color: {COLOR_PRIMARY}; font-size: 18px;">Observations techniques</h3>
@@ -64,6 +73,21 @@ def get_template_1_html():
                                 <p style="margin: 0 0 15px 0; color: {COLOR_WHITE}; font-size: 18px; font-weight: 600;">Je propose un audit gratuit</p>
                                 <p style="margin: 0; color: {COLOR_WHITE}; font-size: 14px;">Pour identifier les opportunités d'amélioration spécifiques à votre site</p>
                             </div>
+                            <table role="presentation" style="width:100%; margin: 22px 0 10px 0;">
+                                <tr>
+                                    <td style="text-align:center;">
+                                        {{#if_website}}
+                                        <a href="{{analysis_url}}" style="display:inline-block;background:{COLOR_PRIMARY};color:{COLOR_WHITE};text-decoration:none;font-size:15px;font-weight:600;padding:14px 18px;border-radius:10px;line-height:1;">
+                                            Voir le rapport d'analyse
+                                        </a>
+                                        <span style="display:inline-block;width:10px;"></span>
+                                        {{#endif}}
+                                        <a href="{{base_url}}/contact" style="display:inline-block;background:#111827;color:{COLOR_WHITE};text-decoration:none;font-size:15px;font-weight:600;padding:14px 18px;border-radius:10px;line-height:1;">
+                                            Échanger 15 min
+                                        </a>
+                                    </td>
+                                </tr>
+                            </table>
                             <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
                                 Seriez-vous disponible pour un échange de 15 minutes cette semaine pour discuter de vos besoins ?
                             </p>
@@ -99,6 +123,9 @@ def get_template_2_html():
     <title>Optimisation de performance</title>
 </head>
 <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: {COLOR_BG};">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        Votre site peut charger plus vite et convertir davantage (audit gratuit).
+    </div>
     <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: {COLOR_BG};">
         <tr>
             <td style="padding: 40px 20px;">
@@ -113,9 +140,15 @@ def get_template_2_html():
                             <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
                                 Bonjour {{nom}},
                             </p>
-                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
+                            <p style="margin: 0 0 16px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
                                 La performance du site de <strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong>{{#if_website}} ({{website}}){{#endif}} a un impact direct sur l'expérience de vos visiteurs et votre positionnement dans les moteurs de recherche.
                             </p>
+                            {{#if_website}}
+                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_MEDIUM}; font-size: 14px; line-height: 1.6;">
+                                Un rapport technique détaillé est disponible en ligne :
+                                <a href="{{analysis_url}}" style="color: {COLOR_PRIMARY}; text-decoration: none;">voir l'analyse de votre site</a>.
+                            </p>
+                            {{#endif}}
                             {{#if_performance}}
                             <div style="background-color: {COLOR_BG}; padding: 20px; border-radius: 6px; margin: 25px 0; border-left: 4px solid {COLOR_PRIMARY};">
                                 <h3 style="margin: 0 0 10px 0; color: {COLOR_PRIMARY}; font-size: 18px;">Score de performance actuel</h3>
@@ -161,6 +194,21 @@ def get_template_2_html():
                                 <p style="margin: 0 0 10px 0; color: {COLOR_WHITE}; font-size: 18px; font-weight: 600;">Audit & Optimisation - 800€</p>
                                 <p style="margin: 0; color: {COLOR_WHITE}; font-size: 14px;">Audit complet + correctifs prioritaires + métriques avant/après</p>
                             </div>
+                            <table role="presentation" style="width:100%; margin: 22px 0 10px 0;">
+                                <tr>
+                                    <td style="text-align:center;">
+                                        {{#if_website}}
+                                        <a href="{{analysis_url}}" style="display:inline-block;background:{COLOR_PRIMARY};color:{COLOR_WHITE};text-decoration:none;font-size:15px;font-weight:600;padding:14px 18px;border-radius:10px;line-height:1;">
+                                            Voir le rapport d'analyse
+                                        </a>
+                                        <span style="display:inline-block;width:10px;"></span>
+                                        {{#endif}}
+                                        <a href="{{base_url}}/contact" style="display:inline-block;background:#111827;color:{COLOR_WHITE};text-decoration:none;font-size:15px;font-weight:600;padding:14px 18px;border-radius:10px;line-height:1;">
+                                            Échanger 15 min
+                                        </a>
+                                    </td>
+                                </tr>
+                            </table>
                             <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
                                 Je propose un audit gratuit pour identifier les points d'amélioration prioritaires de votre site.
                             </p>
@@ -196,6 +244,9 @@ def get_template_3_html():
     <title>Sécurité et conformité</title>
 </head>
 <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: {COLOR_BG};">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        Sécurité & conformité : 2–3 correctifs prioritaires pour réduire les risques.
+    </div>
     <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: {COLOR_BG};">
         <tr>
             <td style="padding: 40px 20px;">
@@ -210,9 +261,15 @@ def get_template_3_html():
                             <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
                                 Bonjour {{nom}},
                             </p>
-                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
+                            <p style="margin: 0 0 16px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
                                 La sécurité et la conformité du site de <strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong>{{#if_website}} ({{website}}){{#endif}} sont essentielles pour protéger vos données et celles de vos clients, ainsi que pour maintenir la confiance de vos visiteurs.
                             </p>
+                            {{#if_website}}
+                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_MEDIUM}; font-size: 14px; line-height: 1.6;">
+                                Vous pouvez consulter le détail de l'analyse sécurité ici :
+                                <a href="{{analysis_url}}" style="color: {COLOR_PRIMARY}; text-decoration: none;">voir l'analyse de votre site</a>.
+                            </p>
+                            {{#endif}}
                             {{#if_security}}
                             <div style="background-color: #FFF3E0; padding: 20px; border-radius: 6px; margin: 25px 0; border-left: 4px solid {COLOR_PRIMARY};">
                                 <h3 style="margin: 0 0 10px 0; color: {COLOR_PRIMARY}; font-size: 18px;">Niveau de sécurité actuel</h3>
@@ -241,6 +298,21 @@ def get_template_3_html():
                                 <p style="margin: 0 0 10px 0; color: {COLOR_WHITE}; font-size: 18px; font-weight: 600;">Audit de sécurité gratuit</p>
                                 <p style="margin: 0; color: {COLOR_WHITE}; font-size: 14px;">Analyse complète et recommandations personnalisées</p>
                             </div>
+                            <table role="presentation" style="width:100%; margin: 22px 0 10px 0;">
+                                <tr>
+                                    <td style="text-align:center;">
+                                        {{#if_website}}
+                                        <a href="{{analysis_url}}" style="display:inline-block;background:{COLOR_PRIMARY};color:{COLOR_WHITE};text-decoration:none;font-size:15px;font-weight:600;padding:14px 18px;border-radius:10px;line-height:1;">
+                                            Voir le rapport d'analyse
+                                        </a>
+                                        <span style="display:inline-block;width:10px;"></span>
+                                        {{#endif}}
+                                        <a href="{{base_url}}/contact" style="display:inline-block;background:#111827;color:{COLOR_WHITE};text-decoration:none;font-size:15px;font-weight:600;padding:14px 18px;border-radius:10px;line-height:1;">
+                                            Échanger 15 min
+                                        </a>
+                                    </td>
+                                </tr>
+                            </table>
                             <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
                                 Je propose un audit de sécurité gratuit pour identifier les points d'amélioration prioritaires et vous accompagner dans la mise en conformité.
                             </p>
@@ -276,6 +348,9 @@ def get_template_4_html():
     <title>Présence digitale</title>
 </head>
 <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: {COLOR_BG};">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        Quelques opportunités concrètes pour gagner en visibilité et en conversions.
+    </div>
     <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: {COLOR_BG};">
         <tr>
             <td style="padding: 40px 20px;">
@@ -290,9 +365,15 @@ def get_template_4_html():
                             <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
                                 Bonjour {{nom}},
                             </p>
-                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
+                            <p style="margin: 0 0 16px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
                                 {{#if_secteur}}Dans le secteur <strong>{{secteur}}</strong>, {{#endif}}j'ai analysé la présence digitale de <strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong>{{#if_website}} ({{website}}){{#endif}} et j'ai identifié plusieurs opportunités pour renforcer votre visibilité en ligne et améliorer votre communication digitale.
                             </p>
+                            {{#if_website}}
+                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_MEDIUM}; font-size: 14px; line-height: 1.6;">
+                                Un rapport d'analyse en ligne est disponible ici :
+                                <a href="{{analysis_url}}" style="color: {COLOR_PRIMARY}; text-decoration: none;">voir l'analyse de votre site</a>.
+                            </p>
+                            {{#endif}}
                             {{#if_scraping_data}}
                             <div style="background-color: {COLOR_BG}; padding: 20px; border-radius: 6px; margin: 25px 0;">
                                 <h3 style="margin: 0 0 15px 0; color: {COLOR_PRIMARY}; font-size: 18px;">Votre présence actuelle</h3>
@@ -337,6 +418,21 @@ def get_template_4_html():
                                 <p style="margin: 0 0 10px 0; color: {COLOR_WHITE}; font-size: 18px; font-weight: 600;">Livraison rapide en 5-8 jours</p>
                                 <p style="margin: 0; color: {COLOR_WHITE}; font-size: 14px;">Code source inclus + documentation + 14 jours de support</p>
                             </div>
+                            <table role="presentation" style="width:100%; margin: 22px 0 10px 0;">
+                                <tr>
+                                    <td style="text-align:center;">
+                                        {{#if_website}}
+                                        <a href="{{analysis_url}}" style="display:inline-block;background:{COLOR_PRIMARY};color:{COLOR_WHITE};text-decoration:none;font-size:15px;font-weight:600;padding:14px 18px;border-radius:10px;line-height:1;">
+                                            Voir le rapport d'analyse
+                                        </a>
+                                        <span style="display:inline-block;width:10px;"></span>
+                                        {{#endif}}
+                                        <a href="{{base_url}}/contact" style="display:inline-block;background:#111827;color:{COLOR_WHITE};text-decoration:none;font-size:15px;font-weight:600;padding:14px 18px;border-radius:10px;line-height:1;">
+                                            Échanger 15 min
+                                        </a>
+                                    </td>
+                                </tr>
+                            </table>
                             <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
                                 Seriez-vous disponible pour un échange de 15 minutes cette semaine pour discuter de vos besoins en développement web ?
                             </p>
@@ -372,6 +468,9 @@ def get_template_5_html():
     <title>Audit complet de votre présence digitale</title>
 </head>
 <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: {COLOR_BG};">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        Audit complet : performance, sécurité, SEO, quick wins prioritaires.
+    </div>
     <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: {COLOR_BG};">
         <tr>
             <td style="padding: 40px 20px;">
@@ -386,9 +485,15 @@ def get_template_5_html():
                             <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
                                 Bonjour {{nom}},
                             </p>
-                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
+                            <p style="margin: 0 0 16px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
                                 {{#if_secteur}}Dans le secteur <strong>{{secteur}}</strong>, {{#endif}}j'ai effectué une analyse complète de la présence digitale de <strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong>{{#if_website}} ({{website}}){{#endif}} et j'ai identifié plusieurs axes d'amélioration pour optimiser votre visibilité et vos performances en ligne.
                             </p>
+                            {{#if_website}}
+                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_MEDIUM}; font-size: 14px; line-height: 1.6;">
+                                Vous pouvez consulter le rapport en ligne ici :
+                                <a href="{{analysis_url}}" style="color: {COLOR_PRIMARY}; text-decoration: none;">voir l'analyse de votre site</a>.
+                            </p>
+                            {{#endif}}
                             {{#if_all_data}}
                             <div style="background-color: {COLOR_BG}; padding: 25px; border-radius: 6px; margin: 25px 0;">
                                 <h3 style="margin: 0 0 20px 0; color: {COLOR_PRIMARY}; font-size: 18px; text-align: center;">Synthèse de l'analyse</h3>
@@ -413,6 +518,21 @@ def get_template_5_html():
                                 <p style="margin: 0 0 10px 0; color: {COLOR_WHITE}; font-size: 14px;">✓ Métriques avant/après</p>
                                 <p style="margin: 0; color: {COLOR_WHITE}; font-size: 14px;">✓ Rapport détaillé + 14 jours de support</p>
                             </div>
+                            <table role="presentation" style="width:100%; margin: 22px 0 10px 0;">
+                                <tr>
+                                    <td style="text-align:center;">
+                                        {{#if_website}}
+                                        <a href="{{analysis_url}}" style="display:inline-block;background:{COLOR_PRIMARY};color:{COLOR_WHITE};text-decoration:none;font-size:15px;font-weight:600;padding:14px 18px;border-radius:10px;line-height:1;">
+                                            Voir le rapport d'analyse
+                                        </a>
+                                        <span style="display:inline-block;width:10px;"></span>
+                                        {{#endif}}
+                                        <a href="{{base_url}}/contact" style="display:inline-block;background:#111827;color:{COLOR_WHITE};text-decoration:none;font-size:15px;font-weight:600;padding:14px 18px;border-radius:10px;line-height:1;">
+                                            Échanger 15 min
+                                        </a>
+                                    </td>
+                                </tr>
+                            </table>
                             <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.6;">
                                 Je propose un échange de 15 minutes pour vous présenter les résultats détaillés de cette analyse et discuter des opportunités d'amélioration spécifiques à votre entreprise.
                             </p>
@@ -452,6 +572,9 @@ def get_template_decouverte_hero_html():
     </style>
 </head>
 <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: {COLOR_BG};">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        15 minutes pour identifier 2–3 améliorations concrètes sur votre site.
+    </div>
     <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: {COLOR_BG};">
         <tr>
             <td style="padding: 32px 20px;" class="mobile-pad">
@@ -471,12 +594,20 @@ def get_template_decouverte_hero_html():
                                 {{#if_website}}Votre site <strong>{{website}}</strong> {{#endif}}m'a donné envie de vous proposer un accompagnement sur mesure.
                             </p>
                             <p style="margin: 0 0 24px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
-                                <strong style="color: {COLOR_PRIMARY};">En 15 minutes</strong>, je peux vous présenter des pistes concrètes pour moderniser votre présence en ligne et gagner en visibilité.
+                                <strong style="color: {COLOR_PRIMARY};">En 15 minutes</strong>, je peux vous présenter 2–3 pistes concrètes issues de cette analyse pour moderniser votre présence en ligne et gagner en visibilité.
                             </p>
-                            <table role="presentation" style="margin: 28px 0;">
+                            <table role="presentation" style="width:100%; margin: 24px 0 10px 0;">
                                 <tr>
-                                    <td style="background: linear-gradient(135deg, {COLOR_PRIMARY}, #C62828); border-radius: 8px; padding: 16px 28px; text-align: center;">
-                                        <a href="{{base_url}}/contact" style="color: {COLOR_WHITE}; font-size: 16px; font-weight: 600; text-decoration: none;">Réserver un créneau</a>
+                                    <td style="text-align:center;">
+                                        {{#if_website}}
+                                        <a href="{{analysis_url}}" style="display:inline-block;background:{COLOR_PRIMARY};color:{COLOR_WHITE};text-decoration:none;font-size:15px;font-weight:600;padding:14px 18px;border-radius:10px;line-height:1;">
+                                            Voir l'analyse de votre site
+                                        </a>
+                                        <span style="display:inline-block;width:10px;"></span>
+                                        {{#endif}}
+                                        <a href="{{base_url}}/contact" style="display:inline-block;background:#111827;color:{COLOR_WHITE};text-decoration:none;font-size:15px;font-weight:600;padding:14px 18px;border-radius:10px;line-height:1;">
+                                            Réserver 15 min
+                                        </a>
                                     </td>
                                 </tr>
                             </table>
@@ -510,6 +641,9 @@ def get_template_relance_html():
     <title>Relance - {{entreprise}}</title>
 </head>
 <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: {COLOR_BG};">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        Petite relance, même valeur : audit rapide + 2–3 améliorations concrètes.
+    </div>
     <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: {COLOR_BG};">
         <tr>
             <td style="padding: 40px 20px;">
@@ -521,9 +655,16 @@ def get_template_relance_html():
                             <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
                                 Je me permets de revenir vers vous concernant ma proposition pour <strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong>.
                             </p>
-                            <p style="margin: 0 0 24px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
-                                Si le moment n'est pas le bon, pas de souci. Sinon, je reste disponible pour un échange de 15 minutes à votre convenance.
+                            <p style="margin: 0 0 16px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                                Si le moment n'est pas le bon, pas de souci. Sinon, je peux toujours vous partager un court retour d'analyse et 2–3 actions prioritaires sur votre site.
                             </p>
+                            <table role="presentation" style="margin: 0 0 18px 0;">
+                                <tr>
+                                    <td style="background-color: {COLOR_PRIMARY}; border-radius: 8px; padding: 12px 22px; text-align: center;">
+                                        <a href="{{base_url}}/contact" style="color: {COLOR_WHITE}; font-size: 15px; font-weight: 600; text-decoration: none;">Proposer un créneau</a>
+                                    </td>
+                                </tr>
+                            </table>
                             <p style="margin: 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
                                 Bien à vous,<br><strong style="color: {COLOR_PRIMARY};">Votre nom</strong>
                             </p>
@@ -547,6 +688,9 @@ def get_template_secteur_html():
     <title>Proposition pour le secteur {{secteur}} - {{entreprise}}</title>
 </head>
 <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: {COLOR_BG};">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        Audit ciblé sur votre secteur pour améliorer performance, sécurité et visibilité.
+    </div>
     <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: {COLOR_BG};">
         <tr>
             <td style="padding: 40px 20px;">
@@ -571,8 +715,8 @@ def get_template_secteur_html():
                                 <p style="margin: 0; color: {COLOR_TEXT_MEDIUM}; font-size: 15px;">Framework / CMS : {{framework}} {{cms}} · Hébergement : {{hosting_provider}}</p>
                             </div>
                             {{#endif}}
-                            <p style="margin: 0 0 24px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
-                                Je vous propose un audit gratuit ciblé sur votre secteur pour identifier les leviers les plus impactants.
+                            <p style="margin: 0 0 16px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                                Je vous propose un audit gratuit ciblé sur votre secteur pour identifier les leviers les plus impactants (2–3 priorités concrètes à court terme).
                             </p>
                             <table role="presentation" style="margin: 24px 0;">
                                 <tr>
@@ -604,6 +748,9 @@ def get_template_post_demo_html():
     <title>Suite à notre échange - {{entreprise}}</title>
 </head>
 <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: {COLOR_BG};">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        Récapitulatif synthétique + prochaines étapes concrètes pour votre projet.
+    </div>
     <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: {COLOR_BG};">
         <tr>
             <td style="padding: 40px 20px;">
@@ -621,7 +768,7 @@ def get_template_post_demo_html():
                             <table role="presentation" style="margin: 24px 0;">
                                 <tr>
                                     <td style="background-color: {COLOR_PRIMARY}; border-radius: 8px; padding: 14px 24px; text-align: center;">
-                                        <a href="{{base_url}}/contact" style="color: {COLOR_WHITE}; font-size: 15px; font-weight: 600; text-decoration: none;">Voir le récapitulatif</a>
+                                        <a href="{{base_url}}/contact" style="color: {COLOR_WHITE}; font-size: 15px; font-weight: 600; text-decoration: none;">Voir / confirmer le récapitulatif</a>
                                     </td>
                                 </tr>
                             </table>
@@ -648,6 +795,9 @@ def get_template_relance2_html():
     <title>Dernière relance - {{entreprise}}</title>
 </head>
 <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: {COLOR_BG};">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        Dernière relance, sans pression, pour décider si on avance ou non.
+    </div>
     <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: {COLOR_BG};">
         <tr>
             <td style="padding: 40px 20px;">
@@ -705,9 +855,15 @@ def get_template_technique_avance_html():
                     <tr>
                         <td style="padding: 36px 32px;">
                             <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">Bonjour {{nom}},</p>
-                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                            <p style="margin: 0 0 16px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
                                 J'ai réalisé une analyse technique de la présence en ligne de <strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong>. Voici une synthèse.
                             </p>
+                            {{#if_website}}
+                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_MEDIUM}; font-size: 14px; line-height: 1.6;">
+                                Le rapport complet est également accessible en ligne :
+                                <a href="{{analysis_url}}" style="color: {COLOR_PRIMARY}; text-decoration: none;">voir l'analyse de votre site</a>.
+                            </p>
+                            {{#endif}}
                             {{#if_all_data}}
                             <div style="background-color: {COLOR_BG}; padding: 24px; border-radius: 8px; margin: 24px 0; border-left: 4px solid {COLOR_PRIMARY};">
                                 <h3 style="margin: 0 0 16px 0; color: {COLOR_PRIMARY}; font-size: 18px;">Résultats de l'analyse</h3>
@@ -760,9 +916,15 @@ def get_template_securite_html():
                     <tr>
                         <td style="padding: 36px 32px;">
                             <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">Bonjour {{nom}},</p>
-                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                            <p style="margin: 0 0 16px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
                                 La sécurité du site de <strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong>{{#if_website}} ({{website}}){{#endif}} est un enjeu majeur pour protéger vos données et celles de vos clients.
                             </p>
+                            {{#if_website}}
+                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_MEDIUM}; font-size: 14px; line-height: 1.6;">
+                                Détail de l'analyse sécurité disponible ici :
+                                <a href="{{analysis_url}}" style="color: {COLOR_PRIMARY}; text-decoration: none;">voir l'analyse de votre site</a>.
+                            </p>
+                            {{#endif}}
                             {{#if_security}}
                             <div style="background-color: #FFF3E0; padding: 20px; border-radius: 8px; margin: 24px 0; border-left: 4px solid #E65100;">
                                 <p style="margin: 0 0 8px 0; color: #E65100; font-size: 14px; font-weight: 600;">Score de sécurité actuel</p>
@@ -800,6 +962,9 @@ def get_template_contacts_html():
     <title>Votre présence en ligne - {{entreprise}}</title>
 </head>
 <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: {COLOR_BG};">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        Vue synthétique de votre présence en ligne + 2–3 actions prioritaires.
+    </div>
     <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: {COLOR_BG};">
         <tr>
             <td style="padding: 40px 20px;">
@@ -813,9 +978,21 @@ def get_template_contacts_html():
                     <tr>
                         <td style="padding: 36px 32px;">
                             <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">Bonjour {{nom}},</p>
-                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
+                            <p style="margin: 0 0 16px 0; color: {COLOR_TEXT_DARK}; font-size: 16px; line-height: 1.65;">
                                 {{#if_secteur}}Dans le secteur <strong>{{secteur}}</strong>, {{#endif}}j'ai analysé la présence en ligne de <strong style="color: {COLOR_PRIMARY};">{{entreprise}}</strong>{{#if_website}} ({{website}}){{#endif}}.
                             </p>
+                            {{#if_website}}
+                            <p style="margin: 0 0 18px 0; color: {COLOR_TEXT_MEDIUM}; font-size: 14px; line-height: 1.6;">
+                                Un rapport détaillé de cette analyse est disponible ici :
+                                <a href="{{analysis_url}}" style="color: {COLOR_PRIMARY}; text-decoration: none;">voir l'analyse de votre site</a>.
+                            </p>
+                            {{#endif}}
+                            {{#if_website}}
+                            <p style="margin: 0 0 20px 0; color: {COLOR_TEXT_MEDIUM}; font-size: 14px; line-height: 1.6;">
+                                Un rapport d'analyse de votre site est disponible ici :
+                                <a href="{{analysis_url}}" style="color: {COLOR_PRIMARY}; text-decoration: none;">voir l'analyse de votre site</a>.
+                            </p>
+                            {{#endif}}
                             {{#if_scraping_data}}
                             <div style="background-color: {COLOR_BG}; padding: 20px; border-radius: 8px; margin: 24px 0;">
                                 <h3 style="margin: 0 0 12px 0; color: {COLOR_PRIMARY}; font-size: 18px;">Ce que j'ai observé</h3>

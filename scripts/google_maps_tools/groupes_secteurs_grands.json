@@ -23,6 +23,264 @@
         "Paysagiste",
         "Bricolage"
       ]
+    },
+    {
+      "group": "Sante_Medicale_Para",
+      "sectors": [
+        "Sante",
+        "Cabinet medical",
+        "Pharmacie parapharmacie",
+        "Veterinaire",
+        "Kinesitherapeute",
+        "Kinesitherapeutes (sante)",
+        "Osteopathe",
+        "Osteopathes",
+        "Psychologue",
+        "Psychologues",
+        "Infirmier",
+        "Cabinets dentaires"
+      ]
+    },
+    {
+      "group": "Beaute_BienEtre_Sport",
+      "sectors": [
+        "Beaute esthetique",
+        "Bien etre",
+        "Institut de beaute",
+        "Spas",
+        "Spa",
+        "Salon de coiffure",
+        "Coiffeurs",
+        "Barbier",
+        "Sport",
+        "Salles de sport",
+        "Salle de sport",
+        "Yoga"
+      ]
+    },
+    {
+      "group": "Commerce_Alimentaire_de_Proximite",
+      "sectors": [
+        "Alimentation et epicerie",
+        "Agroalimentaire",
+        "Boulangerie patisserie",
+        "Boulangeries",
+        "Boucherie",
+        "Boucheries",
+        "Poissonnerie",
+        "Fromagerie",
+        "Supermarche",
+        "Supermarches",
+        "Superette",
+        "Centres commerciaux",
+        "Centre commercial",
+        "Commerce de proximite",
+        "Commerce de detail",
+        "Grande distribution"
+      ]
+    },
+    {
+      "group": "Commerce_Equipement_Maison",
+      "sectors": [
+        "Decoration ameublement",
+        "Fleuriste jardinerie",
+        "Fleuriste",
+        "Electronique",
+        "Telephonie",
+        "Magasin d'electromenager",
+        "Magasin informatique",
+        "Magasin de sport",
+        "Bricolage",
+        "Fournitures bureau",
+        "Papeterie"
+      ]
+    },
+    {
+      "group": "Mode_Luxe_Equipement_Personne",
+      "sectors": [
+        "Mode habillement",
+        "Bijouterie",
+        "Boutique",
+        "Librairie",
+        "Pressing",
+        "Blanchisserie",
+        "Cordonnerie"
+      ]
+    },
+    {
+      "group": "Restaurants_Bars_Traiteurs",
+      "sectors": [
+        "Food restauration",
+        "Restauration",
+        "Restauration rapide",
+        "Restaurants",
+        "Pizzerias",
+        "Bars",
+        "Bar cafe brasserie",
+        "Traiteurs",
+        "Traiteur evenementiel",
+        "Hotel restaurant"
+      ]
+    },
+    {
+      "group": "Immobilier_Gestion_Location",
+      "sectors": [
+        "Immobilier",
+        "Agences immobilieres",
+        "Promotion immobiliere",
+        "Location",
+        "Habitat"
+      ]
+    },
+    {
+      "group": "Juridique_Finance_Assurance",
+      "sectors": [
+        "Juridique",
+        "Cabinets d'avocats",
+        "Notaires",
+        "Banque",
+        "Banque assurance",
+        "Finance",
+        "Comptabilite",
+        "Cabinets comptables",
+        "Assurance",
+        "Agences d'assurance",
+        "Courtier",
+        "Conseil",
+        "Conseil entreprise",
+        "Profession liberale"
+      ]
+    },
+    {
+      "group": "Services_B2B_Entreprise",
+      "sectors": [
+        "Services aux entreprises",
+        "Prestataire de services",
+        "Informatique",
+        "Services informatiques",
+        "Developpement logiciel",
+        "Telecom",
+        "Communication",
+        "Agence de communication",
+        "Agence marketing",
+        "Agence web",
+        "Marketing",
+        "Medias",
+        "Evenementiel",
+        "Imprimerie",
+        "Imprimeries",
+        "Photographe",
+        "Videaste",
+        "Production audiovisuelle",
+        "Securite"
+      ]
+    },
+    {
+      "group": "Services_B2C_Personne",
+      "sectors": [
+        "Services a la personne",
+        "Particulier employeur",
+        "Entretien nettoyage",
+        "Proprete",
+        "Organisateur d'evenements",
+        "Salle de reception",
+        "Creche",
+        "Creches",
+        "Mairie",
+        "Administration"
+      ]
+    },
+    {
+      "group": "Education_Formation_RH",
+      "sectors": [
+        "Centre de formation",
+        "Enseignement",
+        "Ecole",
+        "Ecoles",
+        "College",
+        "Lycee",
+        "Universite",
+        "Auto ecole",
+        "Auto ecoles",
+        "Agence d'interim",
+        "Agences d'interim",
+        "Recrutement",
+        "Ressources humaines"
+      ]
+    },
+    {
+      "group": "Auto_Mobilite_Logistique",
+      "sectors": [
+        "Automobile",
+        "Garage automobile",
+        "Garages",
+        "Concessionnaire",
+        "Vendeurs automobiles",
+        "Carrosserie",
+        "Carrosseries",
+        "Pneus",
+        "Depannage auto",
+        "Controle technique",
+        "Centres commerciaux",
+        "Stations service",
+        "Station service",
+        "Location de voiture",
+        "Entreprise de demenagement",
+        "Taxi",
+        "Taxi VTC",
+        "VTC",
+        "Transporteur",
+        "Transport",
+        "Logistique"
+      ]
+    },
+    {
+      "group": "Tourisme_Hotellerie_Voyage",
+      "sectors": [
+        "Tourisme",
+        "Agence de voyage",
+        "Voyage",
+        "Hotellerie",
+        "Hotels",
+        "Hebergement",
+        "Hotel restaurant",
+        "Chambre d'hotes",
+        "Camping",
+        "Campings",
+        "Culture loisirs"
+      ]
+    },
+    {
+      "group": "Agriculture_Industrie_Energie",
+      "sectors": [
+        "Agriculture et elevage",
+        "Agroalimentaire",
+        "Industrie",
+        "Maintenance industrielle",
+        "Metalurgie",
+        "Energie"
+      ]
+    },
+    {
+      "group": "Industrie_Production_B2B",
+      "sectors": [
+        "Industrie",
+        "Maintenance industrielle",
+        "Metalurgie",
+        "Energie",
+        "Logistique",
+        "Transporteur",
+        "Services aux entreprises",
+        "Prestataire de services"
+      ]
+    },
+    {
+      "group": "Associations_Organisations",
+      "sectors": [
+        "Association",
+        "Organisations religieuses",
+        "Organisation religieuse"
+      ]
     }
   ]
 }

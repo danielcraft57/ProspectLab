@@ -31,29 +31,120 @@ EXPORT_COLUMNS = [
 ]
 
 TYPE_FR_MAP: Dict[str, str] = {
+    # --- Services / artisans ---
     "plumber": "plombier",
     "electrician": "electricien",
     "locksmith": "serrurier",
+    "general_contractor": "entreprise de travaux",
+    "roofing_contractor": "couvreur",
+    "moving_company": "demenageur",
+    "painter": "peintre",
+
+    # --- Restauration / sorties ---
     "restaurant": "restaurant",
     "bar": "bar",
-    "bakery": "boulangerie",
     "cafe": "cafe",
-    "lawyer": "avocat",
-    "accounting": "expert-comptable",
-    "dentist": "dentiste",
+    "bakery": "boulangerie",
+    "meal_takeaway": "a emporter",
+    "meal_delivery": "livraison de repas",
+    "night_club": "boite de nuit",
+
+    # --- Sante ---
     "doctor": "medecin",
+    "dentist": "dentiste",
+    "hospital": "hopital",
+    "pharmacy": "pharmacie",
+    "drugstore": "parapharmacie",
+    "physiotherapist": "kinesitherapeute",
+    "veterinary_care": "veterinaire",
+
+    # --- Finance / juridique / pro ---
+    "accounting": "expert-comptable",
+    "bank": "banque",
+    "atm": "distributeur",
+    "insurance_agency": "assurance",
+    "lawyer": "avocat",
+    "real_estate_agency": "agence immobiliere",
+
+    # --- Beaute / bien-etre ---
     "hair_care": "coiffeur",
     "beauty_salon": "institut de beaute",
-    "real_estate_agency": "agence immobiliere",
-    "car_repair": "garage",
-    "car_dealer": "concessionnaire auto",
+    "spa": "spa",
     "gym": "salle de sport",
-    "lodging": "hotel",
-    "moving_company": "demenageur",
-    "roofing_contractor": "couvreur",
-    "general_contractor": "entreprise de travaux",
-    "home_goods_store": "magasin maison",
+
+    # --- Auto / transport ---
+    "car_dealer": "concessionnaire auto",
+    "car_repair": "garage",
+    "car_rental": "location de voiture",
+    "car_wash": "lavage auto",
+    "gas_station": "station service",
+    "parking": "parking",
+    "taxi_stand": "station taxi",
+    "bus_station": "gare routiere",
+    "train_station": "gare",
+    "subway_station": "metro",
+    "light_rail_station": "tramway",
+    "transit_station": "station transport",
+    "airport": "aeroport",
+
+    # --- Commerces ---
     "store": "magasin",
+    "supermarket": "supermarche",
+    "convenience_store": "epicerie",
+    "department_store": "grand magasin",
+    "shopping_mall": "centre commercial",
+    "hardware_store": "quincaillerie",
+    "home_goods_store": "magasin maison",
+    "furniture_store": "magasin meubles",
+    "electronics_store": "magasin electronique",
+    "clothing_store": "magasin vetements",
+    "shoe_store": "magasin chaussures",
+    "jewelry_store": "bijouterie",
+    "book_store": "librairie",
+    "florist": "fleuriste",
+    "pet_store": "animalerie",
+    "liquor_store": "caviste",
+    "laundry": "laverie",
+    "storage": "garde-meubles",
+
+    # --- Culture / loisirs / tourisme ---
+    "tourist_attraction": "attraction touristique",
+    "museum": "musee",
+    "art_gallery": "galerie d'art",
+    "movie_theater": "cinema",
+    "bowling_alley": "bowling",
+    "amusement_park": "parc d'attractions",
+    "aquarium": "aquarium",
+    "zoo": "zoo",
+    "park": "parc",
+    "stadium": "stade",
+
+    # --- Education ---
+    "school": "ecole",
+    "primary_school": "ecole primaire",
+    "secondary_school": "college/lycee",
+    "university": "universite",
+    "library": "bibliotheque",
+
+    # --- Administration / services publics ---
+    "city_hall": "mairie",
+    "courthouse": "tribunal",
+    "police": "police",
+    "fire_station": "pompiers",
+    "post_office": "poste",
+    "local_government_office": "administration",
+
+    # --- Culte ---
+    "church": "eglise",
+    "mosque": "mosquee",
+    "synagogue": "synagogue",
+    "hindu_temple": "temple hindou",
+
+    # --- Hebergement / voyage ---
+    "lodging": "hotel",
+    "travel_agency": "agence de voyage",
+
+    # --- Generiques ---
     "point_of_interest": "point d'interet",
     "establishment": "etablissement",
 }
@@ -283,7 +374,70 @@ def _translate_category(category: Optional[str], mode: str) -> Optional[str]:
         return None
     if mode == "none":
         return category
-    return TYPE_FR_MAP.get(category, category)
+    direct = TYPE_FR_MAP.get(category)
+    if direct:
+        return direct
+    # Heuristique: couvre la majorité des Place Types Google en évitant une liste infinie.
+    t = str(category).strip().lower()
+    if not t:
+        return category
+
+    # Types génériques (Table B / tags)
+    generic_map = {
+        "food": "alimentation",
+        "health": "sante",
+        "finance": "finance",
+        "place_of_worship": "lieu de culte",
+        "natural_feature": "site naturel",
+        "landmark": "monument",
+        "geocode": "adresse",
+        "political": "zone administrative",
+    }
+    if t in generic_map:
+        return generic_map[t]
+
+    # Suffixes / patterns fréquents
+    if t.endswith("_restaurant"):
+        base = t[: -len("_restaurant")].replace("_", " ").strip()
+        if not base:
+            return "restaurant"
+        # Ex: "mexican restaurant" -> "restaurant mexicain"
+        return f"restaurant {base}"
+
+    if t.endswith("_store") or t.endswith("_shop"):
+        base = t.rsplit("_", 1)[0].replace("_", " ").strip()
+        return f"magasin {base}" if base else "magasin"
+
+    if t.endswith("_clinic"):
+        base = t[: -len("_clinic")].replace("_", " ").strip()
+        return f"clinique {base}" if base else "clinique"
+
+    if t.endswith("_hospital"):
+        base = t[: -len("_hospital")].replace("_", " ").strip()
+        return f"hopital {base}" if base else "hopital"
+
+    if t.endswith("_school"):
+        base = t[: -len("_school")].replace("_", " ").strip()
+        return f"ecole {base}" if base else "ecole"
+
+    if t.endswith("_station"):
+        base = t[: -len("_station")].replace("_", " ").strip()
+        return f"station {base}" if base else "station"
+
+    if t.endswith("_office"):
+        base = t[: -len("_office")].replace("_", " ").strip()
+        return f"bureau {base}" if base else "bureau"
+
+    if t.endswith("_center") or t.endswith("_centre"):
+        base = t.rsplit("_", 1)[0].replace("_", " ").strip()
+        return f"centre {base}" if base else "centre"
+
+    if t.endswith("_service"):
+        base = t[: -len("_service")].replace("_", " ").strip()
+        return f"service {base}" if base else "service"
+
+    # Fallback lisible (au lieu de l'anglais brut avec underscores)
+    return t.replace("_", " ")
 
 
 def _to_export_row(item: Dict[str, Any], category_translate_mode: str) -> Dict[str, Any]:
