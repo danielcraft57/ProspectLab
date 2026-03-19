@@ -342,23 +342,26 @@ class TemplateManager:
             data = {}
             
             # Données de base de l'entreprise
-            conn = db.get_connection()
-            cursor = conn.cursor()
-            cursor.execute('SELECT * FROM entreprises WHERE id = ?', (entreprise_id,))
-            entreprise_row = cursor.fetchone()
-            if entreprise_row:
-                entreprise = dict(entreprise_row)
+            # IMPORTANT: ne pas exécuter de SQL brut ici (placeholder "?" incompatible avec PostgreSQL).
+            # Utiliser les méthodes du module DB qui adaptent la requête selon SQLite/PostgreSQL.
+            entreprise = None
+            try:
+                if hasattr(db, 'get_entreprise'):
+                    entreprise = db.get_entreprise(entreprise_id)
+            except Exception:
+                entreprise = None
+
+            if entreprise and isinstance(entreprise, dict):
                 data.update({
-                    'website': entreprise.get('website', ''),
-                    'secteur': entreprise.get('secteur', ''),
-                    'framework': entreprise.get('framework', ''),
-                    'hosting_provider': entreprise.get('hosting_provider', ''),
+                    'website': entreprise.get('website', '') or '',
+                    'secteur': entreprise.get('secteur', '') or '',
+                    'framework': entreprise.get('framework', '') or '',
+                    'hosting_provider': entreprise.get('hosting_provider', '') or '',
                     'responsable': entreprise.get('responsable') or '',
                     'email_principal': entreprise.get('email_principal') or '',
                     'opportunite': entreprise.get('opportunite') or '',
                     'statut': entreprise.get('statut') or '',
                 })
-            conn.close()
             
             # Analyse technique
             tech_analysis = tech_manager.get_technical_analysis(entreprise_id)
@@ -662,6 +665,13 @@ class TemplateManager:
         
         content = template.get('content', '')
         is_html = template.get('is_html', False)
+
+        # Auto-détection de modèles HTML au moment du rendu, même si is_html est à False
+        # (par ex. anciens templates en BDD). Cela évite d'envoyer le HTML comme texte brut.
+        if not is_html and isinstance(content, str):
+            snippet = content.strip()[:256].lower()
+            if snippet.startswith('<!doctype html') or snippet.startswith('<html') or '<body' in snippet:
+                is_html = True
         
         # Récupérer les données étendues si entreprise_id fourni
         extended_data = {}
@@ -696,6 +706,13 @@ class TemplateManager:
             encoded_website = quote(website_val.strip(), safe='')
             analysis_url = f"https://danielcraft.fr/analyse?website={encoded_website}&full=1"
         extended_flat['analysis_url'] = analysis_url
+
+        # Lien de désabonnement (danielcraft.fr/desabonnement?website=...)
+        unsubscribe_url = ''
+        if isinstance(website_val, str) and website_val.strip():
+            encoded_website = quote(website_val.strip(), safe='')
+            unsubscribe_url = f"https://danielcraft.fr/desabonnement?website={encoded_website}"
+        extended_flat['unsubscribe_url'] = unsubscribe_url
 
         variables = {
             'nom': formatted_nom,
