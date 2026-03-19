@@ -223,6 +223,53 @@ class CampagneManager(DatabaseBase):
         conn.close()
         return [dict(row) for row in rows]
 
+    def get_campagnes_launched_between(self, start_utc_iso, end_utc_iso):
+        """
+        Retourne les campagnes dont la date de lancement est comprise entre
+        deux bornes en UTC.
+
+        On considère comme "date de lancement" :
+          - la colonne scheduled_at si elle est renseignée
+          - sinon date_creation.
+
+        Args:
+            start_utc_iso (str): Borne de début (UTC ISO ex: 2025-02-12T06:00:00.000Z)
+            end_utc_iso (str): Borne de fin (UTC ISO)
+
+        Returns:
+            list[dict]: Campagnes avec toutes leurs colonnes.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        # SQLite ne dispose pas forcément de fonctions avancées de dates,
+        # on reste donc sur une comparaison lexicographique sur des ISO strings,
+        # ce qui fonctionne pour des timestamps normalisés.
+        self.execute_sql(
+            cursor,
+            """
+            SELECT *
+            FROM campagnes_email
+            WHERE
+                (
+                    scheduled_at IS NOT NULL
+                    AND scheduled_at >= ?
+                    AND scheduled_at <= ?
+                )
+                OR (
+                    scheduled_at IS NULL
+                    AND date_creation >= ?
+                    AND date_creation <= ?
+                )
+            ORDER BY date_creation DESC
+            """,
+            (start_utc_iso, end_utc_iso, start_utc_iso, end_utc_iso),
+        )
+
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
     def save_email_envoye(
         self,
         campagne_id,

@@ -41,6 +41,9 @@ MAIL_USERNAME = os.environ.get('MAIL_USERNAME', '')
 MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD', '')
 MAIL_DEFAULT_SENDER = os.environ.get('MAIL_DEFAULT_SENDER', 'Loic Daniel <loic@example.com>')
 
+# Destinataire par défaut pour les rapports internes (campagnes, diagnostics, etc.)
+MAIL_DEFAULT_RECIPIENT = os.environ.get('MAIL_DEFAULT_RECIPIENT', 'contact@danielcraft.fr')
+
 # Configuration scraping
 SCRAPING_DELAY = 2.0  # Délai entre requêtes (secondes)
 SCRAPING_MAX_WORKERS = 3  # Nombre de threads parallèles

@@ -338,13 +338,21 @@
                 <h2>📊 Résultats de la campagne</h2>
                 <span id="results-campagne-name" class="results-campagne-name"></span>
             </div>
-            <button class="modal-results-close" onclick="closeResultsModal()">&times;</button>
+            <button class="modal-results-close" onclick="closeResultsModal()" aria-label="Fermer la fenêtre">
+                &times;
+            </button>
         </div>
         <div class="modal-results-body" id="results-modal-body">
             <div class="results-loading">
                 <div class="loading-spinner"></div>
                 <p>Chargement des résultats...</p>
             </div>
+        </div>
+        <div class="modal-results-footer">
+            <button type="button" class="btn-cancel" onclick="closeResultsModal()">Fermer</button>
+            <button type="button" class="btn-results-send-email btn-submit" onclick="sendResultsReportByEmail()">
+                Envoyer le rapport par email
+            </button>
         </div>
     </div>
 </div>

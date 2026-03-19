@@ -1494,6 +1494,31 @@ body[data-theme="dark"] .campagnes-search-input i {
     flex: 1;
 }
 
+.modal-results-footer {
+    padding: 16px 30px;
+    border-top: 1px solid #e0e0e0;
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    background: #ffffff;
+}
+
+.modal-results-footer .btn-results-send-email {
+    /* Même logique que btn-submit, mais un peu plus discret */
+    box-shadow: 0 4px 10px rgba(102, 126, 234, 0.25);
+}
+
+body[data-theme="dark"] .modal-results-footer {
+    background: #0f172a;
+    border-top-color: #334155;
+}
+
+body[data-theme="dark"] .modal-results-footer .btn-cancel {
+    background: #1e293b;
+    border: 1px solid #475569;
+    color: #e2e8f0;
+}
+
 .results-loading {
     text-align: center;
     padding: 60px 20px;

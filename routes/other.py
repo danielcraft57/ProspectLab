@@ -7,6 +7,7 @@ Contient les routes pour les emails, templates, scraping et téléchargements.
 from flask import Blueprint, render_template, request, jsonify, send_file, redirect, url_for, flash
 import os
 from services.email_sender import EmailSender
+from config import MAIL_DEFAULT_RECIPIENT
 from services.template_manager import TemplateManager
 from config import EXPORT_FOLDER
 from utils.template_helpers import render_page
@@ -512,6 +513,225 @@ def api_delete_campagne(campagne_id):
     if deleted:
         return jsonify({'success': True})
     return jsonify({'error': 'Campagne introuvable'}), 404
+
+
+@other_bp.route('/api/campagnes/<int:campagne_id>/send-report-email', methods=['POST'])
+@login_required
+def api_send_campagne_report_email(campagne_id):
+    """
+    API: Envoie par email le rapport détaillé d'une campagne
+    (statistiques globales + tableau des contacts).
+
+    L'email est envoyé à contact@danielcraft.fr.
+
+    Returns:
+        JSON: {'success': bool, 'message': str}
+    """
+    from services.database.campagnes import CampagneManager
+    from services.email_sender import EmailSender
+
+    campagne_manager = CampagneManager()
+    campagne = campagne_manager.get_campagne(campagne_id)
+    if not campagne:
+        return jsonify({'error': 'Campagne introuvable'}), 404
+
+    stats = campagne_manager.get_campagne_tracking_stats(campagne_id)
+
+    # Métadonnées utiles
+    raw_date_creation = campagne.get('date_creation') or ''
+    sujet_email = campagne.get('sujet') or ''
+    total_emails = stats.get('total_emails', 0)
+    total_opens = stats.get('total_opens', 0)
+    total_clicks = stats.get('total_clicks', 0)
+    open_rate = stats.get('open_rate', 0)
+    click_rate = stats.get('click_rate', 0)
+
+    # Formattage dates (plus lisibles)
+    from datetime import datetime
+
+    def _format_dt(value: str) -> str:
+        if not value:
+            return ''
+        try:
+            # Gère "YYYY-MM-DD HH:MM:SS" ou ISO
+            s = str(value).replace('T', ' ')
+            dt = datetime.fromisoformat(s)
+            return dt.strftime('%d/%m/%Y %H:%M')
+        except Exception:
+            return str(value)
+
+    date_creation = _format_dt(raw_date_creation)
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    report_generated_at = _format_dt(now_str)
+
+    # Sujet d'email plus convivial
+    # Exemple: "Rapport du 19/03/2026 – Optimisation conversion Technologie"
+    date_for_subject = report_generated_at.split(' ')[0] if report_generated_at else ''
+    subject = f"Rapport du {date_for_subject} – {campagne.get('nom') or f'Campagne #{campagne_id}'}"
+
+    # Corps texte simple
+    lines = [
+        f"Rapport du {date_for_subject} – campagne #{campagne_id}",
+        f"Nom : {campagne.get('nom') or '-'}",
+        f"Sujet : {sujet_email or '-'}",
+        f"Date de création : {date_creation}",
+        f"Rapport généré : {report_generated_at}",
+        "",
+        f"Emails envoyés : {total_emails}",
+        f"Ouvertures uniques : {total_opens} (taux {open_rate:.1f}%)",
+        f"Clics uniques : {total_clicks} (taux {click_rate:.1f}%)",
+        "",
+        "Détail par contact :"
+    ]
+    for email in stats.get('emails', []):
+        lines.append(
+            f"- {email.get('nom_destinataire') or 'N/A'} <{email.get('email')}> "
+            f"({email.get('entreprise') or 'N/A'}) "
+            f"– statut={email.get('statut')}, opens={email.get('opens', 0)}, clicks={email.get('clicks', 0)}"
+        )
+    text_body = "\n".join(lines)
+
+    # Corps HTML : ne lister que les contacts ayant au moins une ouverture ou un clic
+    engaged_emails = [
+        e for e in stats.get('emails', [])
+        if (e.get('opens', 0) or 0) > 0 or (e.get('clicks', 0) or 0) > 0
+    ]
+
+    # Regrouper par entreprise pour un affichage plus lisible
+    grouped_by_company = {}
+    for email in engaged_emails:
+        key = email.get('entreprise') or email.get('entreprise_nom') or 'Sans entreprise'
+        grouped_by_company.setdefault(key, []).append(email)
+
+    emails_rows = ""
+    for company, emails in grouped_by_company.items():
+        # Totaux par entreprise
+        company_opens = sum(e.get('opens', 0) or 0 for e in emails)
+        company_clicks = sum(e.get('clicks', 0) or 0 for e in emails)
+
+        # Ligne "header" d'entreprise
+        emails_rows += f"""
+            <tr style="background:#f9fafb;">
+                <td style="padding:7px 10px; border-bottom:1px solid #e5e7eb; font-weight:600; color:#111827;">
+                    {company}
+                    <span style="font-size:11px; font-weight:400; color:#6b7280; margin-left:6px;">
+                        {len(emails)} email(s)
+                    </span>
+                </td>
+                <td style="padding:7px 10px; border-bottom:1px solid #e5e7eb;"></td>
+                <td style="padding:7px 10px; border-bottom:1px solid #e5e7eb; text-align:center; font-size:12px; color:#4b5563;">
+                    Total
+                </td>
+                <td style="padding:7px 10px; border-bottom:1px solid #e5e7eb; text-align:center; color:#16a34a; font-weight:600;">
+                    {company_opens}
+                </td>
+                <td style="padding:7px 10px; border-bottom:1px solid #e5e7eb; text-align:center; color:#2563eb; font-weight:600;">
+                    {company_clicks}
+                </td>
+            </tr>
+        """
+        # Sous-lignes par email (détails discrets, décalés à gauche)
+        for email in emails:
+            emails_rows += f"""
+            <tr>
+                <td style="padding:4px 10px 5px 22px; border-bottom:1px solid #f3f4f6;">
+                    <div style="font-weight:500; font-size:12px; margin-bottom:1px;">{(email.get('nom_destinataire') or 'Contact')}</div>
+                    <div style="font-size:11px;color:#6b7280;">{(email.get('email') or '')}</div>
+                </td>
+                <td style="padding:4px 10px 5px 10px; border-bottom:1px solid #f3f4f6; font-size:11px; color:#6b7280;">
+                    Canal email
+                </td>
+                <td style="padding:4px 10px 5px 10px; border-bottom:1px solid #f3f4f6; text-align:center; font-size:11px; color:#6b7280;">
+                    {email.get('statut') or '-'}
+                </td>
+                <td style="padding:4px 10px 5px 10px; border-bottom:1px solid #f3f4f6; text-align:center; color:#16a34a; font-size:11px;">
+                    {email.get('opens', 0)}
+                </td>
+                <td style="padding:4px 10px 5px 10px; border-bottom:1px solid #f3f4f6; text-align:center; color:#2563eb; font-size:11px;">
+                    {email.get('clicks', 0)}
+                </td>
+            </tr>
+            """
+
+    html_body = f"""
+    <html>
+      <body style="margin:0; padding:24px; font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:#f3f4f6; color:#111827;">
+        <div style="max-width:840px; margin:0 auto; background:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 18px 40px rgba(15,23,42,0.12); border:1px solid #e5e7eb;">
+          <!-- Header -->
+          <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6); padding:18px 22px 14px; color:#ffffff;">
+            <div style="font-size:13px; opacity:0.9; margin-bottom:4px;">Rapport du {date_for_subject}</div>
+            <div style="font-size:20px; font-weight:600; margin-bottom:10px;">{(campagne.get('nom') or f"Campagne #{campagne_id}")}</div>
+            <div style="display:flex; flex-wrap:wrap; gap:18px; font-size:12px; opacity:0.96;">
+              <div>📅 <strong>Créée :</strong> {date_creation or 'N/A'}</div>
+              <div>🕒 <strong>Rapport :</strong> {report_generated_at}</div>
+              <div style="flex:1 1 100%; margin-top:2px;">✉️ <strong>Sujet :</strong> {sujet_email or '-'}</div>
+            </div>
+          </div>
+
+          <!-- Corps -->
+          <div style="padding:18px 22px 22px;">
+            <!-- Vue d'ensemble (2 colonnes + 1 colonne ratios) -->
+            <div style="display:flex; flex-wrap:wrap; gap:12px; margin-bottom:18px;">
+              <div style="flex:1 1 180px; background:#f9fafb; border-radius:12px; padding:12px 14px; border:1px solid #e5e7eb;">
+                <div style="font-size:13px; color:#6b7280; margin-bottom:4px;">Volume envoyé</div>
+                <div style="font-size:24px; font-weight:600; color:#111827;">{total_emails}</div>
+                <div style="font-size:12px; color:#6b7280;">emails</div>
+              </div>
+              <div style="flex:1 1 180px; background:#ecfdf3; border-radius:12px; padding:12px 14px; border:1px solid #bbf7d0;">
+                <div style="font-size:13px; color:#15803d; margin-bottom:4px;">Engagement</div>
+                <div style="font-size:20px; font-weight:600; color:#14532d;">{total_opens} ouvertures</div>
+                <div style="font-size:12px; color:#16a34a;">{open_rate:.1f}% d'ouverture</div>
+              </div>
+              <div style="flex:1 1 180px; background:#eff6ff; border-radius:12px; padding:12px 14px; border:1px solid #bfdbfe;">
+                <div style="font-size:13px; color:#1d4ed8; margin-bottom:4px;">Intérêt fort</div>
+                <div style="font-size:20px; font-weight:600; color:#1e40af;">{total_clicks} clics</div>
+                <div style="font-size:12px; color:#2563eb;">{click_rate:.1f}% de clic</div>
+              </div>
+            </div>
+
+            <!-- Détail par contact -->
+            <div style="border-radius:12px; border:1px solid #e5e7eb; overflow:hidden; background:#f9fafb;">
+              <div style="padding:10px 12px; background:#eef2ff; border-bottom:1px solid #e5e7eb; font-size:13px; font-weight:600; display:flex; justify-content:space-between; align-items:center; color:#1e293b;">
+                <span>Contacts engagés (ouverture ou clic)</span>
+                <span style="font-size:12px; color:#4b5563;">{len(engaged_emails)} contact(s)</span>
+              </div>
+              <table cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse; font-size:13px; background:#ffffff;">
+                <thead>
+                  <tr style="background:#e5e7eb;">
+                    <th align="left" style="padding:8px 10px; border-bottom:1px solid #e5e7eb; color:#374151;">Contact</th>
+                    <th align="left" style="padding:8px 10px; border-bottom:1px solid #e5e7eb; color:#374151;">Entreprise</th>
+                    <th align="center" style="padding:8px 10px; border-bottom:1px solid #e5e7eb; color:#374151;">Statut</th>
+                    <th align="center" style="padding:8px 10px; border-bottom:1px solid #e5e7eb; color:#374151;">Ouvertures</th>
+                    <th align="center" style="padding:8px 10px; border-bottom:1px solid #e5e7eb; color:#374151;">Clics</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {emails_rows or '<tr><td colspan="5" style="padding:10px 12px; text-align:center; color:#6b7280; background:#f9fafb;">Aucun contact n&#39;a encore ouvert ou cliqué cet email.</td></tr>'}
+                </tbody>
+              </table>
+            </div>
+
+            <div style="margin-top:14px; font-size:12px; color:#6b7280;">
+              Astuce : compare ces chiffres avec tes autres campagnes pour identifier ce qui fonctionne le mieux (objet, accroche, ciblage…).
+            </div>
+          </div>
+        </div>
+      </body>
+    </html>
+    """
+
+    sender = EmailSender()
+    result = sender.send_email(
+        to=MAIL_DEFAULT_RECIPIENT,
+        subject=subject,
+        body=text_body,
+        html_body=html_body,
+    )
+
+    if not result.get('success'):
+        return jsonify({'success': False, 'message': result.get('message', 'Erreur lors de l\'envoi')}), 500
+
+    return jsonify({'success': True, 'message': 'Rapport de campagne envoyé à l\'adresse de réception par défaut'})
 
 
 @other_bp.route('/api/entreprises/emails', methods=['GET'])

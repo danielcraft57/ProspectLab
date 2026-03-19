@@ -1758,6 +1758,41 @@ function closeResultsModal() {
     currentResultsCampagneId = null;
 }
 
+// Envoyer le rapport de la campagne courante par email
+async function sendResultsReportByEmail() {
+    if (!currentResultsCampagneId) {
+        alert('Aucune campagne sélectionnée.');
+        return;
+    }
+
+    const btn = document.querySelector('.btn-results-send-email');
+    if (btn) {
+        btn.disabled = true;
+        const originalText = btn.textContent;
+        btn.textContent = 'Envoi en cours...';
+        try {
+            const res = await fetch(`/api/campagnes/${currentResultsCampagneId}/send-report-email`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+                throw new Error(data && data.message ? data.message : 'Erreur lors de l\'envoi du rapport');
+            }
+            showNotification('Rapport envoyé par email à contact@danielcraft.fr', 'success');
+        } catch (e) {
+            showNotification('Erreur: ' + (e && e.message ? e.message : e), 'error');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        }
+    }
+}
+
 // Charger les résultats de la campagne
 async function loadCampagneResults(campagneId, silent) {
     try {

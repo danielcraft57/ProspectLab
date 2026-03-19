@@ -7,6 +7,7 @@ de manière asynchrone, évitant ainsi de bloquer l'application Flask.
 
 from celery import Celery
 from celery.signals import setup_logging
+from celery.schedules import crontab
 from config import CELERY_BROKER_URL, CELERY_RESULT_BACKEND, CELERY_TASK_SERIALIZER, \
     CELERY_RESULT_SERIALIZER, CELERY_ACCEPT_CONTENT, CELERY_TIMEZONE, CELERY_ENABLE_UTC, \
     CELERY_TASK_TRACK_STARTED, CELERY_TASK_TIME_LIMIT, CELERY_TASK_SOFT_TIME_LIMIT
@@ -76,6 +77,22 @@ celery.conf.update(
         'start-scheduled-campagnes': {
             'task': 'tasks.email_tasks.start_scheduled_campagnes',
             'schedule': 60.0,  # Toutes les minutes : lance les campagnes dont l'heure programmée est atteinte (UTC)
+        },
+        # Rapports de campagnes (matin / soir) vers contact@danielcraft.fr
+        'campagnes-report-evening': {
+            'task': 'tasks.email_tasks.send_campagnes_report_task',
+            'schedule': crontab(hour=18, minute=0),  # Tous les jours à 18h (heure de Paris via CELERY_TIMEZONE)
+            'args': ('evening',),
+        },
+        'campagnes-report-morning': {
+            'task': 'tasks.email_tasks.send_campagnes_report_task',
+            'schedule': crontab(hour=8, minute=0),  # Tous les jours à 8h
+            'args': ('morning',),
+        },
+        # Vérification périodique des changements significatifs des performances de campagnes
+        'campagnes-significant-changes': {
+            'task': 'tasks.email_tasks.check_campaigns_significant_changes_task',
+            'schedule': 1800.0,  # Toutes les 30 minutes
         },
     },
 )
