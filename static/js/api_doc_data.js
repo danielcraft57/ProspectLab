@@ -2,85 +2,58 @@
  * Données partagées pour la documentation API (page et modale)
  */
 const API_DOC_FAMILIES = [
-    { id: 'tokens', name: 'Tokens API', description: 'Gestion des tokens API (admin). Créer, lister, révoquer ou supprimer les tokens utilisés pour l\'API publique.', basePath: '/api/tokens', auth: 'Session ProspectLab (cookie) — utilisateur admin.', endpoints: [
-        { method: 'GET', path: '', desc: 'Liste tous les tokens API.', params: [{ name: 'user_id', type: 'int', desc: 'Filtrer par ID utilisateur (optionnel)' }] },
-        { method: 'POST', path: '', desc: 'Crée un nouveau token API.', body: 'JSON: name, app_url?, user_id?, can_read_entreprises?, can_read_emails?, can_read_statistics?, can_read_campagnes?' },
-        { method: 'DELETE', path: '/<token_id>', desc: 'Révoque un token (désactive sans le supprimer).' },
-        { method: 'DELETE', path: '/<token_id>/delete', desc: 'Supprime définitivement un token.' }
-    ]},
-    { id: 'public', name: 'API publique', description: 'Endpoints accessibles avec un token API (header Authorization: Bearer <token> ou ?api_token=). Idéal pour connecter une app externe (ex: http://localhost:5173/prospection).', basePath: '/api/public', auth: 'Header: Authorization: Bearer <votre_token> ou paramètre ?api_token=<token>.', endpoints: [
-        { method: 'GET', path: '/entreprises', desc: 'Liste des entreprises.', params: [{ name: 'limit', type: 'int', desc: 'Max résultats (défaut 100, max 1000)' }, { name: 'offset', type: 'int', desc: 'Pagination' }, { name: 'secteur', type: 'str' }, { name: 'statut', type: 'str' }, { name: 'search', type: 'str' }] },
-        { method: 'GET', path: '/entreprises/<id>', desc: 'Détails d\'une entreprise.' },
-        { method: 'GET', path: '/entreprises/<id>/emails', desc: 'Emails scrapés d\'une entreprise.' },
-        { method: 'GET', path: '/emails', desc: 'Liste de tous les emails.', params: [{ name: 'limit', type: 'int' }, { name: 'offset', type: 'int' }, { name: 'entreprise_id', type: 'int' }] },
-        { method: 'GET', path: '/statistics', desc: 'Statistiques globales.' },
-        { method: 'GET', path: '/campagnes', desc: 'Liste des campagnes email.', params: [{ name: 'limit', type: 'int' }, { name: 'offset', type: 'int' }, { name: 'statut', type: 'str' }] },
-        { method: 'GET', path: '/campagnes/<id>', desc: 'Détails d\'une campagne.' },
-        { method: 'GET', path: '/campagnes/<id>/emails', desc: 'Emails envoyés d\'une campagne.', params: [{ name: 'limit', type: 'int' }, { name: 'offset', type: 'int' }, { name: 'statut', type: 'str' }] },
-        { method: 'GET', path: '/campagnes/<id>/statistics', desc: 'Statistiques de tracking (ouvertures, clics).' },
-        { method: 'POST', path: '/website-analysis', desc: 'Lance une analyse complète d’un site (scraping + technique + SEO + OSINT + pentest) ou retourne le rapport existant.', body: 'JSON: website (requis), force?, full?, max_depth?, max_workers?, max_time?, max_pages?, enable_nmap?, use_lighthouse?' },
-        { method: 'GET', path: '/website-analysis', desc: 'Récupère un rapport d’analyse existant pour un site.', params: [{ name: 'website', type: 'str', desc: 'Requis (URL ou domaine)' }, { name: 'full', type: 'bool', desc: 'Optionnel (inclut items de scraping, volumineux)' }] }
-    ]},
-    { id: 'extended', name: 'API étendue', description: 'Analyses techniques, OSINT, Pentest, SEO, scrapers, export. Réservé aux utilisateurs connectés (session).', basePath: '/api', auth: 'Session ProspectLab (cookie) — login requis.', endpoints: [
-        { method: 'GET', path: '/analyses-techniques', desc: 'Liste des analyses techniques.', params: [{ name: 'limit', type: 'int' }] },
-        { method: 'GET', path: '/analyse-technique/<id>', desc: 'Détails d\'une analyse technique.' },
-        { method: 'DELETE', path: '/analyse-technique/<id>', desc: 'Supprime une analyse technique.' },
-        { method: 'GET', path: '/analyses-osint', desc: 'Liste des analyses OSINT.' },
-        { method: 'GET', path: '/analyse-osint/<id>', desc: 'Détails d\'une analyse OSINT.' },
-        { method: 'DELETE', path: '/analyse-osint/<id>', desc: 'Supprime une analyse OSINT.' },
-        { method: 'GET', path: '/analyses-pentest', desc: 'Liste des analyses Pentest.' },
-        { method: 'GET', path: '/analyse-pentest/<id>', desc: 'Détails d\'une analyse Pentest.' },
-        { method: 'DELETE', path: '/analyse-pentest/<id>', desc: 'Supprime une analyse Pentest.' },
-        { method: 'GET', path: '/analyses-seo', desc: 'Liste des analyses SEO.' },
-        { method: 'GET', path: '/analyse-seo/<id>', desc: 'Détails d\'une analyse SEO.' },
-        { method: 'DELETE', path: '/analyse-seo/<id>', desc: 'Supprime une analyse SEO.' },
-        { method: 'GET', path: '/entreprise/<id>/analyse-technique', desc: 'Analyse technique d\'une entreprise.' },
-        { method: 'GET', path: '/entreprise/<id>/analyse-osint', desc: 'Analyse OSINT d\'une entreprise.' },
-        { method: 'GET', path: '/entreprise/<id>/analyse-pentest', desc: 'Analyse Pentest d\'une entreprise.' },
-        { method: 'GET', path: '/entreprise/<id>/analyse-seo', desc: 'Analyse SEO d\'une entreprise.' },
-        { method: 'GET', path: '/entreprise/<id>/scrapers', desc: 'Scrapers d\'une entreprise.' },
-        { method: 'GET', path: '/entreprise/<id>/images', desc: 'Images d\'une entreprise.' },
-        { method: 'GET', path: '/scraper/<id>/images', desc: 'Images d\'un scraper.' },
-        { method: 'POST', path: '/scraper', desc: 'Sauvegarde un scraper.', body: 'JSON: entreprise_id?, url, scraper_type, emails[], people[], visited_urls?, total_emails?, total_people?, duration?' },
-        { method: 'GET', path: '/entreprise/<id>/personnes', desc: 'Personnes d\'une entreprise.' },
-        { method: 'GET', path: '/entreprise/<id>/organigramme', desc: 'Organigramme d\'une entreprise.' },
-        { method: 'GET', path: '/entreprises/nearby', desc: 'Entreprises proches d\'un point.', params: [{ name: 'latitude', type: 'float' }, { name: 'longitude', type: 'float' }, { name: 'radius_km', type: 'float' }, { name: 'secteur', type: 'str' }, { name: 'limit', type: 'int' }] },
-        { method: 'GET', path: '/entreprise/<id>/competition', desc: 'Concurrence locale.', params: [{ name: 'radius_km', type: 'float' }] },
-        { method: 'GET', path: '/export/<format>', desc: 'Export CSV/JSON/PDF.', params: [{ name: 'secteur', type: 'str' }, { name: 'statut', type: 'str' }, { name: 'opportunite', type: 'str' }, { name: 'search', type: 'str' }] },
-        { method: 'POST', path: '/website-analysis', desc: 'Lance une analyse complète d’un site (scraping + technique + SEO + OSINT + pentest) ou retourne le rapport existant.', body: 'JSON: website (requis), force?, max_depth?, max_workers?, max_time?, max_pages?, enable_nmap?, use_lighthouse?' },
-        { method: 'GET', path: '/website-analysis', desc: 'Récupère un rapport d’analyse existant pour un site.', params: [{ name: 'website', type: 'str', desc: 'Requis (URL ou domaine)' }] }
-    ]},
-    { id: 'integration', name: 'API intégration (Companies)', description: 'API normalisée « company » pour applications internes (Facturio, MailPilot, VocalGuard, CompetiScope). Authentification par clé API (header x-api-key).', basePath: '/api', auth: 'Header: x-api-key: <clé_application> ou ?api_key=<clé>.', endpoints: [
-        { method: 'GET', path: '/companies/<id>', desc: 'Entreprise par ID ProspectLab.' },
-        { method: 'GET', path: '/companies/by-email', desc: 'Entreprise par email d\'un contact.', params: [{ name: 'email', type: 'str', desc: 'Requis' }] },
-        { method: 'GET', path: '/companies/by-phone', desc: 'Entreprise par numéro de téléphone.', params: [{ name: 'phone', type: 'str', desc: 'Requis' }] },
-        { method: 'GET', path: '/companies/by-domain', desc: 'Entreprise par nom de domaine.', params: [{ name: 'domain', type: 'str', desc: 'Requis' }] },
-        { method: 'POST', path: '/companies/from-website', desc: 'Créer ou mettre à jour une entreprise depuis une URL.', body: 'JSON: website (requis), name?, status?, tags[]?' }
-    ]},
-    { id: 'main', name: 'API principale', description: 'Entreprises, groupes, statistiques, diagnostics. Réservé aux utilisateurs connectés (session).', basePath: '/api', auth: 'Session ProspectLab (cookie) — login requis.', endpoints: [
-        { method: 'GET', path: '/osint/diagnostic', desc: 'Diagnostic environnement OSINT.' },
-        { method: 'GET', path: '/pentest/diagnostic', desc: 'Diagnostic environnement Pentest.' },
-        { method: 'GET', path: '/seo/diagnostic', desc: 'Diagnostic environnement SEO.' },
-        { method: 'GET', path: '/statistics', desc: 'Statistiques globales.', params: [{ name: 'days', type: 'int', desc: 'Optionnel' }] },
-        { method: 'GET', path: '/analyses', desc: 'Liste des analyses.', params: [{ name: 'limit', type: 'int' }] },
-        { method: 'GET', path: '/entreprises', desc: 'Liste des entreprises avec filtres et pagination.', params: [{ name: 'page', type: 'int' }, { name: 'page_size', type: 'int' }, { name: 'secteur', type: 'str' }, { name: 'statut', type: 'str' }, { name: 'search', type: 'str' }, { name: 'favori', type: 'bool' }] },
-        { method: 'GET', path: '/entreprise/<id>', desc: 'Détails d\'une entreprise.' },
-        { method: 'DELETE', path: '/entreprise/<id>', desc: 'Supprime une entreprise.' },
-        { method: 'GET', path: '/groupes-entreprises', desc: 'Liste des groupes.' },
-        { method: 'POST', path: '/groupes-entreprises', desc: 'Crée un groupe.' },
-        { method: 'DELETE', path: '/groupes-entreprises/<id>', desc: 'Supprime un groupe.' },
-        { method: 'POST', path: '/entreprise/<id>/groupes', desc: 'Associe l\'entreprise à un groupe.', body: 'JSON: groupe_id' },
-        { method: 'DELETE', path: '/entreprise/<id>/groupes/<groupe_id>', desc: 'Retire l\'entreprise d\'un groupe.' },
-        { method: 'POST', path: '/entreprise/<id>/recalculate-opportunity', desc: 'Recalcule le score d\'opportunité.' },
-        { method: 'POST', path: '/entreprise/<id>/tags', desc: 'Ajoute des tags.' },
-        { method: 'PUT', path: '/entreprise/<id>/tags', desc: 'Remplace les tags.' },
-        { method: 'DELETE', path: '/entreprise/<id>/tags', desc: 'Supprime des tags.' },
-        { method: 'POST', path: '/entreprise/<id>/notes', desc: 'Ajoute une note.' },
-        { method: 'PUT', path: '/entreprise/<id>/notes', desc: 'Met à jour une note.' },
-        { method: 'POST', path: '/entreprise/<id>/favori', desc: 'Met en favori.' },
-        { method: 'POST', path: '/entreprise/<id>/statut', desc: 'Change le statut.' },
-        { method: 'PUT', path: '/entreprise/<id>/statut', desc: 'Met à jour le statut.' },
-        { method: 'PATCH', path: '/entreprise/<id>/statut', desc: 'Met à jour le statut (partiel).' },
-        { method: 'GET', path: '/secteurs', desc: 'Liste des secteurs.' }
-    ]}
+    {
+        id: 'public',
+        name: 'API publique',
+        description: 'Endpoints accessibles uniquement sous `/api/public` avec un token API (header `Authorization: Bearer <token>` ou paramètre `?api_token=<token>`).',
+        basePath: '/api/public',
+        auth: 'Header: Authorization: Bearer <votre_token> ou paramètre ?api_token=<token>.',
+        categories: [
+            {
+                id: 'entreprises',
+                name: 'Entreprises',
+                endpoints: [
+                    { method: 'GET', path: '/entreprises', desc: 'Liste des entreprises (filtre statut avec niveaux : Gagné/Perdu/Relance).', params: [{ name: 'limit', type: 'int', desc: 'Max résultats (défaut 100, max 1000)' }, { name: 'offset', type: 'int', desc: 'Pagination' }, { name: 'secteur', type: 'str' }, { name: 'statut', type: 'str', desc: 'Valeur exacte ou niveau (Gagné/Perdu/Relance) qui inclut des statuts événementiels associés.' }, { name: 'search', type: 'str' }] },
+                    { method: 'GET', path: '/entreprises/<id>', desc: 'Détails d\'une entreprise.' },
+                    { method: 'GET', path: '/entreprises/by-website', desc: 'Récupère l\'entreprise ProspectLab à partir d\'un website (URL ou domaine).', params: [{ name: 'website', type: 'str', desc: 'Requis (URL ou domaine)' }] },
+                    { method: 'GET', path: '/entreprises/<id>/emails', desc: 'Emails scrapés d\'une entreprise.' }
+                ]
+            },
+            {
+                id: 'statuts-entreprise',
+                name: 'Statuts entreprise',
+                endpoints: [
+                    { method: 'GET', path: '/entreprises/statuses', desc: 'Liste des statuts d’entreprise supportés (pipeline + désabonnement/bounce/réponses).' },
+                    { method: 'PATCH', path: '/entreprises/<id>/statut', desc: 'Met à jour le statut d’une entreprise (générique).', body: 'JSON: { "statut": <string>, "note": <string optionnel> }' },
+                    { method: 'POST', path: '/entreprises/<id>/unsubscribe', desc: 'Raccourci: marque l’entreprise comme Désabonné.', body: 'JSON: { "note": <string optionnel> }' },
+                    { method: 'POST', path: '/entreprises/<id>/negative-reply', desc: 'Raccourci: marque l’entreprise comme Réponse négative.', body: 'JSON: { "note": <string optionnel> }' },
+                    { method: 'POST', path: '/entreprises/<id>/bounce', desc: 'Raccourci: marque l’entreprise comme Bounce.', body: 'JSON: { "note": <string optionnel> }' },
+                    { method: 'POST', path: '/entreprises/<id>/positive-reply', desc: 'Raccourci: marque l’entreprise comme Réponse positive.', body: 'JSON: { "note": <string optionnel> }' },
+                    { method: 'POST', path: '/entreprises/<id>/spam-complaint', desc: 'Raccourci: marque l’entreprise comme Plainte spam.', body: 'JSON: { "note": <string optionnel> }' },
+                    { method: 'POST', path: '/entreprises/<id>/do-not-contact', desc: 'Raccourci: marque l’entreprise comme Ne pas contacter.', body: 'JSON: { "note": <string optionnel> }' },
+                    { method: 'POST', path: '/entreprises/<id>/callback', desc: 'Raccourci: marque l’entreprise comme À rappeler.', body: 'JSON: { "note": <string optionnel> }' }
+                ]
+            },
+            {
+                id: 'emails-campagnes',
+                name: 'Emails & campagnes',
+                endpoints: [
+                    { method: 'GET', path: '/emails', desc: 'Liste de tous les emails.', params: [{ name: 'limit', type: 'int' }, { name: 'offset', type: 'int' }, { name: 'entreprise_id', type: 'int' }] },
+                    { method: 'GET', path: '/statistics', desc: 'Statistiques globales.' },
+                    { method: 'GET', path: '/campagnes', desc: 'Liste des campagnes email.', params: [{ name: 'limit', type: 'int' }, { name: 'offset', type: 'int' }, { name: 'statut', type: 'str' }] },
+                    { method: 'GET', path: '/campagnes/<id>', desc: 'Détails d\'une campagne.' },
+                    { method: 'GET', path: '/campagnes/<id>/emails', desc: 'Emails envoyés d\'une campagne.', params: [{ name: 'limit', type: 'int' }, { name: 'offset', type: 'int' }, { name: 'statut', type: 'str' }] },
+                    { method: 'GET', path: '/campagnes/<id>/statistics', desc: 'Statistiques de tracking (ouvertures, clics).' }
+                ]
+            },
+            {
+                id: 'website-analysis',
+                name: 'Website analysis',
+                endpoints: [
+                    { method: 'POST', path: '/website-analysis', desc: 'Lance une analyse complète d’un site (scraping + technique + SEO + OSINT + pentest) ou retourne le rapport existant.', body: 'JSON: website (requis), force?, full?, max_depth?, max_workers?, max_time?, max_pages?, enable_nmap?, use_lighthouse?' },
+                    { method: 'GET', path: '/website-analysis', desc: 'Récupère un rapport d’analyse existant pour un site.', params: [{ name: 'website', type: 'str', desc: 'Requis (URL ou domaine)' }, { name: 'full', type: 'bool', desc: 'Optionnel (inclut items de scraping, volumineux)' }] }
+                ]
+            }
+        ]
+    }
 ];

@@ -44,7 +44,9 @@ http://votre-domaine.com/api/public
 - `limit` (int, optionnel) : Nombre maximum de résultats (défaut: 100, max: 1000)
 - `offset` (int, optionnel) : Offset pour la pagination (défaut: 0)
 - `secteur` (string, optionnel) : Filtrer par secteur
-- `statut` (string, optionnel) : Filtrer par statut commercial (`Nouveau`, `À qualifier`, `Relance`, `Gagné`, `Perdu`)
+- `statut` (string, optionnel) : Filtrer sur `entreprises.statut`.
+  - Si `statut` vaut `Gagné`, `Perdu` ou `Relance`, la requête inclut aussi les statuts événementiels associés (ex : `Réponse positive` pour `Gagné`, etc.).
+  - Sinon, le filtre est une valeur exacte.
 - `search` (string, optionnel) : Recherche textuelle (nom, website)
 
 **Exemple de requête** :
@@ -82,6 +84,64 @@ curl -H "Authorization: Bearer votre_token" \
 }
 ```
 
+### Statuts d'entreprise supportés
+
+**GET** `/api/public/entreprises/statuses`
+
+Retourne la liste des statuts supportés par ProspectLab (pipeline + statuts délivrabilité/opt-out).
+
+**Exemple** :
+
+```bash
+curl -H "Authorization: Bearer votre_token" \
+  "http://localhost:5000/api/public/entreprises/statuses"
+```
+
+### Mapping retours emails -> statuts
+
+Tu peux traduire les retours de boîte mail en appelant les endpoints “raccourcis” :
+
+- Undelivered / non livré -> `POST /api/public/entreprises/<id>/bounce` (statut = `Bounce`)
+- Réponse automatique (auto-reply) -> `POST /api/public/entreprises/<id>/callback` (statut = `À rappeler`)
+- Réponse “normale” négative -> `POST /api/public/entreprises/<id>/negative-reply` (statut = `Réponse négative`)
+- Réponse “normale” positive -> `POST /api/public/entreprises/<id>/positive-reply` (statut = `Réponse positive`)
+- Désabonnement / stop pub -> `POST /api/public/entreprises/<id>/unsubscribe` (statut = `Désabonné`) ou `do-not-contact` (statut = `Ne pas contacter`)
+- Spam complaint -> `POST /api/public/entreprises/<id>/spam-complaint` (statut = `Plainte spam`)
+
+### Mettre à jour le statut d'une entreprise (public)
+
+**PATCH** `/api/public/entreprises/<entreprise_id>/statut`
+
+**Body (JSON)** :
+- `statut` (string, requis) : valeur parmi `GET /api/public/entreprises/statuses`
+- `note` (string, optionnel) : texte libre (audit) ajouté aux notes si fourni
+
+**Exemple** :
+
+```bash
+curl -X PATCH -H "Authorization: Bearer votre_token" -H "Content-Type: application/json" \
+  -d "{\"statut\": \"Désabonné\", \"note\": \"Opt-out depuis formulaire / unsubscribe\"}" \
+  "http://localhost:5000/api/public/entreprises/42/statut"
+```
+
+### Raccourcis (opt-out / négatif / bounce)
+
+**POST** `/api/public/entreprises/<entreprise_id>/unsubscribe`
+
+**POST** `/api/public/entreprises/<entreprise_id>/negative-reply`
+
+**POST** `/api/public/entreprises/<entreprise_id>/bounce`
+
+**POST** `/api/public/entreprises/<entreprise_id>/positive-reply`
+
+**POST** `/api/public/entreprises/<entreprise_id>/spam-complaint`
+
+**POST** `/api/public/entreprises/<entreprise_id>/do-not-contact`
+
+**POST** `/api/public/entreprises/<entreprise_id>/callback`
+
+Body JSON optionnel : `{ "note": "..." }`
+
 ### 2. Détails d'une entreprise
 
 **GET** `/api/public/entreprises/<entreprise_id>`
@@ -114,6 +174,19 @@ curl -H "Authorization: Bearer votre_token" \
     "og_data": {...}
   }
 }
+```
+
+### 2.1. Entreprise par website
+
+**GET** `/api/public/entreprises/by-website?website=...`
+
+Retourne l'entreprise (donc l'`id`) à partir d'un `website` (URL ou domaine).
+
+**Exemple** :
+
+```bash
+curl -H "Authorization: Bearer votre_token" \
+  "http://localhost:5000/api/public/entreprises/by-website?website=danielcraft.fr"
 ```
 
 ### 3. Emails d'une entreprise

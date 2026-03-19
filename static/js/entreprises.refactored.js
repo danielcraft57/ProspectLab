@@ -1277,6 +1277,13 @@
                                 : statut === 'Relance' ? 'fa-phone'
                                 : statut === 'Gagné' ? 'fa-trophy'
                                 : statut === 'Perdu' ? 'fa-times-circle'
+                                : statut === 'Désabonné' ? 'fa-ban'
+                                : statut === 'Réponse négative' ? 'fa-thumbs-down'
+                                : statut === 'Réponse positive' ? 'fa-thumbs-up'
+                                : statut === 'Bounce' ? 'fa-exclamation-triangle'
+                                : statut === 'Plainte spam' ? 'fa-skull-crossbones'
+                                : statut === 'Ne pas contacter' ? 'fa-user-slash'
+                                : statut === 'À rappeler' ? 'fa-clock'
                                 : 'fa-tag';
                             return `<span class="row-chip row-chip-status badge badge-${cls}" title="Statut"><i class="fas ${icon}" aria-hidden="true"></i> ${Formatters.escapeHtml(statut)}</span>`;
                         })() : ''}

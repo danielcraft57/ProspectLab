@@ -14,6 +14,25 @@ from .base import DatabaseBase
 
 logger = logging.getLogger(__name__)
 
+# Statuts "métier" supportés pour le suivi commercial et la délivrabilité.
+# IMPORTANT: ces valeurs sont consommées par l'UI (filtres) et par l'API publique.
+ENTERPRISE_STATUSES: set[str] = {
+    # Pipeline commercial historique
+    'Nouveau',
+    'À qualifier',
+    'Relance',
+    'Gagné',
+    'Perdu',
+    # Statuts liés aux retours campagnes / délivrabilité / opt-out
+    'Désabonné',
+    'Réponse négative',
+    'Réponse positive',
+    'Bounce',
+    'Plainte spam',
+    'Ne pas contacter',
+    'À rappeler',
+}
+
 # Importer le calculateur d'opportunité
 try:
     from services.opportunity_calculator import OpportunityCalculator
@@ -636,8 +655,16 @@ class EntrepriseManager(DatabaseBase):
                 inner_query += ' AND e.secteur = ?'
                 params.append(filters['secteur'])
             if filters.get('statut'):
-                inner_query += ' AND e.statut = ?'
-                params.append(filters['statut'])
+                statut_val = filters['statut']
+                if isinstance(statut_val, (list, tuple, set)):
+                    statut_list = [s for s in statut_val if s is not None and str(s).strip() != '']
+                    if statut_list:
+                        placeholders = ','.join(['?' for _ in statut_list])
+                        inner_query += f' AND e.statut IN ({placeholders})'
+                        params.extend(statut_list)
+                else:
+                    inner_query += ' AND e.statut = ?'
+                    params.append(statut_val)
             if filters.get('opportunite'):
                 inner_query += ' AND e.opportunite = ?'
                 params.append(filters['opportunite'])
@@ -882,8 +909,16 @@ class EntrepriseManager(DatabaseBase):
                 inner_query += ' AND e.secteur = ?'
                 params.append(filters['secteur'])
             if filters.get('statut'):
-                inner_query += ' AND e.statut = ?'
-                params.append(filters['statut'])
+                statut_val = filters['statut']
+                if isinstance(statut_val, (list, tuple, set)):
+                    statut_list = [s for s in statut_val if s is not None and str(s).strip() != '']
+                    if statut_list:
+                        placeholders = ','.join(['?' for _ in statut_list])
+                        inner_query += f' AND e.statut IN ({placeholders})'
+                        params.extend(statut_list)
+                else:
+                    inner_query += ' AND e.statut = ?'
+                    params.append(statut_val)
             if filters.get('opportunite'):
                 inner_query += ' AND e.opportunite = ?'
                 params.append(filters['opportunite'])
@@ -1297,16 +1332,16 @@ class EntrepriseManager(DatabaseBase):
 
         Args:
             entreprise_id: ID de l'entreprise
-            statut: Nouveau statut parmi Nouveau, À qualifier, Relance, Gagné, Perdu
+            statut: Nouveau statut (voir ENTERPRISE_STATUSES)
         """
-        allowed = {'Nouveau', 'À qualifier', 'Relance', 'Gagné', 'Perdu'}
-        if statut not in allowed:
-            return
+        if not statut or statut not in ENTERPRISE_STATUSES:
+            return False
         conn = self.get_connection()
         cursor = conn.cursor()
         self.execute_sql(cursor, 'UPDATE entreprises SET statut = ? WHERE id = ?', (statut, entreprise_id))
         conn.commit()
         conn.close()
+        return True
 
     def toggle_favori(self, entreprise_id):
         """
@@ -2021,8 +2056,16 @@ class EntrepriseManager(DatabaseBase):
                 base_sql += ' AND e.opportunite = ?'
                 params.append(filters['opportunite'])
             if filters.get('statut'):
-                base_sql += ' AND e.statut = ?'
-                params.append(filters['statut'])
+                statut_val = filters['statut']
+                if isinstance(statut_val, (list, tuple, set)):
+                    statut_list = [s for s in statut_val if s is not None and str(s).strip() != '']
+                    if statut_list:
+                        placeholders = ','.join(['?' for _ in statut_list])
+                        base_sql += f' AND e.statut IN ({placeholders})'
+                        params.extend(statut_list)
+                else:
+                    base_sql += ' AND e.statut = ?'
+                    params.append(statut_val)
             if filters.get('tags_contains'):
                 base_sql += ' AND e.tags LIKE ?'
                 params.append('%' + str(filters['tags_contains']) + '%')

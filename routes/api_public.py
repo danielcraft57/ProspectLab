@@ -15,6 +15,55 @@ api_public_bp = Blueprint('api_public', __name__, url_prefix='/api/public')
 # Initialiser la base de données
 database = Database()
 
+def _expand_statut_level(statut: str) -> list[str]:
+    """
+    Permet de "coupler" plusieurs statuts événementiels sous un niveau marketing.
+
+    Choix de mapping (option simple, sans migration DB) :
+    - Gagné   => Gagné + Réponse positive
+    - Perdu   => Perdu + Réponse négative + Bounce + Désabonné + Ne pas contacter + Plainte spam
+    - Relance => Relance + Nouveau + À qualifier + À rappeler
+    """
+    if not statut:
+        return []
+
+    s = str(statut).strip()
+    mapping: dict[str, list[str]] = {
+        'Gagné': ['Gagné', 'Réponse positive'],
+        'Perdu': ['Perdu', 'Réponse négative', 'Bounce', 'Désabonné', 'Ne pas contacter', 'Plainte spam'],
+        'Relance': ['Relance', 'Nouveau', 'À qualifier', 'À rappeler'],
+    }
+    return mapping.get(s, [s])
+
+
+def _maybe_expand_statut_filter(statut_param):
+    """
+    Si l'UI envoie un niveau (Gagné/Perdu/Relance), on l'étend en liste de statuts événementiels.
+    Sinon, on laisse en valeur stricte.
+    """
+    if not statut_param:
+        return None
+    s = str(statut_param).strip()
+    if s in ('Gagné', 'Perdu', 'Relance'):
+        return _expand_statut_level(s)
+    return s
+
+def _get_allowed_entreprise_statuses() -> list[str]:
+    """
+    Retourne la liste canonique des statuts autorisés côté DB.
+    Fallback robuste si le symbole n'est pas importable.
+    """
+    try:
+        from services.database.entreprises import ENTERPRISE_STATUSES
+        return sorted(list(ENTERPRISE_STATUSES), key=lambda s: s.lower())
+    except Exception:
+        # Fallback minimal (ne pas casser l'API si import échoue)
+        return [
+            'Nouveau', 'À qualifier', 'Relance', 'Gagné', 'Perdu',
+            'Désabonné', 'Réponse négative', 'Réponse positive', 'Bounce',
+            'Plainte spam', 'Ne pas contacter', 'À rappeler',
+        ]
+
 def _normalize_url_for_analysis(raw: str) -> str | None:
     if not raw:
         return None
@@ -130,7 +179,7 @@ def get_entreprises():
         if request.args.get('secteur'):
             filters['secteur'] = request.args.get('secteur')
         if request.args.get('statut'):
-            filters['statut'] = request.args.get('statut')
+            filters['statut'] = _maybe_expand_statut_filter(request.args.get('statut'))
         if request.args.get('search'):
             filters['search'] = request.args.get('search')
         
@@ -152,6 +201,142 @@ def get_entreprises():
             'success': False,
             'error': str(e)
         }), 500
+
+
+@api_public_bp.route('/entreprises/statuses', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+def get_entreprise_statuses():
+    """
+    API publique : Liste des statuts d'entreprise supportés.
+    Utile côté intégration pour valider/mapper les événements (désabonnement, bounce, etc.).
+    """
+    return jsonify({
+        'success': True,
+        'data': _get_allowed_entreprise_statuses(),
+    })
+
+
+@api_public_bp.route('/entreprises/<int:entreprise_id>/statut', methods=['PATCH', 'POST'])
+@api_token_required
+@require_api_permission('entreprises')
+def update_entreprise_statut_public(entreprise_id: int):
+    """
+    API publique : Met à jour le statut d'une entreprise.
+
+    Body JSON:
+        - statut (str, requis): nouveau statut (voir GET /api/public/entreprises/statuses)
+        - note (str, optionnel): texte libre ajouté aux notes (audit) si fourni
+    """
+    payload = request.get_json(silent=True) or {}
+    statut = (payload.get('statut') or '').strip()
+    note = payload.get('note')
+    return _update_entreprise_status(entreprise_id, statut=statut, note=note)
+
+
+def _update_entreprise_status(entreprise_id: int, statut: str, note=None):
+    try:
+        entreprise = database.get_entreprise(entreprise_id)
+        if not entreprise:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable'}), 404
+
+        if not statut:
+            return jsonify({'success': False, 'error': 'Le champ "statut" est requis.'}), 400
+
+        allowed = set(_get_allowed_entreprise_statuses())
+        if statut not in allowed:
+            return jsonify({
+                'success': False,
+                'error': 'Statut non supporté',
+                'allowed': sorted(list(allowed), key=lambda s: s.lower()),
+            }), 400
+
+        updated = database.update_entreprise_statut(entreprise_id, statut)
+        if updated is False:
+            return jsonify({
+                'success': False,
+                'error': 'Statut non supporté',
+                'allowed': sorted(list(allowed), key=lambda s: s.lower()),
+            }), 400
+
+        if isinstance(note, str) and note.strip():
+            existing_notes = (entreprise.get('notes') or '').strip() if isinstance(entreprise, dict) else ''
+            new_notes = (existing_notes + '\n' if existing_notes else '') + note.strip()
+            try:
+                database.update_entreprise_notes(entreprise_id, new_notes)
+            except Exception:
+                pass
+
+        entreprise_updated = database.get_entreprise(entreprise_id)
+        from utils.helpers import clean_json_dict
+        entreprise_updated = clean_json_dict(entreprise_updated)
+
+        return jsonify({'success': True, 'data': entreprise_updated})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@api_public_bp.route('/entreprises/<int:entreprise_id>/unsubscribe', methods=['POST'])
+@api_token_required
+@require_api_permission('entreprises')
+def entreprise_unsubscribe_public(entreprise_id: int):
+    """API publique : Marque une entreprise comme Désabonné."""
+    payload = request.get_json(silent=True) or {}
+    return _update_entreprise_status(entreprise_id, statut='Désabonné', note=payload.get('note'))
+
+
+@api_public_bp.route('/entreprises/<int:entreprise_id>/negative-reply', methods=['POST'])
+@api_token_required
+@require_api_permission('entreprises')
+def entreprise_negative_reply_public(entreprise_id: int):
+    """API publique : Marque une entreprise comme Réponse négative."""
+    payload = request.get_json(silent=True) or {}
+    return _update_entreprise_status(entreprise_id, statut='Réponse négative', note=payload.get('note'))
+
+
+@api_public_bp.route('/entreprises/<int:entreprise_id>/bounce', methods=['POST'])
+@api_token_required
+@require_api_permission('entreprises')
+def entreprise_bounce_public(entreprise_id: int):
+    """API publique : Marque une entreprise comme Bounce."""
+    payload = request.get_json(silent=True) or {}
+    return _update_entreprise_status(entreprise_id, statut='Bounce', note=payload.get('note'))
+
+
+@api_public_bp.route('/entreprises/<int:entreprise_id>/positive-reply', methods=['POST'])
+@api_token_required
+@require_api_permission('entreprises')
+def entreprise_positive_reply_public(entreprise_id: int):
+    """API publique : Marque une entreprise comme Réponse positive."""
+    payload = request.get_json(silent=True) or {}
+    return _update_entreprise_status(entreprise_id, statut='Réponse positive', note=payload.get('note'))
+
+
+@api_public_bp.route('/entreprises/<int:entreprise_id>/spam-complaint', methods=['POST'])
+@api_token_required
+@require_api_permission('entreprises')
+def entreprise_spam_complaint_public(entreprise_id: int):
+    """API publique : Marque une entreprise comme Plainte spam."""
+    payload = request.get_json(silent=True) or {}
+    return _update_entreprise_status(entreprise_id, statut='Plainte spam', note=payload.get('note'))
+
+
+@api_public_bp.route('/entreprises/<int:entreprise_id>/do-not-contact', methods=['POST'])
+@api_token_required
+@require_api_permission('entreprises')
+def entreprise_do_not_contact_public(entreprise_id: int):
+    """API publique : Marque une entreprise comme Ne pas contacter."""
+    payload = request.get_json(silent=True) or {}
+    return _update_entreprise_status(entreprise_id, statut='Ne pas contacter', note=payload.get('note'))
+
+
+@api_public_bp.route('/entreprises/<int:entreprise_id>/callback', methods=['POST'])
+@api_token_required
+@require_api_permission('entreprises')
+def entreprise_callback_public(entreprise_id: int):
+    """API publique : Marque une entreprise comme À rappeler."""
+    payload = request.get_json(silent=True) or {}
+    return _update_entreprise_status(entreprise_id, statut='À rappeler', note=payload.get('note'))
 
 
 @api_public_bp.route('/entreprises/<int:entreprise_id>', methods=['GET'])
@@ -189,6 +374,44 @@ def get_entreprise(entreprise_id):
             'success': False,
             'error': str(e)
         }), 500
+
+
+@api_public_bp.route('/entreprises/by-website', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+def get_entreprise_by_website():
+    """
+    API publique : retrouver l'entreprise via son URL/domaine.
+
+    Query params:
+        website (str, requis): URL ou domaine.
+
+    Returns:
+        JSON: { success: True, data: <entreprise> }
+    """
+    try:
+        website_raw = request.args.get('website', '')
+        website = _normalize_url_for_analysis(website_raw)
+        if not website:
+            return jsonify({'success': False, 'error': 'Paramètre "website" requis (URL ou domaine).'}), 400
+
+        entreprise_id = _get_entreprise_id_for_website(database, website)
+        if not entreprise_id:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable pour ce website.'}), 404
+
+        entreprise = database.get_entreprise(entreprise_id)
+        if not entreprise:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable.'}), 404
+
+        from utils.helpers import clean_json_dict
+        entreprise = clean_json_dict(entreprise)
+
+        return jsonify({
+            'success': True,
+            'data': entreprise,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @api_public_bp.route('/entreprises/<int:entreprise_id>/emails', methods=['GET'])

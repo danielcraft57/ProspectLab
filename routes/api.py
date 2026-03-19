@@ -14,6 +14,31 @@ api_bp = Blueprint('api', __name__, url_prefix='/api')
 # Initialiser la base de données
 database = Database()
 
+def _expand_statut_level(statut: str) -> list[str]:
+    """
+    Couplage simple (sans migration DB) :
+    étendre un niveau Gagné/Perdu/Relance vers une liste de statuts événementiels.
+    """
+    if not statut:
+        return []
+
+    s = str(statut).strip()
+    mapping: dict[str, list[str]] = {
+        'Gagné': ['Gagné', 'Réponse positive'],
+        'Perdu': ['Perdu', 'Réponse négative', 'Bounce', 'Désabonné', 'Ne pas contacter', 'Plainte spam'],
+        'Relance': ['Relance', 'Nouveau', 'À qualifier', 'À rappeler'],
+    }
+    return mapping.get(s, [s])
+
+
+def _maybe_expand_statut_filter(statut_param):
+    if not statut_param:
+        return None
+    s = str(statut_param).strip()
+    if s in ('Gagné', 'Perdu', 'Relance'):
+        return _expand_statut_level(s)
+    return s
+
 
 @api_bp.route('/osint/diagnostic')
 @login_required
@@ -153,7 +178,7 @@ def entreprises():
         analyse_id = request.args.get('analyse_id', type=int)
         filters = {
             'secteur': request.args.get('secteur'),
-            'statut': request.args.get('statut'),
+            'statut': _maybe_expand_statut_filter(request.args.get('statut')),
             'opportunite': request.args.get('opportunite'),
             'favori': request.args.get('favori') == 'true',
             'search': request.args.get('search'),

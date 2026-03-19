@@ -74,7 +74,14 @@
                 'À qualifier': 'warning',
                 'Relance': 'relance',
                 'Gagné': 'success',
-                'Perdu': 'danger'
+                'Perdu': 'danger',
+                'Désabonné': 'danger',
+                'Réponse négative': 'danger',
+                'Réponse positive': 'success',
+                'Bounce': 'warning',
+                'Plainte spam': 'danger',
+                'Ne pas contacter': 'danger',
+                'À rappeler': 'relance',
             };
             const className = classes[statut] || 'secondary';
             return `<span class="badge badge-${className}">${statut}</span>`;
@@ -92,7 +99,14 @@
                 'À qualifier': 'warning',
                 'Relance': 'relance',
                 'Gagné': 'success',
-                'Perdu': 'danger'
+                'Perdu': 'danger',
+                'Désabonné': 'danger',
+                'Réponse négative': 'danger',
+                'Réponse positive': 'success',
+                'Bounce': 'warning',
+                'Plainte spam': 'danger',
+                'Ne pas contacter': 'danger',
+                'À rappeler': 'relance',
             };
             return classes[statut] || 'secondary';
         },
