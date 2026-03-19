@@ -39,7 +39,8 @@
                     <h4>Segmentation</h4>
                     <p>Affiner rapidement par secteur, groupe, email et statut.</p>
                 </div>
-                <div class="filters-grid">
+                <div class="filters-advanced-section-body">
+                    <div class="filters-grid">
                     <div class="filter-group">
                         <label for="filter-secteur">Secteur</label>
                         <select id="filter-secteur" class="form-select">
@@ -86,6 +87,7 @@
                     </div>
                 </div>
             </div>
+            </div>
 
             <!-- Bloc 2 - Scores -->
             <div class="filters-advanced-section">
@@ -93,10 +95,11 @@
                     <h4>Scores</h4>
                     <p>Cibler selon les scores sécurité, SEO et risque.</p>
                 </div>
-                <div class="filters-grid">
+                <div class="filters-advanced-section-body">
+                    <div class="filters-grid">
                     <!-- Jauges de score sécurité (min / max) -->
                     <div class="filter-group">
-                        <label class="filter-label" for="filter-security-min">Score sécurité</label>
+                        <label class="filter-label" for="filter-security-min">Score Technique</label>
                         <div class="score-slider">
                             <div class="score-slider-row">
                                 <div class="score-slider-header">
@@ -184,7 +187,7 @@
 
                     <!-- Jauge de score Risque (Pentest) -->
                     <div class="filter-group" data-filter-type="pentest">
-                        <label class="filter-label" for="filter-pentest-min">Score Risque (Pentest)</label>
+                        <label class="filter-label" for="filter-pentest-min">Score Pentest</label>
                         <div class="score-slider">
                             <div class="score-slider-row">
                                 <div class="score-slider-header">
@@ -227,6 +230,7 @@
                     </div>
                 </div>
             </div>
+            </div>
 
             <!-- Bloc 3 - Technologies -->
             <div class="filters-advanced-section">
@@ -234,7 +238,8 @@
                     <h4>Technologies</h4>
                     <p>Filtrer par CMS et framework principal.</p>
                 </div>
-                <div class="filters-grid">
+                <div class="filters-advanced-section-body">
+                    <div class="filters-grid">
                     <!-- Filtre CMS / techno -->
                     <div class="filter-group">
                         <label class="filter-label" for="filter-cms">CMS détecté</label>
@@ -270,6 +275,7 @@
                     </div>
                 </div>
             </div>
+            </div>
 
             <!-- Bloc 4 - Comportement & tags -->
             <div class="filters-advanced-section">
@@ -277,7 +283,8 @@
                     <h4>Comportement & contenu</h4>
                     <p>Repérer les sites avec blog, formulaire, tunnel ou tags spécifiques.</p>
                 </div>
-                <div class="filters-grid">
+                <div class="filters-advanced-section-body">
+                    <div class="filters-grid">
                     <!-- Filtre Tags intelligents (plein largeur en premier) -->
                     <div class="filter-group filter-group-tags">
                         <label class="filter-label" for="filter-tags">Tags</label>
@@ -297,7 +304,7 @@
                     </div>
 
                     <!-- Comportements / contenu -->
-                    <div class="filter-group">
+                    <div class="filter-group filter-group-parcours">
                         <label class="filter-label">Contenu & parcours</label>
                         <label class="form-checkbox">
                             <input type="checkbox" id="filter-has-blog">
@@ -313,6 +320,7 @@
                         </label>
                     </div>
                 </div>
+            </div>
             </div>
         </div>
 

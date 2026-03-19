@@ -1866,6 +1866,20 @@ class EntrepriseManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         result = {"secteurs": [], "opportunites": [], "statuts": [], "tags": []}
+
+        def row_get(row, key, default=None):
+            """
+            Extrait une valeur de ligne SQL (sqlite3.Row / RealDictCursor).
+            """
+            try:
+                return row[key]
+            except Exception:
+                try:
+                    if hasattr(row, 'get'):
+                        return row.get(key, default)
+                except Exception:
+                    pass
+                return default
         try:
             self.execute_sql(cursor, '''
                 SELECT secteur as value, COUNT(*) as count FROM entreprises
@@ -1894,10 +1908,11 @@ class EntrepriseManager(DatabaseBase):
         except Exception:
             pass
         try:
+            # 1) Tags "manuels" déjà stockés dans la colonne tags
             self.execute_sql(cursor, 'SELECT tags FROM entreprises WHERE tags IS NOT NULL AND tags != ""')
             tags_count = {}
             for row in cursor.fetchall():
-                raw = row.get("tags")
+                raw = row_get(row, "tags")
                 if not raw:
                     continue
                 try:
@@ -1911,42 +1926,93 @@ class EntrepriseManager(DatabaseBase):
                     # On ignore les lignes mal formées
                     pass
 
-            # Tags "connus" à suggérer même s'ils ne sont pas encore très présents
+            # 2) Tags dérivés des champs de résumé technique
+            # Ces champs sont censés exister même si la colonne tags n'a pas été mise à jour partout.
+            def norm_lower(val):
+                return str(val).strip().lower()
+
+            # CMS distincts
+            try:
+                self.execute_sql(cursor, '''
+                    SELECT cms as value, COUNT(*) as count
+                    FROM entreprises
+                    WHERE cms IS NOT NULL AND cms != ''
+                    GROUP BY cms
+                ''')
+                for row in cursor.fetchall():
+                    if not row_get(row, 'value'):
+                        continue
+                    tags_count[f"cms:{norm_lower(row_get(row, 'value'))}"] = row_get(row, 'count', 0)
+            except Exception:
+                pass
+
+            # Framework distincts
+            try:
+                self.execute_sql(cursor, '''
+                    SELECT framework as value, COUNT(*) as count
+                    FROM entreprises
+                    WHERE framework IS NOT NULL AND framework != ''
+                    GROUP BY framework
+                ''')
+                for row in cursor.fetchall():
+                    if not row_get(row, 'value'):
+                        continue
+                    tags_count[f"framework:{norm_lower(row_get(row, 'value'))}"] = row_get(row, 'count', 0)
+            except Exception:
+                pass
+
+            # Performance dérivée
+            try:
+                self.execute_sql(cursor, '''
+                    SELECT
+                        SUM(CASE WHEN performance_score IS NOT NULL AND performance_score < 40 THEN 1 ELSE 0 END) as low_count,
+                        SUM(CASE WHEN performance_score IS NOT NULL AND performance_score >= 70 THEN 1 ELSE 0 END) as good_count
+                    FROM entreprises
+                ''')
+                perf_row = cursor.fetchone()
+                if perf_row:
+                    low_count = row_get(perf_row, 'low_count') or 0
+                    good_count = row_get(perf_row, 'good_count') or 0
+                    # match avec technical.py: perf:low / perf:good
+                    tags_count['perf:low'] = int(low_count)
+                    tags_count['perf:good'] = int(good_count)
+            except Exception:
+                pass
+
+            # Blog / contact_form / ecommerce
+            try:
+                self.execute_sql(cursor, '''
+                    SELECT
+                        SUM(CASE WHEN has_blog = 1 THEN 1 ELSE 0 END) as blog_count,
+                        SUM(CASE WHEN has_contact_form = 1 THEN 1 ELSE 0 END) as form_count,
+                        SUM(CASE WHEN has_checkout = 1 THEN 1 ELSE 0 END) as checkout_count
+                    FROM entreprises
+                ''')
+                row = cursor.fetchone()
+                if row:
+                    tags_count['blog'] = int(row_get(row, 'blog_count') or 0)
+                    tags_count['contact_form'] = int(row_get(row, 'form_count') or 0)
+                    tags_count['ecommerce'] = int(row_get(row, 'checkout_count') or 0)
+            except Exception:
+                pass
+
+            # 3) Tags "connus" (pour lesquels on veut aussi proposer une suggestion à 0)
+            # On évite d'y remettre cms:* / framework:* / perf:* car on les dérive déjà du résumé technique ci-dessus.
             important_tags = [
-                # Potentiel / refonte
                 "refonte",
                 "fort_potentiel_refonte",
-                # Sécurité / HTTPS / risque
                 "https",
                 "site_sans_https",
                 "risque",
                 "risque_cyber_eleve",
-                # SEO / performance
                 "seo",
                 "seo_a_ameliorer",
-                "perf:good",
-                "perf:low",
                 "perf_lente",
-                # Comportement / contenu
-                "blog",
-                "contact_form",
-                "ecommerce",
-                # CMS
-                "cms:wordpress",
-                "cms:prestashop",
-                "cms:symfony",
-                "cms:shopify",
-                "cms:drupal",
-                "cms:joomla",
-                "cms:wix",
-                "cms:squarespace",
-                # Langues
                 "lang_fr",
                 "lang_en",
             ]
             for tag in important_tags:
-                if tag not in tags_count:
-                    tags_count[tag] = 0
+                tags_count.setdefault(tag, 0)
 
             result["tags"] = [
                 {"value": v, "count": c}

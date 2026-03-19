@@ -232,8 +232,8 @@
         if (!container) return;
         const query = (filterText || '').toLowerCase().trim();
         if (!tagsSuggestions || !tagsSuggestions.length) {
-            container.classList.add('hidden');
-            container.innerHTML = '';
+            container.classList.remove('hidden');
+            container.innerHTML = `<div class="tag-suggestion-empty">Aucun résultat</div>`;
             return;
         }
         const available = tagsSuggestions
@@ -243,8 +243,9 @@
             ? available.filter(item => item.value.toLowerCase().includes(query))
             : available;
         if (!filtered.length) {
-            container.classList.add('hidden');
-            container.innerHTML = '';
+            container.classList.remove('hidden');
+            const text = query ? `Aucun tag pour \"${Formatters.escapeHtml(query)}\"` : 'Aucun résultat';
+            container.innerHTML = `<div class="tag-suggestion-empty">${text}</div>`;
             return;
         }
         const maxToShow = 20;
@@ -324,19 +325,6 @@
         } catch (e) {
             console.error('Erreur chargement tags suggestions:', e);
             tagsSuggestions = [];
-        }
-
-        // Fallback: si aucune suggestion ne remonte de l'API,
-        // on propose une petite liste de tags "type" pour aider l'utilisateur.
-        if (!tagsSuggestions || !tagsSuggestions.length) {
-            tagsSuggestions = [
-                { value: 'refonte', count: null },
-                { value: 'https', count: null },
-                { value: 'blog', count: null },
-                { value: 'seo', count: null },
-                { value: 'risque', count: null },
-                { value: 'performant', count: null },
-            ];
         }
 
     }
@@ -2357,6 +2345,93 @@
                 toggleBtn.classList.toggle('filters-toggle-open');
             });
         }
+
+        // Accordéon intelligent pour réduire la hauteur
+        function setupAdvancedFiltersSectionsAccordion() {
+            const root = document.getElementById('advanced-filters');
+            if (!root) return;
+            if (root.dataset.accordionInit === '1') return;
+            root.dataset.accordionInit = '1';
+
+            const sections = Array.from(root.querySelectorAll('.filters-advanced-section'));
+
+            sections.forEach((section, index) => {
+                const header = section.querySelector('.filters-advanced-section-header');
+                const body = section.querySelector('.filters-advanced-section-body');
+                if (!header || !body) return;
+
+                const initiallyCollapsed = true; // tout replié par défaut
+                const rootCollapsed = root.classList.contains('collapsed');
+
+                header.setAttribute('role', 'button');
+                header.setAttribute('tabindex', '0');
+                header.setAttribute('aria-expanded', String(!initiallyCollapsed));
+
+                if (initiallyCollapsed) {
+                    section.classList.add('collapsed');
+                    body.style.maxHeight = '0px';
+                } else {
+                    section.classList.remove('collapsed');
+                    // Si la zone globale est encore repliée, scrollHeight peut valoir 0.
+                    // On laisse donc gérer la hauteur au moment du toggle.
+                    body.style.maxHeight = rootCollapsed ? '' : body.scrollHeight + 'px';
+                }
+
+                const expand = () => {
+                    section.classList.remove('collapsed');
+                    header.setAttribute('aria-expanded', 'true');
+                    body.style.maxHeight = body.scrollHeight + 'px';
+                };
+
+                const collapse = () => {
+                    section.classList.add('collapsed');
+                    header.setAttribute('aria-expanded', 'false');
+                    body.style.maxHeight = body.scrollHeight + 'px';
+                    body.offsetHeight; // forcer le recalcul
+                    body.style.maxHeight = '0px';
+                };
+
+                const toggle = () => {
+                    const shouldExpand = section.classList.contains('collapsed');
+                    if (shouldExpand) {
+                        // Fermer toutes les autres sections avant d'ouvrir celle-ci
+                        sections.forEach((other) => {
+                            if (other !== section) {
+                                other.classList.add('collapsed');
+                                const otherHeader = other.querySelector('.filters-advanced-section-header');
+                                const otherBody = other.querySelector('.filters-advanced-section-body');
+                                if (otherHeader) {
+                                    otherHeader.setAttribute('aria-expanded', 'false');
+                                }
+                                if (otherBody) {
+                                    otherBody.style.maxHeight = '0px';
+                                }
+                            }
+                        });
+                        expand();
+                    } else {
+                        // si on clique une section déjà ouverte: on la replie
+                        collapse();
+                    }
+                };
+
+                header.addEventListener('click', (e) => {
+                    // Si jamais on clique sur un élément interactif dans le header, on ignore.
+                    const interactive = e.target.closest('input, select, textarea, button, a, label');
+                    if (interactive && interactive !== header) return;
+                    toggle();
+                });
+
+                header.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        toggle();
+                    }
+                });
+            });
+        }
+
+        setupAdvancedFiltersSectionsAccordion();
         
         document.getElementById('btn-view-grid').addEventListener('click', () => {
             currentView = 'grid';

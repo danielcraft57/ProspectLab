@@ -166,6 +166,28 @@
     color: #6b7280;
 }
 
+/* Accordéon des sections de filtres avancés */
+.filters-advanced-section-header {
+    cursor: pointer;
+    user-select: none;
+}
+
+.filters-advanced-section-body {
+    overflow: hidden;
+    transition: max-height 0.28s ease, opacity 0.18s ease, transform 0.18s ease;
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.filters-advanced-section.collapsed {
+    padding-bottom: 1rem;
+}
+
+.filters-advanced-section.collapsed .filters-advanced-section-body {
+    opacity: 0;
+    transform: translateY(-4px);
+}
+
 /* Adaptation dark mode pour les sections de filtres avancés */
 body[data-theme="dark"] .filters-advanced-section {
     background: #020617;
@@ -188,6 +210,11 @@ body[data-theme="dark"] .filters-advanced-section-header p {
 
 /* Le filtre Tags (comportement & contenu) prend aussi toute la largeur */
 .filters-advanced-section .filter-group-tags {
+    grid-column: 1 / -1;
+}
+
+/* Le bloc "Contenu & parcours" prend toute la largeur */
+.filters-advanced-section .filter-group-parcours {
     grid-column: 1 / -1;
 }
 
