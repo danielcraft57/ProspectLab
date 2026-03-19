@@ -118,10 +118,10 @@
 /* Filtres avancés repliables */
 .filters-advanced {
     transition: max-height 0.25s ease, opacity 0.25s ease, transform 0.25s ease;
-    max-height: 900px;
+    max-height: 1600px;
     opacity: 1;
     transform: translateY(0);
-    overflow: hidden;
+    overflow: visible;
 }
 
 .filters-advanced.collapsed {
@@ -129,6 +129,82 @@
     opacity: 0;
     transform: translateY(-4px);
     margin-bottom: 0;
+    overflow: hidden;
+}
+
+/* Sections ergonomiques dans les filtres avancés */
+.filters-advanced-section {
+    padding: 1.25rem 1.25rem 1.35rem;
+    border-radius: 0.9rem;
+    background: #f9fafb;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    margin-bottom: 1.25rem;
+}
+
+.filters-advanced-section:last-child {
+    margin-bottom: 0;
+}
+
+.filters-advanced-section-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    margin-bottom: 0.9rem;
+}
+
+.filters-advanced-section-header h4 {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #111827;
+}
+
+.filters-advanced-section-header p {
+    margin: 0;
+    font-size: 0.8rem;
+    color: #6b7280;
+}
+
+/* Adaptation dark mode pour les sections de filtres avancés */
+body[data-theme="dark"] .filters-advanced-section {
+    background: #020617;
+    border-color: #1e293b;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.65);
+}
+
+body[data-theme="dark"] .filters-advanced-section-header h4 {
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] .filters-advanced-section-header p {
+    color: #9ca3af;
+}
+
+/* Le filtre Statut prend toute la largeur pour éviter l'overflow des chips */
+.filters-advanced-section .filter-group-status {
+    grid-column: 1 / -1;
+}
+
+/* Le filtre Tags (comportement & contenu) prend aussi toute la largeur */
+.filters-advanced-section .filter-group-tags {
+    grid-column: 1 / -1;
+}
+
+/* Animation légère des groupes au dépliage */
+.filters-advanced:not(.collapsed) .filter-group {
+    animation: filtersGroupIn 0.25s ease-out;
+}
+
+@keyframes filtersGroupIn {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .filters-toggle {

@@ -10,18 +10,6 @@
 
 <div class="filters-section">
     <div class="filters-card">
-        <div class="filters-header">
-            <div class="filters-title">
-                <h3>Recherche d'entreprises</h3>
-                <p class="filters-subtitle">Filtrage en temps réel, sans bouton Appliquer.</p>
-            </div>
-            <button id="btn-toggle-advanced-filters" type="button" class="btn filters-toggle">
-                <i class="fas fa-sliders-h" aria-hidden="true"></i>
-                <span>Filtres avancés</span>
-                <span id="active-filters-count" class="filters-toggle-badge" style="display: none;">0</span>
-            </button>
-        </div>
-
         <div class="filters-main-search">
             <label for="search-input" class="filters-main-label">Recherche</label>
             <div class="search-field search-field-large">
@@ -36,248 +24,294 @@
             </div>
         </div>
 
-        <div id="advanced-filters" class="filters-grid filters-advanced collapsed">
-            <div class="filter-group">
-                <label for="filter-secteur">Secteur</label>
-                <select id="filter-secteur" class="form-select">
-                    <option value="">Tous les secteurs</option>
-                </select>
-            </div>
+        <div class="filters-header">
+            <button id="btn-toggle-advanced-filters" type="button" class="btn filters-toggle">
+                <i class="fas fa-sliders-h" aria-hidden="true"></i>
+                <span>Filtres avancés</span>
+                <span id="active-filters-count" class="filters-toggle-badge" style="display: none;">0</span>
+            </button>
+        </div>
 
-            <div class="filter-group">
-                <label for="filter-groupe">Groupe</label>
-                <select id="filter-groupe" class="form-select">
-                    <option value="">Tous les groupes</option>
-                    <option value="none">Sans groupe</option>
-                </select>
-            </div>
-
-            <div class="filter-group">
-                <label class="filter-label">Emails</label>
-                <label class="form-checkbox">
-                    <input type="checkbox" id="filter-has-email">
-                    <span>Entreprises avec email uniquement</span>
-                </label>
-            </div>
-
-            <!-- Statut: pills interactifs plutôt qu'une simple liste déroulante -->
-            <div class="filter-group">
-                <label class="filter-label">Statut</label>
-                <div id="filter-statut-pills" class="status-pills">
-                    <button type="button" class="pill active" data-value="">Tous</button>
-                    <button type="button" class="pill" data-value="Nouveau">Nouveau</button>
-                    <button type="button" class="pill" data-value="À qualifier">À qualifier</button>
-                    <button type="button" class="pill" data-value="Relance">Relance</button>
-                    <button type="button" class="pill" data-value="Gagné">Gagné</button>
-                    <button type="button" class="pill" data-value="Perdu">Perdu</button>
-                    <button type="button" class="pill" data-value="Désabonné">Désabonné</button>
-                    <button type="button" class="pill" data-value="Réponse négative">Réponse négative</button>
-                    <button type="button" class="pill" data-value="Réponse positive">Réponse positive</button>
-                    <button type="button" class="pill" data-value="Bounce">Bounce</button>
-                    <button type="button" class="pill" data-value="Plainte spam">Plainte spam</button>
-                    <button type="button" class="pill" data-value="Ne pas contacter">Ne pas contacter</button>
-                    <button type="button" class="pill" data-value="À rappeler">À rappeler</button>
+        <div id="advanced-filters" class="filters-advanced collapsed">
+            <!-- Bloc 1 - Segmentation de base -->
+            <div class="filters-advanced-section">
+                <div class="filters-advanced-section-header">
+                    <h4>Segmentation</h4>
+                    <p>Affiner rapidement par secteur, groupe, email et statut.</p>
                 </div>
-                <!-- Champ caché utilisé par le JS pour construire les filtres -->
-                <input type="hidden" id="filter-statut" value="">
-            </div>
+                <div class="filters-grid">
+                    <div class="filter-group">
+                        <label for="filter-secteur">Secteur</label>
+                        <select id="filter-secteur" class="form-select">
+                            <option value="">Tous les secteurs</option>
+                        </select>
+                    </div>
 
-            <!-- Jauges de score sécurité (min / max) -->
-            <div class="filter-group">
-                <label class="filter-label" for="filter-security-min">Score sécurité</label>
-                <div class="score-slider">
-                    <div class="score-slider-row">
-                        <div class="score-slider-header">
-                            <span class="score-slider-label">À partir de</span>
-                            <span id="filter-security-min-value" class="score-slider-value">0 (tous)</span>
-                        </div>
-                        <input
-                            type="range"
-                            id="filter-security-min"
-                            min="0"
-                            max="100"
-                            step="5"
-                            value="0"
-                            class="score-range-input"
-                        >
+                    <div class="filter-group">
+                        <label for="filter-groupe">Groupe</label>
+                        <select id="filter-groupe" class="form-select">
+                            <option value="">Tous les groupes</option>
+                            <option value="none">Sans groupe</option>
+                        </select>
                     </div>
-                    <div class="score-slider-row">
-                        <div class="score-slider-header">
-                            <span class="score-slider-label">Jusqu'à</span>
-                            <span id="filter-security-max-value" class="score-slider-value">100 (tous)</span>
-                        </div>
-                        <input
-                            type="range"
-                            id="filter-security-max"
-                            min="0"
-                            max="100"
-                            step="5"
-                            value="100"
-                            class="score-range-input"
-                        >
+
+                    <div class="filter-group">
+                        <label class="filter-label">Emails</label>
+                        <label class="form-checkbox">
+                            <input type="checkbox" id="filter-has-email">
+                            <span>Entreprises avec email uniquement</span>
+                        </label>
                     </div>
-                    <div class="score-slider-scale">
-                        <span>0</span>
-                        <span>25</span>
-                        <span>50</span>
-                        <span>75</span>
-                        <span>100</span>
+
+                    <!-- Statut: pills interactifs plutôt qu'une simple liste déroulante -->
+                    <div class="filter-group filter-group-status">
+                        <label class="filter-label">Statut</label>
+                        <div id="filter-statut-pills" class="status-pills">
+                            <button type="button" class="pill active" data-value="">Tous</button>
+                            <button type="button" class="pill" data-value="Nouveau">Nouveau</button>
+                            <button type="button" class="pill" data-value="À qualifier">À qualifier</button>
+                            <button type="button" class="pill" data-value="Relance">Relance</button>
+                            <button type="button" class="pill" data-value="Gagné">Gagné</button>
+                            <button type="button" class="pill" data-value="Perdu">Perdu</button>
+                            <button type="button" class="pill" data-value="Désabonné">Désabonné</button>
+                            <button type="button" class="pill" data-value="Réponse négative">Réponse négative</button>
+                            <button type="button" class="pill" data-value="Réponse positive">Réponse positive</button>
+                            <button type="button" class="pill" data-value="Bounce">Bounce</button>
+                            <button type="button" class="pill" data-value="Plainte spam">Plainte spam</button>
+                            <button type="button" class="pill" data-value="Ne pas contacter">Ne pas contacter</button>
+                            <button type="button" class="pill" data-value="À rappeler">À rappeler</button>
+                        </div>
+                        <!-- Champ caché utilisé par le JS pour construire les filtres -->
+                        <input type="hidden" id="filter-statut" value="">
                     </div>
                 </div>
             </div>
 
-            <!-- Jauges de score SEO (min / max) -->
-            <div class="filter-group">
-                <label class="filter-label" for="filter-seo-min">Score SEO</label>
-                <div class="score-slider">
-                    <div class="score-slider-row">
-                        <div class="score-slider-header">
-                            <span class="score-slider-label">À partir de</span>
-                            <span id="filter-seo-min-value" class="score-slider-value">0 (tous)</span>
+            <!-- Bloc 2 - Scores -->
+            <div class="filters-advanced-section">
+                <div class="filters-advanced-section-header">
+                    <h4>Scores</h4>
+                    <p>Cibler selon les scores sécurité, SEO et risque.</p>
+                </div>
+                <div class="filters-grid">
+                    <!-- Jauges de score sécurité (min / max) -->
+                    <div class="filter-group">
+                        <label class="filter-label" for="filter-security-min">Score sécurité</label>
+                        <div class="score-slider">
+                            <div class="score-slider-row">
+                                <div class="score-slider-header">
+                                    <span class="score-slider-label">À partir de</span>
+                                    <span id="filter-security-min-value" class="score-slider-value">0 (tous)</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    id="filter-security-min"
+                                    min="0"
+                                    max="100"
+                                    step="5"
+                                    value="0"
+                                    class="score-range-input"
+                                >
+                            </div>
+                            <div class="score-slider-row">
+                                <div class="score-slider-header">
+                                    <span class="score-slider-label">Jusqu'à</span>
+                                    <span id="filter-security-max-value" class="score-slider-value">100 (tous)</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    id="filter-security-max"
+                                    min="0"
+                                    max="100"
+                                    step="5"
+                                    value="100"
+                                    class="score-range-input"
+                                >
+                            </div>
+                            <div class="score-slider-scale">
+                                <span>0</span>
+                                <span>25</span>
+                                <span>50</span>
+                                <span>75</span>
+                                <span>100</span>
+                            </div>
                         </div>
-                        <input
-                            type="range"
-                            id="filter-seo-min"
-                            min="0"
-                            max="100"
-                            step="5"
-                            value="0"
-                            class="score-range-input"
-                        >
                     </div>
-                    <div class="score-slider-row">
-                        <div class="score-slider-header">
-                            <span class="score-slider-label">Jusqu'à</span>
-                            <span id="filter-seo-max-value" class="score-slider-value">100 (tous)</span>
+
+                    <!-- Jauges de score SEO (min / max) -->
+                    <div class="filter-group">
+                        <label class="filter-label" for="filter-seo-min">Score SEO</label>
+                        <div class="score-slider">
+                            <div class="score-slider-row">
+                                <div class="score-slider-header">
+                                    <span class="score-slider-label">À partir de</span>
+                                    <span id="filter-seo-min-value" class="score-slider-value">0 (tous)</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    id="filter-seo-min"
+                                    min="0"
+                                    max="100"
+                                    step="5"
+                                    value="0"
+                                    class="score-range-input"
+                                >
+                            </div>
+                            <div class="score-slider-row">
+                                <div class="score-slider-header">
+                                    <span class="score-slider-label">Jusqu'à</span>
+                                    <span id="filter-seo-max-value" class="score-slider-value">100 (tous)</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    id="filter-seo-max"
+                                    min="0"
+                                    max="100"
+                                    step="5"
+                                    value="100"
+                                    class="score-range-input"
+                                >
+                            </div>
+                            <div class="score-slider-scale">
+                                <span>0</span>
+                                <span>25</span>
+                                <span>50</span>
+                                <span>75</span>
+                                <span>100</span>
+                            </div>
                         </div>
-                        <input
-                            type="range"
-                            id="filter-seo-max"
-                            min="0"
-                            max="100"
-                            step="5"
-                            value="100"
-                            class="score-range-input"
-                        >
                     </div>
-                    <div class="score-slider-scale">
-                        <span>0</span>
-                        <span>25</span>
-                        <span>50</span>
-                        <span>75</span>
-                        <span>100</span>
+
+                    <!-- Jauge de score Risque (Pentest) -->
+                    <div class="filter-group" data-filter-type="pentest">
+                        <label class="filter-label" for="filter-pentest-min">Score Risque (Pentest)</label>
+                        <div class="score-slider">
+                            <div class="score-slider-row">
+                                <div class="score-slider-header">
+                                    <span class="score-slider-label">À partir de</span>
+                                    <span id="filter-pentest-min-value" class="score-slider-value">0 (tous)</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    id="filter-pentest-min"
+                                    min="0"
+                                    max="100"
+                                    step="5"
+                                    value="0"
+                                    class="score-range-input"
+                                >
+                            </div>
+                            <div class="score-slider-row">
+                                <div class="score-slider-header">
+                                    <span class="score-slider-label">Jusqu'à</span>
+                                    <span id="filter-pentest-max-value" class="score-slider-value">100 (tous)</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    id="filter-pentest-max"
+                                    min="0"
+                                    max="100"
+                                    step="5"
+                                    value="100"
+                                    class="score-range-input"
+                                >
+                            </div>
+                            <div class="score-slider-scale">
+                                <span>0</span>
+                                <span>25</span>
+                                <span>50</span>
+                                <span>75</span>
+                                <span>100</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Jauge de score Risque (Pentest) -->
-            <div class="filter-group" data-filter-type="pentest">
-                <label class="filter-label" for="filter-pentest-min">Score Risque (Pentest)</label>
-                <div class="score-slider">
-                    <div class="score-slider-row">
-                        <div class="score-slider-header">
-                            <span class="score-slider-label">À partir de</span>
-                            <span id="filter-pentest-min-value" class="score-slider-value">0 (tous)</span>
-                        </div>
-                        <input
-                            type="range"
-                            id="filter-pentest-min"
-                            min="0"
-                            max="100"
-                            step="5"
-                            value="0"
-                            class="score-range-input"
-                        >
+            <!-- Bloc 3 - Technologies -->
+            <div class="filters-advanced-section">
+                <div class="filters-advanced-section-header">
+                    <h4>Technologies</h4>
+                    <p>Filtrer par CMS et framework principal.</p>
+                </div>
+                <div class="filters-grid">
+                    <!-- Filtre CMS / techno -->
+                    <div class="filter-group">
+                        <label class="filter-label" for="filter-cms">CMS détecté</label>
+                        <select id="filter-cms" class="form-select">
+                            <option value="">Tous les CMS</option>
+                            <option value="WordPress">WordPress</option>
+                            <option value="PrestaShop">PrestaShop</option>
+                            <option value="Symfony">Symfony</option>
+                            <option value="Drupal">Drupal</option>
+                            <option value="Joomla">Joomla</option>
+                            <option value="Shopify">Shopify</option>
+                            <option value="Wix">Wix</option>
+                            <option value="Squarespace">Squarespace</option>
+                            <option value="Custom">Custom / Autre</option>
+                        </select>
                     </div>
-                    <div class="score-slider-row">
-                        <div class="score-slider-header">
-                            <span class="score-slider-label">Jusqu'à</span>
-                            <span id="filter-pentest-max-value" class="score-slider-value">100 (tous)</span>
-                        </div>
-                        <input
-                            type="range"
-                            id="filter-pentest-max"
-                            min="0"
-                            max="100"
-                            step="5"
-                            value="100"
-                            class="score-range-input"
-                        >
-                    </div>
-                    <div class="score-slider-scale">
-                        <span>0</span>
-                        <span>25</span>
-                        <span>50</span>
-                        <span>75</span>
-                        <span>100</span>
+
+                    <div class="filter-group">
+                        <label class="filter-label" for="filter-framework">Framework / techno principale</label>
+                        <select id="filter-framework" class="form-select">
+                            <option value="">Tous les frameworks</option>
+                            <option value="Laravel">Laravel</option>
+                            <option value="Symfony">Symfony</option>
+                            <option value="Django">Django</option>
+                            <option value="Ruby on Rails">Ruby on Rails</option>
+                            <option value="Node.js">Node.js</option>
+                            <option value="React">React</option>
+                            <option value="Vue.js">Vue.js</option>
+                            <option value="Angular">Angular</option>
+                            <option value="Next.js">Next.js</option>
+                            <option value="Nuxt.js">Nuxt.js</option>
+                        </select>
                     </div>
                 </div>
             </div>
 
-            <!-- Filtre CMS / techno -->
-            <div class="filter-group">
-                <label class="filter-label" for="filter-cms">CMS détecté</label>
-                <select id="filter-cms" class="form-select">
-                    <option value="">Tous les CMS</option>
-                    <option value="WordPress">WordPress</option>
-                    <option value="PrestaShop">PrestaShop</option>
-                    <option value="Symfony">Symfony</option>
-                    <option value="Drupal">Drupal</option>
-                    <option value="Joomla">Joomla</option>
-                    <option value="Shopify">Shopify</option>
-                    <option value="Wix">Wix</option>
-                    <option value="Squarespace">Squarespace</option>
-                    <option value="Custom">Custom / Autre</option>
-                </select>
-            </div>
+            <!-- Bloc 4 - Comportement & tags -->
+            <div class="filters-advanced-section">
+                <div class="filters-advanced-section-header">
+                    <h4>Comportement & contenu</h4>
+                    <p>Repérer les sites avec blog, formulaire, tunnel ou tags spécifiques.</p>
+                </div>
+                <div class="filters-grid">
+                    <!-- Filtre Tags intelligents (plein largeur en premier) -->
+                    <div class="filter-group filter-group-tags">
+                        <label class="filter-label" for="filter-tags">Tags</label>
+                        <div class="tags-filter-wrapper">
+                            <div class="tags-filter-control">
+                                <div id="filter-tags-chips" class="tags-filter-chips"></div>
+                                <input
+                                    type="text"
+                                    id="filter-tags"
+                                    class="tags-filter-input"
+                                    placeholder="Ex: refonte, risque, https, SEO..."
+                                    autocomplete="off"
+                                >
+                            </div>
+                            <div id="filter-tags-suggestions" class="tags-filter-suggestions hidden"></div>
+                        </div>
+                    </div>
 
-            <div class="filter-group">
-                <label class="filter-label" for="filter-framework">Framework / techno principale</label>
-                <select id="filter-framework" class="form-select">
-                    <option value="">Tous les frameworks</option>
-                    <option value="Laravel">Laravel</option>
-                    <option value="Symfony">Symfony</option>
-                    <option value="Django">Django</option>
-                    <option value="Ruby on Rails">Ruby on Rails</option>
-                    <option value="Node.js">Node.js</option>
-                    <option value="React">React</option>
-                    <option value="Vue.js">Vue.js</option>
-                    <option value="Angular">Angular</option>
-                    <option value="Next.js">Next.js</option>
-                    <option value="Nuxt.js">Nuxt.js</option>
-                </select>
-            </div>
-
-            <!-- Comportements / contenu -->
-            <div class="filter-group">
-                <label class="filter-label">Contenu & parcours</label>
-                <label class="form-checkbox">
-                    <input type="checkbox" id="filter-has-blog">
-                    <span>Avec blog</span>
-                </label>
-                <label class="form-checkbox">
-                    <input type="checkbox" id="filter-has-form">
-                    <span>Avec formulaire de contact</span>
-                </label>
-                <label class="form-checkbox">
-                    <input type="checkbox" id="filter-has-tunnel">
-                    <span>Avec tunnel e‑commerce</span>
-                </label>
-            </div>
-
-            <!-- Filtre Tags intelligents -->
-            <div class="filter-group">
-                <label class="filter-label" for="filter-tags">Tags</label>
-                <div class="tags-filter-wrapper">
-                    <div id="filter-tags-chips" class="tags-filter-chips"></div>
-                    <input
-                        type="text"
-                        id="filter-tags"
-                        class="form-input"
-                        placeholder="Ex: refonte, risque, https, SEO..."
-                        autocomplete="off"
-                    >
-                    <div id="filter-tags-suggestions" class="tags-filter-suggestions"></div>
+                    <!-- Comportements / contenu -->
+                    <div class="filter-group">
+                        <label class="filter-label">Contenu & parcours</label>
+                        <label class="form-checkbox">
+                            <input type="checkbox" id="filter-has-blog">
+                            <span>Avec blog</span>
+                        </label>
+                        <label class="form-checkbox">
+                            <input type="checkbox" id="filter-has-form">
+                            <span>Avec formulaire de contact</span>
+                        </label>
+                        <label class="form-checkbox">
+                            <input type="checkbox" id="filter-has-tunnel">
+                            <span>Avec tunnel e‑commerce</span>
+                        </label>
+                    </div>
                 </div>
             </div>
         </div>

@@ -391,18 +391,55 @@ body[data-theme="dark"] .card-footer .btn-danger:hover {
     position: relative;
     display: flex;
     flex-direction: column;
+    gap: 0.3rem;
+    padding: 0.35rem 0.55rem;
+    border-radius: 0.9rem;
+    background: rgba(15, 23, 42, 0.4);
+    box-shadow: 0 8px 22px rgba(15, 23, 42, 0.45);
+}
+
+.tags-filter-control {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
     gap: 0.25rem;
+    padding: 0.15rem 0.4rem;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.6);
+    background: transparent;
+    min-height: 32px;
 }
 
 .tags-filter-chips {
-    min-height: 32px;
     display: flex;
     flex-wrap: wrap;
     gap: 0.25rem;
-    padding: 0.3rem 0.4rem;
-    border-radius: 0.5rem;
-    border: 1px solid #e5e7eb;
-    background: #f9fafb;
+    align-items: center;
+    max-width: 100%;
+}
+
+.tags-filter-input {
+    flex: 1;
+    min-width: 120px;
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    -webkit-appearance: none;
+    appearance: none;
+    border-radius: 0;
+    padding: 0.25rem 0.35rem;
+    font-size: 0.9rem;
+    color: #111827;
+}
+
+.tags-filter-input:focus {
+    outline: none;
+    box-shadow: none;
+}
+
+.tags-filter-input::placeholder {
+    color: #9ca3af;
+    opacity: 1;
 }
 
 .tags-filter-chip {
@@ -437,8 +474,21 @@ body[data-theme="dark"] .card-footer .btn-danger:hover {
     color: #111827;
 }
 
-.tags-filter-wrapper .form-input {
-    padding-right: 1.75rem;
+[data-theme="dark"] .tags-filter-wrapper {
+    color: #e5e7eb;
+}
+
+[data-theme="dark"] .tags-filter-control {
+    background: transparent;
+    border-color: transparent;
+}
+
+[data-theme="dark"] .tags-filter-input {
+    color: #e5e7eb;
+}
+
+[data-theme="dark"] .tags-filter-input::placeholder {
+    color: #6b7280;
 }
 
 .tags-filter-suggestions {
@@ -645,38 +695,43 @@ body[data-theme=\"light\"] .pagination-page-size .form-select-compact {
     background: #eff6ff;
 }
 
-body[data-theme="dark"] .tags-filter-chips {
+[data-theme="dark"] .tags-filter-chips {
     border-color: #1f2937;
     background: #020617;
 }
 
-body[data-theme="dark"] .tags-filter-chip {
+[data-theme="dark"] .tags-filter-chip {
     background: rgba(37, 99, 235, 0.15);
     border-color: rgba(59, 130, 246, 0.5);
     color: #e5e7eb;
 }
 
-body[data-theme="dark"] .tags-filter-chip i {
+[data-theme="dark"] .tags-filter-chip i {
     color: #60a5fa;
 }
 
+[data-theme="dark"] .tags-filter-suggestions,
 body[data-theme="dark"] .tags-filter-suggestions {
-    background: #020617;
-    border-color: rgba(31, 41, 55, 0.9);
-    box-shadow: 0 10px 35px rgba(15, 23, 42, 0.85);
+    background: #020617 !important;
+    border-color: rgba(31, 41, 55, 0.9) !important;
+    box-shadow: 0 10px 35px rgba(15, 23, 42, 0.85) !important;
 }
 
+[data-theme="dark"] .tag-suggestion,
 body[data-theme="dark"] .tag-suggestion {
-    color: #e5e7eb;
+    color: #e5e7eb !important;
 }
 
+[data-theme="dark"] .tag-suggestion small,
 body[data-theme="dark"] .tag-suggestion small {
-    color: #9ca3af;
+    color: #9ca3af !important;
 }
 
+[data-theme="dark"] .tag-suggestion:hover,
+[data-theme="dark"] .tag-suggestion.active,
 body[data-theme="dark"] .tag-suggestion:hover,
 body[data-theme="dark"] .tag-suggestion.active {
-    background: rgba(37, 99, 235, 0.35);
+    background: rgba(37, 99, 235, 0.35) !important;
 }
 
 /* Logo / image entreprise tout à gauche */
@@ -1023,7 +1078,8 @@ body[data-theme="dark"] .tag-suggestion.active {
     gap: 0.35rem;
 }
 
-.tags-filter-suggestions .tag-suggestion {
+[data-theme="light"] .tags-filter-suggestions .tag-suggestion,
+body[data-theme="light"] .tags-filter-suggestions .tag-suggestion {
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
@@ -1037,20 +1093,23 @@ body[data-theme="dark"] .tag-suggestion.active {
     transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
 }
 
-.tags-filter-suggestions .tag-suggestion:hover {
+[data-theme="light"] .tags-filter-suggestions .tag-suggestion:hover,
+body[data-theme="light"] .tags-filter-suggestions .tag-suggestion:hover {
     background: #eef2ff;
     border-color: #6366f1;
     color: #111827;
     transform: translateY(-1px);
 }
 
-.tags-filter-suggestions .tag-suggestion.active {
+[data-theme="light"] .tags-filter-suggestions .tag-suggestion.active,
+body[data-theme="light"] .tags-filter-suggestions .tag-suggestion.active {
     background: #4f46e5;
     border-color: #4f46e5;
     color: #f9fafb;
 }
 
-.tags-filter-suggestions .tag-suggestion small {
+[data-theme="light"] .tags-filter-suggestions .tag-suggestion small,
+body[data-theme="light"] .tags-filter-suggestions .tag-suggestion small {
     opacity: 0.8;
 }
 

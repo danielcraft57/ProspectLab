@@ -262,17 +262,23 @@
     function syncTagFilterInputAndApply() {
         const input = document.getElementById('filter-tags');
         if (input) {
-            if (Array.isArray(activeTagFilters) && activeTagFilters.length) {
-                input.value = activeTagFilters.join(', ');
-            } else {
-                input.value = '';
-            }
+            // On laisse toujours l'input visuellement vide, l'état réel est dans activeTagFilters
+            input.value = '';
         }
         renderTagFilterChips();
         if (typeof applyFilters === 'function') {
             applyFilters();
         }
-        renderTagSuggestions(input ? input.value : '');
+        // Si aucun texte saisi, on masque complètement les suggestions
+        if (input && input.value.trim() === '') {
+            const container = document.getElementById('filter-tags-suggestions');
+            if (container) {
+                container.innerHTML = '';
+                container.classList.add('hidden');
+            }
+        } else {
+            renderTagSuggestions(input ? input.value : '');
+        }
     }
 
     function addTagToFilter(rawTag) {
@@ -284,6 +290,19 @@
         }
         activeTagFilters.push(value);
         syncTagFilterInputAndApply();
+
+        // Efface visuellement le champ après ajout
+        const input = document.getElementById('filter-tags');
+        if (input) {
+            input.value = '';
+        }
+
+        // Masque la liste de suggestions quand on a choisi un tag
+        const container = document.getElementById('filter-tags-suggestions');
+        if (container) {
+            container.innerHTML = '';
+            container.classList.add('hidden');
+        }
     }
 
     function removeTagFromFilter(rawTag) {
@@ -296,13 +315,30 @@
     async function loadTagsSuggestions() {
         try {
             const response = await fetch('/api/ciblage/suggestions?with_counts=1');
-            if (!response.ok) return;
-            const data = await response.json();
-            tagsSuggestions = (data && data.tags) || [];
-            renderTagSuggestions('');
+            if (response.ok) {
+                const data = await response.json();
+                tagsSuggestions = (data && data.tags) || [];
+            } else {
+                tagsSuggestions = [];
+            }
         } catch (e) {
             console.error('Erreur chargement tags suggestions:', e);
+            tagsSuggestions = [];
         }
+
+        // Fallback: si aucune suggestion ne remonte de l'API,
+        // on propose une petite liste de tags "type" pour aider l'utilisateur.
+        if (!tagsSuggestions || !tagsSuggestions.length) {
+            tagsSuggestions = [
+                { value: 'refonte', count: null },
+                { value: 'https', count: null },
+                { value: 'blog', count: null },
+                { value: 'seo', count: null },
+                { value: 'risque', count: null },
+                { value: 'performant', count: null },
+            ];
+        }
+
     }
 
     // Charger les groupes pour le filtre
@@ -1729,6 +1765,16 @@
                     Object.keys(entrepriseGroupsCache).forEach(k => {
                         entrepriseGroupsCache[k] = null;
                     });
+                    // Forcer un rechargement des listes de groupes (filtre + bulk)
+                    try {
+                        await loadGroupFilter();
+                    } catch (e) {
+                        console.error('[entreprises] Erreur refresh filtre groupes après création:', e);
+                    }
+                    const bulkGroupSelectEl = document.getElementById('bulk-group-select');
+                    if (bulkGroupSelectEl) {
+                        bulkGroupSelectEl.dataset.loaded = '0';
+                    }
                     // Recharger la liste puis essayer d'attacher automatiquement l'entreprise
                     await loadGroupsIntoDropdown(entrepriseId, dropdown, true);
                     let autoAttached = false;
@@ -1816,7 +1862,39 @@
                         Object.keys(entrepriseGroupsCache).forEach(k => {
                             entrepriseGroupsCache[k] = null;
                         });
-                        await loadGroupsIntoDropdown(entrepriseId, dropdown);
+                        // Recharger les groupes du dropdown pour mettre à jour les compteurs
+                        await loadGroupsIntoDropdown(entrepriseId, dropdown, true);
+                        // Rafraîchir les listes de groupes (filtre + bulk)
+                        try {
+                            await loadGroupFilter();
+                        } catch (e) {
+                            console.error('[entreprises] Erreur refresh filtre groupes après ajout/retrait entreprise:', e);
+                        }
+                        try {
+                            const bulkGroupSelectEl = document.getElementById('bulk-group-select');
+                            if (bulkGroupSelectEl) {
+                                const groupesBulk = await EntreprisesAPI.loadGroupes();
+                                bulkGroupSelectEl.innerHTML = '<option value="">Choisir un groupe...</option>';
+                                (groupesBulk || []).forEach(g => {
+                                    const parts = [];
+                                    if (g.nom) {
+                                        parts.push(Formatters.escapeHtml(g.nom));
+                                    } else {
+                                        parts.push('Groupe #' + String(g.id));
+                                    }
+                                    if (typeof g.entreprises_count !== 'undefined' && g.entreprises_count !== null) {
+                                        parts.push(`(${g.entreprises_count})`);
+                                    }
+                                    bulkGroupSelectEl.insertAdjacentHTML(
+                                        'beforeend',
+                                        `<option value="${g.id}">${parts.join(' ')}</option>`
+                                    );
+                                });
+                                bulkGroupSelectEl.dataset.loaded = '1';
+                            }
+                        } catch (e) {
+                            console.error('[entreprises] Erreur refresh bulk groups après ajout/retrait entreprise:', e);
+                        }
                     } catch (error) {
                         console.error(error);
                         Notifications.show('Erreur lors de la mise à jour du groupe', 'error');
@@ -1838,6 +1916,37 @@
                         Object.keys(entrepriseGroupsCache).forEach(k => {
                             entrepriseGroupsCache[k] = null;
                         });
+                            // Rafraîchir les listes de groupes (filtre + bulk)
+                            try {
+                                await loadGroupFilter();
+                            } catch (e) {
+                                console.error('[entreprises] Erreur refresh filtre groupes après suppression:', e);
+                            }
+                            try {
+                                const bulkGroupSelectEl = document.getElementById('bulk-group-select');
+                                if (bulkGroupSelectEl) {
+                                    const groupesBulk = await EntreprisesAPI.loadGroupes();
+                                    bulkGroupSelectEl.innerHTML = '<option value="">Choisir un groupe...</option>';
+                                    (groupesBulk || []).forEach(g => {
+                                        const parts = [];
+                                        if (g.nom) {
+                                            parts.push(Formatters.escapeHtml(g.nom));
+                                        } else {
+                                            parts.push('Groupe #' + String(g.id));
+                                        }
+                                        if (typeof g.entreprises_count !== 'undefined' && g.entreprises_count !== null) {
+                                            parts.push(`(${g.entreprises_count})`);
+                                        }
+                                        bulkGroupSelectEl.insertAdjacentHTML(
+                                            'beforeend',
+                                            `<option value="${g.id}">${parts.join(' ')}</option>`
+                                        );
+                                    });
+                                    bulkGroupSelectEl.dataset.loaded = '1';
+                                }
+                            } catch (e) {
+                                console.error('[entreprises] Erreur refresh bulk groups après suppression groupe:', e);
+                            }
                         Notifications.show('Groupe supprimé', 'success');
                         await loadGroupsIntoDropdown(entrepriseId, dropdown);
                     } catch (error) {
@@ -1870,6 +1979,16 @@
                         Object.keys(entrepriseGroupsCache).forEach(k => {
                             entrepriseGroupsCache[k] = null;
                         });
+                    // Rafraîchir les listes de groupes (filtre + bulk)
+                    try {
+                        await loadGroupFilter();
+                    } catch (e) {
+                        console.error('[entreprises] Erreur refresh filtre groupes après renommage:', e);
+                    }
+                    const bulkGroupSelectEl = document.getElementById('bulk-group-select');
+                    if (bulkGroupSelectEl) {
+                        bulkGroupSelectEl.dataset.loaded = '0';
+                    }
                         Notifications.show('Nom du groupe mis à jour', 'success');
                         await loadGroupsIntoDropdown(entrepriseId, dropdown, true);
                     } catch (error) {
@@ -2021,14 +2140,26 @@
         const bulkGroupSelect = document.getElementById('bulk-group-select');
         const bulkApplyBtn = document.getElementById('bulk-apply-btn');
 
-        async function ensureBulkGroupsLoaded() {
-            if (!bulkGroupSelect || bulkGroupSelect.dataset.loaded === '1') return;
+        async function ensureBulkGroupsLoaded(forceRefresh) {
+            if (!bulkGroupSelect) return;
+            if (!forceRefresh && bulkGroupSelect.dataset.loaded === '1') return;
             try {
                 const groupes = await EntreprisesAPI.loadGroupes();
                 bulkGroupSelect.innerHTML = '<option value=\"\">Choisir un groupe...</option>';
                 (groupes || []).forEach(g => {
-                    bulkGroupSelect.insertAdjacentHTML('beforeend',
-                        `<option value=\"${g.id}\">${Formatters.escapeHtml(g.nom || 'Groupe #' + g.id)}</option>`);
+                    const parts = [];
+                    if (g.nom) {
+                        parts.push(Formatters.escapeHtml(g.nom));
+                    } else {
+                        parts.push('Groupe #' + String(g.id));
+                    }
+                    if (typeof g.entreprises_count !== 'undefined' && g.entreprises_count !== null) {
+                        parts.push(`(${g.entreprises_count})`);
+                    }
+                    bulkGroupSelect.insertAdjacentHTML(
+                        'beforeend',
+                        `<option value=\"${g.id}\">${parts.join(' ')}</option>`
+                    );
                 });
                 bulkGroupSelect.dataset.loaded = '1';
             } catch (e) {
@@ -2059,7 +2190,7 @@
                 const applyBtn = document.getElementById('bulk-apply-btn');
                 if (val === 'group-add' || val === 'group-remove') {
                     bulkGroupSelect.style.display = 'inline-block';
-                    await ensureBulkGroupsLoaded();
+                    await ensureBulkGroupsLoaded(true);
                 } else {
                     bulkGroupSelect.style.display = 'none';
                 }
@@ -2118,6 +2249,37 @@
                             'success'
                         );
                         await applyFilters();
+                        // Après une action de groupe en masse, rafraîchir immédiatement
+                        // les compteurs dans le filtre et dans le select bulk
+                        try {
+                            await loadGroupFilter();
+                        } catch (e) {
+                            console.error('[entreprises] Erreur refresh filtre groupes après action de masse:', e);
+                        }
+                        try {
+                            if (bulkGroupSelect) {
+                                const groupes = await EntreprisesAPI.loadGroupes();
+                                bulkGroupSelect.innerHTML = '<option value="">Choisir un groupe...</option>';
+                                (groupes || []).forEach(g => {
+                                    const parts = [];
+                                    if (g.nom) {
+                                        parts.push(Formatters.escapeHtml(g.nom));
+                                    } else {
+                                        parts.push('Groupe #' + String(g.id));
+                                    }
+                                    if (typeof g.entreprises_count !== 'undefined' && g.entreprises_count !== null) {
+                                        parts.push(`(${g.entreprises_count})`);
+                                    }
+                                    bulkGroupSelect.insertAdjacentHTML(
+                                        'beforeend',
+                                        `<option value="${g.id}">${parts.join(' ')}</option>`
+                                    );
+                                });
+                                bulkGroupSelect.dataset.loaded = '1';
+                            }
+                        } catch (e) {
+                            console.error('[entreprises] Erreur refresh bulk groups après action de masse:', e);
+                        }
                     }
                 } catch (e) {
                     console.error('Erreur action de masse:', e);
@@ -2137,11 +2299,24 @@
 
             if (tagsInput) {
                 tagsInput.addEventListener('input', () => {
-                    renderTagSuggestions(tagsInput.value || '');
+                    const value = tagsInput.value || '';
+                    if (!value.trim()) {
+                        const container = document.getElementById('filter-tags-suggestions');
+                        if (container) {
+                            container.innerHTML = '';
+                            container.classList.add('hidden');
+                        }
+                    } else {
+                        renderTagSuggestions(value);
+                    }
                 });
                 tagsInput.addEventListener('focus', () => {
-                    renderTagSuggestions(tagsInput.value || '');
+                    const value = tagsInput.value || '';
+                    if (value.trim()) {
+                        renderTagSuggestions(value);
+                    }
                 });
+                // On ne masque plus immédiatement sur blur pour laisser le clic fonctionner
             }
 
             if (suggestionsContainer) {

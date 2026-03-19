@@ -1905,10 +1905,53 @@ class EntrepriseManager(DatabaseBase):
                     if isinstance(parsed, list):
                         for t in parsed:
                             if isinstance(t, str) and t.strip():
-                                tags_count[t.strip()] = tags_count.get(t.strip(), 0) + 1
+                                key = t.strip()
+                                tags_count[key] = tags_count.get(key, 0) + 1
                 except Exception:
+                    # On ignore les lignes mal formées
                     pass
-            result["tags"] = [{"value": v, "count": c} for v, c in sorted(tags_count.items(), key=lambda x: (-x[1], x[0]))]
+
+            # Tags "connus" à suggérer même s'ils ne sont pas encore très présents
+            important_tags = [
+                # Potentiel / refonte
+                "refonte",
+                "fort_potentiel_refonte",
+                # Sécurité / HTTPS / risque
+                "https",
+                "site_sans_https",
+                "risque",
+                "risque_cyber_eleve",
+                # SEO / performance
+                "seo",
+                "seo_a_ameliorer",
+                "perf:good",
+                "perf:low",
+                "perf_lente",
+                # Comportement / contenu
+                "blog",
+                "contact_form",
+                "ecommerce",
+                # CMS
+                "cms:wordpress",
+                "cms:prestashop",
+                "cms:symfony",
+                "cms:shopify",
+                "cms:drupal",
+                "cms:joomla",
+                "cms:wix",
+                "cms:squarespace",
+                # Langues
+                "lang_fr",
+                "lang_en",
+            ]
+            for tag in important_tags:
+                if tag not in tags_count:
+                    tags_count[tag] = 0
+
+            result["tags"] = [
+                {"value": v, "count": c}
+                for v, c in sorted(tags_count.items(), key=lambda x: (-x[1], x[0]))
+            ]
         except Exception:
             pass
         conn.close()
