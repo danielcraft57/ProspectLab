@@ -73,6 +73,22 @@
     
     function setScoreRelaunchLoading(entrepriseId, analysisType, isLoading) {
         if (!entrepriseId || !analysisType) return;
+
+        // Mémoriser l'état pour qu'il survive aux rechargements/rafraîchissements de la liste.
+        // Exemple: l'utilisateur relance une analyse, puis change les filtres => les cartes sont re-renderées
+        // et on doit ré-afficher les loaders tant que l'analyse n'est pas terminée.
+        if (isLoading) {
+            if (!relaunchLoadingState[entrepriseId]) relaunchLoadingState[entrepriseId] = {};
+            relaunchLoadingState[entrepriseId][analysisType] = true;
+        } else {
+            if (relaunchLoadingState[entrepriseId] && relaunchLoadingState[entrepriseId][analysisType]) {
+                delete relaunchLoadingState[entrepriseId][analysisType];
+            }
+            if (relaunchLoadingState[entrepriseId] && Object.keys(relaunchLoadingState[entrepriseId]).length === 0) {
+                delete relaunchLoadingState[entrepriseId];
+            }
+        }
+
         const items = document.querySelectorAll(`.score-chart-item[data-entreprise-id="${entrepriseId}"][data-analysis-type="${analysisType}"]`);
         if (!items.length) return;
         items.forEach(item => {
@@ -128,7 +144,18 @@
     
     // Variables d'état
     let currentView = 'grid';
-    let currentPage = 1;
+    const ENTREPRISES_CURRENT_PAGE_STORAGE_KEY = 'entreprises_current_page_v1';
+    let currentPage = (() => {
+        try {
+            const raw = window.localStorage ? window.localStorage.getItem(ENTREPRISES_CURRENT_PAGE_STORAGE_KEY) : null;
+            if (!raw) return 1;
+            const n = parseInt(raw, 10);
+            if (!Number.isFinite(n) || n < 1) return 1;
+            return n;
+        } catch (e) {
+            return 1;
+        }
+    })();
     let itemsPerPage = (() => {
         try {
             const stored = window.localStorage && window.localStorage.getItem('entreprises_page_size');
@@ -150,6 +177,180 @@
     let tagsSuggestions = [];
     let activeTagFilters = [];
     let initialAnalyseId = null;
+    
+    const ENTREPRISES_FILTERS_MEMENTO_KEY = 'entreprises_last_filters';
+    const ENTREPRISES_FILTERS_STORAGE_KEY = 'entreprises_last_filters_v1';
+    
+    function getElValue(id) {
+        const el = document.getElementById(id);
+        return el ? el.value : '';
+    }
+    
+    function getElChecked(id) {
+        const el = document.getElementById(id);
+        return el ? !!el.checked : false;
+    }
+    
+    function buildFiltersMementoState() {
+        // Note: on ne stocke pas "opportunite" dans un champ dédié UI,
+        // elle est conservée via data-attribute sur <body>.
+        return {
+            search: getElValue('search-input'),
+            secteur: getElValue('filter-secteur'),
+            groupe: getElValue('filter-groupe'), // '' | 'none' | <id>
+            statut: getElValue('filter-statut'),
+            security_min: getElValue('filter-security-min'),
+            security_max: getElValue('filter-security-max'),
+            seo_min: getElValue('filter-seo-min'),
+            seo_max: getElValue('filter-seo-max'),
+            pentest_min: getElValue('filter-pentest-min'),
+            pentest_max: getElValue('filter-pentest-max'),
+            has_email: getElChecked('filter-has-email'),
+            has_blog: getElChecked('filter-has-blog'),
+            has_form: getElChecked('filter-has-form'),
+            has_tunnel: getElChecked('filter-has-tunnel'),
+            cms: getElValue('filter-cms'),
+            framework: getElValue('filter-framework'),
+            tags: Array.isArray(activeTagFilters) ? activeTagFilters.slice() : [],
+            opportunite: document.body && document.body.dataset ? (document.body.dataset.initialOpportunite || null) : null
+        };
+    }
+    
+    function restoreFiltersFromMemento() {
+        try {
+            let s = null;
+            
+            // Priorité: Memento (si présent), sinon localStorage.
+            if (window.MementoCaretaker && typeof window.MementoCaretaker.load === 'function') {
+                const m = window.MementoCaretaker.load(ENTREPRISES_FILTERS_MEMENTO_KEY);
+                if (m && m.getState) s = m.getState();
+            }
+            
+            if (!s && window.localStorage) {
+                const raw = window.localStorage.getItem(ENTREPRISES_FILTERS_STORAGE_KEY);
+                if (raw) {
+                    try {
+                        s = JSON.parse(raw);
+                    } catch (e) {
+                        s = null;
+                    }
+                }
+            }
+            
+            if (!s || typeof s !== 'object') return;
+            
+            const searchInput = document.getElementById('search-input');
+            if (searchInput && typeof s.search === 'string') searchInput.value = s.search;
+            
+            const filterSecteur = document.getElementById('filter-secteur');
+            if (filterSecteur && typeof s.secteur === 'string') filterSecteur.value = s.secteur;
+            
+            const filterGroupe = document.getElementById('filter-groupe');
+            if (filterGroupe && typeof s.groupe === 'string') filterGroupe.value = s.groupe;
+            
+            const filterStatutHidden = document.getElementById('filter-statut');
+            const statut = typeof s.statut === 'string' ? s.statut : '';
+            if (filterStatutHidden) filterStatutHidden.value = statut;
+            // Synchroniser les pills visuelles
+            const statutPills = document.querySelectorAll('#filter-statut-pills .pill');
+            statutPills.forEach(p => {
+                const v = p.getAttribute('data-value') || '';
+                p.classList.toggle('active', v === statut);
+            });
+            
+            const setSlider = (id, value) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                const v = value != null ? String(value) : '';
+                if (v !== '' && !Number.isNaN(parseInt(v, 10))) el.value = v;
+            };
+            setSlider('filter-security-min', s.security_min);
+            setSlider('filter-security-max', s.security_max);
+            setSlider('filter-seo-min', s.seo_min);
+            setSlider('filter-seo-max', s.seo_max);
+            setSlider('filter-pentest-min', s.pentest_min);
+            setSlider('filter-pentest-max', s.pentest_max);
+            
+            const setCheckbox = (id, checked) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.checked = !!checked;
+            };
+            setCheckbox('filter-has-email', s.has_email);
+            setCheckbox('filter-has-blog', s.has_blog);
+            setCheckbox('filter-has-form', s.has_form);
+            setCheckbox('filter-has-tunnel', s.has_tunnel);
+            
+            const filterCms = document.getElementById('filter-cms');
+            if (filterCms && typeof s.cms === 'string') filterCms.value = s.cms;
+            const filterFramework = document.getElementById('filter-framework');
+            if (filterFramework && typeof s.framework === 'string') filterFramework.value = s.framework;
+            
+            // Restauration tags: état dans activeTagFilters + rendu chips.
+            if (Array.isArray(s.tags)) {
+                activeTagFilters = s.tags.slice();
+                renderTagFilterChips();
+                const input = document.getElementById('filter-tags');
+                if (input) input.value = '';
+                const suggestions = document.getElementById('filter-tags-suggestions');
+                if (suggestions) {
+                    suggestions.innerHTML = '';
+                    suggestions.classList.add('hidden');
+                }
+            }
+            
+            // Opportunite est traitée comme un filtre backend injecté via data-attribute.
+            if (document.body && document.body.dataset) {
+                if (s.opportunite) document.body.dataset.initialOpportunite = s.opportunite;
+                else delete document.body.dataset.initialOpportunite;
+            }
+            
+            if (typeof updateAdvancedFiltersBadge === 'function') {
+                updateAdvancedFiltersBadge();
+            }
+        } catch (e) {
+            // Silencieux: non bloquant si Memento indisponible.
+            console.error('[entreprises] restoreFiltersFromMemento:', e);
+        }
+    }
+    
+    let _persistFiltersTimer = null;
+    function schedulePersistFiltersToMemento(delayMs = 150) {
+        clearTimeout(_persistFiltersTimer);
+        _persistFiltersTimer = setTimeout(() => {
+            try {
+                const state = buildFiltersMementoState();
+                
+                // Priorité: Memento (si présent), sinon localStorage.
+                if (window.MementoCaretaker && typeof window.MementoCaretaker.save === 'function' && window.Memento) {
+                    const m = new window.Memento(state);
+                    window.MementoCaretaker.save(ENTREPRISES_FILTERS_MEMENTO_KEY, m);
+                } else if (window.localStorage) {
+                    window.localStorage.setItem(ENTREPRISES_FILTERS_STORAGE_KEY, JSON.stringify(state));
+                }
+            } catch (e) {
+                // ignore
+            }
+        }, delayMs);
+    }
+    // Etat des relances en cours (technique/seo/pentest) pour conserver l'affichage après rechargement des filtres.
+    // Structure: { [entrepriseId]: { technique: true, seo: true, pentest: true } }
+    const relaunchLoadingState = {};
+
+    function applyRelaunchLoadingStateToRenderedEnterprises(entreprises) {
+        if (!Array.isArray(entreprises) || entreprises.length === 0) return;
+        const types = ['technique', 'seo', 'pentest'];
+        entreprises.forEach(e => {
+            if (!e || e.id == null) return;
+            const state = relaunchLoadingState[e.id];
+            if (!state) return;
+            types.forEach(t => {
+                if (state[t]) {
+                    setScoreRelaunchLoading(e.id, t, true);
+                }
+            });
+        });
+    }
     
     function getEntrepriseNom(entrepriseId) {
         if (entrepriseId == null) return 'Entreprise';
@@ -334,6 +535,10 @@
         const select = document.getElementById('filter-groupe');
         if (!select) return;
         try {
+            // Ne pas perdre la sélection utilisateur pendant le refresh.
+            // (La fonction recrée les options à partir de zéro.)
+            const currentValue = select.value;
+
             // Réinitialiser les options de base
             select.innerHTML = '';
             const allOption = document.createElement('option');
@@ -363,6 +568,14 @@
                     option.textContent = parts.join(' ');
                     select.appendChild(option);
                 });
+            }
+
+            // Restaurer la sélection si l'option existe encore.
+            if (currentValue !== undefined && currentValue !== null) {
+                const matchingOption = select.querySelector(`option[value="${currentValue}"]`);
+                if (matchingOption) {
+                    select.value = currentValue;
+                }
             }
         } catch (error) {
             console.error('Erreur lors du chargement des groupes pour le filtre:', error);
@@ -569,6 +782,11 @@
             // S'assurer que la page reste dans les bornes si les filtres changent beaucoup
             if (!items.length && totalEntreprises > 0 && currentPage > 1) {
                 currentPage = 1;
+                try {
+                    if (window.localStorage) {
+                        window.localStorage.setItem(ENTREPRISES_CURRENT_PAGE_STORAGE_KEY, String(currentPage));
+                    }
+                } catch (e) {}
                 return loadEntreprises();
             }
             renderEntreprises();
@@ -580,9 +798,50 @@
     }
 
     /** Réapplique les filtres (recharge depuis l'API avec les critères du formulaire). */
-    async function applyFilters() {
-        currentPage = 1;
+    async function applyFilters(opts = {}) {
+        const resetPage = opts.resetPage !== false; // par défaut: true
+        if (resetPage) currentPage = 1;
+        schedulePersistFiltersToMemento();
+        try {
+            if (window.localStorage) {
+                window.localStorage.setItem(ENTREPRISES_CURRENT_PAGE_STORAGE_KEY, String(currentPage));
+            }
+        } catch (e) {}
         await loadEntreprises();
+    }
+    
+    // Rafraîchit la liste filtrée après un changement (groupe / scores),
+    // mais en regroupant plusieurs événements rapprochés.
+    let _applyFiltersTimer = null;
+    let _applyFiltersLastAt = 0;
+    function scheduleApplyFilters(delayMs = 500) {
+        // Éviter de déclencher pendant que la page n'est pas prête.
+        const container = document.getElementById('entreprises-container');
+        if (!container) return;
+
+        clearTimeout(_applyFiltersTimer);
+        const now = Date.now();
+        const minIntervalMs = 1500; // throttle minimal
+        const remaining = Math.max(0, minIntervalMs - (now - _applyFiltersLastAt));
+        const finalDelay = Math.max(delayMs, remaining);
+
+        _applyFiltersTimer = setTimeout(async () => {
+            _applyFiltersTimer = null;
+            _applyFiltersLastAt = Date.now();
+            try {
+                // Rafraîchissement "live": ne pas réinitialiser la pagination.
+                await applyFilters({ resetPage: false });
+            } catch (e) {
+                console.error('[entreprises] Erreur scheduleApplyFilters:', e);
+            }
+        }, finalDelay);
+    }
+
+    function isEntrepriseCurrentlyRendered(entrepriseId) {
+        if (entrepriseId == null) return false;
+        return Boolean(
+            document.querySelector(`.entreprise-card[data-id="${entrepriseId}"], .entreprise-row[data-id="${entrepriseId}"]`)
+        );
     }
     
     // Rendre les entreprises
@@ -613,6 +872,10 @@
         pageEntreprises.forEach(entreprise => {
             setupEntrepriseActions(entreprise.id);
         });
+
+        // Réappliquer l'état des relances (loaders) si l'utilisateur a relancé une analyse
+        // avant de changer de filtres / recharger.
+        applyRelaunchLoadingStateToRenderedEnterprises(pageEntreprises);
 
         // Appliquer la sélection existante (checkbox + surbrillance)
         pageEntreprises.forEach(entreprise => {
@@ -1328,11 +1591,15 @@
     function renderPagination() {
         const totalPages = Math.ceil(totalEntreprises / itemsPerPage);
         const pagination = document.getElementById('pagination');
+        if (!pagination) return;
         
         if (totalPages <= 1) {
             pagination.innerHTML = '';
+            pagination.style.display = 'none';
             return;
         }
+        
+        pagination.style.display = '';
         
         const start = (currentPage - 1) * itemsPerPage + 1;
         const end = Math.min(currentPage * itemsPerPage, totalEntreprises);
@@ -1375,6 +1642,11 @@
                 const page = parseInt(btn.dataset.page);
                 if (page >= 1 && page <= totalPages && !btn.classList.contains('disabled')) {
                     currentPage = page;
+                    try {
+                        if (window.localStorage) {
+                            window.localStorage.setItem(ENTREPRISES_CURRENT_PAGE_STORAGE_KEY, String(currentPage));
+                        }
+                    } catch (e) {}
                     await loadEntreprises();
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                 }
@@ -1387,6 +1659,11 @@
                 const page = parseInt(jumpInput.value, 10);
                 if (page >= 1 && page <= totalPages) {
                     currentPage = page;
+                    try {
+                        if (window.localStorage) {
+                            window.localStorage.setItem(ENTREPRISES_CURRENT_PAGE_STORAGE_KEY, String(currentPage));
+                        }
+                    } catch (e) {}
                     await loadEntreprises();
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                 } else {
@@ -1424,6 +1701,11 @@
                     // ignore
                 }
                 currentPage = 1;
+                try {
+                    if (window.localStorage) {
+                        window.localStorage.setItem(ENTREPRISES_CURRENT_PAGE_STORAGE_KEY, String(currentPage));
+                    }
+                } catch (e) {}
                 loadEntreprises();
             });
         }
@@ -1438,12 +1720,22 @@
                 e.preventDefault();
                 if (currentPage > 1) {
                     currentPage--;
+                    try {
+                        if (window.localStorage) {
+                            window.localStorage.setItem(ENTREPRISES_CURRENT_PAGE_STORAGE_KEY, String(currentPage));
+                        }
+                    } catch (e) {}
                     loadEntreprises().then(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
                 }
             } else if (e.key === 'ArrowRight') {
                 e.preventDefault();
                 if (currentPage < totalPages) {
                     currentPage++;
+                    try {
+                        if (window.localStorage) {
+                            window.localStorage.setItem(ENTREPRISES_CURRENT_PAGE_STORAGE_KEY, String(currentPage));
+                        }
+                    } catch (e) {}
                     loadEntreprises().then(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
                 }
             }
@@ -1708,6 +2000,9 @@
             cleanup();
             dropdown.remove();
         };
+        
+        // Permet aux gestionnaires internes de fermer le menu après une action.
+        dropdown.__close = closeDropdown;
 
         const onPointerDown = (e) => {
             const target = e.target;
@@ -1783,6 +2078,11 @@
                     } else {
                         Notifications.show('Groupe créé. L\'entreprise n\'a pas été ajoutée au groupe.', 'warning');
                     }
+                    
+                    // Fermer le menu après création pour éviter de rester sur un état obsolète.
+                    if (typeof dropdown.__close === 'function') {
+                        dropdown.__close();
+                    }
                     input.value = '';
                 } catch (error) {
                     console.error(error);
@@ -1846,42 +2146,55 @@
                             await EntreprisesAPI.addEntrepriseToGroupe(entrepriseId, groupId);
                             Notifications.show('Entreprise ajoutée au groupe', 'success');
                         }
-                        // Invalider le cache pour toutes les entreprises
-                        Object.keys(entrepriseGroupsCache).forEach(k => {
-                            entrepriseGroupsCache[k] = null;
-                        });
-                        // Recharger les groupes du dropdown pour mettre à jour les compteurs
-                        await loadGroupsIntoDropdown(entrepriseId, dropdown, true);
-                        // Rafraîchir les listes de groupes (filtre + bulk)
-                        try {
-                            await loadGroupFilter();
-                        } catch (e) {
-                            console.error('[entreprises] Erreur refresh filtre groupes après ajout/retrait entreprise:', e);
-                        }
-                        try {
-                            const bulkGroupSelectEl = document.getElementById('bulk-group-select');
-                            if (bulkGroupSelectEl) {
-                                const groupesBulk = await EntreprisesAPI.loadGroupes();
-                                bulkGroupSelectEl.innerHTML = '<option value="">Choisir un groupe...</option>';
-                                (groupesBulk || []).forEach(g => {
-                                    const parts = [];
-                                    if (g.nom) {
-                                        parts.push(Formatters.escapeHtml(g.nom));
-                                    } else {
-                                        parts.push('Groupe #' + String(g.id));
-                                    }
-                                    if (typeof g.entreprises_count !== 'undefined' && g.entreprises_count !== null) {
-                                        parts.push(`(${g.entreprises_count})`);
-                                    }
-                                    bulkGroupSelectEl.insertAdjacentHTML(
-                                        'beforeend',
-                                        `<option value="${g.id}">${parts.join(' ')}</option>`
-                                    );
-                                });
-                                bulkGroupSelectEl.dataset.loaded = '1';
+                        
+                        // Mettre à jour uniquement l'élément concerné (pas de rechargement complet).
+                        // Note: on met à jour de façon "optimiste" le compteur si on a une valeur numérique.
+                        const newIsActive = !isActive;
+                        item.classList.toggle('active', newIsActive);
+                        
+                        const delta = newIsActive ? 1 : -1;
+                        const countEl = item.querySelector('.group-count');
+                        if (countEl) {
+                            const oldCount = parseInt(countEl.textContent, 10);
+                            if (!Number.isNaN(oldCount)) {
+                                const newCount = Math.max(0, oldCount + delta);
+                                countEl.textContent = String(newCount);
                             }
-                        } catch (e) {
-                            console.error('[entreprises] Erreur refresh bulk groups après ajout/retrait entreprise:', e);
+                        }
+                        
+                        const updateOptionCountInSelect = (selectId) => {
+                            const selectEl = document.getElementById(selectId);
+                            if (!selectEl) return;
+                            const opt = selectEl.querySelector(`option[value="${groupId}"]`);
+                            if (!opt) return;
+                            const match = (opt.textContent || '').match(/\((\d+)\)/);
+                            if (!match) return;
+                            const oldCount = parseInt(match[1], 10);
+                            if (Number.isNaN(oldCount)) return;
+                            const newCount = Math.max(0, oldCount + delta);
+                            opt.textContent = (opt.textContent || '').replace(/\(\d+\)/, `(${newCount})`);
+                        };
+                        
+                        updateOptionCountInSelect('filter-groupe');
+                        updateOptionCountInSelect('bulk-group-select');
+                        
+                        // Mettre à jour aussi le cache local pour le dropdown.
+                        const cacheForEntreprise = entrepriseGroupsCache[entrepriseId];
+                        if (Array.isArray(cacheForEntreprise)) {
+                            const g = cacheForEntreprise.find(x => x && x.id === groupId);
+                            if (g) {
+                                g.is_member = newIsActive;
+                                if (typeof g.entreprises_count === 'number') {
+                                    g.entreprises_count = Math.max(0, g.entreprises_count + delta);
+                                }
+                            }
+                        }
+                        // Re-filtres (avec filtres avancés) pour que l'entreprise disparaisse si elle ne match plus.
+                        scheduleApplyFilters();
+                        
+                        // Fermer le menu après ajout/retrait.
+                        if (typeof dropdown.__close === 'function') {
+                            dropdown.__close();
                         }
                     } catch (error) {
                         console.error(error);
@@ -1901,42 +2214,46 @@
                     }
                     try {
                         await EntreprisesAPI.deleteGroupe(groupId);
-                        Object.keys(entrepriseGroupsCache).forEach(k => {
-                            entrepriseGroupsCache[k] = null;
-                        });
-                            // Rafraîchir les listes de groupes (filtre + bulk)
-                            try {
-                                await loadGroupFilter();
-                            } catch (e) {
-                                console.error('[entreprises] Erreur refresh filtre groupes après suppression:', e);
-                            }
-                            try {
-                                const bulkGroupSelectEl = document.getElementById('bulk-group-select');
-                                if (bulkGroupSelectEl) {
-                                    const groupesBulk = await EntreprisesAPI.loadGroupes();
-                                    bulkGroupSelectEl.innerHTML = '<option value="">Choisir un groupe...</option>';
-                                    (groupesBulk || []).forEach(g => {
-                                        const parts = [];
-                                        if (g.nom) {
-                                            parts.push(Formatters.escapeHtml(g.nom));
-                                        } else {
-                                            parts.push('Groupe #' + String(g.id));
-                                        }
-                                        if (typeof g.entreprises_count !== 'undefined' && g.entreprises_count !== null) {
-                                            parts.push(`(${g.entreprises_count})`);
-                                        }
-                                        bulkGroupSelectEl.insertAdjacentHTML(
-                                            'beforeend',
-                                            `<option value="${g.id}">${parts.join(' ')}</option>`
-                                        );
-                                    });
-                                    bulkGroupSelectEl.dataset.loaded = '1';
-                                }
-                            } catch (e) {
-                                console.error('[entreprises] Erreur refresh bulk groups après suppression groupe:', e);
-                            }
                         Notifications.show('Groupe supprimé', 'success');
-                        await loadGroupsIntoDropdown(entrepriseId, dropdown);
+                        
+                        // Mettre à jour uniquement l'UI concernée (pas de rechargement complet).
+                        try {
+                            // Supprimer l'item du dropdown de l'entreprise courante.
+                            if (item && typeof item.remove === 'function') {
+                                item.remove();
+                            }
+                        } catch (e) {}
+                        
+                        // Mettre à jour le cache local du dropdown.
+                        const cacheForEntreprise = entrepriseGroupsCache[entrepriseId];
+                        if (Array.isArray(cacheForEntreprise)) {
+                            entrepriseGroupsCache[entrepriseId] = cacheForEntreprise.filter(x => x && x.id !== groupId);
+                        }
+                        
+                        // Mettre à jour le select global filtre + bulk.
+                        const filterSelect = document.getElementById('filter-groupe');
+                        if (filterSelect) {
+                            const opt = filterSelect.querySelector(`option[value="${groupId}"]`);
+                            if (opt) opt.remove();
+                            const wasSelected = String(filterSelect.value) === String(groupId);
+                            if (wasSelected) {
+                                filterSelect.value = '';
+                            }
+                            if (typeof updateAdvancedFiltersBadge === 'function' && (wasSelected || !filterSelect.value)) {
+                                updateAdvancedFiltersBadge();
+                            }
+                        }
+                        const bulkGroupSelectEl = document.getElementById('bulk-group-select');
+                        if (bulkGroupSelectEl) {
+                            const opt = bulkGroupSelectEl.querySelector(`option[value="${groupId}"]`);
+                            if (opt) opt.remove();
+                            // Ne pas forcer la valeur si l'user a déjà choisi un autre groupe.
+                        }
+                        
+                        // Rafraîchir la liste de résultats si les filtres avancés dépendent de l'appartenance/groupe.
+                        scheduleApplyFilters();
+                        
+                        // Important: ne pas fermer le menu ici (ton cas: suppression de groupe).
                     } catch (error) {
                         console.error(error);
                         Notifications.show('Erreur lors de la suppression du groupe', 'error');
@@ -1964,21 +2281,38 @@
                     }
                     try {
                         await EntreprisesAPI.updateGroupe(groupId, { nom: trimmed });
-                        Object.keys(entrepriseGroupsCache).forEach(k => {
-                            entrepriseGroupsCache[k] = null;
-                        });
-                    // Rafraîchir les listes de groupes (filtre + bulk)
-                    try {
-                        await loadGroupFilter();
-                    } catch (e) {
-                        console.error('[entreprises] Erreur refresh filtre groupes après renommage:', e);
-                    }
-                    const bulkGroupSelectEl = document.getElementById('bulk-group-select');
-                    if (bulkGroupSelectEl) {
-                        bulkGroupSelectEl.dataset.loaded = '0';
-                    }
+                        
+                        // Mettre à jour uniquement l'élément concerné.
+                        if (nameEl) nameEl.textContent = trimmed;
+                        
+                        const cacheForEntreprise = entrepriseGroupsCache[entrepriseId];
+                        if (Array.isArray(cacheForEntreprise)) {
+                            const g = cacheForEntreprise.find(x => x && x.id === groupId);
+                            if (g) g.nom = trimmed;
+                        }
+                        
+                        // Mettre à jour les options dans les selects (filtre + bulk) sans recharger toute la liste.
+                        const updateOptionNameInSelect = (selectId) => {
+                            const selectEl = document.getElementById(selectId);
+                            if (!selectEl) return;
+                            const opt = selectEl.querySelector(`option[value="${groupId}"]`);
+                            if (!opt) return;
+                            const matchCount = (opt.textContent || '').match(/\((\d+)\)/);
+                            const countPart = matchCount ? ` (${matchCount[1]})` : '';
+                            opt.textContent = trimmed + countPart;
+                        };
+                        updateOptionNameInSelect('filter-groupe');
+                        updateOptionNameInSelect('bulk-group-select');
+                        
                         Notifications.show('Nom du groupe mis à jour', 'success');
-                        await loadGroupsIntoDropdown(entrepriseId, dropdown, true);
+                        
+                        // Rafraîchir la liste de résultats (les filtres peuvent dépendre de l'existence du groupe).
+                        scheduleApplyFilters();
+                        
+                        // Fermer le menu après renommage.
+                        if (typeof dropdown.__close === 'function') {
+                            dropdown.__close();
+                        }
                     } catch (error) {
                         console.error(error);
                         Notifications.show('Erreur lors de la mise à jour du groupe', 'error');
@@ -2213,6 +2547,38 @@
                     } else if (action === 'launch-scraping') {
                         for (const id of ids) {
                             await triggerScrapingRelaunch(id);
+                        }
+                    } else if (action === 'delete-bulk') {
+                        const count = ids.length;
+                        if (!confirm(`Êtes-vous sûr de vouloir supprimer ${count} entreprise${count > 1 ? 's' : ''} ? Cette action est irréversible.`)) {
+                            return;
+                        }
+
+                        let deletedCount = 0;
+                        let failedCount = 0;
+                        for (const id of ids) {
+                            try {
+                                await EntreprisesAPI.delete(id);
+                                deletedCount++;
+                                // Retirer du bloc sélectionné après suppression réussie.
+                                setEntrepriseSelected(id, false);
+                            } catch (e) {
+                                failedCount++;
+                                console.error('Erreur suppression entreprise (bulk):', id, e);
+                            }
+                        }
+
+                        await applyFilters();
+                        if (failedCount > 0) {
+                            Notifications.show(
+                                `Suppression terminée : ${deletedCount} supprimée${deletedCount > 1 ? 's' : ''}, ${failedCount} en échec.`,
+                                'warning'
+                            );
+                        } else {
+                            Notifications.show(
+                                `${deletedCount} entreprise${deletedCount > 1 ? 's' : ''} supprimée${deletedCount > 1 ? 's' : ''}`,
+                                'success'
+                            );
                         }
                     } else if (action === 'group-add' || action === 'group-remove') {
                         const groupId = bulkGroupSelect && bulkGroupSelect.value ? parseInt(bulkGroupSelect.value, 10) : null;
@@ -2962,6 +3328,9 @@
             if (!data || data.entreprise_id == null) return;
             setScoreRelaunchLoading(data.entreprise_id, 'technique', false);
             refreshEntrepriseFromServer(data.entreprise_id, { animateOnlyMetric: 'technique' });
+            if (isEntrepriseCurrentlyRendered(data.entreprise_id)) {
+                scheduleApplyFilters();
+            }
             const nom = getEntrepriseNom(data.entreprise_id);
             Notifications.show(nom + ' — Analyse technique terminée', 'success', 'fa-check-circle');
             if (data.entreprise_id === currentModalEntrepriseId) {
@@ -2982,6 +3351,9 @@
             if (!data || data.entreprise_id == null) return;
             setScoreRelaunchLoading(data.entreprise_id, 'seo', false);
             refreshEntrepriseFromServer(data.entreprise_id, { animateOnlyMetric: 'seo' });
+            if (isEntrepriseCurrentlyRendered(data.entreprise_id)) {
+                scheduleApplyFilters();
+            }
             const nom = getEntrepriseNom(data.entreprise_id);
             Notifications.show(nom + ' — Analyse SEO terminée', 'success', 'fa-check-circle');
             if (data.entreprise_id === currentModalEntrepriseId) {
@@ -3002,6 +3374,9 @@
             if (data && data.entreprise_id != null) {
                 const nom = getEntrepriseNom(data.entreprise_id);
                 Notifications.show(nom + ' — Analyse OSINT terminée', 'success', 'fa-check-circle');
+                if (isEntrepriseCurrentlyRendered(data.entreprise_id)) {
+                    scheduleApplyFilters();
+                }
             }
             if (data && data.entreprise_id === currentModalEntrepriseId) {
                 loadOSINTAnalysis(currentModalEntrepriseId);
@@ -3020,6 +3395,9 @@
             if (!data || data.entreprise_id == null) return;
             setScoreRelaunchLoading(data.entreprise_id, 'pentest', false);
             refreshEntrepriseFromServer(data.entreprise_id);
+            if (isEntrepriseCurrentlyRendered(data.entreprise_id)) {
+                scheduleApplyFilters();
+            }
             const nom = getEntrepriseNom(data.entreprise_id);
             Notifications.show(nom + ' — Analyse Pentest terminée', 'success', 'fa-check-circle');
             if (data.entreprise_id === currentModalEntrepriseId) {
@@ -3053,6 +3431,9 @@
             const entrepriseId = data && data.entreprise_id != null ? data.entreprise_id : currentModalEntrepriseId;
             if (entrepriseId == null) return;
             setScrapingRelaunchLoading(entrepriseId, false);
+            if (isEntrepriseCurrentlyRendered(entrepriseId)) {
+                scheduleApplyFilters();
+            }
             const nom = getEntrepriseNom(entrepriseId);
             Notifications.show(nom + ' — Scraping terminé', 'success', 'fa-check-circle');
             if (entrepriseId === currentModalEntrepriseId) {
@@ -4015,6 +4396,13 @@
             await loadGroupFilter();
         } catch (e) {
             console.error('[entreprises] Erreur init groupes filtre:', e);
+        }
+        // Restaurer la recherche + filtres avancés depuis le memento (si disponible),
+        // avant d'appliquer les filtres éventuellement présents dans l'URL.
+        try {
+            restoreFiltersFromMemento();
+        } catch (e) {
+            // ignore
         }
         // Lire les filtres depuis l'URL (secteur, statut, tags_any, analyse_id...)
         applyInitialFiltersFromUrl();
