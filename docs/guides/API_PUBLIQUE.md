@@ -189,6 +189,23 @@ curl -H "Authorization: Bearer votre_token" \
   "http://localhost:5000/api/public/entreprises/by-website?website=danielcraft.fr"
 ```
 
+### 2.2. Entreprise par email
+
+**GET** `/api/public/entreprises/by-email?email=...`
+
+Retourne l'entreprise (donc l'`id`) à partir d'un email (soit trouvé dans `scraper_emails`, soit via `entreprises.email_principal`).
+
+Paramètres :
+- `email` (string, requis)
+- `include_emails` (bool, optionnel) : si true, inclut aussi tous les emails connus de l'entreprise
+
+**Exemple** :
+
+```bash
+curl -H "Authorization: Bearer votre_token" \
+  "http://localhost:5000/api/public/entreprises/by-email?email=contact@danielcraft.fr"
+```
+
 ### 3. Emails d'une entreprise
 
 **GET** `/api/public/entreprises/<entreprise_id>/emails`
@@ -220,6 +237,25 @@ curl -H "Authorization: Bearer votre_token" \
     }
   ]
 }
+```
+
+### 3.1. Tous les emails d'une entreprise (complet)
+
+**GET** `/api/public/entreprises/<entreprise_id>/emails/all`
+
+Retourne :
+- `email_principal` (si présent) + emails scrapés
+- infos d'analyse quand disponibles (provider/type/risk_score/name_info/is_person)
+- un champ `person` normalisé si on a des infos (nom/prénom)
+
+Paramètres :
+- `include_primary` (bool, optionnel, défaut true) : inclure `email_principal`
+
+**Exemple** :
+
+```bash
+curl -H "Authorization: Bearer votre_token" \
+  "http://localhost:5000/api/public/entreprises/1/emails/all"
 ```
 
 ### 4. Liste de tous les emails

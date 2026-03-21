@@ -15,6 +15,148 @@ api_public_bp = Blueprint('api_public', __name__, url_prefix='/api/public')
 # Initialiser la base de données
 database = Database()
 
+def _normalize_email(raw: str) -> str | None:
+    if not raw:
+        return None
+    s = str(raw).strip()
+    if not s or '@' not in s:
+        return None
+    return s
+
+
+def _extract_person_from_name_info(name_info) -> dict | None:
+    """
+    name_info provient de l'analyse email (JSON) et peut contenir des infos personne.
+    On normalise au format:
+        { full_name, first_name, last_name }
+    """
+    if not name_info:
+        return None
+    try:
+        if isinstance(name_info, str):
+            name_info = json.loads(name_info)
+    except Exception:
+        return None
+
+    if isinstance(name_info, dict):
+        full_name = (name_info.get('full_name') or name_info.get('name') or '').strip() or None
+        first_name = (name_info.get('first_name') or name_info.get('prenom') or '').strip() or None
+        last_name = (name_info.get('last_name') or name_info.get('nom') or '').strip() or None
+        if not full_name and (first_name or last_name):
+            full_name = (' '.join([x for x in [first_name, last_name] if x]) or '').strip() or None
+        if full_name and (not first_name and not last_name):
+            parts = [p for p in full_name.split(' ') if p]
+            if len(parts) >= 2:
+                first_name = parts[0]
+                last_name = ' '.join(parts[1:])
+        if full_name or first_name or last_name:
+            return {'full_name': full_name, 'first_name': first_name, 'last_name': last_name}
+        return None
+
+    # Fallback simple si name_info est une liste ou autre
+    try:
+        s = str(name_info).strip()
+        if not s:
+            return None
+        parts = [p for p in s.split(' ') if p]
+        if len(parts) >= 2:
+            return {'full_name': s, 'first_name': parts[0], 'last_name': ' '.join(parts[1:])}
+        return {'full_name': s, 'first_name': None, 'last_name': None}
+    except Exception:
+        return None
+
+
+def _get_entreprise_emails_full(entreprise_id: int, include_primary: bool = True) -> list[dict]:
+    """
+    Retourne tous les emails connus pour une entreprise, avec info personne si disponible.
+    Source:
+      - email_principal (entreprises)
+      - scraper_emails (scraping) + analyse (provider/type/risk_score/name_info/is_person)
+    """
+    emails: list[dict] = []
+
+    entreprise = database.get_entreprise(entreprise_id)
+    if include_primary and entreprise and isinstance(entreprise, dict):
+        primary = (entreprise.get('email_principal') or '').strip()
+        if primary:
+            emails.append({
+                'email': primary,
+                'source': 'principal',
+                'page_url': None,
+                'date_found': None,
+                'analysis': None,
+                'is_person': None,
+                'person': None,
+            })
+
+    conn = database.get_connection()
+    cursor = conn.cursor()
+    # Chercher dans scraper_emails (normalisée)
+    database.execute_sql(cursor, '''
+        SELECT
+            email,
+            page_url,
+            provider,
+            type,
+            format_valid,
+            mx_valid,
+            risk_score,
+            domain,
+            name_info,
+            is_person,
+            analyzed_at,
+            date_found
+        FROM scraper_emails
+        WHERE entreprise_id = ?
+          AND email IS NOT NULL
+          AND TRIM(email) <> ''
+        ORDER BY date_found DESC
+    ''', (entreprise_id,))
+    rows = cursor.fetchall() or []
+    conn.close()
+
+    seen = {e['email'].lower() for e in emails if isinstance(e.get('email'), str)}
+    for row in rows:
+        d = dict(row) if not isinstance(row, dict) else row
+        email_val = (d.get('email') or '').strip()
+        if not email_val:
+            continue
+        key = email_val.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+
+        name_info = None
+        try:
+            name_info = json.loads(d.get('name_info')) if d.get('name_info') else None
+        except Exception:
+            name_info = None
+
+        analysis = None
+        if d.get('provider') is not None or d.get('type') is not None:
+            analysis = {
+                'provider': d.get('provider'),
+                'type': d.get('type'),
+                'format_valid': bool(d.get('format_valid')) if d.get('format_valid') is not None else None,
+                'mx_valid': bool(d.get('mx_valid')) if d.get('mx_valid') is not None else None,
+                'risk_score': d.get('risk_score'),
+                'domain': d.get('domain'),
+                'name_info': name_info,
+                'analyzed_at': d.get('analyzed_at'),
+            }
+
+        emails.append({
+            'email': email_val,
+            'source': 'scraper',
+            'page_url': d.get('page_url'),
+            'date_found': d.get('date_found'),
+            'analysis': analysis,
+            'is_person': bool(d.get('is_person')) if d.get('is_person') is not None else None,
+            'person': _extract_person_from_name_info(name_info),
+        })
+
+    return emails
+
 def _expand_statut_level(statut: str) -> list[str]:
     """
     Permet de "coupler" plusieurs statuts événementiels sous un niveau marketing.
@@ -376,6 +518,99 @@ def get_entreprise(entreprise_id):
         }), 500
 
 
+@api_public_bp.route('/entreprises/by-email', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+@require_api_permission('emails')
+def get_entreprise_by_email():
+    """
+    API publique : retrouver une entreprise à partir d'un email.
+
+    Query params:
+        email (str, requis)
+        include_emails (bool, optionnel): si true, renvoie aussi tous les emails connus de l'entreprise
+    """
+    try:
+        email_raw = request.args.get('email', '')
+        email = _normalize_email(email_raw)
+        if not email:
+            return jsonify({'success': False, 'error': 'Paramètre "email" requis.'}), 400
+
+        include_emails = str(request.args.get('include_emails', '')).lower() in ('1', 'true', 'yes')
+
+        conn = database.get_connection()
+        cursor = conn.cursor()
+
+        # 1) priorité : emails scrappés (scraper_emails)
+        database.execute_sql(cursor, '''
+            SELECT entreprise_id, email, name_info, is_person, page_url, date_found
+            FROM scraper_emails
+            WHERE LOWER(email) = LOWER(?)
+            ORDER BY date_found DESC
+            LIMIT 1
+        ''', (email,))
+        row = cursor.fetchone()
+
+        entreprise_id = None
+        match = None
+        if row:
+            r = dict(row) if not isinstance(row, dict) else row
+            entreprise_id = r.get('entreprise_id')
+            name_info = None
+            try:
+                name_info = json.loads(r.get('name_info')) if r.get('name_info') else None
+            except Exception:
+                name_info = None
+            match = {
+                'source': 'scraper',
+                'email': r.get('email'),
+                'page_url': r.get('page_url'),
+                'date_found': r.get('date_found'),
+                'is_person': bool(r.get('is_person')) if r.get('is_person') is not None else None,
+                'person': _extract_person_from_name_info(name_info),
+            }
+        else:
+            # 2) fallback : email principal entreprise
+            database.execute_sql(cursor, '''
+                SELECT id
+                FROM entreprises
+                WHERE LOWER(email_principal) = LOWER(?)
+                LIMIT 1
+            ''', (email,))
+            row2 = cursor.fetchone()
+            if row2:
+                entreprise_id = row2.get('id') if isinstance(row2, dict) else row2[0]
+                match = {
+                    'source': 'principal',
+                    'email': email,
+                    'page_url': None,
+                    'date_found': None,
+                    'is_person': None,
+                    'person': None,
+                }
+
+        conn.close()
+
+        if not entreprise_id:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable pour cet email.'}), 404
+
+        entreprise = database.get_entreprise(int(entreprise_id))
+        if not entreprise:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable.'}), 404
+
+        from utils.helpers import clean_json_dict
+        entreprise = clean_json_dict(entreprise)
+
+        payload = {'success': True, 'data': {'entreprise': entreprise, 'match': match}}
+        if include_emails:
+            payload['data']['emails'] = _get_entreprise_emails_full(int(entreprise_id), include_primary=True)
+            payload['data']['emails_count'] = len(payload['data']['emails'])
+
+        return jsonify(payload)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @api_public_bp.route('/entreprises/by-website', methods=['GET'])
 @api_token_required
 @require_api_permission('entreprises')
@@ -436,23 +671,36 @@ def get_entreprise_emails(entreprise_id):
                 'success': False,
                 'error': 'Entreprise introuvable'
             }), 404
-        
-        # Récupérer les emails depuis les scrapers
-        scrapers = database.get_scrapers_by_entreprise(entreprise_id)
+
+        # Utiliser la logique complète mais renvoyer un format simple (compatibilité)
+        full_items = _get_entreprise_emails_full(entreprise_id, include_primary=False)
+
         emails = []
-        
-        for scraper in scrapers:
-            scraper_emails = database.get_scraper_emails(scraper['id'])
-            for email_data in scraper_emails:
-                # Éviter les doublons
-                if not any(e['email'] == email_data.get('email') for e in emails):
-                    emails.append({
-                        'email': email_data.get('email'),
-                        'nom': email_data.get('name_info'),
-                        'page_url': email_data.get('page_url'),
-                        'date_scraping': email_data.get('date_scraping')
-                    })
-        
+        for item in full_items:
+            email = item.get('email')
+            if not email:
+                continue
+            # Dériver un "nom" simple à partir de person ou name_info si dispo
+            person = item.get('person') or {}
+            full_name = person.get('full_name')
+            if not full_name and person.get('first_name'):
+                full_name = (person.get('first_name') + ' ' + (person.get('last_name') or '')).strip()
+
+            if not full_name:
+                analysis = item.get('analysis') or {}
+                ni = analysis.get('name_info')
+                if isinstance(ni, dict):
+                    full_name = ni.get('full_name') or ni.get('name')
+                elif isinstance(ni, str):
+                    full_name = ni
+
+            emails.append({
+                'email': email,
+                'nom': full_name,
+                'page_url': item.get('page_url'),
+                'date_scraping': item.get('date_found'),
+            })
+
         return jsonify({
             'success': True,
             'entreprise_id': entreprise_id,
@@ -464,6 +712,35 @@ def get_entreprise_emails(entreprise_id):
             'success': False,
             'error': str(e)
         }), 500
+
+
+@api_public_bp.route('/entreprises/<int:entreprise_id>/emails/all', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+@require_api_permission('emails')
+def get_entreprise_emails_all(entreprise_id: int):
+    """
+    API publique : Tous les emails d'une entreprise (email_principal + emails scrapés),
+    avec informations d'analyse (provider/type/risk_score/name_info/is_person) si disponibles.
+
+    Query params:
+        include_primary (bool, optionnel): inclure email_principal (défaut: true)
+    """
+    try:
+        entreprise = database.get_entreprise(entreprise_id)
+        if not entreprise:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable'}), 404
+
+        include_primary = str(request.args.get('include_primary', '1')).lower() in ('1', 'true', 'yes')
+        items = _get_entreprise_emails_full(entreprise_id, include_primary=include_primary)
+        return jsonify({
+            'success': True,
+            'entreprise_id': entreprise_id,
+            'count': len(items),
+            'data': items,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @api_public_bp.route('/emails', methods=['GET'])
