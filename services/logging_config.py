@@ -105,25 +105,22 @@ def setup_root_logger(app=None):
     console_handler.setFormatter(console_formatter)
     root_logger.addHandler(console_handler)
     
-    # Configurer aussi le logger Flask si une instance est fournie
+    # Flask / werkzeug : pas de handlers dédiés + propagate vers root.
+    # Sinon chaque ligne est écrite 2× (handler sur enfant + même log remonté au root).
     if app:
         app.logger.setLevel(LOG_LEVEL)
         app.logger.handlers.clear()
-        app.logger.addHandler(flask_handler)
-        app.logger.addHandler(console_handler)
-    
-    # Configurer aussi les loggers werkzeug et flask
+        app.logger.propagate = True
+
     werkzeug_logger = logging.getLogger('werkzeug')
     werkzeug_logger.setLevel(LOG_LEVEL)
     werkzeug_logger.handlers.clear()
-    werkzeug_logger.addHandler(flask_handler)
-    werkzeug_logger.addHandler(console_handler)
-    
+    werkzeug_logger.propagate = True
+
     flask_app_logger = logging.getLogger('flask.app')
     flask_app_logger.setLevel(LOG_LEVEL)
     flask_app_logger.handlers.clear()
-    flask_app_logger.addHandler(flask_handler)
-    flask_app_logger.addHandler(console_handler)
+    flask_app_logger.propagate = True
     
     return root_logger
 

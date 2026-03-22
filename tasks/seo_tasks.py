@@ -16,7 +16,7 @@ logger = setup_logger(__name__, 'seo_tasks.log', level=logging.INFO)
 
 
 @celery.task(bind=True)
-def seo_analysis_task(self, url, entreprise_id=None, use_lighthouse=True):
+def seo_analysis_task(self, url, entreprise_id=None, use_lighthouse=False):
     """
     Tâche Celery pour effectuer une analyse SEO d'un site web
     
@@ -24,7 +24,7 @@ def seo_analysis_task(self, url, entreprise_id=None, use_lighthouse=True):
         self: Instance de la tâche Celery (bind=True)
         url (str): URL du site à analyser
         entreprise_id (int, optional): ID de l'entreprise associée
-        use_lighthouse (bool): Utiliser Lighthouse si disponible
+        use_lighthouse (bool): Si True, exécute Lighthouse (défaut False)
         
     Returns:
         dict: Résultats de l'analyse SEO avec analysis_id

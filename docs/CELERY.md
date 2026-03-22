@@ -59,8 +59,19 @@ python run_celery.py
 
 **Linux/Mac :**
 ```bash
-celery -A celery_app worker --pool=threads --concurrency=4 --loglevel=info
+celery -A celery_app worker --pool=threads --concurrency=6 -Q celery,heavy --loglevel=info
 ```
+
+### Files d'attente, charge « bulk » et workers
+
+- **Deux files Redis** : `celery` (tâches courtes : emails, cron, etc.) et `heavy` (analyses techniques, SEO, OSINT, Pentest, scraping). Le worker **doit** consommer les deux : `-Q celery,heavy` (déjà le défaut dans `run_celery.py` via `CELERY_WORKER_QUEUES`).
+- **Préchargement** : `CELERY_WORKER_PREFETCH_MULTIPLIER=1` — chaque worker ne réserve qu’une tâche à la fois, meilleure répartition sous pic.
+- **Accusés tardifs** : `CELERY_TASK_ACKS_LATE=true` — la tâche n’est acquise qu’après exécution (moins de perte si crash worker).
+- **Étalement des sous-tâches** : lors d’un scraping multi-entreprises, chaque sous-tâche (technique, OSINT, SEO, Pentest) est planifiée avec un `countdown` croissant (`CELERY_BULK_STAGGER_SEC`, défaut **0,75 s** entre chaque index), pour ne pas poster 200 messages instantanément sur le broker.
+- **Interface** : les relances bulk depuis la liste entreprises déclenchent les analyses avec un léger décalage côté navigateur (~300 ms entre chaque).
+- **API `website-analysis`** (interne / publique) : le pack scraping + technique + SEO + OSINT + pentest est planifié avec le même étalement (`tasks.heavy_schedule.BulkSubtaskStagger`), pas cinq `.delay()` simultanés.
+
+Variables utiles (`.env`) : `CELERY_WORKERS`, `CELERY_WORKER_QUEUES`, `CELERY_BULK_STAGGER_SEC`, `CELERY_WORKER_PREFETCH_MULTIPLIER`, `CELERY_TASK_ACKS_LATE`, ainsi que les timeouts SEO / OSINT / Pentest (section « Analyses lourdes » dans `.env`).
 
 ### Configuration Celery
 
@@ -451,6 +462,27 @@ pkill -f "celery worker"
 - Augmenter `worker_prefetch_multiplier`
 - Augmenter le nombre de workers
 - Optimiser les taches (moins de requetes HTTP, etc.)
+
+### Bulk SEO / WebSocket : app bloquée, `logs/seo_tasks.log` vide
+
+- **`seo_tasks.log`** (et les autres `*_tasks.log`) ne sont écrits que par le **processus Celery worker**, pas par Gunicorn. Si le fichier reste vide alors que l’UI dit « démarré », le worker **ne consomme pas** la file `heavy` ou **n’est pas lancé**. Vérifier :  
+  `celery -A celery_app inspect ping`  
+  et la commande systemd / script : **`-Q celery,heavy`** (obligatoire pour SEO, technique, pentest, scraping lourd).
+- **Redis** : sans broker, aucune tâche n’est enfilée. Un `PING` Redis léger (avec cache de quelques secondes) remplace l’ancien `celery.control.inspect().active()` avant chaque événement WebSocket, pour éviter de saturer Redis quand on lance 20–50 analyses d’affilée (surtout sur Raspberry Pi + Gunicorn **eventlet**).
+- **Charge Redis** : chaque analyse ouvre un thread de suivi qui interroge le résultat Celery. Variable **`CELERY_WS_MONITOR_POLL_SEC`** (défaut **1.0**) = intervalle entre deux lectures ; augmenter à `1.5` ou `2` sur matériel très lent.
+- **Logs côté web** : après déploiement, les enfilements SEO peuvent apparaître dans **`logs/prospectlab.log`** (`WebSocket SEO: tâche enfilée …`) si le logging Flask racine est actif.
+
+### Worker OK mais « aucune tâche », bannière Redis `/0` vs `/1`
+
+- **Même URL** : le worker et Gunicorn doivent avoir le même `CELERY_BROKER_URL` (même hôte, **même numéro de base** `/0` ou `/1`). Sinon les messages partent dans une base Redis et le worker écoute l’autre. Vérifier :  
+  `bash scripts/linux/print_celery_broker.sh`  
+  et comparer à la ligne `transport:` au démarrage du worker.
+
+### Countdown géant (tâches planifiées dans le futur)
+
+- L’étalement WebSocket utilisait un compteur Redis **`prospectlab:heavy:stagger:seq`** sans borne : après beaucoup de lancements, `countdown` pouvait atteindre **des heures** — le worker reste vide jusqu’à l’ETA. **Correctif code** : index pris modulo `CELERY_BULK_STAGGER_SLOT_MODULO` (défaut **400**). **À chaud** sur un serveur déjà bloqué :  
+  `bash scripts/linux/reset_prospectlab_stagger_counter.sh`  
+  ou manuellement : `redis-cli -n <N> DEL prospectlab:heavy:stagger:seq` (`<N>` = base de ton `CELERY_BROKER_URL`).
 
 ## Analyse technique multi-pages (20 max)
 

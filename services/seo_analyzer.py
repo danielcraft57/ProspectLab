@@ -8,10 +8,13 @@ import shutil
 import json
 import re
 import os
+import sys
 import logging
-from urllib.parse import urlparse, urljoin
-from typing import Dict, List, Optional, Callable
+from urllib.parse import urlparse, urljoin, urlunparse
+from typing import Dict, List, Optional, Callable, Tuple
+from ipaddress import ip_address
 import requests
+from requests.exceptions import ConnectTimeout, ReadTimeout, Timeout as RequestsTimeout
 from bs4 import BeautifulSoup
 import time
 
@@ -19,9 +22,129 @@ logger = logging.getLogger(__name__)
 
 # Importer la configuration
 try:
-    from config import SEO_TOOL_TIMEOUT
+    from config import (
+        SEO_TOOL_TIMEOUT,
+        SEO_FETCH_CONNECT_TIMEOUT,
+        SEO_FETCH_READ_TIMEOUT,
+        CHROME_PATH,
+    )
 except ImportError:
     SEO_TOOL_TIMEOUT = int(os.environ.get('SEO_TOOL_TIMEOUT', '120'))
+    SEO_FETCH_CONNECT_TIMEOUT = float(os.environ.get('SEO_FETCH_CONNECT_TIMEOUT', '12'))
+    SEO_FETCH_READ_TIMEOUT = float(os.environ.get('SEO_FETCH_READ_TIMEOUT', '25'))
+    CHROME_PATH = (os.environ.get('CHROME_PATH') or os.environ.get('LIGHTHOUSE_CHROME_PATH') or '').strip() or None
+
+
+def _lighthouse_chrome_executable() -> Optional[str]:
+    """Binaire Chrome/Chromium pour Lighthouse (CHROME_PATH ou emplacements Linux courants)."""
+    def _usable(path: str) -> bool:
+        return bool(path) and os.path.isfile(path) and os.access(path, os.X_OK)
+
+    if CHROME_PATH and _usable(CHROME_PATH):
+        return CHROME_PATH
+    if sys.platform == 'win32':
+        return None
+    for candidate in (
+        '/usr/bin/chromium',
+        '/usr/bin/chromium-browser',
+        '/snap/bin/chromium',
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/google-chrome',
+    ):
+        if _usable(candidate):
+            return candidate
+    return None
+
+
+def _host_is_ip(hostname: Optional[str]) -> bool:
+    if not hostname:
+        return False
+    try:
+        ip_address(hostname)
+        return True
+    except ValueError:
+        return False
+
+
+def _netloc_variants_www(netloc: str) -> List[str]:
+    """
+    Retourne 1 ou 2 netloc (avec / sans www), en conservant port et auth si présents.
+    Pas de variante www pour IP, IPv6 littérale, ou netloc vide.
+    """
+    if not netloc or not str(netloc).strip():
+        return []
+    p = urlparse('http://' + netloc)
+    host = p.hostname
+    if not host or _host_is_ip(host):
+        return [netloc]
+    # IPv6 dans l'URL : hostname peut être sans crochets
+    if host.startswith('[') or ('%' in host and ':' in host):
+        return [netloc]
+
+    port = p.port
+    username = p.username
+    password = p.password
+    hl = host.lower()
+    if hl.startswith('www.'):
+        hosts = [host, host[4:]]
+    else:
+        hosts = [host, f'www.{host}']
+
+    seen = []
+    for h in hosts:
+        auth = ''
+        if username is not None:
+            auth = username
+            if password is not None:
+                auth += ':' + password
+            auth += '@'
+        if port:
+            nl = f'{auth}{h}:{port}'
+        else:
+            nl = f'{auth}{h}'
+        if nl not in seen:
+            seen.append(nl)
+    return seen
+
+
+def build_seo_url_candidates(raw: str) -> List[str]:
+    """
+    Construit une liste ordonnée d'URL à essayer automatiquement :
+    - saisie normalisée (https par défaut si pas de schéma) ;
+    - variantes https puis http ;
+    - variantes avec / sans www (même domaine, même chemin et query).
+    Dédupliquée, ordre préservé.
+    """
+    s = (raw or '').strip()
+    if not s:
+        return []
+    if not s.startswith(('http://', 'https://')):
+        s = 'https://' + s
+
+    parsed = urlparse(s)
+    if not parsed.netloc:
+        return []
+
+    path = parsed.path if parsed.path else '/'
+    variants_netloc = _netloc_variants_www(parsed.netloc)
+    schemes_order = ['https', 'http']
+
+    out: List[str] = []
+    # 1) URL telle que normalisée (souvent https)
+    first = urlunparse((parsed.scheme, parsed.netloc, path, parsed.params, parsed.query, parsed.fragment))
+    out.append(first)
+
+    for scheme in schemes_order:
+        for nl in variants_netloc:
+            u = urlunparse((scheme, nl, path, parsed.params, parsed.query, parsed.fragment))
+            if u not in out:
+                out.append(u)
+
+    return out
+
+
+def _seo_fetch_timeout_tuple() -> Tuple[float, float]:
+    return (SEO_FETCH_CONNECT_TIMEOUT, SEO_FETCH_READ_TIMEOUT)
 
 
 class SEOAnalyzer:
@@ -78,7 +201,7 @@ class SEOAnalyzer:
         self,
         url: str,
         progress_callback: Optional[Callable[[str], None]] = None,
-        use_lighthouse: bool = True
+        use_lighthouse: bool = False
     ) -> Dict:
         """
         Analyse SEO complète d'un site web
@@ -86,14 +209,16 @@ class SEOAnalyzer:
         Args:
             url: URL à analyser
             progress_callback: Fonction de callback pour la progression
-            use_lighthouse: Utiliser Lighthouse si disponible
+            use_lighthouse: Si True, lance Lighthouse (désactivé par défaut)
             
         Returns:
             dict: Résultats de l'analyse SEO
         """
+        url_initial = (url or '').strip()
         results = {
-            'url': url,
-            'domain': urlparse(url).netloc,
+            'url': url_initial,
+            'url_initial': url_initial,
+            'domain': urlparse(url_initial if url_initial.startswith(('http://', 'https://')) else 'https://' + url_initial).netloc,
             'meta_tags': {},
             'headers': {},
             'structure': {},
@@ -106,51 +231,67 @@ class SEOAnalyzer:
         }
         
         try:
-            # Normaliser l'URL de départ
-            if not url.startswith(('http://', 'https://')):
-                url = 'https://' + url
-            
-            parsed = urlparse(url)
-            base_url = f'{parsed.scheme}://{parsed.netloc}'
-            
+            # Plusieurs stratégies automatiques : https/http, avec/sans www, même chemin
+            candidates = build_seo_url_candidates(url_initial)
+            if not candidates:
+                results['error'] = 'URL vide ou invalide.'
+                return results
+
+            timeout_fetch = _seo_fetch_timeout_tuple()
             if progress_callback:
-                progress_callback('Récupération de la page principale...')
-            
-            # Stratégie de récupération avec fallback http→https ou https→http en cas de blocage
-            candidates = [url]
-            if parsed.scheme == 'http':
-                candidates.append('https://' + parsed.netloc + parsed.path or '')
-            elif parsed.scheme == 'https':
-                # Certains sites bloquent https mais laissent passer http (rare mais possible)
-                candidates.append('http://' + parsed.netloc + parsed.path or '')
-            
+                n = len(candidates)
+                if n > 1:
+                    progress_callback(
+                        f'Vérification automatique de l’URL ({n} variante(s) : protocole https/http, avec/sans www)...'
+                    )
+                else:
+                    progress_callback('Récupération de la page principale...')
+
             response = None
             last_error: Optional[Exception] = None
+            last_candidate_ok: Optional[str] = None
+            fetch_log: List[Dict] = []
+
             for idx, candidate in enumerate(candidates):
                 try:
-                    resp = requests.get(candidate, headers=self.headers, timeout=30, allow_redirects=True)
+                    if progress_callback and idx > 0:
+                        short = candidate
+                        if len(short) > 72:
+                            short = short[:69] + '...'
+                        progress_callback(f'Nouvel essai : {short}')
+                    resp = requests.get(
+                        candidate,
+                        headers=self.headers,
+                        timeout=timeout_fetch,
+                        allow_redirects=True,
+                    )
                     resp.raise_for_status()
                     response = resp
-                    url = candidate  # garder la version réellement utilisée
+                    last_candidate_ok = candidate
+                    fetch_log.append({'url': candidate, 'ok': True, 'status': resp.status_code})
                     break
                 except requests.HTTPError as e:
                     last_error = e
                     status = e.response.status_code if e.response is not None else None
+                    fetch_log.append({'url': candidate, 'ok': False, 'http_status': status})
                     logger.warning(f'HTTP {status} pour {candidate} lors de l\'analyse SEO')
-                    # En cas de 403/401 sur le premier candidat, on tente le suivant
-                    if idx == 0 and status in (401, 403) and idx + 1 < len(candidates):
+                    if status in (401, 403) and idx + 1 < len(candidates):
                         if progress_callback:
-                            progress_callback('Accès refusé, nouvelle tentative avec un autre protocole...')
+                            progress_callback('Accès refusé, essai d’une autre variante d’URL...')
+                        continue
+                    if idx + 1 < len(candidates):
                         continue
                     break
                 except Exception as e:
                     last_error = e
+                    fetch_log.append({'url': candidate, 'ok': False, 'error': str(e)})
                     logger.error(f'Erreur récupération {candidate}: {e}')
-                    # Si c'est la première tentative, on tente la suivante, sinon on arrête
                     if idx + 1 < len(candidates):
                         continue
                     break
-            
+
+            results['url_fetch_attempts'] = fetch_log
+
             if response is None:
                 # Message plus lisible pour l’utilisateur
                 if isinstance(last_error, requests.HTTPError):
@@ -163,14 +304,26 @@ class SEOAnalyzer:
                     else:
                         msg = f'Erreur HTTP {status} lors de la récupération de la page.'
                 else:
-                    msg = f'Erreur lors de la récupération de la page: {str(last_error)}'
+                    if isinstance(last_error, (ConnectTimeout, ReadTimeout, RequestsTimeout)):
+                        msg = (
+                            'Le site n\'a pas répondu à temps (connexion ou lecture trop lente). '
+                            'Vérifiez l\'URL, que le site est joignable depuis le serveur, ou réessayez plus tard.'
+                        )
+                    else:
+                        msg = f'Erreur lors de la récupération de la page: {str(last_error)}'
                 results['error'] = msg
-                logger.error(f'Erreur récupération {url}: {last_error}')
+                logger.error(f'Erreur récupération (dernière URL essayée): {last_error}')
                 return results
-            
+
             html_content = response.text
             final_url = response.url
-            
+            parsed_final = urlparse(final_url)
+            base_url = f'{parsed_final.scheme}://{parsed_final.netloc}'
+            results['url'] = final_url
+            results['domain'] = parsed_final.netloc
+            if last_candidate_ok and last_candidate_ok.rstrip('/') != final_url.rstrip('/'):
+                results['url_opened_with'] = last_candidate_ok
+
             if progress_callback:
                 progress_callback('Analyse des meta tags...')
             
@@ -201,11 +354,11 @@ class SEOAnalyzer:
             # Chercher robots.txt
             results['robots'] = self._check_robots(base_url)
             
-            # Audit Lighthouse si disponible
+            # Audit Lighthouse si disponible (URL finale après redirections)
             if use_lighthouse and self.tools['lighthouse']:
                 if progress_callback:
                     progress_callback('Audit Lighthouse (SEO/perfs)...')
-                results['lighthouse'] = self._run_lighthouse(url)
+                results['lighthouse'] = self._run_lighthouse(final_url)
             
             # Calculer le score SEO
             results['score'] = self._calculate_seo_score(results)
@@ -227,7 +380,7 @@ class SEOAnalyzer:
             }
             
         except Exception as e:
-            logger.error(f'Erreur analyse SEO pour {url}: {e}', exc_info=True)
+            logger.error(f'Erreur analyse SEO pour {url_initial}: {e}', exc_info=True)
             results['error'] = str(e)
         
         return results
@@ -444,22 +597,30 @@ class SEOAnalyzer:
             with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
                 output_path = f.name
             
-            # Exécuter Lighthouse
+            # Exécuter Lighthouse (chrome-launcher exige CHROME_PATH si Chrome n’est pas détecté, ex. Raspberry Pi)
+            chrome_bin = _lighthouse_chrome_executable()
             cmd = [
                 'lighthouse',
                 url,
                 '--output=json',
                 '--output-path=' + output_path,
-                '--chrome-flags=--headless --no-sandbox',
+                '--chrome-flags=--headless --no-sandbox --disable-dev-shm-usage',
                 '--quiet',
-                '--only-categories=seo,performance'
+                '--only-categories=seo,performance',
             ]
-            
+            if chrome_bin:
+                cmd.insert(2, '--chrome-path=' + chrome_bin)
+
+            run_env = os.environ.copy()
+            if chrome_bin:
+                run_env['CHROME_PATH'] = chrome_bin
+
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=SEO_TOOL_TIMEOUT
+                timeout=SEO_TOOL_TIMEOUT,
+                env=run_env,
             )
             
             if result.returncode == 0 and os.path.exists(output_path):

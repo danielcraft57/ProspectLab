@@ -19,7 +19,10 @@ L'application utilise **Flask-SocketIO** pour la communication en temps réel en
 # app.py
 from flask_socketio import SocketIO, emit
 
-socketio = SocketIO(app, async_mode='threading')
+# async_mode=None (défaut) : détection auto — avec Gunicorn -k eventlet, utiliser eventlet.
+# Ne pas forcer async_mode='threading' en prod sous eventlet (non supporté, handlers jamais exécutés).
+# Optionnel : variable d'environnement SOCKETIO_ASYNC_MODE=eventlet|threading|gevent
+socketio = SocketIO(app, async_mode=None)
 
 @socketio.on('start_analysis')
 def handle_analysis(data):

@@ -188,6 +188,10 @@ def entreprises():
             'pentest_max': request.args.get('pentest_max', type=int),
             'seo_min': request.args.get('seo_min', type=int),
             'seo_max': request.args.get('seo_max', type=int),
+            # Uniquement entreprises sans score (NULL) pour ce type d'analyse
+            'security_null': request.args.get('security_null'),
+            'pentest_null': request.args.get('pentest_null'),
+            'seo_null': request.args.get('seo_null'),
             'groupe_id': request.args.get('groupe_id', type=int),
             'no_group': request.args.get('no_group'),
             'has_email': request.args.get('has_email'),
@@ -211,7 +215,8 @@ def entreprises():
             if k in ('security_min', 'security_max', 'pentest_min', 'pentest_max', 'seo_min', 'seo_max',
                      'performance_min', 'performance_max'):
                 return 0 <= v <= 100
-            if k in ('has_email', 'no_group', 'has_blog', 'has_form', 'has_tunnel'):
+            if k in ('has_email', 'no_group', 'has_blog', 'has_form', 'has_tunnel',
+                     'security_null', 'pentest_null', 'seo_null'):
                 return str(v).lower() in ('1', 'true', 'yes')
             return v != ''
         filters = {k: v for k, v in filters.items() if keep_filter(k, v)}

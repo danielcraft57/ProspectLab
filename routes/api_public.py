@@ -913,48 +913,69 @@ def public_website_analysis():
     max_time = int(payload.get('max_time', 180) or 180)
     max_pages = int(payload.get('max_pages', 30) or 30)
     enable_nmap = bool(payload.get('enable_nmap', False))
-    use_lighthouse = bool(payload.get('use_lighthouse', True))
+    use_lighthouse = bool(payload.get('use_lighthouse', False))
 
     from tasks.scraping_tasks import scrape_emails_task
     from tasks.technical_analysis_tasks import technical_analysis_task
     from tasks.seo_tasks import seo_analysis_task
     from tasks.osint_tasks import osint_analysis_task
     from tasks.pentest_tasks import pentest_analysis_task
+    from tasks.heavy_schedule import BulkSubtaskStagger
 
+    _st = BulkSubtaskStagger()
     tasks_launched = {}
     try:
-        scraping_task = scrape_emails_task.delay(
-            url=website,
-            max_depth=max_depth,
-            max_workers=max_workers,
-            max_time=max_time,
-            max_pages=max_pages,
-            entreprise_id=entreprise_id,
+        scraping_task = scrape_emails_task.apply_async(
+            kwargs=dict(
+                url=website,
+                max_depth=max_depth,
+                max_workers=max_workers,
+                max_time=max_time,
+                max_pages=max_pages,
+                entreprise_id=entreprise_id,
+            ),
+            countdown=_st.next_countdown(),
+            queue='heavy',
         )
         tasks_launched['scraping_task_id'] = scraping_task.id
     except Exception as e:
         tasks_launched['scraping_error'] = str(e)
 
     try:
-        tech_task = technical_analysis_task.delay(url=website, entreprise_id=entreprise_id, enable_nmap=enable_nmap)
+        tech_task = technical_analysis_task.apply_async(
+            kwargs=dict(url=website, entreprise_id=entreprise_id, enable_nmap=enable_nmap),
+            countdown=_st.next_countdown(),
+            queue='heavy',
+        )
         tasks_launched['technical_task_id'] = tech_task.id
     except Exception as e:
         tasks_launched['technical_error'] = str(e)
 
     try:
-        seo_task = seo_analysis_task.delay(url=website, entreprise_id=entreprise_id, use_lighthouse=use_lighthouse)
+        seo_task = seo_analysis_task.apply_async(
+            kwargs=dict(url=website, entreprise_id=entreprise_id, use_lighthouse=use_lighthouse),
+            countdown=_st.next_countdown(),
+        )
         tasks_launched['seo_task_id'] = seo_task.id
     except Exception as e:
         tasks_launched['seo_error'] = str(e)
 
     try:
-        osint_task = osint_analysis_task.delay(url=website, entreprise_id=entreprise_id)
+        osint_task = osint_analysis_task.apply_async(
+            kwargs=dict(url=website, entreprise_id=entreprise_id),
+            countdown=_st.next_countdown(),
+            queue='heavy',
+        )
         tasks_launched['osint_task_id'] = osint_task.id
     except Exception as e:
         tasks_launched['osint_error'] = str(e)
 
     try:
-        pentest_task = pentest_analysis_task.delay(url=website, entreprise_id=entreprise_id, options={})
+        pentest_task = pentest_analysis_task.apply_async(
+            kwargs=dict(url=website, entreprise_id=entreprise_id, options={}),
+            countdown=_st.next_countdown(),
+            queue='heavy',
+        )
         tasks_launched['pentest_task_id'] = pentest_task.id
     except Exception as e:
         tasks_launched['pentest_error'] = str(e)

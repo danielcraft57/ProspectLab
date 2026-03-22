@@ -39,6 +39,9 @@ bash scripts/linux/test_all_tools.sh
 - `start-celery.sh` : Démarre worker + beat (utilise `env/` ou venv)
 - `start-celery-beat.sh` : Démarre uniquement Celery beat (`env/` ou venv)
 - `update_services_to_conda.sh` : Met à jour les unités systemd pour Conda (prod)
+- `start_celery_worker.sh` : Worker systemd (`ExecStart` de `prospectlab-celery.service`) avec **`-Q celery,heavy`** — obligatoire en prod pour les analyses lourdes
+- `print_celery_broker.sh` : Affiche `CELERY_BROKER_URL` (à comparer au worker)
+- `reset_prospectlab_stagger_counter.sh` : Remet à zéro le compteur d’étalement Redis si les tâches semblent bloquées des heures dans le futur
 
 ### Par version (bookworm/, trixie/, kali/)
 

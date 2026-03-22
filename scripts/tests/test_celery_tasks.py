@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 
 # Ajouter le répertoire parent au path pour les imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 try:
     from celery_app import celery

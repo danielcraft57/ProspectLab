@@ -200,15 +200,30 @@ python scripts/clear_redis.py
 
 ### Scripts de test
 
+#### `test_multicanal_send.py` - Test d'envoi multicanal (X/Meta)
+
+Teste un envoi de message prive via la couche `services/multicanal`.
+
+**Emplacement :** `scripts/tests/test_multicanal_send.py`
+
+**Utilisation :**
+```bash
+# Test X
+python scripts/tests/test_multicanal_send.py --channel x --recipient-id 123456789 --body "Bonjour, test X ProspectLab." --entreprise-id 42
+
+# Test Meta
+python scripts/tests/test_multicanal_send.py --channel meta --recipient-id <PSID> --body "Bonjour, test Meta ProspectLab." --entreprise-id 42
+```
+
 #### `test_celery_tasks.py` - Test des tâches Celery
 
 Vérifie que toutes les tâches Celery sont correctement enregistrées.
 
-**Emplacement :** `scripts/test_celery_tasks.py`
+**Emplacement :** `scripts/tests/test_celery_tasks.py`
 
 **Utilisation :**
 ```bash
-python scripts/test_celery_tasks.py
+python scripts/tests/test_celery_tasks.py
 ```
 
 **Résultat :** Affiche la liste de toutes les tâches enregistrées et vérifie les tâches principales (analysis, scraping, technical_analysis, email, cleanup).
@@ -217,7 +232,7 @@ python scripts/test_celery_tasks.py
 
 Vérifie que Redis est accessible et que Celery peut s'y connecter.
 
-**Emplacement :** `scripts/test_redis_connection.py`
+**Emplacement :** `scripts/tests/test_redis_connection.py`
 
 **Prérequis :**
 - Redis démarré
@@ -225,7 +240,7 @@ Vérifie que Redis est accessible et que Celery peut s'y connecter.
 
 **Utilisation :**
 ```bash
-python scripts/test_redis_connection.py
+python scripts/tests/test_redis_connection.py
 ```
 
 **Résultat :** Affiche les informations de configuration Redis, teste la connexion et vérifie les workers Celery actifs.

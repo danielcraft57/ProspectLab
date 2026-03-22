@@ -76,6 +76,13 @@ WSL_USER = os.environ.get('WSL_USER', 'loupix')
 OSINT_TOOL_TIMEOUT = int(os.environ.get('OSINT_TOOL_TIMEOUT', '60'))  # secondes
 PENTEST_TOOL_TIMEOUT = int(os.environ.get('PENTEST_TOOL_TIMEOUT', '120'))  # secondes
 
+# Analyse SEO : timeouts séparés connexion / lecture (plusieurs URL candidates)
+SEO_FETCH_CONNECT_TIMEOUT = float(os.environ.get('SEO_FETCH_CONNECT_TIMEOUT', '12'))
+SEO_FETCH_READ_TIMEOUT = float(os.environ.get('SEO_FETCH_READ_TIMEOUT', '25'))
+SEO_TOOL_TIMEOUT = int(os.environ.get('SEO_TOOL_TIMEOUT', '120'))
+# Lighthouse (Node chrome-launcher) : sur Linux embarqué / Raspberry Pi, Chrome n’est pas dans le PATH standard
+CHROME_PATH = (os.environ.get('CHROME_PATH') or os.environ.get('LIGHTHOUSE_CHROME_PATH') or '').strip() or None
+
 # Configuration des limites de requêtes API
 SIRENE_API_RATE_LIMIT = int(os.environ.get('SIRENE_API_RATE_LIMIT', '10'))  # requêtes par minute
 
@@ -92,6 +99,17 @@ CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes max par tâche
 CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # 25 minutes avant arrêt doux
 # Nombre de workers Celery (4 en dev, 6 en prod par défaut)
 CELERY_WORKERS = int(os.environ.get('CELERY_WORKERS', '4'))
+# Étalement des sous-tâches lancées en masse (scraping multi-sites, etc.) : countdown = index * valeur
+CELERY_BULK_STAGGER_SEC = float(os.environ.get('CELERY_BULK_STAGGER_SEC', '0.75'))
+# Index Redis global (WebSocket) pris modulo cette valeur pour éviter un countdown énorme
+# si la clé prospectlab:heavy:stagger:seq a été incrémentée des milliers de fois (sinon les
+# tâches restent « planifiées » pendant des heures et le worker semble ne rien faire).
+CELERY_BULK_STAGGER_SLOT_MODULO = max(1, int(os.environ.get('CELERY_BULK_STAGGER_SLOT_MODULO', '400')))
+# 1 = le worker ne précharge qu'une tâche à la fois (meilleure répartition sous charge)
+CELERY_WORKER_PREFETCH_MULTIPLIER = int(os.environ.get('CELERY_WORKER_PREFETCH_MULTIPLIER', '1'))
+CELERY_TASK_ACKS_LATE = os.environ.get('CELERY_TASK_ACKS_LATE', 'true').lower() in ('1', 'true', 'yes')
+# Files à consommer (lourd vs léger) — le worker doit écouter les deux, ex: celery,heavy
+CELERY_WORKER_QUEUES = os.environ.get('CELERY_WORKER_QUEUES', 'celery,heavy')
 
 # URL de base pour le tracking des emails (doit être accessible publiquement)
 # Exemple: https://votre-domaine.com ou http://votre-ip:5000

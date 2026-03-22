@@ -93,7 +93,7 @@
             <div class="filters-advanced-section">
                 <div class="filters-advanced-section-header">
                     <h4>Scores</h4>
-                    <p>Cibler selon les scores sécurité, SEO et risque.</p>
+                    <p>Cibler selon les scores technique, SEO et pentest. Cochez « sans score » pour les entreprises jamais analysées (valeur NULL en base).</p>
                 </div>
                 <div class="filters-advanced-section-body">
                     <div class="filters-grid">
@@ -138,6 +138,10 @@
                                 <span>75</span>
                                 <span>100</span>
                             </div>
+                            <label class="form-checkbox score-null-option" for="filter-security-null">
+                                <input type="checkbox" id="filter-security-null" />
+                                <span>Sans score technique (non analysé)</span>
+                            </label>
                         </div>
                     </div>
 
@@ -182,6 +186,10 @@
                                 <span>75</span>
                                 <span>100</span>
                             </div>
+                            <label class="form-checkbox score-null-option" for="filter-seo-null">
+                                <input type="checkbox" id="filter-seo-null" />
+                                <span>Sans score SEO (non analysé)</span>
+                            </label>
                         </div>
                     </div>
 
@@ -226,6 +234,10 @@
                                 <span>75</span>
                                 <span>100</span>
                             </div>
+                            <label class="form-checkbox score-null-option" for="filter-pentest-null">
+                                <input type="checkbox" id="filter-pentest-null" />
+                                <span>Sans score pentest (non analysé)</span>
+                            </label>
                         </div>
                     </div>
                 </div>
@@ -411,6 +423,6 @@
 <script src="{{ url_for('static', filename='js/modules/analyses/pentest.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/analyses/scraping.js') }}"></script>
 <!-- Script principal (chargement différé) -->
-<script src="{{ url_for('static', filename='js/entreprises.refactored.js') }}?v=5" defer></script>
+<script src="{{ url_for('static', filename='js/entreprises.refactored.js') }}?v=6" defer></script>
 {% endblock %}
 

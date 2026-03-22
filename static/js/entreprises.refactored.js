@@ -143,7 +143,41 @@
         : (fn) => fn;
     
     // Variables d'état
-    let currentView = 'grid';
+    const ENTREPRISES_VIEW_STORAGE_KEY = 'entreprises_view_v1';
+    let currentView = (() => {
+        try {
+            if (!window.localStorage) return 'grid';
+            const raw = window.localStorage.getItem(ENTREPRISES_VIEW_STORAGE_KEY);
+            if (raw === 'list' || raw === 'grid') return raw;
+            return 'grid';
+        } catch (e) {
+            return 'grid';
+        }
+    })();
+
+    function persistEntreprisesViewMode() {
+        try {
+            if (window.localStorage) {
+                window.localStorage.setItem(ENTREPRISES_VIEW_STORAGE_KEY, currentView);
+            }
+        } catch (e) {
+            // ignore
+        }
+    }
+
+    function syncViewToggleButtons() {
+        const btnGrid = document.getElementById('btn-view-grid');
+        const btnList = document.getElementById('btn-view-list');
+        if (!btnGrid || !btnList) return;
+        if (currentView === 'list') {
+            btnList.classList.add('active');
+            btnGrid.classList.remove('active');
+        } else {
+            btnGrid.classList.add('active');
+            btnList.classList.remove('active');
+        }
+    }
+
     const ENTREPRISES_CURRENT_PAGE_STORAGE_KEY = 'entreprises_current_page_v1';
     let currentPage = (() => {
         try {
@@ -190,6 +224,49 @@
         const el = document.getElementById(id);
         return el ? !!el.checked : false;
     }
+
+    function formatScoreMinLabel(value) {
+        const v = parseInt(value, 10) || 0;
+        if (v <= 0) return '0 (tous)';
+        if (v >= 75) return `≥ ${v} (excellent)`;
+        if (v >= 50) return `≥ ${v} (bon)`;
+        if (v >= 25) return `≥ ${v} (moyen)`;
+        return `≥ ${v}`;
+    }
+
+    function formatScoreMaxLabel(value) {
+        const v = parseInt(value, 10) || 100;
+        if (v >= 100) return '100 (tous)';
+        if (v <= 25) return `≤ ${v} (risqué)`;
+        if (v <= 50) return `≤ ${v} (moyen)`;
+        return `≤ ${v}`;
+    }
+
+    /** Désactive les jauges quand « sans score » est coché (filtre SQL IS NULL). */
+    function syncScoreNullSlidersDisabled() {
+        const triples = [
+            ['filter-security-null', 'filter-security-min', 'filter-security-max', 'filter-security-min-value', 'filter-security-max-value'],
+            ['filter-seo-null', 'filter-seo-min', 'filter-seo-max', 'filter-seo-min-value', 'filter-seo-max-value'],
+            ['filter-pentest-null', 'filter-pentest-min', 'filter-pentest-max', 'filter-pentest-min-value', 'filter-pentest-max-value'],
+        ];
+        triples.forEach(([nullId, minId, maxId, minLabelId, maxLabelId]) => {
+            const n = document.getElementById(nullId);
+            const minEl = document.getElementById(minId);
+            const maxEl = document.getElementById(maxId);
+            const minL = document.getElementById(minLabelId);
+            const maxL = document.getElementById(maxLabelId);
+            if (!n || !minEl || !maxEl) return;
+            const dis = !!n.checked;
+            minEl.disabled = dis;
+            maxEl.disabled = dis;
+            if (dis) {
+                minEl.value = '0';
+                maxEl.value = '100';
+            }
+            if (minL) minL.textContent = formatScoreMinLabel(minEl.value);
+            if (maxL) maxL.textContent = formatScoreMaxLabel(maxEl.value);
+        });
+    }
     
     function buildFiltersMementoState() {
         // Note: on ne stocke pas "opportunite" dans un champ dédié UI,
@@ -205,6 +282,9 @@
             seo_max: getElValue('filter-seo-max'),
             pentest_min: getElValue('filter-pentest-min'),
             pentest_max: getElValue('filter-pentest-max'),
+            security_null: getElChecked('filter-security-null'),
+            seo_null: getElChecked('filter-seo-null'),
+            pentest_null: getElChecked('filter-pentest-null'),
             has_email: getElChecked('filter-has-email'),
             has_blog: getElChecked('filter-has-blog'),
             has_form: getElChecked('filter-has-form'),
@@ -276,6 +356,9 @@
                 if (!el) return;
                 el.checked = !!checked;
             };
+            setCheckbox('filter-security-null', s.security_null);
+            setCheckbox('filter-seo-null', s.seo_null);
+            setCheckbox('filter-pentest-null', s.pentest_null);
             setCheckbox('filter-has-email', s.has_email);
             setCheckbox('filter-has-blog', s.has_blog);
             setCheckbox('filter-has-form', s.has_form);
@@ -305,6 +388,7 @@
                 else delete document.body.dataset.initialOpportunite;
             }
             
+            syncScoreNullSlidersDisabled();
             if (typeof updateAdvancedFiltersBadge === 'function') {
                 updateAdvancedFiltersBadge();
             }
@@ -595,6 +679,9 @@
         const seoMaxRaw = get('filter-seo-max') || '100';
         const pentestMinRaw = get('filter-pentest-min') || '0';
         const pentestMaxRaw = get('filter-pentest-max') || '100';
+        const securityNull = document.getElementById('filter-security-null')?.checked;
+        const seoNull = document.getElementById('filter-seo-null')?.checked;
+        const pentestNull = document.getElementById('filter-pentest-null')?.checked;
         const tagsText = (get('filter-tags') || '').trim();
         const cms = (get('filter-cms') || '').trim();
         const framework = (get('filter-framework') || '').trim();
@@ -632,23 +719,35 @@
         if (hasEmailCheckbox && hasEmailCheckbox.checked) {
             filters.has_email = 'true';
         }
-        if (!Number.isNaN(securityMin) && securityMin > 0) {
-            filters.security_min = securityMin;
+        if (securityNull) {
+            filters.security_null = 'true';
+        } else {
+            if (!Number.isNaN(securityMin) && securityMin > 0) {
+                filters.security_min = securityMin;
+            }
+            if (!Number.isNaN(securityMax) && securityMax < 100) {
+                filters.security_max = securityMax;
+            }
         }
-        if (!Number.isNaN(securityMax) && securityMax < 100) {
-            filters.security_max = securityMax;
+        if (seoNull) {
+            filters.seo_null = 'true';
+        } else {
+            if (!Number.isNaN(seoMin) && seoMin > 0) {
+                filters.seo_min = seoMin;
+            }
+            if (!Number.isNaN(seoMax) && seoMax < 100) {
+                filters.seo_max = seoMax;
+            }
         }
-        if (!Number.isNaN(seoMin) && seoMin > 0) {
-            filters.seo_min = seoMin;
-        }
-        if (!Number.isNaN(seoMax) && seoMax < 100) {
-            filters.seo_max = seoMax;
-        }
-        if (!Number.isNaN(pentestMin) && pentestMin > 0) {
-            filters.pentest_min = pentestMin;
-        }
-        if (!Number.isNaN(pentestMax) && pentestMax < 100) {
-            filters.pentest_max = pentestMax;
+        if (pentestNull) {
+            filters.pentest_null = 'true';
+        } else {
+            if (!Number.isNaN(pentestMin) && pentestMin > 0) {
+                filters.pentest_min = pentestMin;
+            }
+            if (!Number.isNaN(pentestMax) && pentestMax < 100) {
+                filters.pentest_max = pentestMax;
+            }
         }
         const hasActiveTags = Array.isArray(activeTagFilters) && activeTagFilters.length > 0;
         let partsFromInput = [];
@@ -2345,6 +2444,9 @@
             'filter-seo-max',
             'filter-pentest-min',
             'filter-pentest-max',
+            'filter-security-null',
+            'filter-seo-null',
+            'filter-pentest-null',
             'filter-has-email'
         ];
 
@@ -2352,6 +2454,9 @@
             const el = document.getElementById(id);
             if (el) {
                 el.addEventListener('change', () => {
+                    if (id.endsWith('-null')) {
+                        syncScoreNullSlidersDisabled();
+                    }
                     updateAdvancedFiltersBadge();
                     debouncedApplyFilters();
                 });
@@ -2389,23 +2494,6 @@
         const seoLabelMax = document.getElementById('filter-seo-max-value');
         const pentestLabelMin = document.getElementById('filter-pentest-min-value');
         const pentestLabelMax = document.getElementById('filter-pentest-max-value');
-
-        function formatScoreMinLabel(value) {
-            const v = parseInt(value, 10) || 0;
-            if (v <= 0) return '0 (tous)';
-            if (v >= 75) return `≥ ${v} (excellent)`;
-            if (v >= 50) return `≥ ${v} (bon)`;
-            if (v >= 25) return `≥ ${v} (moyen)`;
-            return `≥ ${v}`;
-        }
-
-        function formatScoreMaxLabel(value) {
-            const v = parseInt(value, 10) || 100;
-            if (v >= 100) return '100 (tous)';
-            if (v <= 25) return `≤ ${v} (risqué)`;
-            if (v <= 50) return `≤ ${v} (moyen)`;
-            return `≤ ${v}`;
-        }
 
         if (securitySliderMin && securityLabelMin) {
             securityLabelMin.textContent = formatScoreMinLabel(securitySliderMin.value);
@@ -2454,6 +2542,8 @@
                 updateAdvancedFiltersBadge();
             });
         }
+
+        syncScoreNullSlidersDisabled();
 
         // Actions de masse (sélection, relance, groupes)
         const bulkSelectAllBtn = document.getElementById('bulk-select-all');
@@ -2541,8 +2631,23 @@
                         const types = action === 'launch-all'
                             ? ['technique', 'seo', 'pentest']
                             : [action.replace('launch-', '')];
-                        ids.forEach(id => {
-                            types.forEach(t => triggerAnalysisRelaunch(id, t));
+                        /** @type {{ id: number, t: string }[]} */
+                        const jobs = [];
+                        ids.forEach((id) => {
+                            types.forEach((t) => jobs.push({ id, t }));
+                        });
+                        const staggerMs = jobs.length > 20 ? 700 : 300;
+                        if (jobs.length > 3) {
+                            Notifications.show(
+                                `${jobs.length} analyse(s) planifiées (lancement étalé ~${staggerMs} ms entre chaque pour ne pas saturer Celery).`,
+                                'info',
+                                'fa-layer-group'
+                            );
+                        }
+                        jobs.forEach((job, i) => {
+                            setTimeout(() => {
+                                triggerAnalysisRelaunch(job.id, job.t);
+                            }, i * staggerMs);
                         });
                     } else if (action === 'launch-scraping') {
                         for (const id of ids) {
@@ -2801,15 +2906,15 @@
         
         document.getElementById('btn-view-grid').addEventListener('click', () => {
             currentView = 'grid';
-            document.getElementById('btn-view-grid').classList.add('active');
-            document.getElementById('btn-view-list').classList.remove('active');
+            syncViewToggleButtons();
+            persistEntreprisesViewMode();
             renderEntreprises();
         });
         
         document.getElementById('btn-view-list').addEventListener('click', () => {
             currentView = 'list';
-            document.getElementById('btn-view-list').classList.add('active');
-            document.getElementById('btn-view-grid').classList.remove('active');
+            syncViewToggleButtons();
+            persistEntreprisesViewMode();
             renderEntreprises();
         });
     }
@@ -2843,6 +2948,9 @@
         if (seoMax && parseInt(seoMax, 10) < 100) count += 1;
         if (pentestMin && parseInt(pentestMin, 10) > 0) count += 1;
         if (pentestMax && parseInt(pentestMax, 10) < 100) count += 1;
+        if (document.getElementById('filter-security-null')?.checked) count += 1;
+        if (document.getElementById('filter-seo-null')?.checked) count += 1;
+        if (document.getElementById('filter-pentest-null')?.checked) count += 1;
         if (hasEmail) count += 1;
 
         if (count > 0) {
@@ -4387,6 +4495,11 @@
     
     // Initialisation
     (async () => {
+        try {
+            syncViewToggleButtons();
+        } catch (e) {
+            // ignore
+        }
         try {
             await loadSecteurs();
         } catch (e) {

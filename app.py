@@ -67,10 +67,20 @@ setup_root_logger(app)
 celery = make_celery(app)
 
 # Initialiser SocketIO
+# IMPORTANT (prod) : avec Gunicorn « -k eventlet », ne pas forcer async_mode='threading'.
+# La doc Flask-SocketIO indique que le mode threading n'est pas supporté quand eventlet/gevent
+# monkey-patchent la stdlib — les événements Socket.IO (ex. start_seo_analysis) peuvent alors
+# ne jamais exécuter le handler côté serveur (aucune tâche Celery enfilée, aucun log).
+# - Par défaut : None → détection auto (eventlet si déjà patché par Gunicorn, sinon threading en dev).
+# - Forcer si besoin : SOCKETIO_ASYNC_MODE=threading | eventlet | gevent
+_socketio_async_mode = os.environ.get('SOCKETIO_ASYNC_MODE') or None
+if _socketio_async_mode is not None:
+    _socketio_async_mode = _socketio_async_mode.strip() or None
+
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
-    async_mode='threading',
+    async_mode=_socketio_async_mode,
     logger=False,
     engineio_logger=False,
     allow_unsafe_werkzeug=True
@@ -100,6 +110,13 @@ app.register_blueprint(other_bp)
 # Enregistrer les handlers WebSocket
 from routes.websocket_handlers import register_websocket_handlers
 register_websocket_handlers(socketio, app)
+
+# Trace unique au boot worker : confirme async_mode (diagnostic Gunicorn + Socket.IO)
+try:
+    _am = getattr(socketio, 'async_mode', None) or 'inconnu'
+except Exception:
+    _am = 'erreur'
+app.logger.info('ProspectLab Socket.IO prêt (async_mode=%s)', _am)
 
 # CORS : autoriser l'app prospection (ex: Vite sur localhost:5173) à appeler l'API
 ALLOWED_CORS_ORIGINS = [

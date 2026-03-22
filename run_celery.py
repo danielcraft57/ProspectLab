@@ -14,6 +14,12 @@ import subprocess
 import socket
 import uuid
 
+try:
+    from config import CELERY_WORKERS, CELERY_WORKER_QUEUES
+except ImportError:
+    CELERY_WORKERS = int(os.environ.get('CELERY_WORKERS', '4'))
+    CELERY_WORKER_QUEUES = os.environ.get('CELERY_WORKER_QUEUES', 'celery,heavy')
+
 def kill_process_tree(pid):
     """Tue un processus et tous ses enfants (Windows)"""
     if sys.platform == 'win32':
@@ -98,9 +104,11 @@ def run_celery_worker():
         # Sur Windows, --beat ne fonctionne pas, donc on lance juste le worker
         # Le beat sera lancé dans un processus séparé
         # Utiliser --pool=threads avec --concurrency=4 pour permettre l'exécution de 4 tâches en parallèle
+        q = CELERY_WORKER_QUEUES.replace(' ', '')
         celery_process = subprocess.Popen(
             [sys.executable, '-m', 'celery', '-A', 'celery_app', 'worker',
-             '--loglevel=info', '--pool=threads', '--concurrency=4', f'--hostname={worker_name}'],
+             '--loglevel=info', '--pool=threads', f'--concurrency={CELERY_WORKERS}',
+             '-Q', q, f'--hostname={worker_name}'],
             stdout=sys.stdout,
             stderr=sys.stderr
         )

@@ -17,6 +17,13 @@ from typing import Dict
 # Configurer le logger pour cette tâche (niveau INFO pour limiter le bruit)
 logger = setup_logger(__name__, 'scraping_tasks.log', level=logging.INFO)
 
+from tasks.heavy_schedule import BulkSubtaskStagger
+
+try:
+    from config import CELERY_BULK_STAGGER_SEC
+except ImportError:
+    CELERY_BULK_STAGGER_SEC = 0.75
+
 
 def _safe_update_state(task, task_id, **kwargs):
     """
@@ -223,10 +230,16 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
     osint_tasks = []  # Stocker les tâches d'analyse OSINT lancées
     pentest_tasks = []  # Stocker les tâches d'analyse Pentest lancées
     seo_tasks = []    # Stocker les tâches d'analyse SEO lancées
+
+    # Compteur partagé : technique + OSINT + SEO + Pentest (évite de poster 200 tâches instantanément)
+    bulk_stagger = BulkSubtaskStagger()
     
-    # Lancer TOUTES les analyses techniques en parallèle AVANT de commencer le scraping
+    # Lancer les analyses techniques avec étalement (countdown) — pas toutes en même tick
     from tasks.technical_analysis_tasks import technical_analysis_task
-    logger.info(f'[Scraping Analyse {analysis_id}] Lancement de toutes les analyses techniques en parallèle...')
+    logger.info(
+        f'[Scraping Analyse {analysis_id}] Planification des analyses techniques '
+        f'({CELERY_BULK_STAGGER_SEC}s entre chaque sous-tâche)...'
+    )
     for row in rows:
         # Gérer les dictionnaires PostgreSQL et les tuples SQLite
         if isinstance(row, dict):
@@ -260,18 +273,29 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
 
         if website_str:
             try:
-                tech_task = technical_analysis_task.delay(url=website_str, entreprise_id=entreprise_id)
+                cd = bulk_stagger.next_countdown()
+                tech_task = technical_analysis_task.apply_async(
+                    kwargs=dict(url=website_str, entreprise_id=entreprise_id, enable_nmap=False),
+                    countdown=cd,
+                    queue='heavy',
+                )
                 tech_tasks.append({
                     'task': tech_task,
                     'entreprise_id': entreprise_id,
                     'url': website_str,
                     'nom': entreprise_name
                 })
-                logger.info(f'[Scraping Analyse {analysis_id}] Analyse technique lancée pour {entreprise_name} ({website_str}) - task_id={tech_task.id}')
+                logger.info(
+                    f'[Scraping Analyse {analysis_id}] Analyse technique planifiée pour {entreprise_name} '
+                    f'({website_str}) countdown={cd}s - task_id={tech_task.id}'
+                )
             except Exception as e:
                 logger.warning(f'[Scraping Analyse {analysis_id}] Erreur lors du lancement de l\'analyse technique pour {entreprise_name}: {e}')
     
-    logger.info(f'[Scraping Analyse {analysis_id}] {len(tech_tasks)} analyses techniques lancées en parallèle, démarrage du scraping...')
+    logger.info(
+        f'[Scraping Analyse {analysis_id}] {len(tech_tasks)} analyses techniques planifiées (étalées), '
+        f'démarrage du scraping...'
+    )
     
     # Inclure les IDs des tâches techniques dans le meta pour le monitoring en temps réel
     tech_tasks_launched_ids = [{'task_id': t['task'].id, 'entreprise_id': t['entreprise_id'], 'url': t['url'], 'nom': t['nom']} for t in tech_tasks]
@@ -660,13 +684,18 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
 
                     # Lancer la tâche OSINT en arrière-plan (ne pas attendre)
                     # Une tâche OSINT par site scrapé ; ajoutée ici à la fin du scraping de ce site.
-                    osint_task = osint_analysis_task.delay(
-                        url=website_str,
-                        entreprise_id=entreprise_id,
-                        people_from_scrapers=people_from_scrapers,
-                        emails_from_scrapers=emails_from_scrapers,
-                        social_profiles_from_scrapers=social_profiles_from_scrapers,
-                        phones_from_scrapers=phones_from_scrapers
+                    osint_cd = bulk_stagger.next_countdown()
+                    osint_task = osint_analysis_task.apply_async(
+                        kwargs=dict(
+                            url=website_str,
+                            entreprise_id=entreprise_id,
+                            people_from_scrapers=people_from_scrapers,
+                            emails_from_scrapers=emails_from_scrapers,
+                            social_profiles_from_scrapers=social_profiles_from_scrapers,
+                            phones_from_scrapers=phones_from_scrapers,
+                        ),
+                        countdown=osint_cd,
+                        queue='heavy',
                     )
                     
                     # Stocker la tâche OSINT pour le monitoring (liste alimentée à chaque fin de site scrapé)
@@ -684,10 +713,15 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                     )
                     # Lancer l'analyse SEO en parallèle
                     try:
-                        seo_task = seo_analysis_task.delay(
-                            url=website_str,
-                            entreprise_id=entreprise_id,
-                            use_lighthouse=True
+                        seo_cd = bulk_stagger.next_countdown()
+                        seo_task = seo_analysis_task.apply_async(
+                            kwargs=dict(
+                                url=website_str,
+                                entreprise_id=entreprise_id,
+                                use_lighthouse=False,
+                            ),
+                            countdown=seo_cd,
+                            queue='heavy',
                         )
                         seo_tasks.append({
                             'task': seo_task,
@@ -715,11 +749,16 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                         # Récupérer les formulaires du scraper si disponibles, sinon liste vide
                         forms_from_scrapers = results.get('forms') if results else None
 
-                        pentest_task = pentest_analysis_task.delay(
-                            url=website_str,
-                            entreprise_id=entreprise_id,
-                            options={},
-                            forms_from_scrapers=forms_from_scrapers
+                        pentest_cd = bulk_stagger.next_countdown()
+                        pentest_task = pentest_analysis_task.apply_async(
+                            kwargs=dict(
+                                url=website_str,
+                                entreprise_id=entreprise_id,
+                                options={},
+                                forms_from_scrapers=forms_from_scrapers,
+                            ),
+                            countdown=pentest_cd,
+                            queue='heavy',
                         )
 
                         # Stocker pour le monitoring (liste alimentée à chaque fin de site scrapé)
@@ -850,11 +889,16 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                     f'(scraping échoué, mais on lance quand même Pentest)'
                 )
                 
-                pentest_task = pentest_analysis_task.delay(
-                    url=website_str,
-                    entreprise_id=entreprise_id,
-                    options={},
-                    forms_from_scrapers=None  # Pas de formulaires car scraping échoué
+                pentest_cd = bulk_stagger.next_countdown()
+                pentest_task = pentest_analysis_task.apply_async(
+                    kwargs=dict(
+                        url=website_str,
+                        entreprise_id=entreprise_id,
+                        options={},
+                        forms_from_scrapers=None,
+                    ),
+                    countdown=pentest_cd,
+                    queue='heavy',
                 )
                 
                 pentest_tasks.append({

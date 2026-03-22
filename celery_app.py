@@ -8,9 +8,11 @@ de manière asynchrone, évitant ainsi de bloquer l'application Flask.
 from celery import Celery
 from celery.signals import setup_logging
 from celery.schedules import crontab
+from kombu import Queue
 from config import CELERY_BROKER_URL, CELERY_RESULT_BACKEND, CELERY_TASK_SERIALIZER, \
     CELERY_RESULT_SERIALIZER, CELERY_ACCEPT_CONTENT, CELERY_TIMEZONE, CELERY_ENABLE_UTC, \
-    CELERY_TASK_TRACK_STARTED, CELERY_TASK_TIME_LIMIT, CELERY_TASK_SOFT_TIME_LIMIT
+    CELERY_TASK_TRACK_STARTED, CELERY_TASK_TIME_LIMIT, CELERY_TASK_SOFT_TIME_LIMIT, \
+    CELERY_WORKER_PREFETCH_MULTIPLIER, CELERY_TASK_ACKS_LATE
 
 # Configuration des logs Celery via le module centralisé
 from services.logging_config import setup_celery_logger
@@ -44,6 +46,25 @@ celery.conf.update(
     task_track_started=CELERY_TASK_TRACK_STARTED,
     task_time_limit=CELERY_TASK_TIME_LIMIT,
     task_soft_time_limit=CELERY_TASK_SOFT_TIME_LIMIT,
+    # Répartition : tâches légères (emails, cron) vs lourdes (analyses, scraping)
+    task_default_queue='celery',
+    task_queues=(
+        Queue('celery', routing_key='celery'),
+        Queue('heavy', routing_key='heavy'),
+    ),
+    # Dict pattern -> route (Celery 5 / kombu : une *liste* de tuples casse MapRoute qui itère
+    # chaque entrée en « k, v » — le 1er élément est une str → too many values to unpack).
+    task_routes={
+        'tasks.technical_analysis_tasks.*': {'queue': 'heavy'},
+        'tasks.seo_tasks.*': {'queue': 'heavy'},
+        'tasks.osint_tasks.*': {'queue': 'heavy'},
+        'tasks.pentest_tasks.*': {'queue': 'heavy'},
+        'tasks.scraping_tasks.*': {'queue': 'heavy'},
+        'tasks.analysis_tasks.*': {'queue': 'heavy'},
+    },
+    task_create_missing_queues=True,
+    worker_prefetch_multiplier=CELERY_WORKER_PREFETCH_MULTIPLIER,
+    task_acks_late=CELERY_TASK_ACKS_LATE,
     # Importer automatiquement les tâches
     # Important : inclure explicitement toutes les tâches spécialisées
     imports=(

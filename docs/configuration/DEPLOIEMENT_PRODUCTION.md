@@ -148,11 +148,13 @@ RestartSec=10
 WantedBy=multi-user.target
 ```
 
+**Flask-SocketIO + Eventlet** : avec `-k eventlet`, l’application **ne doit pas** forcer `SOCKETIO_ASYNC_MODE=threading` dans `.env`. Le code utilise une détection automatique du mode async (eventlet une fois le worker Gunicorn chargé). Forcer le mode threading avec Eventlet peut empêcher l’exécution des handlers Socket.IO — les lancements d’analyse (SEO, etc.) ne déclenchent alors **aucune** tâche Celery ni log côté web.
+
 ### 2.2. Service Celery Worker
 
 Créer le script `/opt/prospectlab/scripts/linux/start_celery_worker.sh` :
 
-Le script `scripts/linux/start_celery_worker.sh` utilise déjà `/opt/prospectlab/env/bin/celery`. Aucune activation manuelle nécessaire.
+Le script `scripts/linux/start_celery_worker.sh` lance le worker avec **`-Q celery,heavy`** (surchargeable via `CELERY_WORKER_QUEUES` dans `.env`). Sans la file `heavy`, les tâches SEO / technique / pentest ne s’exécutent jamais.
 
 Rendre exécutable :
 

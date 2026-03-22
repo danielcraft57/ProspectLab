@@ -300,6 +300,7 @@ User=pi
 Group=pi
 WorkingDirectory=/opt/prospectlab
 Environment="PATH=/opt/prospectlab/env/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=/opt/prospectlab/.env
 ExecStart=/opt/prospectlab/env/bin/celery -A celery_app beat --loglevel=info --logfile=/opt/prospectlab/logs/celery_beat.log --pidfile=/opt/prospectlab/celery_beat.pid --detach
 ExecStop=/bin/kill -s TERM $MAINPID
 Restart=always

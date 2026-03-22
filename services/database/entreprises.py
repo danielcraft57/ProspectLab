@@ -49,6 +49,16 @@ class EntrepriseManager(DatabaseBase):
     def __init__(self, *args, **kwargs):
         """Initialise le module entreprises"""
         super().__init__(*args, **kwargs)
+
+    @staticmethod
+    def _truthy_filter(filters, key):
+        """True si le filtre booléen (query string) est activé : 1, true, yes."""
+        if not filters:
+            return False
+        v = filters.get(key)
+        if v is None:
+            return False
+        return str(v).lower() in ('1', 'true', 'yes')
     
     def find_duplicate_entreprise(self, nom, website=None, address_1=None, address_2=None):
         """
@@ -624,9 +634,18 @@ class EntrepriseManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
 
-        has_security_filters = filters and any(filters.get(k) is not None for k in ('security_min', 'security_max'))
-        has_pentest_filters = filters and any(filters.get(k) is not None for k in ('pentest_min', 'pentest_max'))
-        has_seo_filters = filters and any(filters.get(k) is not None for k in ('seo_min', 'seo_max'))
+        has_security_filters = filters and (
+            any(filters.get(k) is not None for k in ('security_min', 'security_max'))
+            or EntrepriseManager._truthy_filter(filters, 'security_null')
+        )
+        has_pentest_filters = filters and (
+            any(filters.get(k) is not None for k in ('pentest_min', 'pentest_max'))
+            or EntrepriseManager._truthy_filter(filters, 'pentest_null')
+        )
+        has_seo_filters = filters and (
+            any(filters.get(k) is not None for k in ('seo_min', 'seo_max'))
+            or EntrepriseManager._truthy_filter(filters, 'seo_null')
+        )
         wrap_subquery = has_security_filters or has_pentest_filters or has_seo_filters
 
         inner_query = '''
@@ -678,7 +697,20 @@ class EntrepriseManager(DatabaseBase):
             if str(filters.get('no_group', '')).lower() in ('1', 'true', 'yes'):
                 inner_query += ' AND e.id NOT IN (SELECT entreprise_id FROM entreprise_groupes)'
             if str(filters.get('has_email', '')).lower() in ('1', 'true', 'yes'):
-                inner_query += " AND e.email_principal IS NOT NULL AND TRIM(e.email_principal) <> ''"
+                # "has_email" côté UI veut dire "entreprise avec au moins un email connu".
+                # En prod, beaucoup d'emails sont stockés dans `scraper_emails` et pas dans `entreprises.email_principal`.
+                inner_query += """
+                    AND (
+                        (e.email_principal IS NOT NULL AND TRIM(e.email_principal) <> '')
+                        OR EXISTS (
+                            SELECT 1
+                            FROM scraper_emails se
+                            WHERE se.entreprise_id = e.id
+                              AND se.email IS NOT NULL
+                              AND TRIM(se.email) <> ''
+                        )
+                    )
+                """
             # Nouveaux filtres de segmentation
             if filters.get('cms'):
                 cms_val = filters['cms']
@@ -722,6 +754,13 @@ class EntrepriseManager(DatabaseBase):
                             LOWER(e.nom) LIKE ?
                             OR LOWER(e.secteur) LIKE ?
                             OR LOWER(COALESCE(e.email_principal, '')) LIKE ?
+                            OR EXISTS (
+                                SELECT 1
+                                FROM scraper_emails se
+                                WHERE se.entreprise_id = e.id
+                                  AND se.email IS NOT NULL
+                                  AND LOWER(se.email) LIKE ?
+                            )
                             OR LOWER(COALESCE(e.responsable, '')) LIKE ?
                             OR LOWER(COALESCE(e.website, '')) LIKE ?
                             OR LOWER(COALESCE(e.address_1, '')) LIKE ?
@@ -730,7 +769,7 @@ class EntrepriseManager(DatabaseBase):
                         )
                     '''
                     # Même token appliqué sur tous les champs cibles
-                    params.extend([like] * 8)
+                    params.extend([like] * 9)
 
             # Filtres sur les tags (JSON/texte)
             if filters.get('tags_contains'):
@@ -755,30 +794,39 @@ class EntrepriseManager(DatabaseBase):
                     params.append('%' + str(v) + '%')
 
         if wrap_subquery:
-            # Important : pour les filtres, on considère les analyses non faites comme score 0
-            # via COALESCE(score, 0), afin de pouvoir les exclure avec un seuil minimum > 0.
+            # Filtres plage : analyses non faites = score 0 via COALESCE (exclure avec min > 0).
+            # Filtres *_null : uniquement entreprises sans analyse (score IS NULL en base / sous-requête).
             query = 'SELECT sub.* FROM (' + inner_query + ') sub WHERE 1=1'
             if has_security_filters:
-                if filters.get('security_min') is not None:
-                    query += ' AND (COALESCE(sub.score_securite, 0) >= ?)'
-                    params.append(filters['security_min'])
-                if filters.get('security_max') is not None:
-                    query += ' AND (COALESCE(sub.score_securite, 0) <= ?)'
-                    params.append(filters['security_max'])
+                if EntrepriseManager._truthy_filter(filters, 'security_null'):
+                    query += ' AND sub.score_securite IS NULL'
+                else:
+                    if filters.get('security_min') is not None:
+                        query += ' AND (COALESCE(sub.score_securite, 0) >= ?)'
+                        params.append(filters['security_min'])
+                    if filters.get('security_max') is not None:
+                        query += ' AND (COALESCE(sub.score_securite, 0) <= ?)'
+                        params.append(filters['security_max'])
             if has_pentest_filters:
-                if filters.get('pentest_min') is not None:
-                    query += ' AND (COALESCE(sub.score_pentest, 0) >= ?)'
-                    params.append(filters['pentest_min'])
-                if filters.get('pentest_max') is not None:
-                    query += ' AND (COALESCE(sub.score_pentest, 0) <= ?)'
-                    params.append(filters['pentest_max'])
+                if EntrepriseManager._truthy_filter(filters, 'pentest_null'):
+                    query += ' AND sub.score_pentest IS NULL'
+                else:
+                    if filters.get('pentest_min') is not None:
+                        query += ' AND (COALESCE(sub.score_pentest, 0) >= ?)'
+                        params.append(filters['pentest_min'])
+                    if filters.get('pentest_max') is not None:
+                        query += ' AND (COALESCE(sub.score_pentest, 0) <= ?)'
+                        params.append(filters['pentest_max'])
             if has_seo_filters:
-                if filters.get('seo_min') is not None:
-                    query += ' AND (COALESCE(sub.score_seo, 0) >= ?)'
-                    params.append(filters['seo_min'])
-                if filters.get('seo_max') is not None:
-                    query += ' AND (COALESCE(sub.score_seo, 0) <= ?)'
-                    params.append(filters['seo_max'])
+                if EntrepriseManager._truthy_filter(filters, 'seo_null'):
+                    query += ' AND sub.score_seo IS NULL'
+                else:
+                    if filters.get('seo_min') is not None:
+                        query += ' AND (COALESCE(sub.score_seo, 0) >= ?)'
+                        params.append(filters['seo_min'])
+                    if filters.get('seo_max') is not None:
+                        query += ' AND (COALESCE(sub.score_seo, 0) <= ?)'
+                        params.append(filters['seo_max'])
 
             # Tri par pertinence si recherche textuelle présente
             if filters and filters.get('search'):
@@ -878,9 +926,18 @@ class EntrepriseManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
 
-        has_security_filters = filters and any(filters.get(k) is not None for k in ('security_min', 'security_max'))
-        has_pentest_filters = filters and any(filters.get(k) is not None for k in ('pentest_min', 'pentest_max'))
-        has_seo_filters = filters and any(filters.get(k) is not None for k in ('seo_min', 'seo_max'))
+        has_security_filters = filters and (
+            any(filters.get(k) is not None for k in ('security_min', 'security_max'))
+            or EntrepriseManager._truthy_filter(filters, 'security_null')
+        )
+        has_pentest_filters = filters and (
+            any(filters.get(k) is not None for k in ('pentest_min', 'pentest_max'))
+            or EntrepriseManager._truthy_filter(filters, 'pentest_null')
+        )
+        has_seo_filters = filters and (
+            any(filters.get(k) is not None for k in ('seo_min', 'seo_max'))
+            or EntrepriseManager._truthy_filter(filters, 'seo_null')
+        )
         wrap_subquery = has_security_filters or has_pentest_filters or has_seo_filters
 
         inner_query = '''
@@ -932,7 +989,19 @@ class EntrepriseManager(DatabaseBase):
             if str(filters.get('no_group', '')).lower() in ('1', 'true', 'yes'):
                 inner_query += ' AND e.id NOT IN (SELECT entreprise_id FROM entreprise_groupes)'
             if str(filters.get('has_email', '')).lower() in ('1', 'true', 'yes'):
-                inner_query += " AND e.email_principal IS NOT NULL AND TRIM(e.email_principal) <> ''"
+                # Même logique que dans get_entreprises: considérer aussi les emails scrapés.
+                inner_query += """
+                    AND (
+                        (e.email_principal IS NOT NULL AND TRIM(e.email_principal) <> '')
+                        OR EXISTS (
+                            SELECT 1
+                            FROM scraper_emails se
+                            WHERE se.entreprise_id = e.id
+                              AND se.email IS NOT NULL
+                              AND TRIM(se.email) <> ''
+                        )
+                    )
+                """
             # Nouveaux filtres de segmentation (même logique que get_entreprises)
             if filters.get('cms'):
                 cms_val = filters['cms']
@@ -971,18 +1040,27 @@ class EntrepriseManager(DatabaseBase):
                 tokens = [t.lower() for t in re.split(r'\s+', raw_search) if t.strip()]
                 for token in tokens:
                     like = f"%{token}%"
+                    # Doit être strictement aligné sur get_entreprises (même champs, même ordre des ?)
                     inner_query += '''
                         AND (
                             LOWER(e.nom) LIKE ?
                             OR LOWER(e.secteur) LIKE ?
                             OR LOWER(COALESCE(e.email_principal, '')) LIKE ?
+                            OR EXISTS (
+                                SELECT 1
+                                FROM scraper_emails se
+                                WHERE se.entreprise_id = e.id
+                                  AND se.email IS NOT NULL
+                                  AND LOWER(se.email) LIKE ?
+                            )
                             OR LOWER(COALESCE(e.responsable, '')) LIKE ?
                             OR LOWER(COALESCE(e.website, '')) LIKE ?
                             OR LOWER(COALESCE(e.address_1, '')) LIKE ?
                             OR LOWER(COALESCE(e.address_2, '')) LIKE ?
+                            OR LOWER(COALESCE(e.tags, '')) LIKE ?
                         )
                     '''
-                    params.extend([like] * 7)
+                    params.extend([like] * 9)
 
             # Filtres sur les tags (même logique que get_entreprises)
             if filters.get('tags_contains'):
@@ -1011,26 +1089,35 @@ class EntrepriseManager(DatabaseBase):
         # applique déjà TOUS les filtres, y compris la recherche multi-mots.
         query = 'SELECT COUNT(*) as count FROM (' + inner_query + ') sub WHERE 1=1'
         if has_security_filters:
-            if filters.get('security_min') is not None:
-                query += ' AND (sub.score_securite IS NOT NULL AND sub.score_securite >= ?)'
-                params.append(filters['security_min'])
-            if filters.get('security_max') is not None:
-                query += ' AND (sub.score_securite IS NOT NULL AND sub.score_securite <= ?)'
-                params.append(filters['security_max'])
+            if EntrepriseManager._truthy_filter(filters, 'security_null'):
+                query += ' AND sub.score_securite IS NULL'
+            else:
+                if filters.get('security_min') is not None:
+                    query += ' AND (COALESCE(sub.score_securite, 0) >= ?)'
+                    params.append(filters['security_min'])
+                if filters.get('security_max') is not None:
+                    query += ' AND (COALESCE(sub.score_securite, 0) <= ?)'
+                    params.append(filters['security_max'])
         if has_pentest_filters:
-            if filters.get('pentest_min') is not None:
-                query += ' AND (sub.score_pentest IS NOT NULL AND sub.score_pentest >= ?)'
-                params.append(filters['pentest_min'])
-            if filters.get('pentest_max') is not None:
-                query += ' AND (sub.score_pentest IS NOT NULL AND sub.score_pentest <= ?)'
-                params.append(filters['pentest_max'])
+            if EntrepriseManager._truthy_filter(filters, 'pentest_null'):
+                query += ' AND sub.score_pentest IS NULL'
+            else:
+                if filters.get('pentest_min') is not None:
+                    query += ' AND (COALESCE(sub.score_pentest, 0) >= ?)'
+                    params.append(filters['pentest_min'])
+                if filters.get('pentest_max') is not None:
+                    query += ' AND (COALESCE(sub.score_pentest, 0) <= ?)'
+                    params.append(filters['pentest_max'])
         if has_seo_filters:
-            if filters.get('seo_min') is not None:
-                query += ' AND (sub.score_seo IS NOT NULL AND sub.score_seo >= ?)'
-                params.append(filters['seo_min'])
-            if filters.get('seo_max') is not None:
-                query += ' AND (sub.score_seo IS NOT NULL AND sub.score_seo <= ?)'
-                params.append(filters['seo_max'])
+            if EntrepriseManager._truthy_filter(filters, 'seo_null'):
+                query += ' AND sub.score_seo IS NULL'
+            else:
+                if filters.get('seo_min') is not None:
+                    query += ' AND (COALESCE(sub.score_seo, 0) >= ?)'
+                    params.append(filters['seo_min'])
+                if filters.get('seo_max') is not None:
+                    query += ' AND (COALESCE(sub.score_seo, 0) <= ?)'
+                    params.append(filters['seo_max'])
 
         self.execute_sql(cursor, query, params)
         row = cursor.fetchone()

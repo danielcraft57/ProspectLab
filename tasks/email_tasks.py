@@ -556,16 +556,29 @@ def send_campagnes_report_task(report_type='evening'):
         if not cid:
             continue
         stats = campagne_manager.get_campagne_tracking_stats(cid)
+        total_emails = int(stats.get('total_emails', 0) or 0)
+        # Ne pas inclure les campagnes sans envoi réel : date_creation / scheduled_at peut
+        # tomber dans la fenêtre alors qu'aucun email n'est encore enregistré (brouillon,
+        # programmation, échec avant enregistrement, etc.) → sinon rapports à 0 partout.
+        if total_emails < 1:
+            continue
         campagnes_stats.append(
             {
                 'id': cid,
                 'nom': c.get('nom'),
                 'statut': c.get('statut'),
-                'total_emails': stats.get('total_emails', 0),
+                'total_emails': total_emails,
                 'open_rate': stats.get('open_rate', 0.0),
                 'click_rate': stats.get('click_rate', 0.0),
             }
         )
+
+    if not campagnes_stats:
+        logger.info(
+            f"[Rapport campagnes] Aucun envoi : aucune campagne avec emails envoyés sur la période "
+            f"({report_type}, {len(campagnes)} campagne(s) trouvée(s) sans lignes emails_envoyes)."
+        )
+        return {'success': True, 'count': 0, 'skipped': True, 'reason': 'no_sent_emails_in_window'}
 
     sender = EmailSender()
     subject = f"[ProspectLab] {title}"
@@ -693,8 +706,13 @@ def check_campaigns_significant_changes_task(
 
         entry['last_seen_at'] = now_utc_iso
 
-        # Evite les faux signaux sur des campagnes avec trop peu de données
+        # Evite les faux signaux sur des campagnes avec trop peu de données.
+        # Réinitialise l'état si la campagne repasse sous le seuil (données insuffisantes).
         if total_emails < min_emails_for_stability:
+            entry['ready_to_send'] = False
+            entry['triggered'] = False
+            entry['stable_counter'] = 0
+            entry['triggered_at'] = None
             cache[cid_str] = entry
             continue
 
@@ -786,6 +804,16 @@ def check_campaigns_significant_changes_task(
         if not bool(entry.get('ready_to_send', False)):
             continue
 
+        stats_send = campagne_manager.get_campagne_tracking_stats(cid)
+        te = int(stats_send.get('total_emails', 0) or 0)
+        if te < min_emails_for_stability:
+            # Cache obsolète ou campagne vidée : ne pas envoyer de rapport vide / incohérent
+            entry['ready_to_send'] = False
+            entry['triggered'] = False
+            entry['stable_counter'] = 0
+            cache[cid_str] = entry
+            continue
+
         is_latest = (latest_cid_str is not None and cid_str == latest_cid_str)
         if is_latest:
             latest_ready.append(
@@ -794,7 +822,7 @@ def check_campaigns_significant_changes_task(
                     'id': cid,
                     'nom': c.get('nom') or '',
                     'statut': c.get('statut') or '',
-                    'total_emails': (campagne_manager.get_campagne_tracking_stats(cid).get('total_emails', 0) or 0),
+                    'total_emails': te,
                     'current_open': float(entry.get('last_open_rate', 0.0) or 0.0),
                     'current_click': float(entry.get('last_click_rate', 0.0) or 0.0),
                 }
@@ -808,11 +836,14 @@ def check_campaigns_significant_changes_task(
                     'id': cid,
                     'nom': c.get('nom') or '',
                     'statut': c.get('statut') or '',
-                    'total_emails': (campagne_manager.get_campagne_tracking_stats(cid).get('total_emails', 0) or 0),
+                    'total_emails': te,
                     'current_open': float(entry.get('last_open_rate', 0.0) or 0.0),
                     'current_click': float(entry.get('last_click_rate', 0.0) or 0.0),
                 }
             )
+
+    # Persister l'état (1re boucle + invalidations ready_to_send de la 2e boucle)
+    _save_stats_cache(cache)
 
     to_send = latest_ready if latest_ready else others_ready
 

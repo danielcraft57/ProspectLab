@@ -388,6 +388,20 @@ body[data-theme="dark"] .filters-advanced-section-header p {
     color: #9ca3af;
 }
 
+/* Filtres entreprises : jauges floutées quand « sans score » désactive les curseurs */
+#advanced-filters .score-slider:has(.score-range-input:disabled) > .score-slider-row,
+#advanced-filters .score-slider:has(.score-range-input:disabled) > .score-slider-scale {
+    filter: blur(3px);
+    opacity: 0.48;
+    pointer-events: none;
+    user-select: none;
+    transition: filter 0.22s ease, opacity 0.22s ease;
+}
+
+#advanced-filters .score-slider .score-range-input:disabled {
+    cursor: not-allowed;
+}
+
 /* Variante compacte pour Score Risque (Pentest) : visuel \"double jauge\" */
 .filter-group[data-filter-type="pentest"] .score-slider {
     background: radial-gradient(circle at center, rgba(248, 113, 113, 0.08), transparent);

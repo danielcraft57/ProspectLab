@@ -102,6 +102,30 @@ Vérifie la disponibilité des outils OSINT et Pentest dans WSL kali-linux.
 **Résultat :**
 Affiche la liste des outils disponibles et non disponibles.
 
+#### `tests/test_multicanal_send.py` - Teste l'envoi multicanal (X/Meta)
+Permet de tester un envoi de message prive sur X ou Meta avec un seul script.
+
+**Prérequis :**
+- Variables d'environnement du canal configurées (`X_*` ou `META_*`)
+- Environnement conda prospectlab activé
+
+**Utilisation :**
+```bash
+# Test X
+python scripts/tests/test_multicanal_send.py --channel x --recipient-id 123456789 --body "Bonjour, test X ProspectLab." --entreprise-id 42
+
+# Test Meta
+python scripts/tests/test_multicanal_send.py --channel meta --recipient-id <PSID> --body "Bonjour, test Meta ProspectLab." --entreprise-id 42
+```
+
+#### `tests/test_multicanal_batch.py` - Teste une campagne multicanal en lot (CSV)
+Permet de traiter plusieurs lignes avec fallback de canaux (ex: X puis Meta).
+
+**Utilisation :**
+```bash
+python scripts/tests/test_multicanal_batch.py --csv "data/multicanal_batch.csv" --default-order "x,meta" --dry-run --output-json "logs/multicanal_batch_report.json"
+```
+
 #### `test_celery_tasks.py` - Teste l'enregistrement des tâches Celery
 Vérifie que toutes les tâches Celery sont correctement enregistrées.
 
@@ -110,7 +134,7 @@ Vérifie que toutes les tâches Celery sont correctement enregistrées.
 
 **Utilisation :**
 ```bash
-python scripts/test_celery_tasks.py
+python scripts/tests/test_celery_tasks.py
 ```
 
 **Résultat :**
@@ -125,7 +149,7 @@ Vérifie que Redis est accessible et que Celery peut s'y connecter.
 
 **Utilisation :**
 ```bash
-python scripts/test_redis_connection.py
+python scripts/tests/test_redis_connection.py
 ```
 
 **Résultat :**
