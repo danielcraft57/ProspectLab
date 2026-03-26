@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Confiance — {entreprise}</title>
+</head>
+<body style="margin:0;padding:0;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:#f9fafb;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        Avis, références, garanties : ce qui rassure avant le premier clic « contact ».
+    </div>
+    <table role="presentation" style="width:100%;border-collapse:collapse;background:#f9fafb;">
+        <tr>
+            <td style="padding:32px 16px;">
+                <table role="presentation" style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.07);">
+                    <tr>
+                        <td style="padding:26px 28px;background:linear-gradient(135deg,#0f3550 0%,#184c70 100%);text-align:center;">
+                            <p style="margin:0 0 10px 0;color:rgba(255,255,255,0.85);font-size:11px;letter-spacing:0.12em;text-transform:uppercase;font-weight:700;">Crédibilité</p>
+                            <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;line-height:1.3;">Rassurer avant de convertir</h1>
+                            <p style="margin:12px 0 0 0;color:rgba(255,255,255,0.9);font-size:14px;">{entreprise}</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:32px 28px;">
+                            <p style="margin:0 0 18px 0;color:#1f2937;font-size:16px;line-height:1.65;">Bonjour <strong>{nom}</strong>,</p>
+                            <p style="margin:0 0 18px 0;color:#1f2937;font-size:16px;line-height:1.65;">
+                                Sur le web, la <strong>première barrière</strong> n'est pas toujours le design : c'est le doute (qui êtes-vous ? pourquoi vous ? que se passe-t-il après le formulaire ?).
+                            </p>
+                            <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:18px 20px;margin:0 0 22px 0;">
+                                <p style="margin:0 0 10px 0;color:#1f2937;font-size:14px;font-weight:600;">Check-list communication (facile à renforcer) :</p>
+                                <ul style="margin:0;padding-left:18px;color:#4b5563;font-size:14px;line-height:1.75;">
+                                    <li>Mise en avant claire des <strong>preuves</strong> (études de cas, logos clients, chiffres).</li>
+                                    <li>Page « équipe » ou visage humain — limite la distance.</li>
+                                    <li>Politique de confidentialité &amp; réponse annoncée (délai).</li>
+                                </ul>
+                            </div>
+                            {#if_website}
+                            <p style="margin:0 0 22px 0;color:#4b5563;font-size:14px;line-height:1.55;">
+                                J'ai un aperçu structuré de votre présence :
+                                <a href="{analysis_url}" style="display:inline-block;background:#f3f4f6;color:#4da9d6;text-decoration:none;font-size:13px;font-weight:600;padding:10px 16px;border-radius:999px;line-height:1.2;">Voir l'analyse du site</a>
+                            </p>
+                            {#endif}
+                            <table role="presentation" style="width:100%;">
+                                <tr>
+                                    <td style="text-align:center;">
+                                        <a href="{dc_contact_url}" style="display:inline-block;background:#4da9d6;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:14px 26px;border-radius:10px;line-height:1;">Améliorer la page d'accueil / de contact</a>
+                                    </td>
+                                </tr>
+                            </table>
+                            {#include:signature_standard}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:18px 28px 24px;background:#f9fafb;text-align:center;">
+                            {#include:footer_standard}
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

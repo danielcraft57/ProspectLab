@@ -51,6 +51,7 @@ logs/*.log.*
 *.log
 logs_analysis/
 logs_server/
+logs/campagne_stats_cache.json
 
 # Uploads et exports
 uploads/*
@@ -90,6 +91,9 @@ cursor_*.md
 *.old
 *_old.*
 *.backup
+
+# Template Studio (préviews navigateur générées)
+.template_studio_preview/
 
 # OS
 Thumbs.db

@@ -10,6 +10,150 @@ class ProspectLabWebSocket {
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 5;
         this.reconnectDelay = 3000;
+        this._connecting = false;
+        this._forcePollingOnly = this._detectForcePollingOnly();
+        this._wsErrorBurst = 0;
+        this._lastForcePollingTs = 0;
+        this._connectSeq = 0;
+        this._debug = this._readDebugFlag();
+    }
+
+    _detectForcePollingOnly() {
+        try {
+            const host = (window.location.hostname || '').toLowerCase();
+            const path = (window.location.pathname || '').toLowerCase();
+            const looksLocal = host === '127.0.0.1' || host === 'localhost';
+            const looksPreview = path.includes('/preview');
+            // En dev, /preview a des "ping timeout" sur websocket -> polling-only stabilise.
+            return looksLocal && looksPreview;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    _readDebugFlag() {
+        try {
+            const qs = new URLSearchParams(window.location.search || '');
+            if (qs.get('ws_debug') === '1') return true;
+        } catch (e) {}
+        try {
+            return (localStorage.getItem('ws_debug') === '1');
+        } catch (e) {
+            return false;
+        }
+    }
+
+    _dbg(...args) {
+        if (!this._debug) return;
+        try {
+            console.debug('[WS]', ...args);
+        } catch (e) {}
+    }
+
+    _dbgWarn(...args) {
+        if (!this._debug) return;
+        try {
+            console.warn('[WS]', ...args);
+        } catch (e) {}
+    }
+
+    _dbgError(...args) {
+        if (!this._debug) return;
+        try {
+            console.error('[WS]', ...args);
+        } catch (e) {}
+    }
+
+    _safeErrObj(error) {
+        try {
+            if (!error) return null;
+            const out = {};
+            if (typeof error === 'string') return { message: error };
+            if (typeof error.message === 'string') out.message = error.message;
+            if (typeof error.description === 'string') out.description = error.description;
+            if (typeof error.type === 'string') out.type = error.type;
+            if (typeof error.code !== 'undefined') out.code = error.code;
+            if (typeof error.context !== 'undefined') out.context = error.context;
+            // Socket.IO v4 met parfois des infos dans `error.data`
+            if (typeof error.data !== 'undefined') out.data = error.data;
+            return out;
+        } catch (e) {
+            return { message: String(error) };
+        }
+    }
+
+    _buildSocketOptions() {
+        // En dev (notamment Windows + eventlet), le transport websocket peut être instable.
+        // On bascule automatiquement en "polling only" si on détecte une rafale d'erreurs websocket.
+        const base = {
+            reconnection: true,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            reconnectionAttempts: Infinity,
+            timeout: 60000,
+            // Tolérance aux pics de charge / latence
+            pingInterval: 25000,
+            pingTimeout: 60000,
+            forceNew: false,
+            rememberUpgrade: true
+        };
+        if (this._forcePollingOnly) {
+            return {
+                ...base,
+                transports: ['polling'],
+                upgrade: false
+            };
+        }
+        return {
+            ...base,
+            // Plus robuste : démarrer en polling puis upgrade websocket si possible
+            transports: ['polling', 'websocket'],
+            upgrade: true
+        };
+    }
+
+    _maybeForcePollingOnly(error) {
+        // Heuristique : si le websocket échoue plusieurs fois de suite, on force polling only
+        const msg = (error && (error.message || error.description || String(error))) || '';
+        const looksLikeWsFailure =
+            msg.toLowerCase().includes('websocket') ||
+            msg.toLowerCase().includes('closed before') ||
+            msg.toLowerCase().includes('transport close') ||
+            msg.toLowerCase().includes('ping timeout');
+
+        // Socket.IO peut aussi renvoyer "timeout" (connect_error) sans mention explicite.
+        const looksLikeTimeout = msg.toLowerCase().includes('timeout');
+        const isWsLike = looksLikeWsFailure || looksLikeTimeout;
+
+        if (!isWsLike) {
+            // reset progressif
+            this._wsErrorBurst = Math.max(0, this._wsErrorBurst - 1);
+            return false;
+        }
+
+        // Ping timeout : bascule immédiate (évite les boucles de reconnexion websocket)
+        if (msg.toLowerCase().includes('ping timeout') || msg.toLowerCase() === 'timeout') {
+            if (!this._forcePollingOnly) {
+                this._forcePollingOnly = true;
+                this._lastForcePollingTs = Date.now();
+                this._dbgWarn('ping timeout détecté : polling-only immédiat');
+            }
+            return true;
+        }
+
+        this._wsErrorBurst += 1;
+        this._dbgWarn('wsErrorBurst', this._wsErrorBurst, 'error=', this._safeErrObj(error));
+        // Après 3 erreurs rapprochées, on force polling-only (pendant un moment)
+        if (this._wsErrorBurst < 3) return false;
+
+        const now = Date.now();
+        // éviter de flip-flop en boucle : max 1 bascule / 30s
+        if (now - this._lastForcePollingTs < 30000) return false;
+
+        this._lastForcePollingTs = now;
+        this._forcePollingOnly = true;
+        this._dbgWarn('WebSocket instable détecté : bascule en polling-only');
+        return true;
     }
 
     connect() {
@@ -42,15 +186,33 @@ class ProspectLabWebSocket {
             return;
         }
 
-        this.socket = io({
-            transports: ['websocket', 'polling'],
-            reconnection: true,
-            reconnectionDelay: 1000,
-            reconnectionDelayMax: 5000,
-            reconnectionAttempts: Infinity, // Reconnexion infinie
-            timeout: 20000,
-            forceNew: false
-        });
+        // Éviter de recréer une connexion en boucle (sinon tempête de sockets/handlers).
+        if (this.socket) {
+            try {
+                if (this.socket.connected) {
+                    return;
+                }
+                // Si déjà en cours de connexion, ne rien faire
+                if (this._connecting) {
+                    return;
+                }
+                this._connecting = true;
+                this._connectSeq += 1;
+                this._dbg('connect() reuse existing socket', { seq: this._connectSeq, forcePollingOnly: this._forcePollingOnly });
+                this.socket.connect();
+                return;
+            } catch (e) {
+                // Si on a un socket corrompu, on repart de zéro.
+                try { this.socket.close(); } catch (e2) {}
+                this.socket = null;
+            }
+        }
+
+        this._connecting = true;
+        this._connectSeq += 1;
+        const opts = this._buildSocketOptions();
+        this._dbg('connect() create new socket', { seq: this._connectSeq, opts });
+        this.socket = io(opts);
 
         this.setupEventHandlers();
     }
@@ -72,12 +234,35 @@ class ProspectLabWebSocket {
         this.socket.on('connect', () => {
             this.connected = true;
             this.reconnectAttempts = 0;
+            this._connecting = false;
+            this._wsErrorBurst = 0;
+            try {
+                const tname = this.socket && this.socket.io && this.socket.io.engine && this.socket.io.engine.transport
+                    ? this.socket.io.engine.transport.name
+                    : null;
+                this._dbg('connected', { transport: tname, id: this.socket && this.socket.id });
+            } catch (e) {}
             this.onConnect();
         });
 
-        this.socket.on('disconnect', () => {
+        this.socket.on('disconnect', (reason) => {
             this.connected = false;
+            this._connecting = false;
+            try {
+                const tname = this.socket && this.socket.io && this.socket.io.engine && this.socket.io.engine.transport
+                    ? this.socket.io.engine.transport.name
+                    : null;
+                this._dbgWarn('disconnected', { reason, transport: tname });
+            } catch (e) {}
             this.onDisconnect();
+            // En polling-only on reste stable, donc si on est déconnecté c'est autre chose.
+            // En mode normal, si le serveur ferme l'upgrade websocket, on peut passer en polling-only.
+            if (!this._forcePollingOnly && typeof reason === 'string') {
+                const r = reason.toLowerCase();
+                if (r.includes('transport') || r.includes('ping timeout') || r.includes('timeout')) {
+                    this._maybeForcePollingOnly(reason);
+                }
+            }
         });
 
         this.socket.on('connect_error', (error) => {
@@ -91,28 +276,51 @@ class ProspectLabWebSocket {
             if (this.reconnectAttempts === 0) {
                 console.warn('Connexion WebSocket échouée, tentative de reconnexion...');
             }
+            this._dbgWarn('connect_error', this._safeErrObj(error));
             this.onConnectionError(error);
-            // Tentative de reconnexion automatique
-            if (this.reconnectAttempts < this.maxReconnectAttempts) {
-                this.reconnectAttempts++;
-                setTimeout(() => {
-                    this.connect();
-                }, this.reconnectDelay);
+            // IMPORTANT: Socket.IO gère déjà la reconnexion (reconnectionAttempts=Infinity).
+            // Ne pas rappeler connect() ici, sinon on multiplie les sockets/handlers.
+            this._connecting = false;
+
+            // Fallback automatique : si websocket instable, recréer une connexion polling-only.
+            if (this._maybeForcePollingOnly(error)) {
+                try { this.socket.close(); } catch (e) {}
+                this.socket = null;
+                // Petite pause pour éviter une boucle serrée
+                setTimeout(() => this.connect(), 250);
             }
         });
 
         this.socket.on('reconnect', (attemptNumber) => {
             this.reconnectAttempts = 0;
+            this._dbg('reconnect', { attemptNumber });
         });
 
         this.socket.on('reconnect_error', (error) => {
+            this._dbgWarn('reconnect_error', this._safeErrObj(error));
             console.error('Erreur lors de la reconnexion:', error);
         });
 
         this.socket.on('reconnect_failed', () => {
+            this._dbgError('reconnect_failed');
             console.error('Échec de la reconnexion après toutes les tentatives');
             this.showError('Impossible de se reconnecter au serveur. Veuillez recharger la page.');
         });
+
+        // Log bas niveau Engine.IO (utile pour diagnostiquer upgrade websocket)
+        try {
+            if (this.socket && this.socket.io && this.socket.io.engine) {
+                this.socket.io.engine.on('upgrade', (transport) => {
+                    this._dbg('engine upgrade', { transport: transport && transport.name });
+                });
+                this.socket.io.engine.on('close', (reason) => {
+                    this._dbgWarn('engine close', { reason });
+                });
+                this.socket.io.engine.on('error', (err) => {
+                    this._dbgWarn('engine error', this._safeErrObj(err));
+                });
+            }
+        } catch (e) {}
 
         // Événements d'analyse
         this.socket.on('analysis_started', (data) => {
@@ -209,7 +417,7 @@ class ProspectLabWebSocket {
     startAnalysis(filename, options) {
         if (!this.connected) {
             this.showError('WebSocket non connecté. Reconnexion...');
-            this.connect();
+            this.connect(); // (safe: ne recrée pas de socket en boucle)
             return;
         }
 

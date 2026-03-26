@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analyse technique - {entreprise}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f9fafb;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        Synthèse technique + prochaines étapes — un seul clic pour le détail.
+    </div>
+    <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f9fafb;">
+        <tr>
+            <td style="padding: 32px 16px;">
+                <table role="presentation" style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.07);">
+                    <tr>
+                        <td style="padding: 28px 32px; background: linear-gradient(135deg, #4da9d6, #184c70);">
+                            <h1 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 600;">Analyse technique de votre site</h1>
+                            <p style="margin: 8px 0 0; color: rgba(255,255,255,0.9); font-size: 14px;">{entreprise} {#if_website}· {website} {#endif}</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 36px 32px;">
+                            <p style="margin: 0 0 20px 0; color: #1f2937; font-size: 16px; line-height: 1.65;">Bonjour {nom},</p>
+                            <p style="margin: 0 0 16px 0; color: #1f2937; font-size: 16px; line-height: 1.65;">
+                                J'ai réalisé une analyse technique de la présence en ligne de <strong style="color: #4da9d6;">{entreprise}</strong>. Voici une synthèse.
+                            </p>
+                            {#if_website}
+                            <p style="margin: 0 0 20px 0; color: #4b5563; font-size: 14px; line-height: 1.6;">
+                                Le rapport complet est également accessible en ligne :
+                                <a href="{analysis_url}" style="display:inline-block;background:#f3f4f6;color:#4da9d6;text-decoration:none;font-size:13px;font-weight:600;padding:10px 16px;border-radius:999px;line-height:1.2;">Voir l'analyse du site</a>.
+                            </p>
+                            {#endif}
+                            {#if_all_data}
+                            <div style="background-color: #f9fafb; padding: 24px; border-radius: 8px; margin: 24px 0; border-left: 4px solid #4da9d6;">
+                                <h3 style="margin: 0 0 16px 0; color: #4da9d6; font-size: 18px;">Résultats de l'analyse</h3>
+                                <table role="presentation" style="width: 100%; border-collapse: collapse;">
+                                    {analysis_summary}
+                                </table>
+                            </div>
+                            {#endif}
+                            <p style="margin: 0 0 24px 0; color: #1f2937; font-size: 16px; line-height: 1.65;">
+                                Je peux vous détailler ces points et proposer un plan d’action très simple (priorités, ordre de correction, impact attendu).
+                            </p>
+                            <p style="margin: 0 0 18px 0; color: #4b5563; font-size: 14px; line-height: 1.6;">
+                                Question : vous préférez commencer par <strong>la perf</strong> (vitesse / UX) ou par <strong>la fiabilité</strong> (sécurité / stabilité) ?
+                            </p>
+                            {#include:cta_dual_analysis_and_15min}
+                            {#include:signature_standard}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:18px 32px 26px;background:#f9fafb;text-align:center;border-top:1px solid #eef2f7;">
+                            {#include:footer_standard}
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

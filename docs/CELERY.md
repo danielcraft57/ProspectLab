@@ -59,12 +59,12 @@ python run_celery.py
 
 **Linux/Mac :**
 ```bash
-celery -A celery_app worker --pool=threads --concurrency=6 -Q celery,heavy --loglevel=info
+celery -A celery_app worker --pool=threads --concurrency=6 -Q celery,scraping,technical,seo,osint,pentest,heavy --loglevel=info
 ```
 
 ### Files d'attente, charge « bulk » et workers
 
-- **Deux files Redis** : `celery` (tâches courtes : emails, cron, etc.) et `heavy` (analyses techniques, SEO, OSINT, Pentest, scraping). Le worker **doit** consommer les deux : `-Q celery,heavy` (déjà le défaut dans `run_celery.py` via `CELERY_WORKER_QUEUES`).
+- **Files Celery dédiées** : `celery` (tâches courtes : emails, cron, etc.), et `scraping`, `technical`, `seo`, `osint`, `pentest` (tâches lourdes spécialisées). Le worker **doit** consommer au minimum toutes les files lourdes : `-Q celery,scraping,technical,seo,osint,pentest` (le `heavy` est conservé en compat si des tâches historiques y sont encore routées).
 - **Préchargement** : `CELERY_WORKER_PREFETCH_MULTIPLIER=1` — chaque worker ne réserve qu’une tâche à la fois, meilleure répartition sous pic.
 - **Accusés tardifs** : `CELERY_TASK_ACKS_LATE=true` — la tâche n’est acquise qu’après exécution (moins de perte si crash worker).
 - **Étalement des sous-tâches** : lors d’un scraping multi-entreprises, chaque sous-tâche (technique, OSINT, SEO, Pentest) est planifiée avec un `countdown` croissant (`CELERY_BULK_STAGGER_SEC`, défaut **0,75 s** entre chaque index), pour ne pas poster 200 messages instantanément sur le broker.
@@ -465,9 +465,9 @@ pkill -f "celery worker"
 
 ### Bulk SEO / WebSocket : app bloquée, `logs/seo_tasks.log` vide
 
-- **`seo_tasks.log`** (et les autres `*_tasks.log`) ne sont écrits que par le **processus Celery worker**, pas par Gunicorn. Si le fichier reste vide alors que l’UI dit « démarré », le worker **ne consomme pas** la file `heavy` ou **n’est pas lancé**. Vérifier :  
+- **`seo_tasks.log`** (et les autres `*_tasks.log`) ne sont écrits que par le **processus Celery worker**, pas par Gunicorn. Si le fichier reste vide alors que l’UI dit « démarré », le worker **ne consomme pas** la file dédiée (`seo`, `technical`, `osint`, `pentest` ou `scraping`) ou **n’est pas lancé**. Vérifier :  
   `celery -A celery_app inspect ping`  
-  et la commande systemd / script : **`-Q celery,heavy`** (obligatoire pour SEO, technique, pentest, scraping lourd).
+  et la commande systemd / script : **`-Q celery,scraping,technical,seo,osint,pentest`** (obligatoire pour les analyses/scans lourds).
 - **Redis** : sans broker, aucune tâche n’est enfilée. Un `PING` Redis léger (avec cache de quelques secondes) remplace l’ancien `celery.control.inspect().active()` avant chaque événement WebSocket, pour éviter de saturer Redis quand on lance 20–50 analyses d’affilée (surtout sur Raspberry Pi + Gunicorn **eventlet**).
 - **Charge Redis** : chaque analyse ouvre un thread de suivi qui interroge le résultat Celery. Variable **`CELERY_WS_MONITOR_POLL_SEC`** (défaut **1.0**) = intervalle entre deux lectures ; augmenter à `1.5` ou `2` sur matériel très lent.
 - **Logs côté web** : après déploiement, les enfilements SEO peuvent apparaître dans **`logs/prospectlab.log`** (`WebSocket SEO: tâche enfilée …`) si le logging Flask racine est actif.

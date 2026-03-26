@@ -5,12 +5,15 @@ Ces tâches permettent d'exécuter le scraping de manière asynchrone,
 évitant ainsi de bloquer l'application Flask principale.
 """
 
+import time
+
 from celery_app import celery
 from services.unified_scraper import UnifiedScraper
 from services.database import Database
 from services.logging_config import setup_logger
 from services.name_validator import is_valid_human_name, validate_name_pair
 import logging
+import os
 import json
 from typing import Dict
 
@@ -23,6 +26,104 @@ try:
     from config import CELERY_BULK_STAGGER_SEC
 except ImportError:
     CELERY_BULK_STAGGER_SEC = 0.75
+
+
+# Verrou global optionnel (désactivé par défaut) : si activé, un seul scrape à la fois sur tout le cluster.
+# Par défaut : parallélisme = Celery worker (--concurrency) + étalement côté enqueue, comme avant.
+def _env_bool(name: str, default: bool = False) -> bool:
+    v = os.environ.get(name)
+    if v is None or str(v).strip() == '':
+        return default
+    return str(v).strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+_SCRAPING_GLOBAL_LOCK_ENABLED = _env_bool('SCRAPING_GLOBAL_LOCK_ENABLED', False)
+
+_SCRAPING_LOCK_KEY = os.environ.get('SCRAPING_LOCK_KEY', 'prospectlab:lock:scraping:global')
+_SCRAPING_LOCK_TTL_SEC = int(os.environ.get('SCRAPING_LOCK_TTL_SEC', '3600'))
+_SCRAPING_LOCK_RETRY_SEC = float(os.environ.get('SCRAPING_LOCK_RETRY_SEC', '10'))
+# Attente du verrou dans la même exécution Celery (pas de self.retry() : évite MaxRetriesExceeded en bulk).
+try:
+    _SCRAPING_LOCK_WAIT_MAX_SEC = int(os.environ.get('SCRAPING_LOCK_WAIT_MAX_SEC', str(86400)))
+except ValueError:
+    _SCRAPING_LOCK_WAIT_MAX_SEC = 86400
+_SCRAPING_LOCK_WAIT_MAX_SEC = max(int(_SCRAPING_LOCK_RETRY_SEC) * 2, _SCRAPING_LOCK_WAIT_MAX_SEC)
+
+_redis_lock_client = None
+_redis_lock_release_script = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+  return redis.call("del", KEYS[1])
+else
+  return 0
+end
+"""
+
+
+def _redis_lock():
+    global _redis_lock_client
+    if _redis_lock_client is None:
+        import redis
+        from config import CELERY_BROKER_URL
+
+        _redis_lock_client = redis.Redis.from_url(
+            CELERY_BROKER_URL,
+            decode_responses=True,
+            socket_connect_timeout=2.0,
+            socket_timeout=2.0,
+        )
+    return _redis_lock_client
+
+
+def _acquire_scraping_lock(lock_value: str) -> bool:
+    r = _redis_lock()
+    return bool(r.set(_SCRAPING_LOCK_KEY, lock_value, nx=True, ex=_SCRAPING_LOCK_TTL_SEC))
+
+
+def _release_scraping_lock(lock_value: str) -> None:
+    r = _redis_lock()
+    try:
+        r.eval(_redis_lock_release_script, 1, _SCRAPING_LOCK_KEY, lock_value)
+    except Exception:
+        # Si Redis est instable, on évite d'écraser l'exécution de la tâche.
+        pass
+
+
+def _wait_acquire_scraping_lock(lock_value: str, task_self=None, wait_label: str = 'Scraping') -> bool:
+    """
+    Attend le verrou Redis sans utiliser Celery retry (sinon max_retries épuisé sur les gros bulk).
+
+    Returns:
+        True si le verrou a été acquis, False si délai max dépassé.
+    """
+    deadline = time.monotonic() + float(_SCRAPING_LOCK_WAIT_MAX_SEC)
+    logged_wait = False
+    last_meta = 0.0
+
+    while time.monotonic() < deadline:
+        if _acquire_scraping_lock(lock_value):
+            return True
+        if not logged_wait:
+            logger.info(
+                f'{wait_label}: verrou déjà pris, attente active (file « un à un », '
+                f'jusqu’à {_SCRAPING_LOCK_WAIT_MAX_SEC}s)...'
+            )
+            logged_wait = True
+        now = time.monotonic()
+        if task_self is not None and (now - last_meta) >= 30.0:
+            last_meta = now
+            try:
+                task_self.update_state(
+                    state='PROGRESS',
+                    meta={'message': 'En file d’attente (scraping global, verrou)...'},
+                )
+            except Exception:
+                pass
+        time.sleep(_SCRAPING_LOCK_RETRY_SEC)
+
+    logger.warning(
+        f'{wait_label}: délai max d’attente sur le verrou global dépassé ({_SCRAPING_LOCK_WAIT_MAX_SEC}s).'
+    )
+    return False
 
 
 def _safe_update_state(task, task_id, **kwargs):
@@ -82,6 +183,20 @@ def scrape_emails_task(self, url, max_depth=3, max_workers=5, max_time=300,
     """
     try:
         logger.info(f'Démarrage du scraping pour {url}')
+
+        # Verrou global optionnel (SCRAPING_GLOBAL_LOCK_ENABLED=1) : sinon parallèle selon le worker Celery.
+        lock_value = str(getattr(self.request, "id", None) or id(self))
+        lock_acquired = False
+        if _SCRAPING_GLOBAL_LOCK_ENABLED:
+            if not _wait_acquire_scraping_lock(lock_value, task_self=self, wait_label='Scraping'):
+                return {
+                    'success': False,
+                    'url': url,
+                    'entreprise_id': entreprise_id,
+                    'error': 'scraping_lock_wait_timeout',
+                    'results': {},
+                }
+            lock_acquired = True
         
         def progress_callback(message):
             """Callback pour mettre à jour la progression de la tâche"""
@@ -143,6 +258,9 @@ def scrape_emails_task(self, url, max_depth=3, max_workers=5, max_time=300,
             except Exception as e:
                 logger.warning(f'Erreur lors de la sauvegarde du scraper pour {url}: {e}')
         
+        if lock_acquired:
+            _release_scraping_lock(lock_value)
+
         logger.info(f'Scraping terminé pour {url}: {len(results.get("emails", []))} emails trouvés')
         
         return {
@@ -153,6 +271,8 @@ def scrape_emails_task(self, url, max_depth=3, max_workers=5, max_time=300,
         }
         
     except Exception as e:
+        if lock_acquired:
+            _release_scraping_lock(lock_value)
         logger.error(f'Erreur lors du scraping de {url}: {e}', exc_info=True)
         raise
 
@@ -180,6 +300,23 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
         dict: Statistiques globales du scraping pour cette analyse.
     """
     logger.info(f'Demarrage du scraping pour l analyse {analysis_id}')
+
+    # Verrou global optionnel pour le pack analyse (même interrupteur que scrape_emails_task).
+    lock_value = str(getattr(self.request, 'id', None) or id(self))
+    lock_acquired = False
+    if _SCRAPING_GLOBAL_LOCK_ENABLED:
+        if not _wait_acquire_scraping_lock(
+            lock_value, task_self=self, wait_label=f'Scraping pack analyse {analysis_id}'
+        ):
+            return {
+                'success': False,
+                'analysis_id': analysis_id,
+                'error': 'scraping_lock_wait_timeout',
+                'scraped_count': 0,
+                'stats': {},
+            }
+        lock_acquired = True
+
     task_id = getattr(self.request, 'id', None)
     if not task_id:
         logger.debug('task_id introuvable au demarrage de scrape_analysis_task')
@@ -202,6 +339,8 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
     
     if not rows:
         logger.info(f'Aucune entreprise avec website pour l analyse {analysis_id}')
+        if lock_acquired:
+            _release_scraping_lock(lock_value)
         return {
             'success': True,
             'analysis_id': analysis_id,
@@ -277,7 +416,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                 tech_task = technical_analysis_task.apply_async(
                     kwargs=dict(url=website_str, entreprise_id=entreprise_id, enable_nmap=False),
                     countdown=cd,
-                    queue='heavy',
+                    queue='technical',
                 )
                 tech_tasks.append({
                     'task': tech_task,
@@ -695,7 +834,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                             phones_from_scrapers=phones_from_scrapers,
                         ),
                         countdown=osint_cd,
-                        queue='heavy',
+                        queue='osint',
                     )
                     
                     # Stocker la tâche OSINT pour le monitoring (liste alimentée à chaque fin de site scrapé)
@@ -721,7 +860,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                                 use_lighthouse=False,
                             ),
                             countdown=seo_cd,
-                            queue='heavy',
+                            queue='seo',
                         )
                         seo_tasks.append({
                             'task': seo_task,
@@ -758,7 +897,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                                 forms_from_scrapers=forms_from_scrapers,
                             ),
                             countdown=pentest_cd,
-                            queue='heavy',
+                            queue='pentest',
                         )
 
                         # Stocker pour le monitoring (liste alimentée à chaque fin de site scrapé)
@@ -898,7 +1037,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                         forms_from_scrapers=None,
                     ),
                     countdown=pentest_cd,
-                    queue='heavy',
+                    queue='pentest',
                 )
                 
                 pentest_tasks.append({
@@ -931,7 +1070,10 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
         f'Scraping terminé pour l\'analyse {analysis_id}: '
         f'{scraped_count}/{total} entreprises traitées'
     )
-    
+
+    if lock_acquired:
+        _release_scraping_lock(lock_value)
+
     return {
         'success': True,
         'analysis_id': analysis_id,

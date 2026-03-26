@@ -1050,7 +1050,7 @@ def website_analysis():
                 entreprise_id=entreprise_id,
             ),
             countdown=_st.next_countdown(),
-            queue='heavy',
+            queue='scraping',
         )
         tasks_launched['scraping_task_id'] = scraping_task.id
     except Exception as e:
@@ -1060,7 +1060,7 @@ def website_analysis():
         tech_task = technical_analysis_task.apply_async(
             kwargs=dict(url=website, entreprise_id=entreprise_id, enable_nmap=enable_nmap),
             countdown=_st.next_countdown(),
-            queue='heavy',
+            queue='technical',
         )
         tasks_launched['technical_task_id'] = tech_task.id
     except Exception as e:
@@ -1070,7 +1070,7 @@ def website_analysis():
         seo_task = seo_analysis_task.apply_async(
             kwargs=dict(url=website, entreprise_id=entreprise_id, use_lighthouse=use_lighthouse),
             countdown=_st.next_countdown(),
-            queue='heavy',
+            queue='seo',
         )
         tasks_launched['seo_task_id'] = seo_task.id
     except Exception as e:
@@ -1081,7 +1081,7 @@ def website_analysis():
         osint_task = osint_analysis_task.apply_async(
             kwargs=dict(url=website, entreprise_id=entreprise_id),
             countdown=_st.next_countdown(),
-            queue='heavy',
+            queue='osint',
         )
         tasks_launched['osint_task_id'] = osint_task.id
     except Exception as e:
@@ -1091,7 +1091,7 @@ def website_analysis():
         pentest_task = pentest_analysis_task.apply_async(
             kwargs=dict(url=website, entreprise_id=entreprise_id, options={}),
             countdown=_st.next_countdown(),
-            queue='heavy',
+            queue='pentest',
         )
         tasks_launched['pentest_task_id'] = pentest_task.id
     except Exception as e:

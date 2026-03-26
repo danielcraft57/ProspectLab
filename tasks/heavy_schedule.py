@@ -7,13 +7,17 @@ sur le broker quand une seule route API lance tout le pack.
 
 from __future__ import annotations
 
+import os
+
 try:
     from config import CELERY_BULK_STAGGER_SEC, CELERY_BULK_STAGGER_SLOT_MODULO
 except ImportError:
-    import os
-
     CELERY_BULK_STAGGER_SEC = float(os.environ.get('CELERY_BULK_STAGGER_SEC', '0.75'))
     CELERY_BULK_STAGGER_SLOT_MODULO = max(1, int(os.environ.get('CELERY_BULK_STAGGER_SLOT_MODULO', '400')))
+
+# Limite "sécurité" : évite de planifier des centaines de tâches à plusieurs heures.
+# L’objectif est de garder l’exécution visible rapidement sur Raspberry Pi.
+_STAGGER_MAX_SEC = float(os.environ.get('CELERY_STAGGER_MAX_SEC', '120'))
 
 # Client Redis réutilisé pour l'INCR global (évite 50× from_url en rafale WebSocket).
 _stagger_redis = None
@@ -46,10 +50,13 @@ class BulkSubtaskStagger:
         self._i = 0
         self._sec = float(CELERY_BULK_STAGGER_SEC)
 
-    def next_countdown(self) -> int:
-        c = int(self._i * self._sec)
+    def next_countdown(self) -> float:
+        # Cycle modulo pour borner la valeur max (et donc la latence de visibilité).
+        idx = self._i
         self._i += 1
-        return c
+        slot = int(idx % max(1, int(CELERY_BULK_STAGGER_SLOT_MODULO)))
+        c = float(slot) * float(self._sec)
+        return float(min(c, _STAGGER_MAX_SEC))
 
 
 def next_global_stagger_countdown() -> float:
@@ -103,4 +110,8 @@ def next_websocket_stagger_countdown(session_id: str) -> float:
         idx = entry["idx"]
         entry["idx"] = idx + 1
         entry["ts"] = now
-    return float(idx) * float(CELERY_BULK_STAGGER_SEC)
+    # Bornage : modulo pour éviter les grands retards sur des sessions très longues.
+    mod = max(1, int(CELERY_BULK_STAGGER_SLOT_MODULO))
+    slot = int(idx % mod)
+    c = float(slot) * float(CELERY_BULK_STAGGER_SEC)
+    return float(min(c, _STAGGER_MAX_SEC))

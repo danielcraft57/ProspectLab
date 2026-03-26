@@ -83,6 +83,10 @@ socketio = SocketIO(
     async_mode=_socketio_async_mode,
     logger=False,
     engineio_logger=False,
+    # Robustesse : éviter les déconnexions intempestives quand le serveur est occupé
+    # (bulk d'events + eventlet) ou derrière un proxy qui coupe vite les websockets.
+    ping_timeout=60,
+    ping_interval=25,
     allow_unsafe_werkzeug=True
 )
 
@@ -219,6 +223,10 @@ def restrict_to_local_network():
         if path.startswith('/track/'):
             return None
         if path.startswith('/api/public'):
+            return None
+        # Socket.IO doit rester accessible, sinon handshake WS/polling échoue
+        # et le navigateur affiche "WebSocket is closed before the connection is established."
+        if path.startswith('/socket.io'):
             return None
 
         if _client_ip_allowed():

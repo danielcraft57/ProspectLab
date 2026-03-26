@@ -108,8 +108,13 @@ CELERY_BULK_STAGGER_SLOT_MODULO = max(1, int(os.environ.get('CELERY_BULK_STAGGER
 # 1 = le worker ne précharge qu'une tâche à la fois (meilleure répartition sous charge)
 CELERY_WORKER_PREFETCH_MULTIPLIER = int(os.environ.get('CELERY_WORKER_PREFETCH_MULTIPLIER', '1'))
 CELERY_TASK_ACKS_LATE = os.environ.get('CELERY_TASK_ACKS_LATE', 'true').lower() in ('1', 'true', 'yes')
-# Files à consommer (lourd vs léger) — le worker doit écouter les deux, ex: celery,heavy
-CELERY_WORKER_QUEUES = os.environ.get('CELERY_WORKER_QUEUES', 'celery,heavy')
+# Files Celery à consommer.
+# En dev, si CELERY_WORKER_QUEUES n'est pas fourni, on doit écouter aussi les queues dédiées
+# (scraping/technical/seo/osint/pentest), sinon les tâches routées ne sont jamais exécutées.
+CELERY_WORKER_QUEUES = os.environ.get(
+    'CELERY_WORKER_QUEUES',
+    'celery,scraping,technical,seo,osint,pentest,heavy'
+)
 
 # URL de base pour le tracking des emails (doit être accessible publiquement)
 # Exemple: https://votre-domaine.com ou http://votre-ip:5000

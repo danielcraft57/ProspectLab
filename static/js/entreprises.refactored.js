@@ -2650,9 +2650,20 @@
                             }, i * staggerMs);
                         });
                     } else if (action === 'launch-scraping') {
-                        for (const id of ids) {
-                            await triggerScrapingRelaunch(id);
+                        const jobs = ids.map((id) => ({ id }));
+                        const staggerMs = jobs.length > 20 ? 700 : 300;
+                        if (jobs.length > 3) {
+                            Notifications.show(
+                                `${jobs.length} scraping(s) planifiés (lancement étalé ~${staggerMs} ms entre chaque pour ne pas saturer Celery).`,
+                                'info',
+                                'fa-layer-group'
+                            );
                         }
+                        jobs.forEach((job, i) => {
+                            setTimeout(() => {
+                                triggerScrapingRelaunch(job.id);
+                            }, i * staggerMs);
+                        });
                     } else if (action === 'delete-bulk') {
                         const count = ids.length;
                         if (!confirm(`Êtes-vous sûr de vouloir supprimer ${count} entreprise${count > 1 ? 's' : ''} ? Cette action est irréversible.`)) {

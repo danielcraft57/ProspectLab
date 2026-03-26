@@ -186,7 +186,7 @@ def register_websocket_handlers(socketio, app):
                         delay=delay,
                         enable_osint=enable_osint,
                     ),
-                    queue='heavy',
+                    queue='technical',
                 )
             except Exception as e:
                 safe_emit(socketio, 'analysis_error', {
@@ -299,7 +299,7 @@ def register_websocket_handlers(socketio, app):
                                             try:
                                                 scraping_task = scrape_analysis_task.apply_async(
                                                     kwargs=dict(analysis_id=analysis_id),
-                                                    queue='heavy',
+                                                    queue='scraping',
                                                 )
                                                 logger.info(f'Tâche de scraping lancée avec task_id={scraping_task.id}')
                                                 scraping_launched = True
@@ -1205,12 +1205,50 @@ def register_websocket_handlers(socketio, app):
             except Exception:
                 entreprise_id = None
             session_id = request.sid
+
+            try:
+                logger.info(
+                    '[Socket.IO] start_scraping sid=%s entreprise_id=%s url=%s depth=%s workers=%s time=%s pages=%s',
+                    session_id,
+                    entreprise_id,
+                    (url[:100] + '...') if isinstance(url, str) and len(url) > 100 else url,
+                    max_depth,
+                    max_workers,
+                    max_time,
+                    max_pages,
+                )
+            except Exception:
+                pass
+
+            if not url and entreprise_id:
+                try:
+                    entreprise = database.get_entreprise(entreprise_id)
+                    if entreprise:
+                        url = entreprise.get('website') or entreprise.get('url')
+                        if url:
+                            logger.info(
+                                '[Socket.IO] scraping url récupérée via entreprise_id=%s -> %s',
+                                entreprise_id,
+                                (url[:100] + '...') if isinstance(url, str) and len(url) > 100 else url,
+                            )
+                except Exception as e:
+                    logger.warning(
+                        '[Socket.IO] scraping fallback url échoué via entreprise_id=%s: %s',
+                        entreprise_id,
+                        str(e),
+                        exc_info=True,
+                    )
             
             if not url:
                 safe_emit(socketio, 'scraping_error', {'error': 'URL requise', 'entreprise_id': entreprise_id}, room=session_id)
                 return
             
             if not broker_ping_ok():
+                logger.warning(
+                    '[Socket.IO] start_scraping: broker Redis injoignable sid=%s entreprise_id=%s',
+                    session_id,
+                    entreprise_id,
+                )
                 safe_emit(socketio, 'scraping_error', {
                     'error': _CELERY_BROKER_UNREACHABLE_MSG
                 }, room=session_id)
@@ -1218,6 +1256,7 @@ def register_websocket_handlers(socketio, app):
             
             # Lancer la tâche Celery
             try:
+                cd = next_websocket_stagger_countdown(session_id)
                 task = scrape_emails_task.apply_async(
                     kwargs=dict(
                         url=url,
@@ -1227,9 +1266,15 @@ def register_websocket_handlers(socketio, app):
                         max_pages=max_pages,
                         entreprise_id=entreprise_id,
                     ),
-                    queue='heavy',
+                    countdown=cd,
+                    queue='scraping',
                 )
             except Exception as e:
+                logger.exception(
+                    '[Socket.IO] apply_async scraping échoué sid=%s entreprise_id=%s',
+                    session_id,
+                    entreprise_id,
+                )
                 safe_emit(socketio, 'scraping_error', {
                     'error': f'Erreur lors du démarrage de la tâche: {str(e)}',
                     'entreprise_id': entreprise_id
@@ -1239,6 +1284,14 @@ def register_websocket_handlers(socketio, app):
             # Stocker la tâche
             with tasks_lock:
                 active_tasks[session_id] = {'task_id': task.id, 'type': 'scraping'}
+
+            logger.info(
+                '[Socket.IO] scraping enfilée task_id=%s entreprise_id=%s countdown=%.2fs queue=scraping url=%s',
+                task.id,
+                entreprise_id,
+                cd,
+                (url[:100] + '...') if isinstance(url, str) and len(url) > 100 else url,
+            )
             
             safe_emit(socketio, 'scraping_started', {'message': 'Scraping démarré...', 'task_id': task.id, 'entreprise_id': entreprise_id}, room=session_id)
             
@@ -1310,12 +1363,46 @@ def register_websocket_handlers(socketio, app):
             url = data.get('url')
             entreprise_id = data.get('entreprise_id')
             session_id = request.sid
+
+            try:
+                logger.info(
+                    '[Socket.IO] start_osint_analysis sid=%s entreprise_id=%s url=%s',
+                    session_id,
+                    entreprise_id,
+                    (url[:100] + '...') if isinstance(url, str) and len(url) > 100 else url,
+                )
+            except Exception:
+                pass
+
+            if not url and entreprise_id:
+                try:
+                    entreprise = database.get_entreprise(entreprise_id)
+                    if entreprise:
+                        url = entreprise.get('website') or entreprise.get('url')
+                        if url:
+                            logger.info(
+                                '[Socket.IO] osint url récupérée via entreprise_id=%s -> %s',
+                                entreprise_id,
+                                (url[:100] + '...') if isinstance(url, str) and len(url) > 100 else url,
+                            )
+                except Exception as e:
+                    logger.warning(
+                        '[Socket.IO] osint fallback url échoué via entreprise_id=%s: %s',
+                        entreprise_id,
+                        str(e),
+                        exc_info=True,
+                    )
             
             if not url:
                 safe_emit(socketio, 'osint_analysis_error', {'error': 'URL requise'}, room=session_id)
                 return
             
             if not broker_ping_ok():
+                logger.warning(
+                    '[Socket.IO] start_osint_analysis: broker Redis injoignable sid=%s entreprise_id=%s',
+                    session_id,
+                    entreprise_id,
+                )
                 safe_emit(socketio, 'osint_analysis_error', {
                     'error': _CELERY_BROKER_UNREACHABLE_MSG
                 }, room=session_id)
@@ -1345,9 +1432,14 @@ def register_websocket_handlers(socketio, app):
                         people_from_scrapers=people_from_scrapers,
                     ),
                     countdown=cd,
-                    queue='heavy',
+                    queue='osint',
                 )
             except Exception as e:
+                logger.exception(
+                    '[Socket.IO] apply_async osint échoué sid=%s entreprise_id=%s',
+                    session_id,
+                    entreprise_id,
+                )
                 safe_emit(socketio, 'osint_analysis_error', {
                     'error': f'Erreur lors du démarrage de la tâche: {str(e)}'
                 }, room=session_id)
@@ -1356,6 +1448,14 @@ def register_websocket_handlers(socketio, app):
             # Stocker la tâche
             with tasks_lock:
                 active_tasks[session_id] = {'task_id': task.id, 'type': 'osint', 'url': url}
+
+            logger.info(
+                '[Socket.IO] osint enfilée task_id=%s entreprise_id=%s countdown=%.2fs queue=osint url=%s',
+                task.id,
+                entreprise_id,
+                cd,
+                (url[:100] + '...') if isinstance(url, str) and len(url) > 100 else url,
+            )
             
             safe_emit(socketio, 'osint_analysis_started', {'message': 'Analyse OSINT démarrée...', 'task_id': task.id}, room=session_id)
             
@@ -1441,12 +1541,49 @@ def register_websocket_handlers(socketio, app):
             entreprise_id = data.get('entreprise_id')
             options = data.get('options', {})
             session_id = request.sid
+
+            # Log côté serveur (utile quand le front n'a "aucun retour / aucun log").
+            try:
+                logger.info(
+                    '[Socket.IO] start_pentest_analysis sid=%s entreprise_id=%s url=%s',
+                    session_id,
+                    entreprise_id,
+                    (url[:100] + '...') if isinstance(url, str) and len(url) > 100 else url,
+                )
+            except Exception:
+                pass
             
+            # Robustesse : si le front envoie un entreprise_id mais pas (ou vide) de url,
+            # on récupère le "website" depuis la base.
+            if not url and entreprise_id:
+                try:
+                    entreprise = database.get_entreprise(entreprise_id)
+                    if entreprise:
+                        url = entreprise.get('website') or entreprise.get('url')
+                        if url:
+                            logger.info(
+                                '[Socket.IO] pentest url récupérée via entreprise_id=%s -> %s',
+                                entreprise_id,
+                                (url[:100] + '...') if isinstance(url, str) and len(url) > 100 else url,
+                            )
+                except Exception as e:
+                    logger.warning(
+                        '[Socket.IO] pentest fallback url échoué via entreprise_id=%s: %s',
+                        entreprise_id,
+                        str(e),
+                        exc_info=True,
+                    )
+
             if not url:
                 safe_emit(socketio, 'pentest_analysis_error', {'error': 'URL requise'}, room=session_id)
                 return
             
             if not broker_ping_ok():
+                logger.warning(
+                    '[Socket.IO] start_pentest_analysis: broker Redis injoignable sid=%s entreprise_id=%s',
+                    session_id,
+                    entreprise_id,
+                )
                 safe_emit(socketio, 'pentest_analysis_error', {
                     'error': _CELERY_BROKER_UNREACHABLE_MSG
                 }, room=session_id)
@@ -1483,9 +1620,14 @@ def register_websocket_handlers(socketio, app):
                         forms_from_scrapers=forms_from_scrapers,
                     ),
                     countdown=cd,
-                    queue='heavy',
+                    queue='pentest',
                 )
             except Exception as e:
+                logger.exception(
+                    '[Socket.IO] apply_async pentest échoué sid=%s entreprise_id=%s',
+                    session_id,
+                    entreprise_id,
+                )
                 safe_emit(socketio, 'pentest_analysis_error', {
                     'error': f'Erreur lors du démarrage de la tâche: {str(e)}'
                 }, room=session_id)
@@ -1494,6 +1636,14 @@ def register_websocket_handlers(socketio, app):
             # Stocker la tâche
             with tasks_lock:
                 active_tasks[session_id] = {'task_id': task.id, 'type': 'pentest', 'url': url}
+
+            logger.info(
+                '[Socket.IO] pentest enfilée task_id=%s entreprise_id=%s countdown=%.2fs queue=pentest url=%s',
+                task.id,
+                entreprise_id,
+                cd,
+                (url[:100] + '...') if isinstance(url, str) and len(url) > 100 else url,
+            )
             
             safe_emit(socketio, 'pentest_analysis_started', {'message': 'Analyse de sécurité démarrée...', 'task_id': task.id}, room=session_id)
             
@@ -1588,6 +1738,27 @@ def register_websocket_handlers(socketio, app):
                 )
             except Exception:
                 pass
+
+            if not url and entreprise_id:
+                try:
+                    entreprise = database.get_entreprise(entreprise_id)
+                    if entreprise:
+                        url = entreprise.get('website') or entreprise.get('url')
+                        if url:
+                            app.logger.info(
+                                '[Socket.IO] seo url récupérée via entreprise_id=%s -> %s',
+                                entreprise_id,
+                                (url[:100] + '…') if isinstance(url, str) and len(url) > 100 else url,
+                            )
+                except Exception as e:
+                    try:
+                        app.logger.warning(
+                            '[Socket.IO] seo fallback url échoué via entreprise_id=%s: %s',
+                            entreprise_id,
+                            str(e),
+                        )
+                    except Exception:
+                        pass
             
             if not url:
                 safe_emit(socketio, 'seo_analysis_error', {'error': 'URL requise'}, room=session_id)
@@ -1610,7 +1781,7 @@ def register_websocket_handlers(socketio, app):
                         use_lighthouse=use_lighthouse,
                     ),
                     countdown=cd,
-                    queue='heavy',
+                    queue='seo',
                 )
             except Exception as e:
                 app.logger.exception('[Socket.IO] apply_async SEO échoué sid=%s: %s', session_id, e)
@@ -1620,7 +1791,7 @@ def register_websocket_handlers(socketio, app):
                 return
             
             app.logger.info(
-                '[Socket.IO] SEO enfilée task_id=%s entreprise_id=%s countdown=%.2fs queue=heavy url=%s',
+                '[Socket.IO] SEO enfilée task_id=%s entreprise_id=%s countdown=%.2fs queue=seo url=%s',
                 task.id, entreprise_id, cd, url,
             )
             # Stocker la tâche
@@ -1710,11 +1881,46 @@ def register_websocket_handlers(socketio, app):
             enable_nmap = data.get('enable_nmap', False)
             session_id = request.sid
 
+            try:
+                logger.info(
+                    '[Socket.IO] start_technical_analysis sid=%s entreprise_id=%s url=%s enable_nmap=%s',
+                    session_id,
+                    entreprise_id,
+                    (url[:100] + '...') if isinstance(url, str) and len(url) > 100 else url,
+                    enable_nmap,
+                )
+            except Exception:
+                pass
+
+            if not url and entreprise_id:
+                try:
+                    entreprise = database.get_entreprise(entreprise_id)
+                    if entreprise:
+                        url = entreprise.get('website') or entreprise.get('url')
+                        if url:
+                            logger.info(
+                                '[Socket.IO] technical url récupérée via entreprise_id=%s -> %s',
+                                entreprise_id,
+                                (url[:100] + '...') if isinstance(url, str) and len(url) > 100 else url,
+                            )
+                except Exception as e:
+                    logger.warning(
+                        '[Socket.IO] technical fallback url échoué via entreprise_id=%s: %s',
+                        entreprise_id,
+                        str(e),
+                        exc_info=True,
+                    )
+
             if not url:
                 safe_emit(socketio, 'technical_analysis_error', {'error': 'URL requise'}, room=session_id)
                 return
 
             if not broker_ping_ok():
+                logger.warning(
+                    '[Socket.IO] start_technical_analysis: broker Redis injoignable sid=%s entreprise_id=%s',
+                    session_id,
+                    entreprise_id,
+                )
                 safe_emit(socketio, 'technical_analysis_error', {'error': _CELERY_BROKER_UNREACHABLE_MSG}, room=session_id)
                 return
 
@@ -1724,9 +1930,14 @@ def register_websocket_handlers(socketio, app):
                 task = technical_analysis_task.apply_async(
                     kwargs=dict(url=url, entreprise_id=entreprise_id, enable_nmap=enable_nmap),
                     countdown=cd,
-                    queue='heavy',
+                    queue='technical',
                 )
             except Exception as e:
+                logger.exception(
+                    '[Socket.IO] apply_async technical échoué sid=%s entreprise_id=%s',
+                    session_id,
+                    entreprise_id,
+                )
                 safe_emit(socketio, 'technical_analysis_error', {
                     'error': f'Erreur lors du démarrage de la tâche: {str(e)}'
                 }, room=session_id)
@@ -1735,6 +1946,14 @@ def register_websocket_handlers(socketio, app):
             # Stocker la tâche
             with tasks_lock:
                 active_tasks[session_id] = {'task_id': task.id, 'type': 'technical', 'url': url}
+
+            logger.info(
+                '[Socket.IO] technical enfilée task_id=%s entreprise_id=%s countdown=%.2fs queue=technical url=%s',
+                task.id,
+                entreprise_id,
+                cd,
+                (url[:100] + '...') if isinstance(url, str) and len(url) > 100 else url,
+            )
 
             safe_emit(socketio, 'technical_analysis_started', {
                 'message': 'Analyse technique démarrée...',

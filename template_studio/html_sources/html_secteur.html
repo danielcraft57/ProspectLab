@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Proposition pour le secteur {secteur} - {entreprise}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f9fafb;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        Audit ciblé sur votre secteur pour améliorer performance, sécurité et visibilité.
+    </div>
+    <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f9fafb;">
+        <tr>
+            <td style="padding: 40px 20px;">
+                <table role="presentation" style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08);">
+                    <tr>
+                        <td style="padding: 28px 32px; background: linear-gradient(135deg, #4da9d6, #184c70); border-radius: 12px 12px 0 0;">
+                            <h1 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 600;">Proposition adaptée à votre secteur</h1>
+                            <p style="margin: 8px 0 0; color: rgba(255,255,255,0.9); font-size: 14px;">{#if_secteur}{secteur} · {#endif}{entreprise}</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 36px 32px;">
+                            <p style="margin: 0 0 20px 0; color: #1f2937; font-size: 16px; line-height: 1.65;">
+                                Bonjour {nom},
+                            </p>
+                            <p style="margin: 0 0 20px 0; color: #1f2937; font-size: 16px; line-height: 1.65;">
+                                {#if_secteur}Les entreprises du secteur <strong style="color: #4da9d6;">{secteur}</strong> comme {#endif}<strong>{entreprise}</strong> ont souvent les mêmes enjeux : visibilité, performance du site, et mise en conformité.
+                            </p>
+                            {#if_tech_data}
+                            <div style="background-color: #f9fafb; padding: 20px; border-radius: 8px; margin: 24px 0; border-left: 4px solid #4da9d6;">
+                                <p style="margin: 0 0 8px 0; color: #4da9d6; font-size: 14px; font-weight: 600;">Votre stack actuelle</p>
+                                <p style="margin: 0; color: #4b5563; font-size: 15px;">Framework / CMS : {framework} {cms} · Hébergement : {hosting_provider}</p>
+                            </div>
+                            {#endif}
+                            <p style="margin: 0 0 16px 0; color: #1f2937; font-size: 16px; line-height: 1.65;">
+                                Je vous propose un audit gratuit ciblé sur votre secteur pour identifier les leviers les plus impactants (2–3 priorités concrètes à court terme).
+                            </p>
+                            <p style="margin: 0 0 18px 0; color: #4b5563; font-size: 14px; line-height: 1.6;">
+                                Question : votre priorité, c’est plutôt <strong>être trouvé</strong> (SEO / visibilité) ou <strong>mieux convertir</strong> (plus de demandes) ?
+                            </p>
+                            {#include:cta_dual_analysis_and_15min}
+                            {#include:signature_standard}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:18px 32px 26px;background:#f9fafb;text-align:center;border-top:1px solid #eef2f7;">
+                            {#include:footer_standard}
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

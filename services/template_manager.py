@@ -3,10 +3,39 @@ Gestionnaire de modèles de messages
 """
 
 import json
+import re
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
 from urllib.parse import quote
+
+
+def _normalize_danielcraft_href(url: str) -> str:
+    """
+    Le site vitrine est une SPA : /contact renvoie 404. On normalise vers /#contact.
+    """
+    if not url or 'danielcraft.fr' not in url.lower():
+        return url
+    return re.sub(
+        r'(https?://(?:www\.)?danielcraft\.fr)/contact/?(?=\?|#|$)',
+        r'\1/#contact',
+        url,
+        flags=re.IGNORECASE,
+    )
+
+
+def _append_email_query_before_fragment(url: str, encoded_email: str) -> str:
+    """Ajoute ?email= ou &email= avant le fragment #... pour que le tracking reste valide."""
+    if not encoded_email or not url:
+        return url
+    if re.search(r'(?:[?&])email=', url, flags=re.IGNORECASE):
+        return url
+    if '#' in url:
+        left, frag = url.split('#', 1)
+        joiner = '&' if '?' in left else '?'
+        return f'{left}{joiner}email={encoded_email}#{frag}'
+    joiner = '&' if '?' in url else '?'
+    return f'{url}{joiner}email={encoded_email}'
 
 
 class TemplateManager:
@@ -22,7 +51,14 @@ class TemplateManager:
         else:
             # Utiliser un fichier par défaut dans le dossier de l'app
             app_dir = Path(__file__).parent.parent
-            self.templates_file = app_dir / 'templates_data.json'
+            self.templates_file = app_dir / 'template_studio' / 'templates_data.json'
+
+        # Assurer l'existence du dossier parent (utile en prod si template_studio/ n'a pas été déployé)
+        try:
+            self.templates_file.parent.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            # Ne jamais empêcher le boot si le FS est read-only; la suite gérera via fallback/BDD.
+            pass
         
         # Créer le fichier s'il n'existe pas (copie du fichier par défaut complet si présent)
         if not self.templates_file.exists():
@@ -36,8 +72,16 @@ class TemplateManager:
         self.templates = self._load_templates()
     
     def _init_templates_file(self):
-        """Initialise le fichier de templates (vide). Utilisez scripts/generate_html_templates.py --restore pour charger les modèles HTML."""
+        """Initialise le fichier de templates (vide).
+
+        Utilisez `template_studio/generate_cli.py --restore` pour charger les modèles HTML.
+        """
         default_templates = {'templates': []}
+        # S'assurer que le dossier existe avant d'écrire
+        try:
+            self.templates_file.parent.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
         with open(self.templates_file, 'w', encoding='utf-8') as f:
             json.dump(default_templates, f, ensure_ascii=False, indent=2)
     
@@ -49,7 +93,9 @@ class TemplateManager:
             db = Database()
             if hasattr(db, 'list_email_templates'):
                 rows = db.list_email_templates(active_only=True)
-                if rows is not None:
+                # Si la BDD est connectée mais ne renvoie rien (liste vide),
+                # on fallback sur le JSON local pour rester fonctionnel en dev/CLI.
+                if rows:
                     # Harmoniser les types
                     normalized = []
                     for r in rows:
@@ -140,6 +186,14 @@ class TemplateManager:
                         template['is_html'] = True
 
                 if template.get('is_html'):
+                    # Pour l'UI (gestionnaire de modèles), on renvoie du HTML "résolu"
+                    # (fragments inclus) afin d'éviter d'afficher des directives {#include:...}.
+                    if isinstance(content, str):
+                        content = self._apply_includes(content)
+                        # Pour la prévisualisation UI, rendre les liens cliquables même si
+                        # les placeholders ne sont pas rendus (ex: href="{dc_contact_url}").
+                        content = self._make_ui_preview_links_clickable(content)
+                        template['content'] = content
                     template['preview'] = 'Modèle HTML avec variables dynamiques. {{nom}} = nom du contact ou responsable entreprise si inconnu ; {{entreprise}}, {{email}}, {{responsable}}, blocs conditionnels.'
                 else:
                     text = content if isinstance(content, str) else str(content)
@@ -166,14 +220,125 @@ class TemplateManager:
                 if tpl:
                     d = dict(tpl)
                     d['is_html'] = bool(d.get('is_html'))
+                    if d.get('is_html') and isinstance(d.get('content'), str):
+                        d['content'] = self._apply_includes(d['content'])
+                        d['content'] = self._make_ui_preview_links_clickable(d['content'])
                     return d
         except Exception:
             pass
 
         for template in self.templates:
             if template.get('id') == template_id:
-                return template.copy()
+                d = template.copy()
+                if d.get('is_html') and isinstance(d.get('content'), str):
+                    d['content'] = self._apply_includes(d['content'])
+                    d['content'] = self._make_ui_preview_links_clickable(d['content'])
+                return d
         return None
+
+    @staticmethod
+    def _make_ui_preview_links_clickable(content: str) -> str:
+        """
+        Dans la page "modèles d'email", on affiche souvent le HTML sans rendre les variables.
+        On remplace donc quelques href placeholders par des URLs de fallback cliquables.
+        """
+        if not isinstance(content, str) or 'href="' not in content:
+            return content
+
+        # CTA principal
+        content = content.replace('href="{dc_contact_url}"', 'href="https://danielcraft.fr/#contact"')
+
+        # Analyse (fallback "exemple.com" pour que le lien soit valide en UI)
+        content = content.replace(
+            'href="{analysis_url}"',
+            'href="https://danielcraft.fr/analyse?website=https%3A%2F%2Fexemple.com&full=1"',
+        )
+
+        # Désabonnement (fallback "exemple.com")
+        content = content.replace(
+            'href="{unsubscribe_url}"',
+            'href="https://danielcraft.fr/desabonnement?website=https%3A%2F%2Fexemple.com"',
+        )
+
+        return content
+
+    def _apply_includes(self, content: str) -> str:
+        """
+        Supporte des “morceaux communs” pour factoriser le HTML.
+
+        Syntaxes supportées :
+          - {#include:footer_standard}
+          - {#include_footer_standard}
+
+        Les fragments sont chargés depuis :
+        `template_studio/fragments/<name>.html`
+        """
+        if not isinstance(content, str) or "{#include" not in content:
+            return content
+
+        fragments_dir = Path(__file__).parent.parent / "template_studio" / "fragments"
+        if not fragments_dir.exists():
+            return content
+
+        def load_fragment(fragment_name: str) -> str:
+            fragment_file = fragments_dir / f"{fragment_name}.html"
+            if not fragment_file.exists():
+                return ""
+            return fragment_file.read_text(encoding="utf-8")
+
+        # On applique les includes de façon récursive (un fragment peut inclure un autre fragment).
+        # Protection : profondeur max pour éviter les boucles infinies.
+        max_depth = 8
+        for _ in range(max_depth):
+            if "{#include" not in content:
+                break
+
+            before = content
+
+            # {#include:footer_standard}
+            content = re.sub(
+                r"\{#include:([a-zA-Z0-9_\-]+)\}",
+                lambda m: load_fragment(m.group(1)),
+                content,
+            )
+
+            # {#include_footer_standard}
+            content = re.sub(
+                r"\{#include_([a-zA-Z0-9_\-]+)\}",
+                lambda m: load_fragment(m.group(1)),
+                content,
+            )
+
+            if content == before:
+                break
+
+        return content
+
+    @staticmethod
+    def _append_email_to_all_hrefs(content: str, encoded_email: str) -> str:
+        """
+        Ajoute `email=...` à tous les liens HTTP(S) d'un HTML rendu.
+        - Ne touche pas aux mailto:, tel:, #anchors, javascript:
+        - Préserve les fragments (#...) en ajoutant la query avant le fragment
+        - N'ajoute pas si email= est déjà présent
+        """
+        if not encoded_email or not isinstance(content, str) or 'href' not in content:
+            return content
+
+        href_re = re.compile(r'(href\s*=\s*["\'])([^"\']+)(["\'])', flags=re.IGNORECASE)
+
+        def repl(m: re.Match) -> str:
+            prefix, url, suffix = m.group(1), m.group(2), m.group(3)
+            low = url.lower()
+            if low.startswith('mailto:') or low.startswith('tel:') or low.startswith('#') or low.startswith('javascript:'):
+                return m.group(0)
+            if low.startswith('http://') or low.startswith('https://'):
+                url2 = _normalize_danielcraft_href(url)
+                url2 = _append_email_query_before_fragment(url2, encoded_email)
+                return f'{prefix}{url2}{suffix}'
+            return m.group(0)
+
+        return href_re.sub(repl, content)
     
     def create_template(self, name: str, subject: str, content: str, category: str = 'cold_email',
                         template_id: Optional[str] = None) -> Dict:
@@ -644,8 +809,15 @@ class TemplateManager:
             "body": "\n".join(lignes)
         }
     
-    def render_template(self, template_id: str, nom: str = '', entreprise: str = '', email: str = '', 
-                       entreprise_id: int = None):
+    def render_template(
+        self,
+        template_id: str,
+        nom: str = '',
+        entreprise: str = '',
+        email: str = '',
+        entreprise_id: int = None,
+        extended_overrides: Optional[Dict] = None,
+    ):
         """
         Rend un template avec les variables remplacées
         
@@ -655,6 +827,8 @@ class TemplateManager:
             entreprise: Nom de l'entreprise
             email: Email du destinataire
             entreprise_id: ID de l'entreprise pour récupérer les données étendues (optionnel)
+            extended_overrides: dict optionnel pour surcharger/completer les données étendues
+                                 (utile pour la CLI en mode mock).
         
         Returns:
             Tuple (contenu rendu, is_html)
@@ -664,6 +838,8 @@ class TemplateManager:
             return '', False
         
         content = template.get('content', '')
+        # Factorisation via fragments communs (header/footer/CTA…).
+        content = self._apply_includes(content)
         is_html = template.get('is_html', False)
 
         # Auto-détection de modèles HTML au moment du rendu, même si is_html est à False
@@ -676,7 +852,11 @@ class TemplateManager:
         # Récupérer les données étendues si entreprise_id fourni
         extended_data = {}
         if entreprise_id:
-            extended_data = self._get_entreprise_extended_data(entreprise_id)
+            extended_data = self._get_entreprise_extended_data(entreprise_id) or {}
+
+        # Mode mock / overrides : injection contrôlée de variables côté CLI.
+        if extended_overrides and isinstance(extended_overrides, dict):
+            extended_data.update(extended_overrides)
         
         # Formater le nom : contact > responsable entreprise > Monsieur/Madame
         from utils.name_formatter import format_name
@@ -700,31 +880,44 @@ class TemplateManager:
 
         # Lien direct vers l'analyse en ligne du site (danielcraft.fr/analyse)
         website_val = extended_flat.get('website') or ''
+        encoded_email = quote((email or '').strip(), safe='') if isinstance(email, str) and email.strip() else ''
         analysis_url = ''
         if isinstance(website_val, str) and website_val.strip():
             # URL-encode du website pour l'inclure dans la query string
             encoded_website = quote(website_val.strip(), safe='')
-            analysis_url = f"https://danielcraft.fr/analyse?website={encoded_website}&full=1"
+            if encoded_email:
+                analysis_url = f"https://danielcraft.fr/analyse?website={encoded_website}&full=1&email={encoded_email}"
+            else:
+                analysis_url = f"https://danielcraft.fr/analyse?website={encoded_website}&full=1"
         extended_flat['analysis_url'] = analysis_url
 
         # Lien de désabonnement (danielcraft.fr/desabonnement?website=...)
         unsubscribe_url = ''
         if isinstance(website_val, str) and website_val.strip():
             encoded_website = quote(website_val.strip(), safe='')
-            unsubscribe_url = f"https://danielcraft.fr/desabonnement?website={encoded_website}"
+            if encoded_email:
+                unsubscribe_url = f"https://danielcraft.fr/desabonnement?website={encoded_website}&email={encoded_email}"
+            else:
+                unsubscribe_url = f"https://danielcraft.fr/desabonnement?website={encoded_website}"
         extended_flat['unsubscribe_url'] = unsubscribe_url
+
+        # Contact site vitrine DanielCraft (SPA : #contact — pas de route /contact)
+        if encoded_email:
+            dc_contact_url = f'https://danielcraft.fr/?email={encoded_email}#contact'
+        else:
+            dc_contact_url = 'https://danielcraft.fr/#contact'
+        extended_flat['dc_contact_url'] = dc_contact_url
 
         variables = {
             'nom': formatted_nom,
             'entreprise': entreprise or 'votre entreprise',
             'email': email or '',
             'base_url': base_url,
+            'dc_contact_url': dc_contact_url,
             **extended_flat
         }
         
         # Remplacer les conditions {#if_xxx} ... {#endif}
-        import re
-
         # Compat: certains templates utilisent {{var}} et {{#if_x}} ... {{#endif}}.
         # On normalise vers {var} et {#if_x} ... {#endif} pour réutiliser le même moteur.
         if isinstance(content, str) and '{{' in content:
@@ -833,6 +1026,54 @@ class TemplateManager:
                 content = content.format(**{k: str(v) if v is not None else '' for k, v in variables.items()})
             except:
                 pass
+
+        # Liens danielcraft.fr : corriger /contact (404 SPA) + email= avant #fragment
+        try:
+            if isinstance(content, str) and 'danielcraft.fr' in content:
+                href_re = re.compile(
+                    r'(href\s*=\s*["\'])(https?://(?:www\.)?danielcraft\.fr/[^"\']*)(["\'])',
+                    flags=re.IGNORECASE,
+                )
+
+                def href_repl(m: re.Match) -> str:
+                    prefix, url, suffix = m.group(1), m.group(2), m.group(3)
+                    url = _normalize_danielcraft_href(url)
+                    if encoded_email:
+                        url = _append_email_query_before_fragment(url, encoded_email)
+                    return f'{prefix}{url}{suffix}'
+
+                content = href_re.sub(href_repl, content)
+        except Exception:
+            pass
+
+        # Tracking : ajouter email=... à tous les liens HTTP(S) (y compris signature, CTA, etc.)
+        # Important : ne s'applique que si un email destinataire est fourni.
+        try:
+            if is_html and isinstance(content, str) and encoded_email:
+                content = self._append_email_to_all_hrefs(content, encoded_email)
+        except Exception:
+            pass
+
+        # Footer désabonnement (robuste) :
+        # Beaucoup de templates ont le texte "Pas de spam." mais pas le lien.
+        # Si on a un `unsubscribe_url` valide et qu'aucun lien de désabonnement
+        # n'apparaît encore dans le HTML rendu, on l'ajoute au bon endroit.
+        try:
+            if is_html and isinstance(content, str):
+                has_unsub = ('desabonnement' in content.lower()) or ('désabonnement' in content.lower())
+                if (not has_unsub) and (unsubscribe_url or '').strip() and ('pas de spam' in content.lower()):
+                    anchor = (
+                        f'<br><a href="{unsubscribe_url}" style="color:#6b7280;text-decoration:none;">se désabonner</a>'
+                    )
+                    content = re.sub(
+                        r'(?i)pas de spam\.?',
+                        lambda m: f"{m.group(0)}{anchor}",
+                        content,
+                        count=1,
+                    )
+        except Exception:
+            # Ne jamais casser le rendu si l'injection échoue.
+            pass
         
         return content, is_html
 

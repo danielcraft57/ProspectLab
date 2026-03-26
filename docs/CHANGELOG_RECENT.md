@@ -43,7 +43,8 @@ En résumé : plusieurs tables sont « à la demande » (users, segments, tokens
 
 - **Page Gestion des modèles** : Bloc "Variables disponibles" (nom, entreprise, email, blocs conditionnels, variables générées) ; catégorie "Email HTML" ; badge et preview pour les modèles HTML ; formulaire avec rappel des variables.
 - **Template_manager** : Création/mise à jour préserve `is_html` selon la catégorie ; si `templates_data.json` absent, copie depuis `templates_data.default.json` si présent.
-- **Script generate_html_templates.py** : Correction encodage (prints sans Unicode) ; option `--restore` / `-r` pour recréer `templates_data.json` à partir du fichier par défaut (2 Cold Email + 5 HTML).
+- **Template Studio (CLI)** : Génération/sync des templates HTML via `python -m template_studio.generate_cli --sync` depuis les sources `template_studio/html_sources/` (bootstrap possible si besoin).
+- **Fragments HTML (includes)** : Factorisation via `{#include:...}` (`footer_standard`, `signature_standard`, `cta_*`) pour garder un rendu cohérent et maintenir vite.
 - **Campagnes (dropdown Modèle de message)** : Chargement des templates plus robuste (réponse API non tableau, select manquant) ; listener "change" attaché une seule fois.
 
 ## Campagnes email : paramètres d'envoi, suggestions et reset (fév. 2026)

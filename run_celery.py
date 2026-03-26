@@ -18,7 +18,10 @@ try:
     from config import CELERY_WORKERS, CELERY_WORKER_QUEUES
 except ImportError:
     CELERY_WORKERS = int(os.environ.get('CELERY_WORKERS', '4'))
-    CELERY_WORKER_QUEUES = os.environ.get('CELERY_WORKER_QUEUES', 'celery,heavy')
+    CELERY_WORKER_QUEUES = os.environ.get(
+        'CELERY_WORKER_QUEUES',
+        'celery,scraping,technical,seo,osint,pentest,heavy',
+    )
 
 def kill_process_tree(pid):
     """Tue un processus et tous ses enfants (Windows)"""

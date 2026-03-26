@@ -239,6 +239,27 @@ foreach ($dir in $dirsToSync) {
 Write-Host "✅ Dossiers synchronisés (routes, services, tasks, templates, static, utils, scripts)" -ForegroundColor Green
 Write-Host ""
 
+# Déployer .env.prod local → .env sur le serveur
+Write-Host "[5.5/9] Envoi de .env.prod vers le serveur (copie en .env)..." -ForegroundColor Yellow
+$envProdLocal = Join-Path $PROJECT_DIR '.env.prod'
+if (Test-Path -LiteralPath $envProdLocal -PathType Leaf) {
+    scp $envProdLocal "$User@$Server`:$RemotePath/.env.prod" 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "❌ Erreur lors de l'envoi de .env.prod" -ForegroundColor Red
+        exit 1
+    }
+    ssh "$User@$Server" "cd $RemotePath && cp -f .env.prod .env && chmod 600 .env .env.prod" 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "❌ Erreur lors de la copie .env.prod → .env sur le serveur" -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "✅ .env mis à jour sur $RemotePath (depuis .env.prod)" -ForegroundColor Green
+} else {
+    Write-Host "⚠️  Fichier .env.prod introuvable à la racine du projet : $envProdLocal" -ForegroundColor Yellow
+    Write-Host "   Le .env existant sur le serveur n'a pas été modifié." -ForegroundColor Gray
+}
+Write-Host ""
+
 # Créer ou mettre à jour l'environnement Conda sur le serveur (prefix = env)
 Write-Host "[6/9] Configuration de l'environnement Conda..." -ForegroundColor Yellow
 $condaOutput = ssh "$User@$Server" "set -e; source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/anaconda3/etc/profile.d/conda.sh; cd $RemotePath; if [ ! -d env ]; then conda create --prefix $RemotePath/env python=3.11 -y --override-channels -c conda-forge; fi; $RemotePath/env/bin/pip install --upgrade pip setuptools wheel; $RemotePath/env/bin/pip install -r requirements.txt" 2>&1
@@ -307,12 +328,10 @@ if ($ProxyServer) {
 Write-Host "[9/9] Déploiement terminé !" -ForegroundColor Green
 Write-Host ""
 Write-Host "Prochaines étapes:" -ForegroundColor Cyan
-Write-Host "1. Connectez-vous au serveur de production" -ForegroundColor Yellow
-Write-Host "2. Allez dans le répertoire de déploiement" -ForegroundColor Yellow
-Write-Host "3. Configurez le fichier .env avec vos paramètres de production" -ForegroundColor Yellow
-Write-Host "4. Environnement Conda: $RemotePath/env" -ForegroundColor Yellow
-Write-Host "5. Initialisez la base de données si nécessaire" -ForegroundColor Yellow
-Write-Host "6. Démarrez l'application (Gunicorn) ou vérifiez les services systemd" -ForegroundColor Yellow
+Write-Host "1. Si .env.prod était présent localement, .env a été mis à jour sur le serveur (sinon éditez $RemotePath/.env à la main)." -ForegroundColor Yellow
+Write-Host "2. Environnement Conda: $RemotePath/env" -ForegroundColor Yellow
+Write-Host "3. Initialisez la base de données si nécessaire" -ForegroundColor Yellow
+Write-Host "4. Les services systemd ont été redémarrés en fin de script" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "Pour plus d'informations, consultez:" -ForegroundColor Cyan
 Write-Host "  docs/configuration/DEPLOIEMENT_PRODUCTION.md" -ForegroundColor Gray

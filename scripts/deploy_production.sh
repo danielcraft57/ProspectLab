@@ -20,7 +20,7 @@ echo "=========================================="
 echo ""
 
 # Vérifier la connexion SSH
-echo "[1/8] Vérification de la connexion SSH..."
+echo "[1/9] Vérification de la connexion SSH..."
 if ! ssh -o ConnectTimeout=5 "$USER@$SERVER" "echo 'Connexion OK'" > /dev/null 2>&1; then
     echo "❌ Impossible de se connecter au serveur"
     echo "   Vérifiez que:"
@@ -33,7 +33,7 @@ echo "✅ Connexion SSH OK"
 echo ""
 
 # Créer le répertoire de déploiement local
-echo "[2/8] Préparation des fichiers locaux..."
+echo "[2/9] Préparation des fichiers locaux..."
 DEPLOY_DIR="$PROJECT_DIR/deploy"
 if [ -d "$DEPLOY_DIR" ]; then
     rm -rf "$DEPLOY_DIR"
@@ -108,7 +108,7 @@ echo "✅ Fichiers préparés"
 echo ""
 
 # Vérifier Conda sur le serveur
-echo "[3/8] Vérification de Conda..."
+echo "[3/9] Vérification de Conda..."
 CONDA_CMD=$(ssh "$USER@$SERVER" "which conda 2>/dev/null || (source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null && which conda) || (source ~/anaconda3/etc/profile.d/conda.sh 2>/dev/null && which conda) || true" || echo "")
 if [ -z "$CONDA_CMD" ]; then
     echo "❌ Conda n'est pas installé sur le serveur (miniconda3 ou anaconda3)"
@@ -119,13 +119,13 @@ echo "✅ Conda détecté"
 echo ""
 
 # Créer le répertoire sur le serveur
-echo "[4/8] Préparation du répertoire sur le serveur..."
+echo "[4/9] Préparation du répertoire sur le serveur..."
 ssh "$USER@$SERVER" "sudo mkdir -p $REMOTE_PATH && sudo chown -R $USER:$USER $REMOTE_PATH"
 echo "✅ Répertoire créé sur le serveur"
 echo ""
 
 # Copier les fichiers vers le serveur
-echo "[5/8] Transfert des fichiers vers le serveur..."
+echo "[5/9] Transfert des fichiers vers le serveur..."
 echo "   Cela peut prendre quelques instants..."
 scp -r "$DEPLOY_DIR"/* "$USER@$SERVER:$REMOTE_PATH/" > /dev/null 2>&1
 if [ $? -ne 0 ]; then
@@ -147,8 +147,29 @@ done
 echo "✅ Dossiers synchronisés"
 echo ""
 
+# Déployer la configuration : .env.prod local → .env sur le serveur
+echo "[5.5/9] Envoi de .env.prod vers le serveur (copie en .env)..."
+ENV_PROD_LOCAL="$PROJECT_DIR/.env.prod"
+if [ -f "$ENV_PROD_LOCAL" ]; then
+    scp "$ENV_PROD_LOCAL" "$USER@$SERVER:$REMOTE_PATH/.env.prod"
+    if [ $? -ne 0 ]; then
+        echo "❌ Erreur lors de l'envoi de .env.prod"
+        exit 1
+    fi
+    ssh "$USER@$SERVER" "cd $REMOTE_PATH && cp -f .env.prod .env && chmod 600 .env .env.prod"
+    if [ $? -ne 0 ]; then
+        echo "❌ Erreur lors de la copie .env.prod → .env sur le serveur"
+        exit 1
+    fi
+    echo "✅ .env mis à jour sur $REMOTE_PATH (depuis .env.prod)"
+else
+    echo "⚠️  Fichier .env.prod introuvable à la racine du projet ($ENV_PROD_LOCAL)"
+    echo "   Le .env existant sur le serveur n'a pas été modifié."
+fi
+echo ""
+
 # Créer ou mettre à jour l'environnement Conda sur le serveur (prefix = env)
-echo "[6/8] Configuration de l'environnement Conda..."
+echo "[6/9] Configuration de l'environnement Conda..."
 ssh "$USER@$SERVER" "set -e; source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/anaconda3/etc/profile.d/conda.sh; cd $REMOTE_PATH; if [ ! -d env ]; then conda create --prefix $REMOTE_PATH/env python=3.11 -y --override-channels -c conda-forge; fi; $REMOTE_PATH/env/bin/pip install --upgrade pip setuptools wheel; $REMOTE_PATH/env/bin/pip install -r requirements.txt"
 if [ $? -ne 0 ]; then
     echo "❌ Erreur lors de l'installation des dépendances Conda/pip"
@@ -158,7 +179,7 @@ echo "✅ Environnement Conda configuré (prefix=$REMOTE_PATH/env)"
 echo ""
 
 # Créer les répertoires nécessaires
-echo "[7/8] Création des répertoires nécessaires..."
+echo "[7/9] Création des répertoires nécessaires..."
 ssh "$USER@$SERVER" "cd $REMOTE_PATH && mkdir -p logs logs_server"
 echo "✅ Répertoires créés"
 echo ""
@@ -217,12 +238,10 @@ fi
 echo "[9/9] Déploiement terminé !"
 echo ""
 echo "Prochaines étapes:"
-echo "1. Connectez-vous au serveur de production"
-echo "2. Allez dans le répertoire de déploiement"
-echo "3. Configurez le fichier .env avec vos paramètres de production"
-echo "4. Environnement Conda: $REMOTE_PATH/env (activer avec: source \$CONDA_PREFIX/etc/profile.d/conda.sh && conda activate $REMOTE_PATH/env)"
-echo "5. Initialisez la base de données si nécessaire"
-echo "6. Démarrez l'application avec Gunicorn ou vérifiez les services systemd"
+echo "1. Si .env.prod était présent localement, .env a été mis à jour sur le serveur (sinon éditez $REMOTE_PATH/.env à la main)."
+echo "2. Environnement Conda: $REMOTE_PATH/env (activer avec: source \$CONDA_PREFIX/etc/profile.d/conda.sh && conda activate $REMOTE_PATH/env)"
+echo "3. Initialisez la base de données si nécessaire"
+echo "4. Les services systemd (prospectlab, celery) ont été redémarrés en fin de script"
 echo ""
 echo "Pour plus d'informations, consultez:"
 echo "  docs/configuration/DEPLOIEMENT_PRODUCTION.md"

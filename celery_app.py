@@ -50,17 +50,24 @@ celery.conf.update(
     task_default_queue='celery',
     task_queues=(
         Queue('celery', routing_key='celery'),
+        Queue('scraping', routing_key='scraping'),
+        Queue('technical', routing_key='technical'),
+        Queue('seo', routing_key='seo'),
+        Queue('osint', routing_key='osint'),
+        Queue('pentest', routing_key='pentest'),
+        # Queue legacy conservée (compat). A terme, tout doit être routé ailleurs.
         Queue('heavy', routing_key='heavy'),
     ),
     # Dict pattern -> route (Celery 5 / kombu : une *liste* de tuples casse MapRoute qui itère
     # chaque entrée en « k, v » — le 1er élément est une str → too many values to unpack).
     task_routes={
-        'tasks.technical_analysis_tasks.*': {'queue': 'heavy'},
-        'tasks.seo_tasks.*': {'queue': 'heavy'},
-        'tasks.osint_tasks.*': {'queue': 'heavy'},
-        'tasks.pentest_tasks.*': {'queue': 'heavy'},
-        'tasks.scraping_tasks.*': {'queue': 'heavy'},
-        'tasks.analysis_tasks.*': {'queue': 'heavy'},
+        'tasks.scraping_tasks.*': {'queue': 'scraping'},
+        'tasks.technical_analysis_tasks.*': {'queue': 'technical'},
+        'tasks.seo_tasks.*': {'queue': 'seo'},
+        'tasks.osint_tasks.*': {'queue': 'osint'},
+        'tasks.pentest_tasks.*': {'queue': 'pentest'},
+        # Analyse Excel "pack" : plutôt côté technique (inclut notamment génération des sous-tâches).
+        'tasks.analysis_tasks.*': {'queue': 'technical'},
     },
     task_create_missing_queues=True,
     worker_prefetch_multiplier=CELERY_WORKER_PREFETCH_MULTIPLIER,
