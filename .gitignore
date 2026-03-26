@@ -35,6 +35,7 @@ instance/
 .env.local
 .env.*.local
 .env.prod
+.env.cluster
 .env.dev
 .env.prod.*
 .env.dev.*

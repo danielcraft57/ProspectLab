@@ -102,6 +102,38 @@ Vérifie la disponibilité des outils OSINT et Pentest dans WSL kali-linux.
 **Résultat :**
 Affiche la liste des outils disponibles et non disponibles.
 
+### PostgreSQL distant
+
+#### `backup-postgres-remote.ps1` - Backup PostgreSQL sur un serveur distant
+Crée un dump PostgreSQL compressé (`.sql.gz`) sur le serveur distant, le télécharge en local, puis supprime le fichier distant (sauf option de conservation).
+
+**Utilisation :**
+```powershell
+.\scripts\windows\backup-postgres-remote.ps1 -Server "node15.lan" -User "pi"
+```
+
+**Exemple avec options :**
+```powershell
+.\scripts\windows\backup-postgres-remote.ps1 -Server "node15.lan" -User "pi" -DbName "prospectlab" -DbUser "prospectlab" -DbPassword "VOTRE_MOT_DE_PASSE" -LocalOutputDir ".\backups" -KeepRemoteFile
+```
+
+**Note :**
+- Si PostgreSQL exige un mot de passe, utilise `-DbPassword`.
+- Si un `.sql.gz` fait quelques octets seulement, le dump est probablement vide/invalide (auth DB incorrecte, par exemple).
+
+#### `restore-postgres-remote.ps1` - Restore PostgreSQL sur un serveur distant
+Envoie un dump local (`.sql` ou `.sql.gz`) vers le serveur distant et restaure la base cible.
+
+**Utilisation :**
+```powershell
+.\scripts\windows\restore-postgres-remote.ps1 -Server "node15.lan" -User "pi" -BackupFile ".\backups\prospectlab_backup_YYYYMMDD_HHMMSS.sql.gz" -DbPassword "VOTRE_MOT_DE_PASSE"
+```
+
+**Exemple avec recréation de base :**
+```powershell
+.\scripts\windows\restore-postgres-remote.ps1 -Server "node15.lan" -User "pi" -BackupFile ".\backups\prospectlab_backup_YYYYMMDD_HHMMSS.sql.gz" -RecreateDatabase
+```
+
 #### `tests/test_multicanal_send.py` - Teste l'envoi multicanal (X/Meta)
 Permet de tester un envoi de message prive sur X ou Meta avec un seul script.
 
