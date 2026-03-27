@@ -17,6 +17,7 @@ from tasks.osint_tasks import osint_analysis_task
 from tasks.seo_tasks import seo_analysis_task
 from tasks.heavy_schedule import next_websocket_stagger_countdown
 from utils.celery_health import broker_ping_ok
+from utils.cluster_files import cluster_copy_upload_to_workers, is_windows_path
 import os
 import threading
 import logging
@@ -151,6 +152,23 @@ def register_websocket_handlers(socketio, app):
                     {'error': f'Fichier introuvable: {filepath}'},
                     room=session_id
                 )
+                return
+
+            # Mode cluster (app Windows -> workers Linux): copier le fichier sur les noeuds avant d'enfiler la tâche
+            # Sinon les workers reçoivent un chemin C:\... et échouent "fichier introuvable".
+            try:
+                if is_windows_path(filepath) and (os.environ.get('CLUSTER_WORKER_NODES') or '').strip():
+                    safe_emit(socketio, 'analysis_progress', {
+                        'current': 0,
+                        'total': 0,
+                        'percentage': 0,
+                        'message': 'Copie du fichier vers le cluster...'
+                    }, room=session_id)
+                    filepath = cluster_copy_upload_to_workers(filepath, remote_filename=filename)
+            except Exception as e:
+                safe_emit(socketio, 'analysis_error', {
+                    'error': f'Erreur copie fichier vers cluster: {str(e)}'
+                }, room=session_id)
                 return
             
             # Créer le fichier de sortie

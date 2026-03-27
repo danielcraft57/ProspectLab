@@ -40,6 +40,7 @@ Puis lance l’app comme d’habitude (ex. `python app.py`). Pense à remettre `
 - **Flask** tourne sur ta machine (localhost:5000 ou autre).
 - Les **tâches Celery** sont envoyées à Redis sur node15 ; les workers du cluster (node15, node13, node14) les exécutent.
 - Tu **ne dois pas** lancer de worker Celery en local (`celery -A celery_app worker`), sinon tu aurais des workers en double sur le même broker.
+- Pour l'analyse Excel: l'app **copie l'upload vers les noeuds du cluster** (sinon un worker Linux ne peut pas lire un chemin Windows `C:\...`). Configure `CLUSTER_WORKER_NODES` dans `.env.cluster`.
 
 ## Vérification rapide
 

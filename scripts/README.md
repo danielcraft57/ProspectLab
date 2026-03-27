@@ -14,6 +14,25 @@ scripts/
 
 ## Scripts Windows (PowerShell)
 
+### Cluster
+
+#### `deploy_cluster.ps1` - Déploiement multi-noeuds + envoi `.env.cluster`
+Déploie ProspectLab sur plusieurs noeuds du cluster en s'appuyant sur `install_cluster_worker.ps1`, puis copie `.env.cluster` vers `.env` sur chaque noeud et redémarre le service Celery.
+
+**Utilisation (par défaut: node13 + node14) :**
+```powershell
+.\scripts\deploy_cluster.ps1
+```
+
+**Utilisation avec noeuds explicites :**
+```powershell
+.\scripts\deploy_cluster.ps1 -Nodes "node13.lan","node14.lan","node15.lan" -EnvFile ".env.cluster"
+```
+
+**Options utiles :**
+- `-SkipInstall` : n'envoie que `.env.cluster` et ne relance pas l'installation complète.
+- `-SkipRestart` : ne redémarre pas `prospectlab-celery` après la copie de `.env`.
+
 ### Redis
 
 #### `start-redis.ps1` - Démarre Redis avec Docker
