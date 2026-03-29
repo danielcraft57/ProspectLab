@@ -70,8 +70,9 @@ celery -A celery_app worker --pool=threads --concurrency=6 -Q celery,scraping,te
 - **Étalement des sous-tâches** : lors d’un scraping multi-entreprises, chaque sous-tâche (technique, OSINT, SEO, Pentest) est planifiée avec un `countdown` croissant (`CELERY_BULK_STAGGER_SEC`, défaut **0,75 s** entre chaque index), pour ne pas poster 200 messages instantanément sur le broker.
 - **Interface** : les relances bulk depuis la liste entreprises déclenchent les analyses avec un léger décalage côté navigateur (~300 ms entre chaque).
 - **API `website-analysis`** (interne / publique) : le pack scraping + technique + SEO + OSINT + pentest est planifié avec le même étalement (`tasks.heavy_schedule.BulkSubtaskStagger`), pas cinq `.delay()` simultanés.
+- **Pack « Analyse site complet » (page dédiée)** : la tâche est enqueued sur la file `CELERY_FULL_ANALYSIS_QUEUE` (défaut **`technical`**, comme les autres analyses lourdes). Si l’interface reste sur « Tâche en file… » avec l’état Celery `PENDING`, aucun worker ne consomme cette file : vérifiez `CELERY_WORKER_QUEUES` sur le serveur (doit inclure au minimum `technical`). Une file dédiée `website_full` est possible pour isoler le pack ; dans ce cas, ajoutez `website_full` aux workers concernés.
 
-Variables utiles (`.env`) : `CELERY_WORKERS`, `CELERY_WORKER_QUEUES`, `CELERY_BULK_STAGGER_SEC`, `CELERY_WORKER_PREFETCH_MULTIPLIER`, `CELERY_TASK_ACKS_LATE`, ainsi que les timeouts SEO / OSINT / Pentest (section « Analyses lourdes » dans `.env`).
+Variables utiles (`.env`) : `CELERY_WORKERS`, `CELERY_WORKER_QUEUES`, `CELERY_FULL_ANALYSIS_QUEUE`, `CELERY_BULK_STAGGER_SEC`, `CELERY_WORKER_PREFETCH_MULTIPLIER`, `CELERY_TASK_ACKS_LATE`, ainsi que les timeouts SEO / OSINT / Pentest (section « Analyses lourdes » dans `.env`).
 
 ### Configuration Celery
 

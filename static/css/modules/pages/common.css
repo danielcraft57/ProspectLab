@@ -158,6 +158,24 @@
     font-size: 0.95rem;
     font-weight: 600;
     color: #111827;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.section-filter-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.15rem;
+    height: 1.15rem;
+    padding: 0 0.32rem;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1;
+    background: #e5e7eb;
+    color: #374151;
 }
 
 .filters-advanced-section-header p {
@@ -196,6 +214,11 @@ body[data-theme="dark"] .filters-advanced-section {
 }
 
 body[data-theme="dark"] .filters-advanced-section-header h4 {
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] .section-filter-count {
+    background: #334155;
     color: #e5e7eb;
 }
 
@@ -1065,6 +1088,22 @@ body[data-theme="dark"] .group-dropdown-section-create .group-create-input {
     background: #fee2e2;
     color: #b91c1c;
     border: 1px solid #f87171;
+}
+
+.tag-opportunity {
+    font-weight: 600;
+}
+
+.tag-opportunity-high {
+    background: #dbeafe;
+    color: #1d4ed8;
+    border: 1px solid #93c5fd;
+}
+
+.tag-opportunity-very-high {
+    background: #dcfce7;
+    color: #166534;
+    border: 1px solid #86efac;
 }
 
 @keyframes tagPulse {

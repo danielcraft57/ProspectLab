@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory=$false)]
-    [string]$Server = 'node13.lan',
+    [string]$Server = 'node14.lan',
 
     [Parameter(Mandatory=$false)]
     [string]$User = 'pi',

@@ -124,6 +124,16 @@ def liste_analyses_seo():
     return render_page('analyses_seo.html')
 
 
+@main_bp.route('/analyse-site-complet')
+@login_required
+def analyse_site_complet():
+    """
+    Page unique : saisie d'un site, lancement du pack d'analyses (AJAX + suivi Celery),
+    graphiques et aperçu des données persistées en base.
+    """
+    return render_page('analyse_site_complet.html')
+
+
 @main_bp.route('/carte-entreprises')
 @login_required
 def carte_entreprises():

@@ -109,3 +109,57 @@ class DatabaseAnalyses(DatabaseBase):
         conn.close()
         return analyses
 
+    def create_pending_analysis(self, filename, parametres, total_entreprises=1, output_filename=''):
+        """
+        Crée une entrée d'analyse « en cours » (ex. scan complet depuis un site web).
+
+        Returns:
+            int | None: ID de l'analyse
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        params_json = json.dumps(parametres) if isinstance(parametres, dict) else parametres
+        if self.is_postgresql():
+            self.execute_sql(
+                cursor,
+                '''
+                INSERT INTO analyses (filename, output_filename, total_entreprises, parametres, statut, duree_secondes)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING id
+                ''',
+                (filename, output_filename or '', total_entreprises, params_json, 'En cours', None),
+            )
+            result = cursor.fetchone()
+            analysis_id = result.get('id') if isinstance(result, dict) else (result[0] if result else None)
+        else:
+            self.execute_sql(
+                cursor,
+                '''
+                INSERT INTO analyses (filename, output_filename, total_entreprises, parametres, statut, duree_secondes)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ''',
+                (filename, output_filename or '', total_entreprises, params_json, 'En cours', None),
+            )
+            analysis_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return analysis_id
+
+    def finalize_analysis(self, analysis_id, statut='Terminé', duree_secondes=None):
+        """Met à jour le statut (et optionnellement la durée) d'une analyse."""
+        if not analysis_id:
+            return False
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        if duree_secondes is not None:
+            self.execute_sql(
+                cursor,
+                'UPDATE analyses SET statut = ?, duree_secondes = ? WHERE id = ?',
+                (statut, duree_secondes, analysis_id),
+            )
+        else:
+            self.execute_sql(cursor, 'UPDATE analyses SET statut = ? WHERE id = ?', (statut, analysis_id))
+        conn.commit()
+        conn.close()
+        return True
+

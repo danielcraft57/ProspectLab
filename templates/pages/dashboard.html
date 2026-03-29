@@ -7,27 +7,84 @@
 {% block content %}
 {{ page_header('Dashboard', 'Vue d\'ensemble de votre pipeline et de vos campagnes') }}
 
-{# Ligne 1 : pipeline prospects #}
-{{ stats_grid([
-    {'id': 'stat-total-entreprises', 'label': 'Entreprises en base'},
-    {'id': 'stat-actifs', 'label': 'Prospects actifs'},
-    {'id': 'stat-gagnes', 'label': 'Prospects gagnés'},
-    {'id': 'stat-conversion', 'label': 'Taux de conversion'}
-]) }}
-
-{# Ligne 2 : performance emailing #}
-{{ stats_grid([
-    {'id': 'stat-emails-envoyes', 'label': 'Emails envoyés'},
-    {'id': 'stat-open-rate', 'label': 'Taux d\'ouverture'},
-    {'id': 'stat-click-rate', 'label': 'Taux de clic'}
-]) }}
-
-<div class="dashboard-period-switch">
-    <button type="button" class="period-btn active" data-days="">Tout</button>
-    <button type="button" class="period-btn" data-days="7">7 jours</button>
-    <button type="button" class="period-btn" data-days="30">30 jours</button>
-    <button type="button" class="period-btn" data-days="90">90 jours</button>
+<div class="dashboard-kpi-toolbar">
+    <span class="dashboard-kpi-toolbar-label">Période d’analyse</span>
+    <div class="dashboard-period-switch" role="group" aria-label="Période d’analyse">
+        <button type="button" class="period-btn active" data-days="">Tout</button>
+        <button type="button" class="period-btn" data-days="7">7 jours</button>
+        <button type="button" class="period-btn" data-days="30">30 jours</button>
+        <button type="button" class="period-btn" data-days="90">90 jours</button>
+    </div>
 </div>
+
+<div class="dashboard-kpi-shell">
+    <section class="dashboard-kpi-block" aria-labelledby="dashboard-kpi-pipeline-title">
+        <div class="dashboard-kpi-block-head">
+            <h2 id="dashboard-kpi-pipeline-title" class="dashboard-kpi-block-title">Pipeline</h2>
+            <span class="dashboard-kpi-block-hint">Volume & conversion</span>
+        </div>
+        <div class="stats-grid stats-grid--pipeline">
+            <div class="stat-card stat-kpi-card stat-card--split stat-card-clickable" data-stat-id="stat-pipeline-base-actifs" data-kpi-scroll="#chart-statuts">
+                <h3>Base &amp; actifs</h3>
+                <div class="stat-split">
+                    <div class="stat-split-item">
+                        <span class="stat-split-label">En base</span>
+                        <p class="stat-number" id="stat-total-entreprises">-</p>
+                        <p class="stat-delta" id="stat-total-entreprises-delta"></p>
+                    </div>
+                    <div class="stat-split-divider" aria-hidden="true"></div>
+                    <div class="stat-split-item">
+                        <span class="stat-split-label">Actifs</span>
+                        <p class="stat-number" id="stat-actifs">-</p>
+                        <p class="stat-delta" id="stat-actifs-delta"></p>
+                    </div>
+                    <div class="stat-split-divider" aria-hidden="true"></div>
+                    <div class="stat-split-item">
+                        <span class="stat-split-label">Avec email</span>
+                        <p class="stat-number" id="stat-avec-email">-</p>
+                        <p class="stat-delta" id="stat-avec-email-delta"></p>
+                    </div>
+                </div>
+            </div>
+            <div class="stat-card stat-kpi-card stat-card-clickable" data-stat-id="stat-gagnes" data-kpi-scroll="#chart-secteurs-gagnes">
+                <h3>Prospects gagnés</h3>
+                <p class="stat-number" id="stat-gagnes">-</p>
+                <p class="stat-delta" id="stat-gagnes-delta"></p>
+            </div>
+            <div class="stat-card stat-kpi-card stat-card-clickable" data-stat-id="stat-conversion" data-kpi-scroll="#chart-secteurs-gagnes">
+                <h3>Taux de conversion</h3>
+                <p class="stat-number" id="stat-conversion">-</p>
+                <p class="stat-delta" id="stat-conversion-delta"></p>
+            </div>
+        </div>
+    </section>
+
+    <section class="dashboard-kpi-block" aria-labelledby="dashboard-kpi-email-title">
+        <div class="dashboard-kpi-block-head">
+            <h2 id="dashboard-kpi-email-title" class="dashboard-kpi-block-title">Campagnes email</h2>
+            <span class="dashboard-kpi-block-hint">Engagement</span>
+        </div>
+        {{ stats_grid([
+            {'id': 'stat-emails-envoyes', 'label': 'Emails envoyés'},
+            {'id': 'stat-open-rate', 'label': 'Taux d\'ouverture'},
+            {'id': 'stat-click-rate', 'label': 'Taux de clic'}
+        ], 'stats-grid--email') }}
+    </section>
+</div>
+
+<section class="dashboard-insights" id="dashboard-insights">
+    <div class="dashboard-insights-title">Priorités du moment</div>
+    <div class="dashboard-insights-list" id="dashboard-insights-list">
+        <p class="dashboard-muted">Chargement des recommandations...</p>
+    </div>
+</section>
+
+<section class="dashboard-analysis" id="dashboard-analysis">
+    <div class="dashboard-insights-title">Analyse & explications</div>
+    <div class="dashboard-analysis-grid" id="dashboard-analysis-grid">
+        <p class="dashboard-muted">Chargement des analyses...</p>
+    </div>
+</section>
 
 <section class="dashboard-section">
     <h2 class="dashboard-section-title">Structure du pipeline</h2>
@@ -38,8 +95,8 @@
         </div>
         
         <div class="chart-card">
-            <h3>Répartition par secteur</h3>
-            <canvas id="chart-secteurs"></canvas>
+            <h3>Répartition par opportunité</h3>
+            <canvas id="chart-opportunites"></canvas>
         </div>
     </div>
 </section>
@@ -59,12 +116,8 @@
 </section>
 
 <section class="dashboard-section">
-    <h2 class="dashboard-section-title">Segmentation (tags & niveaux)</h2>
-    <div class="charts-section">
-        <div class="chart-card">
-            <h3>Répartition par opportunité</h3>
-            <canvas id="chart-opportunites"></canvas>
-        </div>
+    <h2 class="dashboard-section-title">Segmentation</h2>
+    <div class="charts-section charts-section-single">
         <div class="chart-card">
             <h3>Top tags (cliquez pour filtrer)</h3>
             <div id="top-tags" class="dashboard-tags">

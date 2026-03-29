@@ -515,6 +515,91 @@ def api_delete_campagne(campagne_id):
     return jsonify({'error': 'Campagne introuvable'}), 404
 
 
+@other_bp.route('/api/campagnes/<int:campagne_id>/relaunch', methods=['POST'])
+@login_required
+def api_relaunch_campagne(campagne_id):
+    """
+    API: Relance une campagne existante en recréant un envoi immédiat
+    avec les mêmes destinataires.
+
+    Args:
+        campagne_id (int): ID de la campagne source
+
+    Returns:
+        JSON: {'success': bool, 'campagne_id': int, 'task_id': str}
+    """
+    from services.database.campagnes import CampagneManager
+    from tasks.email_tasks import send_campagne_task
+    import json
+
+    campagne_manager = CampagneManager()
+    campagne = campagne_manager.get_campagne(campagne_id)
+    if not campagne:
+        return jsonify({'error': 'Campagne introuvable'}), 404
+
+    existing_emails = campagne_manager.get_emails_campagne(campagne_id)
+    if not existing_emails:
+        return jsonify({'error': 'Aucun destinataire trouvé pour cette campagne'}), 400
+
+    recipients = []
+    seen = set()
+    for email_row in existing_emails:
+        email = (email_row.get('email') or '').strip()
+        if not email:
+            continue
+        entreprise_id = email_row.get('entreprise_id')
+        uniq_key = f"{email.lower()}::{entreprise_id or ''}"
+        if uniq_key in seen:
+            continue
+        seen.add(uniq_key)
+        recipients.append({
+            'email': email,
+            'nom': email_row.get('nom_destinataire'),
+            'entreprise': email_row.get('entreprise') or email_row.get('entreprise_nom'),
+            'entreprise_id': entreprise_id
+        })
+
+    if not recipients:
+        return jsonify({'error': 'Destinataires invalides pour la relance'}), 400
+
+    template_id = campagne.get('template_id')
+    sujet = campagne.get('sujet')
+    custom_message = None
+
+    params_json = campagne.get('campaign_params_json')
+    if params_json:
+        try:
+            params = json.loads(params_json)
+            custom_message = params.get('custom_message')
+        except (ValueError, TypeError):
+            custom_message = None
+
+    if not template_id and not custom_message:
+        return jsonify({'error': 'Impossible de relancer: campagne sans template ni message source'}), 400
+
+    source_name = campagne.get('nom') or f'Campagne #{campagne_id}'
+    new_name = f"{source_name} Relance"
+    new_campagne_id = campagne_manager.create_campagne(
+        nom=new_name[:190],
+        template_id=template_id,
+        sujet=sujet,
+        total_destinataires=len(recipients),
+        statut='draft'
+    )
+
+    task = send_campagne_task.delay(
+        campagne_id=new_campagne_id,
+        recipients=recipients,
+        template_id=template_id,
+        subject=sujet,
+        custom_message=custom_message,
+        delay=2
+    )
+    campagne_manager.update_campagne(new_campagne_id, statut='scheduled')
+
+    return jsonify({'success': True, 'campagne_id': new_campagne_id, 'task_id': task.id})
+
+
 @other_bp.route('/api/campagnes/<int:campagne_id>/send-report-email', methods=['POST'])
 @login_required
 def api_send_campagne_report_email(campagne_id):
@@ -969,6 +1054,37 @@ def api_get_email_tracking(email_id):
     campagne_manager = CampagneManager()
     stats = campagne_manager.get_email_tracking_stats(email_id)
     return jsonify(stats)
+
+
+@other_bp.route('/api/emails-envoyes/<int:email_id>/preview', methods=['GET'])
+@login_required
+def api_get_sent_email_preview(email_id):
+    """
+    API: Récupère le contenu envoyé pour un email précis.
+
+    Args:
+        email_id (int): ID de l'email envoyé
+
+    Returns:
+        JSON: sujet + contenu + méta utiles à l'affichage
+    """
+    from services.database.campagnes import CampagneManager
+
+    campagne_manager = CampagneManager()
+    email_data = campagne_manager.get_email_envoye(email_id)
+    if not email_data:
+        return jsonify({'error': 'Email introuvable'}), 404
+
+    return jsonify({
+        'id': email_data.get('id'),
+        'campagne_id': email_data.get('campagne_id'),
+        'email': email_data.get('email'),
+        'nom_destinataire': email_data.get('nom_destinataire'),
+        'entreprise': email_data.get('entreprise'),
+        'sujet': email_data.get('sujet'),
+        'contenu_envoye': email_data.get('contenu_envoye'),
+        'date_envoi': email_data.get('date_envoi'),
+    })
 
 
 @other_bp.route('/api/tracking/campagne/<int:campagne_id>', methods=['GET'])

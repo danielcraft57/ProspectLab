@@ -44,6 +44,7 @@
             <li class="nav-dropdown">
                 <a href="#" class="dropdown-toggle">Analyses <span class="dropdown-arrow">▼</span></a>
                 <ul class="dropdown-menu">
+                    <li><a href="{{ url_for('main.analyse_site_complet') }}">Analyse site complet</a></li>
                     <li><a href="{{ url_for('main.liste_analyses_techniques') }}">Analyses techniques</a></li>
                     <li><a href="{{ url_for('main.liste_analyses_osint') }}">Analyses OSINT</a></li>
                     <li><a href="{{ url_for('main.liste_analyses_pentest') }}">Analyses Pentest</a></li>

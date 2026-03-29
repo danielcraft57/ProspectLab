@@ -2,8 +2,12 @@
 
 {% block title %}Rapport d'audit - ProspectLab{% endblock %}
 
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/modules/pages/entreprise_rapport_audit.css') }}">
+{% endblock %}
+
 {% block content %}
-<div class="page-header">
+<div class="page-header audit-page-header">
     <div class="header-actions">
         <a href="{{ url_for('main.entreprise_detail', entreprise_id=entreprise_id) }}" class="btn btn-secondary">← Fiche entreprise</a>
         <a href="{{ url_for('main.liste_entreprises') }}" class="btn btn-outline">← Liste des entreprises</a>

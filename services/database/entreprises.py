@@ -134,7 +134,7 @@ class EntrepriseManager(DatabaseBase):
             row = cursor.fetchone()
             if row:
                 conn.close()
-                return row[0]
+                return row['id']
         
         conn.close()
         return None
@@ -588,7 +588,7 @@ class EntrepriseManager(DatabaseBase):
             og_data['audios'] = [self.clean_row_dict(dict(row)) for row in cursor.fetchall()]
             
             self.execute_sql(cursor,'SELECT locale FROM entreprise_og_locales WHERE og_data_id = ? ORDER BY locale', (og_data_id,))
-            og_data['locales_alternate'] = [row[0] for row in cursor.fetchall()]
+            og_data['locales_alternate'] = [row['locale'] for row in cursor.fetchall()]
             
             conn.close()
             return og_data
@@ -610,7 +610,7 @@ class EntrepriseManager(DatabaseBase):
             og_data['audios'] = [self.clean_row_dict(dict(row)) for row in cursor.fetchall()]
             
             self.execute_sql(cursor,'SELECT locale FROM entreprise_og_locales WHERE og_data_id = ? ORDER BY locale', (og_data_id,))
-            og_data['locales_alternate'] = [row[0] for row in cursor.fetchall()]
+            og_data['locales_alternate'] = [row['locale'] for row in cursor.fetchall()]
             
             all_og_data.append(og_data)
         
@@ -698,7 +698,8 @@ class EntrepriseManager(DatabaseBase):
                 inner_query += ' AND e.id NOT IN (SELECT entreprise_id FROM entreprise_groupes)'
             if str(filters.get('has_email', '')).lower() in ('1', 'true', 'yes'):
                 # "has_email" côté UI veut dire "entreprise avec au moins un email connu".
-                # En prod, beaucoup d'emails sont stockés dans `scraper_emails` et pas dans `entreprises.email_principal`.
+                # Sources prises en compte: email principal, scraper_emails,
+                # personnes.email, scraper_people.email et emails OSINT.
                 inner_query += """
                     AND (
                         (e.email_principal IS NOT NULL AND TRIM(e.email_principal) <> '')
@@ -708,6 +709,28 @@ class EntrepriseManager(DatabaseBase):
                             WHERE se.entreprise_id = e.id
                               AND se.email IS NOT NULL
                               AND TRIM(se.email) <> ''
+                        )
+                        OR EXISTS (
+                            SELECT 1
+                            FROM personnes p
+                            WHERE p.entreprise_id = e.id
+                              AND p.email IS NOT NULL
+                              AND TRIM(p.email) <> ''
+                        )
+                        OR EXISTS (
+                            SELECT 1
+                            FROM scraper_people sp
+                            WHERE sp.entreprise_id = e.id
+                              AND sp.email IS NOT NULL
+                              AND TRIM(sp.email) <> ''
+                        )
+                        OR EXISTS (
+                            SELECT 1
+                            FROM analyses_osint ao
+                            JOIN analysis_osint_emails aoe ON aoe.analysis_id = ao.id
+                            WHERE ao.entreprise_id = e.id
+                              AND aoe.email IS NOT NULL
+                              AND TRIM(aoe.email) <> ''
                         )
                     )
                 """
@@ -989,7 +1012,8 @@ class EntrepriseManager(DatabaseBase):
             if str(filters.get('no_group', '')).lower() in ('1', 'true', 'yes'):
                 inner_query += ' AND e.id NOT IN (SELECT entreprise_id FROM entreprise_groupes)'
             if str(filters.get('has_email', '')).lower() in ('1', 'true', 'yes'):
-                # Même logique que dans get_entreprises: considérer aussi les emails scrapés.
+                # Même logique que dans get_entreprises:
+                # email principal + scraping + personnes + OSINT.
                 inner_query += """
                     AND (
                         (e.email_principal IS NOT NULL AND TRIM(e.email_principal) <> '')
@@ -999,6 +1023,28 @@ class EntrepriseManager(DatabaseBase):
                             WHERE se.entreprise_id = e.id
                               AND se.email IS NOT NULL
                               AND TRIM(se.email) <> ''
+                        )
+                        OR EXISTS (
+                            SELECT 1
+                            FROM personnes p
+                            WHERE p.entreprise_id = e.id
+                              AND p.email IS NOT NULL
+                              AND TRIM(p.email) <> ''
+                        )
+                        OR EXISTS (
+                            SELECT 1
+                            FROM scraper_people sp
+                            WHERE sp.entreprise_id = e.id
+                              AND sp.email IS NOT NULL
+                              AND TRIM(sp.email) <> ''
+                        )
+                        OR EXISTS (
+                            SELECT 1
+                            FROM analyses_osint ao
+                            JOIN analysis_osint_emails aoe ON aoe.analysis_id = ao.id
+                            WHERE ao.entreprise_id = e.id
+                              AND aoe.email IS NOT NULL
+                              AND TRIM(aoe.email) <> ''
                         )
                     )
                 """
@@ -1594,7 +1640,7 @@ class EntrepriseManager(DatabaseBase):
         
         return stats
 
-    def get_statistics(self, days: int | None = None):
+    def get_statistics(self, days: int | None = None, offset_days: int = 0):
         """
         Récupère les statistiques globales de l'application.
         
@@ -1607,16 +1653,25 @@ class EntrepriseManager(DatabaseBase):
         
         stats = {}
 
-        # Calcul de la date minimale pour les statistiques temporelles (emails, campagnes, gagnés)
+        # Calcul de la fenêtre temporelle pour les statistiques filtrables.
+        # - days=None => pas de filtre temps
+        # - days=30, offset_days=0 => [now-30, now]
+        # - days=30, offset_days=30 => [now-60, now-30] (période précédente)
         since = None
+        until = None
         if days and days > 0:
             try:
                 from datetime import datetime, timedelta
-                since_dt = datetime.utcnow() - timedelta(days=days)
+                now_dt = datetime.utcnow()
+                offset = max(0, int(offset_days or 0))
+                until_dt = now_dt - timedelta(days=offset)
+                since_dt = until_dt - timedelta(days=days)
                 # Format ISO compatible avec SQLite et PostgreSQL
                 since = since_dt.isoformat(sep=' ', timespec='seconds')
+                until = until_dt.isoformat(sep=' ', timespec='seconds')
             except Exception:
                 since = None
+                until = None
         
         # Total analyses
         try:
@@ -1631,6 +1686,47 @@ class EntrepriseManager(DatabaseBase):
             stats['total_entreprises'] = cursor.fetchone()['count']
         except Exception:
             stats['total_entreprises'] = 0
+
+        # Entreprises avec au moins un email (principal OU scraping)
+        try:
+            self.execute_sql(cursor, '''
+                SELECT COUNT(DISTINCT e.id) as count
+                FROM entreprises e
+                WHERE
+                    (e.email_principal IS NOT NULL AND TRIM(e.email_principal) != '')
+                    OR EXISTS (
+                        SELECT 1
+                        FROM scraper_emails se
+                        WHERE se.entreprise_id = e.id
+                          AND se.email IS NOT NULL
+                          AND TRIM(se.email) != ''
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM personnes p
+                        WHERE p.entreprise_id = e.id
+                          AND p.email IS NOT NULL
+                          AND TRIM(p.email) != ''
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM scraper_people sp
+                        WHERE sp.entreprise_id = e.id
+                          AND sp.email IS NOT NULL
+                          AND TRIM(sp.email) != ''
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM analyses_osint ao
+                        JOIN analysis_osint_emails aoe ON aoe.analysis_id = ao.id
+                        WHERE ao.entreprise_id = e.id
+                          AND aoe.email IS NOT NULL
+                          AND TRIM(aoe.email) != ''
+                    )
+            ''')
+            stats['entreprises_avec_email'] = cursor.fetchone()['count']
+        except Exception:
+            stats['entreprises_avec_email'] = 0
         
         # Favoris
         try:
@@ -1729,6 +1825,9 @@ class EntrepriseManager(DatabaseBase):
             if since:
                 base_sql += ' AND date_analyse >= ?'
                 params.append(since)
+                if until:
+                    base_sql += ' AND date_analyse < ?'
+                    params.append(until)
             base_sql += ' GROUP BY secteur ORDER BY count DESC LIMIT 5'
 
             self.execute_sql(cursor, base_sql, params)
@@ -1754,6 +1853,9 @@ class EntrepriseManager(DatabaseBase):
             if since:
                 sql += ' AND date_envoi >= ?'
                 params.append(since)
+                if until:
+                    sql += ' AND date_envoi < ?'
+                    params.append(until)
 
             self.execute_sql(cursor, sql, params)
             total_emails_sent = cursor.fetchone()['count']
@@ -1775,6 +1877,9 @@ class EntrepriseManager(DatabaseBase):
             if since:
                 sql_open += ' AND date_event >= ?'
                 params_open.append(since)
+                if until:
+                    sql_open += ' AND date_event < ?'
+                    params_open.append(until)
 
             self.execute_sql(cursor, sql_open, params_open)
             row = cursor.fetchone()
@@ -1793,6 +1898,9 @@ class EntrepriseManager(DatabaseBase):
             if since:
                 sql_click += ' AND date_event >= ?'
                 params_click.append(since)
+                if until:
+                    sql_click += ' AND date_event < ?'
+                    params_click.append(until)
 
             self.execute_sql(cursor, sql_click, params_click)
             row = cursor.fetchone()
@@ -1817,6 +1925,9 @@ class EntrepriseManager(DatabaseBase):
             if since:
                 sql_campagnes += ' WHERE date_creation >= ?'
                 params_campagnes.append(since)
+                if until:
+                    sql_campagnes += ' AND date_creation < ?'
+                    params_campagnes.append(until)
 
             self.execute_sql(cursor, sql_campagnes, params_campagnes)
             stats['total_campagnes'] = cursor.fetchone()['count']
@@ -1833,6 +1944,9 @@ class EntrepriseManager(DatabaseBase):
             if since:
                 sql_recent_camp += ' WHERE date_creation >= ?'
                 params_recent_camp.append(since)
+                if until:
+                    sql_recent_camp += ' AND date_creation < ?'
+                    params_recent_camp.append(until)
             sql_recent_camp += ' ORDER BY date_creation DESC LIMIT 5'
 
             self.execute_sql(cursor, sql_recent_camp, params_recent_camp)
@@ -1863,6 +1977,9 @@ class EntrepriseManager(DatabaseBase):
             if since:
                 sql_recent_gagnes += ' AND date_analyse >= ?'
                 params_recent_gagnes.append(since)
+                if until:
+                    sql_recent_gagnes += ' AND date_analyse < ?'
+                    params_recent_gagnes.append(until)
             sql_recent_gagnes += ' ORDER BY date_analyse DESC LIMIT 5'
 
             self.execute_sql(cursor, sql_recent_gagnes, params_recent_gagnes)

@@ -280,7 +280,8 @@ class CampagneManager(DatabaseBase):
         sujet=None,
         statut='sent',
         erreur=None,
-        tracking_token=None
+        tracking_token=None,
+        contenu_envoye=None
     ):
         """
         Sauvegarde un email envoyé dans la base.
@@ -295,6 +296,7 @@ class CampagneManager(DatabaseBase):
             statut (str): Statut ('pending', 'sent', 'failed', 'bounced')
             erreur (str|None): Message d'erreur si échec (optionnel)
             tracking_token (str|None): Token de tracking unique (optionnel)
+            contenu_envoye (str|None): Snapshot du contenu envoyé (HTML ou texte)
 
         Returns:
             int: ID de l'email enregistré
@@ -314,61 +316,45 @@ class CampagneManager(DatabaseBase):
             self.execute_sql(cursor, "PRAGMA table_info(emails_envoyes)")
             cols = {row[1] for row in cursor.fetchall()}
 
-        # Préparer les paramètres pour INSERT
+        insert_columns = ['campagne_id', 'entreprise_id', 'email', 'nom_destinataire', 'entreprise', 'sujet', 'statut', 'erreur']
+        insert_values = [campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur]
         if 'tracking_token' in cols:
-            params = (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur, tracking_token)
-            if self.is_postgresql():
-                self.execute_sql(cursor,
-                    '''
-                    INSERT INTO emails_envoyes
-                    (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur, tracking_token)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    RETURNING id
-                    ''',
-                    params
-                )
-                row = cursor.fetchone()
-                if isinstance(row, dict):
-                    email_id = row.get('id')
-                else:
-                    email_id = row[0] if row else None
+            insert_columns.append('tracking_token')
+            insert_values.append(tracking_token)
+        if 'contenu_envoye' in cols:
+            insert_columns.append('contenu_envoye')
+            insert_values.append(contenu_envoye)
+
+        columns_sql = ', '.join(insert_columns)
+        placeholders = ', '.join(['?'] * len(insert_columns))
+        params = tuple(insert_values)
+        if self.is_postgresql():
+            self.execute_sql(
+                cursor,
+                f'''
+                INSERT INTO emails_envoyes
+                ({columns_sql})
+                VALUES ({placeholders})
+                RETURNING id
+                ''',
+                params
+            )
+            row = cursor.fetchone()
+            if isinstance(row, dict):
+                email_id = row.get('id')
             else:
-                self.execute_sql(cursor,
-                    '''
-                    INSERT INTO emails_envoyes
-                    (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur, tracking_token)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''',
-                    params
-                )
-                email_id = cursor.lastrowid
+                email_id = row[0] if row else None
         else:
-            params = (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur)
-            if self.is_postgresql():
-                self.execute_sql(cursor,
-                    '''
-                    INSERT INTO emails_envoyes
-                    (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    RETURNING id
-                    ''',
-                    params
-                )
-                row = cursor.fetchone()
-                if isinstance(row, dict):
-                    email_id = row.get('id')
-                else:
-                    email_id = row[0] if row else None
-            else:
-                self.execute_sql(cursor,
-                    '''
-                    INSERT INTO emails_envoyes
-                    (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ''',
-                    params
-                )
-                email_id = cursor.lastrowid
+            self.execute_sql(
+                cursor,
+                f'''
+                INSERT INTO emails_envoyes
+                ({columns_sql})
+                VALUES ({placeholders})
+                ''',
+                params
+            )
+            email_id = cursor.lastrowid
 
         conn.commit()
         conn.close()
@@ -387,6 +373,30 @@ class CampagneManager(DatabaseBase):
             pass
 
         return email_id
+
+    def get_email_envoye(self, email_id):
+        """
+        Récupère le détail d'un email envoyé.
+
+        Args:
+            email_id (int): ID de l'email envoyé
+
+        Returns:
+            dict|None: Détails de l'email ou None
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self.execute_sql(
+            cursor,
+            '''
+            SELECT * FROM emails_envoyes
+            WHERE id = ?
+            ''',
+            (email_id,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
 
     def update_email_tracking_token(self, email_id, tracking_token):
         """
@@ -544,16 +554,21 @@ class CampagneManager(DatabaseBase):
         try:
             if entreprise_id:
                 if event_type == 'open':
-                    # Dès qu'un email est ouvert, passer en "Relance"
+                    # Un "open" = intérêt détecté, mais sans intention forte.
+                    # On passe en "À qualifier" (tiède), sans dégrader un statut déjà plus chaud.
+                    self._update_entreprise_statut(
+                        entreprise_id,
+                        new_statut='À qualifier',
+                        allowed_previous={'Nouveau', 'À qualifier'}
+                    )
+                elif event_type == 'click':
+                    # Un clic est un signal d'intention très fort:
+                    # on passe en "Relance" pour traiter le prospect comme chaud.
                     self._update_entreprise_statut(
                         entreprise_id,
                         new_statut='Relance',
-                        allowed_previous={'Nouveau', 'À qualifier'}
+                        allowed_previous={'Nouveau', 'À qualifier', 'Relance', 'À rappeler'}
                     )
-                # Option 1 (prudente) : on ne passe pas automatiquement à Gagné sur clic.
-                # L'utilisateur marque manuellement "Marquer comme gagné" dans la fiche entreprise.
-                # elif event_type == 'click':
-                #     ...
         except Exception:
             # Ne pas impacter le tracking en cas de souci
             pass

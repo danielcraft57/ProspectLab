@@ -1,6 +1,11 @@
 # Script de démarrage développement ProspectLab
 # - app Flask dans cette fenêtre
-# - Celery dans une autre console
+# - Celery (worker + beat) dans une autre console via run_celery.py
+#
+# Files du worker : CELERY_WORKER_QUEUES dans .env (défaut config : toutes les files dont heavy).
+# Équivalent typique : ... -Q celery,scraping,technical,seo,osint,pentest,heavy,website_full
+# run_celery.py ajoute --pool=threads, --concurrency (config) et lance beat en parallèle.
+#
 # Usage : .\scripts\start_dev.ps1
 
 $ErrorActionPreference = 'Stop'

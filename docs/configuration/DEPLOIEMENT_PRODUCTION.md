@@ -154,7 +154,7 @@ WantedBy=multi-user.target
 
 Créer le script `/opt/prospectlab/scripts/linux/start_celery_worker.sh` :
 
-Le script `scripts/linux/start_celery_worker.sh` lance le worker avec **`-Q celery,heavy`** (surchargeable via `CELERY_WORKER_QUEUES` dans `.env`). Sans la file `heavy`, les tâches SEO / technique / pentest ne s’exécutent jamais.
+Le script `scripts/linux/start_celery_worker.sh` lance le worker avec **`-Q`** listant `celery`, `scraping`, `technical`, `seo`, `osint`, `pentest`, `heavy`, `website_full` (surchargeable via `CELERY_WORKER_QUEUES` dans `.env`). Sans les files spécialisées (`technical`, `scraping`, etc.), les analyses lourdes restent en **PENDING** (« Tâche en file… »). Le pack **Analyse site complet** utilise par défaut la file **`technical`** (`CELERY_FULL_ANALYSIS_QUEUE`) ; une valeur `website_full` n’est utile que si vous dédiez un worker à cette file uniquement.
 
 Rendre exécutable :
 

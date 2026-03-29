@@ -297,6 +297,8 @@ class DatabaseSchema(DatabaseBase):
         
         # Migration : ajouter la colonne tracking_token si elle n'existe pas
         self.safe_execute_sql(cursor, 'ALTER TABLE emails_envoyes ADD COLUMN tracking_token TEXT')
+        # Migration : conserver le contenu réellement envoyé pour prévisualisation future
+        self.safe_execute_sql(cursor, 'ALTER TABLE emails_envoyes ADD COLUMN contenu_envoye TEXT')
         
         # Table des utilisateurs (authentification)
         self.execute_sql(cursor,'''

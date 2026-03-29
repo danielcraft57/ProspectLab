@@ -1,11 +1,11 @@
-{% macro stats_grid(stats) %}
-<div class="stats-grid">
+{% macro stats_grid(stats, grid_class='') %}
+<div class="stats-grid {{ grid_class }}">
     {% for stat in stats %}
-    <div class="stat-card">
+    <div class="stat-card stat-kpi-card" data-stat-id="{{ stat.id }}">
         <h3>{{ stat.label }}</h3>
         <p class="stat-number" id="{{ stat.id }}">-</p>
+        <p class="stat-delta" id="{{ stat.id }}-delta"></p>
     </div>
     {% endfor %}
 </div>
 {% endmacro %}
-

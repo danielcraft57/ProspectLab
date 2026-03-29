@@ -21,6 +21,8 @@ let selectedEntrepriseIds = [];
 let step1SearchTerm = '';
 /** Debounce timer pour chargement auto critères. */
 let ciblageDebounceTimer = null;
+/** Token interne pour ignorer les réponses métriques obsolètes. */
+let campagneMetricsRequestToken = 0;
 
 // Étape courante du formulaire nouvelle campagne (1, 2 ou 3)
 let campagneModalStep = 1;
@@ -195,8 +197,15 @@ function displayCampagnes(campagnes) {
                 <span class="campagne-statut statut-${campagne.statut}">${campagne.statut}</span>
             </div>
             <div class="campagne-meta">
-                <div>Créée le ${formatDate(campagne.date_creation)}</div>
-                ${campagne.sujet ? `<div>Sujet: ${escapeHtml(campagne.sujet)}</div>` : ''}
+                <div class="campagne-meta-main">
+                    <span class="campagne-meta-dot"></span>
+                    <span>${formatRelativeDate(campagne.date_creation)}</span>
+                </div>
+                <div class="campagne-meta-timeline">
+                    <span class="meta-pill ${campagne.statut === 'scheduled' ? 'is-active' : ''}">Créée</span>
+                    <span class="meta-pill ${(campagne.total_envoyes || 0) > 0 ? 'is-active' : ''}">Envoyés</span>
+                    <span class="meta-pill ${(campagne.total_reussis || 0) > 0 ? 'is-active' : ''}">Réussis</span>
+                </div>
             </div>
             <div class="campagne-stats">
                 <div class="stat-item">
@@ -212,9 +221,35 @@ function displayCampagnes(campagnes) {
                     <div class="stat-label">Réussis</div>
                 </div>
             </div>
+            <div class="campagne-kpi-grid">
+                <div class="kpi-line">
+                    <div class="kpi-label-row">
+                        <span>Taux d'envoi</span>
+                        <strong>${formatPercent(safeRate(campagne.total_envoyes, campagne.total_destinataires))}</strong>
+                    </div>
+                    <div class="kpi-bar"><span style="width:${clampPercent(safeRate(campagne.total_envoyes, campagne.total_destinataires))}%"></span></div>
+                </div>
+                <div class="kpi-line">
+                    <div class="kpi-label-row">
+                        <span>Ouverture</span>
+                        <strong data-metric="open-rate">-</strong>
+                    </div>
+                    <div class="kpi-bar kpi-open"><span data-metric-bar="open-rate" style="width:0%"></span></div>
+                </div>
+                <div class="kpi-line">
+                    <div class="kpi-label-row">
+                        <span>Clic</span>
+                        <strong data-metric="click-rate">-</strong>
+                    </div>
+                    <div class="kpi-bar kpi-click"><span data-metric-bar="click-rate" style="width:0%"></span></div>
+                </div>
+            </div>
             <div class="campagne-actions">
                 <button class="btn-action btn-view" onclick="viewCampagne(${campagne.id})">
                     Voir détails
+                </button>
+                <button class="btn-action btn-relaunch" onclick="relaunchCampagne(${campagne.id})">
+                    Relancer
                 </button>
                 <button class="btn-action btn-delete" onclick="deleteCampagne(${campagne.id})">
                     Supprimer
@@ -243,6 +278,48 @@ function displayCampagnes(campagnes) {
             countEl.classList.remove('is-filtered');
         }
     }
+
+    hydrateCampagneCardsMetrics(campagnes);
+}
+
+async function hydrateCampagneCardsMetrics(campagnes) {
+    if (!Array.isArray(campagnes) || campagnes.length === 0) return;
+
+    const token = Date.now();
+    campagneMetricsRequestToken = token;
+
+    const completed = campagnes.filter(function(campagne) {
+        return ['completed', 'running', 'scheduled'].indexOf(campagne.statut) !== -1;
+    });
+
+    await Promise.allSettled(completed.map(async function(campagne) {
+        try {
+            const response = await fetch('/api/tracking/campagne/' + campagne.id);
+            if (!response.ok) return;
+            const stats = await response.json();
+            if (campagneMetricsRequestToken !== token) return;
+            updateCampagneCardMetrics(campagne.id, stats);
+        } catch (error) {
+            // Silence: métriques facultatives sur la carte
+        }
+    }));
+}
+
+function updateCampagneCardMetrics(campagneId, stats) {
+    const card = document.querySelector('[data-campagne-id="' + campagneId + '"]');
+    if (!card || !stats) return;
+
+    const openRate = typeof stats.open_rate === 'number' ? stats.open_rate : 0;
+    const clickRate = typeof stats.click_rate === 'number' ? stats.click_rate : 0;
+    const openRateEl = card.querySelector('[data-metric="open-rate"]');
+    const clickRateEl = card.querySelector('[data-metric="click-rate"]');
+    const openBarEl = card.querySelector('[data-metric-bar="open-rate"]');
+    const clickBarEl = card.querySelector('[data-metric-bar="click-rate"]');
+
+    if (openRateEl) openRateEl.textContent = formatPercent(openRate);
+    if (clickRateEl) clickRateEl.textContent = formatPercent(clickRate);
+    if (openBarEl) openBarEl.style.width = clampPercent(openRate) + '%';
+    if (clickBarEl) clickBarEl.style.width = clampPercent(clickRate) + '%';
 }
 
 // Charger les templates et remplir le select "Modèle de message" (étape 3)
@@ -1818,6 +1895,9 @@ function displayCampagneResults(stats, silentRefresh) {
 
     const openRate = stats.open_rate ? stats.open_rate.toFixed(1) : '0.0';
     const clickRate = stats.click_rate ? stats.click_rate.toFixed(1) : '0.0';
+    const sentCount = stats.total_emails || 0;
+    const openCount = stats.total_opens || 0;
+    const clickCount = stats.total_clicks || 0;
     const hasReadTime = stats.avg_read_time != null && !isNaN(stats.avg_read_time);
     const avgReadTime = hasReadTime ? Math.round(stats.avg_read_time) : null;
 
@@ -1840,40 +1920,47 @@ function displayCampagneResults(stats, silentRefresh) {
     if (silentRefresh) {
         const container = body.querySelector('.results-content');
         if (container) {
-            // Mettre à jour les cartes de stats
-            const statCards = container.querySelectorAll('.stat-card');
-            if (statCards.length >= 4) {
-                // Emails envoyés
-                statCards[0].querySelector('.stat-value-large').textContent = stats.total_emails || 0;
-                // Ouvertures
-                statCards[1].querySelector('.stat-value-large').textContent = stats.total_opens || 0;
-                const openSub = statCards[1].querySelector('.stat-sublabel');
-                if (openSub) {
-                    openSub.textContent = `${openRate}% du total`;
+            // Mettre à jour le header de synthèse
+            const sentEl = container.querySelector('[data-summary="sent"]');
+            const openEl = container.querySelector('[data-summary="open"]');
+            const clickEl = container.querySelector('[data-summary="click"]');
+            const readEl = container.querySelector('[data-summary="read"]');
+            if (sentEl) sentEl.textContent = sentCount;
+            if (openEl) openEl.textContent = `${openRate}%`;
+            if (clickEl) clickEl.textContent = `${clickRate}%`;
+            if (readEl) readEl.textContent = avgReadTime !== null ? `${avgReadTime}s` : 'Non mesuré';
+
+            // Mettre à jour le mini graphe de performance
+            const miniChart = container.querySelector('.campaign-mini-chart');
+            if (miniChart) {
+                // La première barre représente la base du tunnel (toujours 100%).
+                const sendRate = 100;
+                const openNum = Number(openRate) || 0;
+                const clickNum = Number(clickRate) || 0;
+                const bars = miniChart.querySelectorAll('.mini-chart-bar-fill');
+                const labels = miniChart.querySelectorAll('.mini-chart-row strong');
+                if (bars.length >= 3) {
+                    bars[0].style.width = clampPercent(sendRate) + '%';
+                    bars[1].style.width = clampPercent(openNum) + '%';
+                    bars[2].style.width = clampPercent(clickNum) + '%';
                 }
-                // Clics
-                statCards[2].querySelector('.stat-value-large').textContent = stats.total_clicks || 0;
-                const clickSub = statCards[2].querySelector('.stat-sublabel');
-                if (clickSub) {
-                    clickSub.textContent = `${clickRate}% du total`;
+                if (labels.length >= 3) {
+                    labels[0].textContent = '100%';
+                    labels[1].textContent = `${openRate}%`;
+                    labels[2].textContent = `${clickRate}%`;
                 }
-                // Taux d'ouverture
-                statCards[3].querySelector('.stat-value-large').textContent = `${openRate}%`;
             }
 
-            // Mettre à jour les indicateurs de performance
-            const perfCards = container.querySelectorAll('.performance-card');
-            if (perfCards.length >= 2) {
-                // Taux de clic
-                const clickValEl = perfCards[0].querySelector('.performance-value');
-                if (clickValEl) {
-                    clickValEl.textContent = `${clickRate}%`;
-                }
-                // Temps de lecture moyen
-                const readValEl = perfCards[1].querySelector('.performance-value');
-                if (readValEl) {
-                    readValEl.textContent = avgReadTime !== null ? `${avgReadTime}s` : 'Non mesuré';
-                }
+            // Mettre à jour le donut d'engagement
+            const openRing = container.querySelector('[data-donut="open"]');
+            const clickRing = container.querySelector('[data-donut="click"]');
+            if (openRing) {
+                openRing.style.setProperty('--pct', clampPercent(Number(openRate)));
+                openRing.querySelector('strong').textContent = `${openRate}%`;
+            }
+            if (clickRing) {
+                clickRing.style.setProperty('--pct', clampPercent(Number(clickRate)));
+                clickRing.querySelector('strong').textContent = `${clickRate}%`;
             }
 
             // Mettre à jour le tableau des emails
@@ -1900,6 +1987,9 @@ function displayCampagneResults(stats, silentRefresh) {
                             '</td>' +
                             '<td class="text-muted">' + formatDate(email.date_envoi) + '</td>' +
                             '<td class="text-muted">' + formatDate(email.last_open) + '</td>' +
+                            '<td class="text-center">' +
+                                '<button type="button" class="btn-email-preview" onclick="openSentEmailPreview(' + email.id + ')">Voir l\'email</button>' +
+                            '</td>' +
                         '</tr>'
                     );
                 }).join('');
@@ -1927,6 +2017,7 @@ function displayCampagneResults(stats, silentRefresh) {
                                 <th class="text-center">Clics</th>
                                 <th>Date envoi</th>
                                 <th>Dernière ouverture</th>
+                                <th class="text-center">Action</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1946,6 +2037,9 @@ function displayCampagneResults(stats, silentRefresh) {
                                     </td>
                                     <td class="text-muted">${formatDate(email.date_envoi)}</td>
                                     <td class="text-muted">${formatDate(email.last_open)}</td>
+                                    <td class="text-center">
+                                        <button type="button" class="btn-email-preview" onclick="openSentEmailPreview(${email.id})">Voir l'email</button>
+                                    </td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -1959,42 +2053,64 @@ function displayCampagneResults(stats, silentRefresh) {
         <div class="results-content">
             <h2 class="results-main-title">Statistiques de prospection</h2>
 
-            <!-- Vue d'ensemble -->
-            <div class="results-stats-grid">
-                <div class="stat-card stat-primary">
-                    <div class="stat-value-large">${stats.total_emails || 0}</div>
-                    <div class="stat-label">Emails envoyés</div>
+            <div class="results-summary-strip">
+                <div class="summary-chip">
+                    <span>Emails envoyés</span>
+                    <strong data-summary="sent">${sentCount}</strong>
                 </div>
-                <div class="stat-card stat-info">
-                    <div class="stat-value-large">${stats.total_opens || 0}</div>
-                    <div class="stat-label">Ouvertures</div>
-                    <div class="stat-sublabel">${openRate}% du total</div>
+                <div class="summary-chip">
+                    <span>Taux d'ouverture</span>
+                    <strong data-summary="open">${openRate}%</strong>
                 </div>
-                <div class="stat-card stat-success">
-                    <div class="stat-value-large">${stats.total_clicks || 0}</div>
-                    <div class="stat-label">Clics</div>
-                    <div class="stat-sublabel">${clickRate}% du total</div>
+                <div class="summary-chip">
+                    <span>Taux de clic</span>
+                    <strong data-summary="click">${clickRate}%</strong>
                 </div>
-                <div class="stat-card stat-warning">
-                    <div class="stat-value-large">${openRate}%</div>
-                    <div class="stat-label">Taux d'ouverture</div>
+                <div class="summary-chip">
+                    <span>Temps lecture moyen</span>
+                    <strong data-summary="read">${avgReadTime !== null ? `${avgReadTime}s` : 'Non mesuré'}</strong>
                 </div>
             </div>
 
-            <!-- Indicateurs de performance -->
-            <div class="results-performance-grid">
-                <div class="performance-card">
-                    <div class="performance-icon">📈</div>
-                    <div class="performance-content">
-                        <div class="performance-label">Taux de clic</div>
-                        <div class="performance-value">${clickRate}%</div>
+            <div class="results-visual-grid">
+                <div class="results-visual-card">
+                    <h3>Tunnel de conversion</h3>
+                    <div class="campaign-mini-chart">
+                        <div class="mini-chart-row">
+                            <span>Envoi</span>
+                            <strong>100%</strong>
+                        </div>
+                        <div class="mini-chart-bar"><span class="mini-chart-bar-fill" style="width:100%"></span></div>
+                        <div class="mini-chart-row">
+                            <span>Ouverture</span>
+                            <strong>${openRate}%</strong>
+                        </div>
+                        <div class="mini-chart-bar mini-chart-open"><span class="mini-chart-bar-fill" style="width:${clampPercent(Number(openRate))}%"></span></div>
+                        <div class="mini-chart-row">
+                            <span>Clic</span>
+                            <strong>${clickRate}%</strong>
+                        </div>
+                        <div class="mini-chart-bar mini-chart-click"><span class="mini-chart-bar-fill" style="width:${clampPercent(Number(clickRate))}%"></span></div>
+                        <div class="mini-chart-hint">Base 100% = emails envoyés</div>
                     </div>
                 </div>
-                <div class="performance-card">
-                    <div class="performance-icon">⏱</div>
-                    <div class="performance-content">
-                        <div class="performance-label">Temps de lecture moyen</div>
-                        <div class="performance-value">${avgReadTime !== null ? `${avgReadTime}s` : 'Non mesuré'}</div>
+                <div class="results-visual-card">
+                    <h3>Engagement</h3>
+                    <div class="engagement-donuts">
+                        <div class="engagement-donut" data-donut="open" style="--pct:${clampPercent(Number(openRate))}">
+                            <div class="donut-ring"></div>
+                            <div class="donut-center">
+                                <span>Ouverture</span>
+                                <strong>${openRate}%</strong>
+                            </div>
+                        </div>
+                        <div class="engagement-donut is-click" data-donut="click" style="--pct:${clampPercent(Number(clickRate))}">
+                            <div class="donut-ring"></div>
+                            <div class="donut-center">
+                                <span>Clic</span>
+                                <strong>${clickRate}%</strong>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2002,6 +2118,79 @@ function displayCampagneResults(stats, silentRefresh) {
             ${emailsTable}
         </div>
     `;
+}
+
+async function openSentEmailPreview(emailId) {
+    if (!emailId) return;
+    let previewModal = document.getElementById('sent-email-preview-modal');
+    if (!previewModal) {
+        previewModal = document.createElement('div');
+        previewModal.id = 'sent-email-preview-modal';
+        previewModal.className = 'sent-email-preview-modal';
+        previewModal.innerHTML = `
+            <div class="sent-email-preview-content">
+                <div class="sent-email-preview-header">
+                    <h3 id="sent-email-preview-title">Email envoyé</h3>
+                    <button type="button" class="sent-email-preview-close" onclick="closeSentEmailPreview()">&times;</button>
+                </div>
+                <div class="sent-email-preview-body" id="sent-email-preview-body"></div>
+            </div>
+        `;
+        previewModal.addEventListener('click', function(event) {
+            if (event.target === previewModal) closeSentEmailPreview();
+        });
+        document.body.appendChild(previewModal);
+    }
+
+    previewModal.classList.add('show');
+    const body = document.getElementById('sent-email-preview-body');
+    if (body) {
+        body.innerHTML = '<div class="results-loading"><p>Chargement de l\'email envoyé...</p></div>';
+    }
+
+    try {
+        const response = await fetch('/api/emails-envoyes/' + emailId + '/preview');
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data && data.error ? data.error : 'Erreur lors du chargement');
+        }
+        const title = document.getElementById('sent-email-preview-title');
+        if (title) {
+            title.textContent = data.sujet ? ('Email envoyé - ' + data.sujet) : 'Email envoyé';
+        }
+        const sentContent = data.contenu_envoye || '';
+        const looksLikeHtml = /<([a-z][\s\S]*?)>/i.test(sentContent);
+        if (body) {
+            body.innerHTML = `
+                <div class="sent-email-meta">
+                    <div><strong>Destinataire:</strong> ${escapeHtml(data.email || '-')}</div>
+                    <div><strong>Entreprise:</strong> ${escapeHtml(data.entreprise || '-')}</div>
+                    <div><strong>Envoyé:</strong> ${escapeHtml(formatDate(data.date_envoi))}</div>
+                </div>
+                ${looksLikeHtml
+                    ? `<iframe class="sent-email-frame" title="Contenu email"></iframe>`
+                    : `<pre class="sent-email-text">${escapeHtml(sentContent || 'Contenu indisponible')}</pre>`}
+            `;
+            if (looksLikeHtml) {
+                const frame = body.querySelector('.sent-email-frame');
+                if (frame) {
+                    const frameDoc = frame.contentDocument || frame.contentWindow.document;
+                    frameDoc.open();
+                    frameDoc.write(sentContent);
+                    frameDoc.close();
+                }
+            }
+        }
+    } catch (error) {
+        if (body) {
+            body.innerHTML = '<div class="results-loading"><p style="color:#dc2626;">Impossible de charger cet email.</p></div>';
+        }
+    }
+}
+
+function closeSentEmailPreview() {
+    const previewModal = document.getElementById('sent-email-preview-modal');
+    if (previewModal) previewModal.classList.remove('show');
 }
 
 // Fermer la modale en cliquant en dehors
@@ -2032,6 +2221,30 @@ async function deleteCampagne(campagneId) {
         }
     } catch (error) {
         alert('Erreur lors de la suppression');
+    }
+}
+
+async function relaunchCampagne(campagneId) {
+    if (!confirm('Relancer cette campagne avec les mêmes destinataires ?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/campagnes/${campagneId}/relaunch`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data && data.error ? data.error : 'Relance impossible');
+        }
+
+        showNotification('Campagne relancée avec succès', 'success');
+        loadCampagnes();
+    } catch (error) {
+        showNotification('Erreur de relance: ' + (error && error.message ? error.message : 'Erreur inconnue'), 'error');
     }
 }
 
@@ -2261,6 +2474,49 @@ function formatDate(dateString) {
         minute: '2-digit',
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
     });
+}
+
+function formatRelativeDate(dateString) {
+    if (!dateString) return 'Date inconnue';
+    const date = new Date(String(dateString).trim().replace(' ', 'T'));
+    if (Number.isNaN(date.getTime())) return 'Date inconnue';
+
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    if (diffMs < 0) return 'Dans quelques instants';
+    const minute = 60 * 1000;
+    const hour = 60 * minute;
+    const day = 24 * hour;
+
+    if (diffMs < minute) return 'A l\'instant';
+    if (diffMs < hour) {
+        const m = Math.floor(diffMs / minute);
+        return 'Il y a ' + m + ' min';
+    }
+    if (diffMs < day) {
+        const h = Math.floor(diffMs / hour);
+        return 'Il y a ' + h + ' h';
+    }
+    const d = Math.floor(diffMs / day);
+    if (d < 7) return 'Il y a ' + d + ' jour' + (d > 1 ? 's' : '');
+    return 'Il y a ' + Math.floor(d / 7) + ' sem';
+}
+
+function safeRate(part, total) {
+    const num = Number(part) || 0;
+    const den = Number(total) || 0;
+    if (den <= 0) return 0;
+    return (num / den) * 100;
+}
+
+function formatPercent(value) {
+    const v = Number.isFinite(value) ? value : 0;
+    return v.toFixed(1) + '%';
+}
+
+function clampPercent(value) {
+    const v = Number.isFinite(value) ? value : 0;
+    return Math.max(0, Math.min(100, Math.round(v)));
 }
 
 function formatContactName(nomDestinataire) {

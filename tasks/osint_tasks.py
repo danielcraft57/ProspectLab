@@ -11,6 +11,7 @@ from services.database import Database
 from services.logging_config import setup_logger
 import logging
 import json
+import time
 from typing import Dict, List, Optional
 
 # Configurer le logger pour cette tâche avec un fichier dédié (niveau info pour limiter le bruit)
@@ -43,6 +44,27 @@ def osint_analysis_task(self, url, entreprise_id=None, people_from_scrapers=None
         logger.info(f'Démarrage analyse OSINT pour {url} (entreprise_id={entreprise_id})')
         
         database = Database()
+
+        # Sécuriser l'ID entreprise pour éviter les erreurs de clé étrangère
+        # (ex: entreprise supprimée entre le clic de relance bulk et l'exécution Celery).
+        valid_entreprise_id = None
+        if entreprise_id:
+            try:
+                ent = database.get_entreprise(int(entreprise_id))
+                if ent and ent.get('id'):
+                    valid_entreprise_id = int(ent.get('id'))
+                else:
+                    logger.warning(
+                        'OSINT: entreprise_id=%s introuvable, analyse sauvegardée sans lien entreprise',
+                        entreprise_id
+                    )
+            except Exception as e:
+                logger.warning(
+                    'OSINT: validation entreprise_id=%s échouée (%s), fallback sans lien entreprise',
+                    entreprise_id,
+                    e
+                )
+        entreprise_id = valid_entreprise_id
         
         # Vérifier si une analyse existe déjà
         existing = database.get_osint_analysis_by_url(url)
@@ -50,12 +72,23 @@ def osint_analysis_task(self, url, entreprise_id=None, people_from_scrapers=None
             logger.debug(f'Analyse OSINT existante pour {url} (id={existing.get("id")})')
             # Si une analyse existe et qu'on a un entreprise_id, mettre à jour le lien
             if entreprise_id and existing.get('entreprise_id') != entreprise_id:
-                conn = database.get_connection()
-                cursor = conn.cursor()
-                database.execute_sql(cursor, 'UPDATE analyses_osint SET entreprise_id = ? WHERE id = ?', (entreprise_id, existing['id']))
-                conn.commit()
-                conn.close()
-                logger.debug(f'Analyse OSINT mise à jour avec entreprise_id={entreprise_id}')
+                try:
+                    conn = database.get_connection()
+                    cursor = conn.cursor()
+                    database.execute_sql(cursor, 'UPDATE analyses_osint SET entreprise_id = ? WHERE id = ?', (entreprise_id, existing['id']))
+                    conn.commit()
+                    conn.close()
+                    logger.debug(f'Analyse OSINT mise à jour avec entreprise_id={entreprise_id}')
+                except Exception as e:
+                    msg = str(e).lower()
+                    if 'foreign key' in msg:
+                        logger.warning(
+                            'OSINT: FK sur relink analyse existante (entreprise_id=%s), fallback sans entreprise',
+                            entreprise_id
+                        )
+                        entreprise_id = None
+                    else:
+                        raise
         
         self.update_state(
             state='PROGRESS',
@@ -332,10 +365,33 @@ def osint_analysis_task(self, url, entreprise_id=None, people_from_scrapers=None
         )
         
         # Sauvegarder ou mettre à jour dans la base de données
-        if existing:
-            analysis_id = database.update_osint_analysis(existing['id'], osint_data)
-        else:
-            analysis_id = database.save_osint_analysis(entreprise_id, url, osint_data)
+        analysis_id = None
+        last_err = None
+        for attempt in range(4):
+            try:
+                if existing:
+                    analysis_id = database.update_osint_analysis(existing['id'], osint_data)
+                else:
+                    analysis_id = database.save_osint_analysis(entreprise_id, url, osint_data)
+                break
+            except Exception as e:
+                last_err = e
+                msg = str(e).lower()
+                if 'foreign key' in msg and entreprise_id is not None:
+                    logger.warning(
+                        'OSINT: FK lors de la sauvegarde (entreprise_id=%s), retry sans lien entreprise',
+                        entreprise_id
+                    )
+                    entreprise_id = None
+                    continue
+                if 'database is locked' in msg and attempt < 3:
+                    wait_s = 0.35 * (attempt + 1)
+                    logger.warning('OSINT: database is locked, retry dans %.2fs', wait_s)
+                    time.sleep(wait_s)
+                    continue
+                break
+        if analysis_id is None and last_err:
+            raise last_err
         
         self.update_state(
             state='PROGRESS',

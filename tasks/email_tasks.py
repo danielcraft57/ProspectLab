@@ -289,7 +289,8 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
                 sujet=email_subject,
                 statut='sent' if result.get('success') else 'failed',
                 erreur=None if result.get('success') else result.get('message', 'Erreur inconnue'),
-                tracking_token=tracking_token
+                tracking_token=tracking_token,
+                contenu_envoye=html_message or text_message
             )
 
             if result.get('success'):
@@ -323,8 +324,11 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
             total_reussis=total_sent
         )
 
-        # En fin de campagne : passer en "Perdu" les entreprises restées Nouveau/À qualifier sans open ni clic
-        if final_statut == 'completed':
+        # En fin de campagne: le passage auto en "Perdu" est désactivé par défaut,
+        # car il peut fausser fortement le pipeline quand le tracking open/click
+        # est partiellement bloqué (Apple MPP, anti-trackers, clients mail).
+        auto_mark_lost = str(os.getenv('AUTO_MARK_LOST_ON_CAMPAIGN_COMPLETE', '')).strip().lower() in {'1', 'true', 'yes', 'on'}
+        if final_statut == 'completed' and auto_mark_lost:
             try:
                 marked_lost = campagne_manager.mark_campaign_lost_entreprises(campagne_id)
                 if marked_lost:

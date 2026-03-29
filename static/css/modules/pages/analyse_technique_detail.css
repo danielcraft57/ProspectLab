@@ -1,0 +1,54 @@
+/**
+ * Page détail analyse technique (#analyse-detail)
+ * Les couleurs du HTML généré en JS s'appuient sur ces variables.
+ */
+
+#analyse-detail .analysis-details-root {
+    --atd-border: #e5e7eb;
+    --atd-quick-a: #f9fafb;
+    --atd-quick-b: #fdfdfb;
+    --atd-muted: #6b7280;
+    --atd-body: #111827;
+    --atd-summary-bg: #f8f9fa;
+    --atd-summary-fg: #0f172a;
+    --atd-pre-bg: #f5f5f5;
+    --atd-pre-fg: #1e293b;
+    --atd-panel-bg: #f8fafc;
+    --atd-code-bg: #f5f5f5;
+    --atd-code-fg: #1e293b;
+    --atd-h3-color: #2c3e50;
+    --atd-h3-accent: #667eea;
+    --atd-mp-title: #1f2937;
+    --atd-link: #667eea;
+    --atd-hero-link: #ffd700;
+}
+
+body[data-theme="dark"] #analyse-detail .analysis-details-root {
+    --atd-border: #334155;
+    --atd-quick-a: #0f172a;
+    --atd-quick-b: #1e293b;
+    --atd-muted: #94a3b8;
+    --atd-body: #e2e8f0;
+    --atd-summary-bg: #1e293b;
+    --atd-summary-fg: #e2e8f0;
+    --atd-pre-bg: #020617;
+    --atd-pre-fg: #cbd5e1;
+    --atd-panel-bg: #0f172a;
+    --atd-code-bg: #1e293b;
+    --atd-code-fg: #cbd5e1;
+    --atd-h3-color: #e5e7eb;
+    --atd-h3-accent: #818cf8;
+    --atd-mp-title: #e2e8f0;
+    --atd-link: #a5b4fc;
+    --atd-hero-link: #fde047;
+}
+
+#analyse-detail .analysis-details-root table tbody a {
+    color: var(--atd-link);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #analyse-detail .analysis-details-root * {
+        transition: none !important;
+    }
+}

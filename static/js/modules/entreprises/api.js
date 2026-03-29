@@ -56,6 +56,16 @@
             if (!response.ok) throw new Error('Erreur lors du chargement des secteurs');
             return await response.json();
         },
+
+        /**
+         * Charge les opportunites disponibles (valeurs distinctes en base).
+         * @returns {Promise<Array>}
+         */
+        async loadOpportunites() {
+            const response = await fetch('/api/opportunites');
+            if (!response.ok) throw new Error('Erreur lors du chargement des opportunites');
+            return await response.json();
+        },
         
         /**
          * Charge les détails d'une entreprise
@@ -78,6 +88,21 @@
                 method: 'POST'
             });
             if (!response.ok) throw new Error('Erreur lors du recalcul de l\'opportunité');
+            return await response.json();
+        },
+
+        /**
+         * Recalcule les opportunités en bulk (une requête).
+         * @param {Array<number>} ids
+         * @returns {Promise<{success: boolean, total: number, ok: number, failed: number, results?: Array}>}
+         */
+        async recalculateOpportunitiesBulk(ids) {
+            const response = await fetch('/api/entreprises/recalculate-opportunities', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids: ids || [] })
+            });
+            if (!response.ok) throw new Error('Erreur lors du recalcul des opportunités');
             return await response.json();
         },
         

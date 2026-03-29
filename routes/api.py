@@ -103,13 +103,17 @@ def statistics():
     Query params:
         days (int, optionnel): nombre de jours à considérer pour les stats temporelles
             (emails, campagnes, prospects gagnés). Exemple: 7, 30, 90.
+        offset_days (int, optionnel): décalage de fenêtre pour comparer à la période
+            précédente. Exemple avec days=30, offset_days=30 => fenêtre [-60,-30] jours.
     
     Returns:
         JSON: Statistiques de l'application
     """
     try:
         days_param = request.args.get('days')
+        offset_days_param = request.args.get('offset_days')
         days = None
+        offset_days = 0
         if days_param:
             try:
                 days_val = int(days_param)
@@ -117,8 +121,15 @@ def statistics():
                     days = days_val
             except ValueError:
                 days = None
+        if offset_days_param:
+            try:
+                offset_val = int(offset_days_param)
+                if offset_val > 0:
+                    offset_days = offset_val
+            except ValueError:
+                offset_days = 0
 
-        stats = database.get_statistics(days=days)
+        stats = database.get_statistics(days=days, offset_days=offset_days)
         return jsonify(stats)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -505,13 +516,71 @@ def recalculate_opportunity(entreprise_id):
                 'opportunity': result['opportunity'],
                 'score': result['score'],
                 'breakdown': result['breakdown'],
-                'indicators': result['indicators']
+                'indicators': result['indicators'],
+                'score_band': result.get('score_band')
             })
         else:
             return jsonify({
                 'success': False,
                 'error': 'Impossible de calculer l\'opportunité'
             }), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/entreprises/recalculate-opportunities', methods=['POST'])
+@login_required
+def recalculate_opportunities_bulk():
+    """
+    API: Recalcule l'opportunité pour plusieurs entreprises en une seule requête.
+
+    Body:
+        { "ids": [1,2,3] }
+
+    Returns:
+        JSON: { success, total, ok, failed, results? }
+    """
+    try:
+        data = request.get_json() or {}
+        ids = data.get('ids') or []
+        if not isinstance(ids, list) or not ids:
+            return jsonify({'error': 'ids est requis (liste non vide)'}), 400
+
+        ok = 0
+        failed = 0
+        results = []
+        # On limite le payload de retour (utile UI sans exploser la réponse)
+        max_results = 30
+
+        for raw in ids:
+            try:
+                entreprise_id = int(raw)
+            except Exception:
+                failed += 1
+                continue
+            try:
+                res = database.update_opportunity_score(entreprise_id)
+                if res:
+                    ok += 1
+                    if len(results) < max_results:
+                        results.append({
+                            'id': entreprise_id,
+                            'opportunity': res.get('opportunity'),
+                            'score': res.get('score'),
+                            'score_band': res.get('score_band'),
+                        })
+                else:
+                    failed += 1
+            except Exception:
+                failed += 1
+
+        return jsonify({
+            'success': True,
+            'total': len(ids),
+            'ok': ok,
+            'failed': failed,
+            'results': results
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -641,6 +710,45 @@ def secteurs():
         import logging
         import traceback
         logging.getLogger(__name__).error(f'Erreur dans secteurs: {e}\n{traceback.format_exc()}')
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/opportunites')
+@login_required
+def opportunites():
+    """
+    API: Liste des opportunites disponibles
+
+    Returns:
+        JSON: Liste des opportunites distinctes presentes en base
+    """
+    try:
+        conn = database.get_connection()
+        cursor = conn.cursor()
+
+        database.execute_sql(cursor, '''
+            SELECT DISTINCT opportunite
+            FROM entreprises
+            WHERE opportunite IS NOT NULL AND opportunite != ''
+            ORDER BY opportunite
+        ''')
+
+        rows = cursor.fetchall()
+        opportunites_list = []
+        for row in rows:
+            if isinstance(row, dict):
+                opportunite = row.get('opportunite')
+            else:
+                opportunite = row[0] if row else None
+            if opportunite:
+                opportunites_list.append(opportunite)
+
+        conn.close()
+        return jsonify(opportunites_list)
+    except Exception as e:
+        import logging
+        import traceback
+        logging.getLogger(__name__).error(f'Erreur dans opportunites: {e}\n{traceback.format_exc()}')
         return jsonify({'error': str(e)}), 500
 
 

@@ -80,6 +80,17 @@ PENTEST_TOOL_TIMEOUT = int(os.environ.get('PENTEST_TOOL_TIMEOUT', '120'))  # sec
 SEO_FETCH_CONNECT_TIMEOUT = float(os.environ.get('SEO_FETCH_CONNECT_TIMEOUT', '12'))
 SEO_FETCH_READ_TIMEOUT = float(os.environ.get('SEO_FETCH_READ_TIMEOUT', '25'))
 SEO_TOOL_TIMEOUT = int(os.environ.get('SEO_TOOL_TIMEOUT', '120'))
+# HTTP 429 / 503 : nouveaux essais avec attente (Retry-After ou backoff exponentiel)
+SEO_FETCH_RATE_LIMIT_MAX_RETRIES = max(
+    0, int(os.environ.get('SEO_FETCH_RATE_LIMIT_MAX_RETRIES', '5'))
+)
+SEO_FETCH_RATE_LIMIT_BASE_DELAY_SEC = float(
+    os.environ.get('SEO_FETCH_RATE_LIMIT_BASE_DELAY_SEC', '4')
+)
+# Pack « analyse site complète » : pause après le scraping avant technique/SEO (réduit le rafale sur l’hôte)
+FULL_ANALYSIS_INTER_STEP_PAUSE_SEC = float(
+    os.environ.get('FULL_ANALYSIS_INTER_STEP_PAUSE_SEC', '3')
+)
 # Lighthouse (Node chrome-launcher) : sur Linux embarqué / Raspberry Pi, Chrome n’est pas dans le PATH standard
 CHROME_PATH = (os.environ.get('CHROME_PATH') or os.environ.get('LIGHTHOUSE_CHROME_PATH') or '').strip() or None
 
@@ -113,7 +124,15 @@ CELERY_TASK_ACKS_LATE = os.environ.get('CELERY_TASK_ACKS_LATE', 'true').lower() 
 # (scraping/technical/seo/osint/pentest), sinon les tâches routées ne sont jamais exécutées.
 CELERY_WORKER_QUEUES = os.environ.get(
     'CELERY_WORKER_QUEUES',
-    'celery,scraping,technical,seo,osint,pentest,heavy'
+    'celery,scraping,technical,seo,osint,pentest,heavy,website_full'
+)
+
+# File d’enqueue pour le pack « analyse site complet ».
+# Défaut « technical » : les workers existants écoutent déjà cette file (voir CELERY_WORKER_QUEUES).
+# Pour isoler le pack sur un worker dédié : CELERY_FULL_ANALYSIS_QUEUE=website_full et ajoutez
+# « website_full » à CELERY_WORKER_QUEUES sur ce nœud (sinon la tâche reste PENDING à l’infini).
+CELERY_FULL_ANALYSIS_QUEUE = (
+    (os.environ.get('CELERY_FULL_ANALYSIS_QUEUE') or 'technical').strip() or 'technical'
 )
 
 # URL de base pour le tracking des emails (doit être accessible publiquement)

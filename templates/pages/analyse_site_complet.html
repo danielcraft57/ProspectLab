@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+
+{% block title %}Analyse site complet - ProspectLab{% endblock %}
+
+{% block content %}
+<div class="page-header full-analysis-page">
+    <h1>Analyse complète depuis un site web</h1>
+    <p>Scraping (emails, images, formulaires), puis analyses technique, SEO, OSINT et pentest. Les résultats sont enregistrés pour l’entreprise associée dans la base.</p>
+</div>
+
+<div class="new-analysis-section full-analysis-page">
+    <div class="card">
+        <div class="card-header">
+            <h2>Lancer le pack d’analyses</h2>
+        </div>
+        <div class="card-body">
+            <form id="full-analysis-form" class="full-analysis-form">
+                <div class="form-group full-analysis-url-block">
+                    <label for="full-analysis-url">URL ou domaine</label>
+                    <div class="full-analysis-input-wrap">
+                        <input
+                            type="text"
+                            id="full-analysis-url"
+                            class="full-analysis-url-input"
+                            placeholder="https://exemple.fr"
+                            required
+                            autocomplete="url"
+                            inputmode="url"
+                        >
+                        <button
+                            type="submit"
+                            id="full-analysis-launch"
+                            class="full-analysis-launch-btn"
+                            aria-label="Lancer l’analyse complète"
+                            title="Lancer l’analyse"
+                            aria-busy="false"
+                        >
+                            <i class="fa-solid fa-play full-analysis-launch-icon-i" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <fieldset class="full-analysis-options">
+                    <legend class="full-analysis-options-legend">Options</legend>
+                    <div class="full-analysis-option-row">
+                        <label class="form-checkbox full-analysis-checkbox">
+                            <input type="checkbox" id="full-analysis-nmap">
+                            <span>Nmap (analyse technique, plus long)</span>
+                        </label>
+                        <label class="form-checkbox full-analysis-checkbox">
+                            <input type="checkbox" id="full-analysis-lighthouse">
+                            <span>Lighthouse (SEO, plus lourd)</span>
+                        </label>
+                    </div>
+                </fieldset>
+            </form>
+
+            <div id="full-analysis-progress" class="progress-section full-analysis-progress-section" style="display: none; margin-top: 1.25rem;">
+                <div class="full-analysis-progress-meter">
+                    <div
+                        class="progress-bar-container full-analysis-progress-track"
+                        role="progressbar"
+                        aria-valuemin="0"
+                        aria-valuemax="100"
+                        aria-valuenow="0"
+                        aria-describedby="full-analysis-steps"
+                    >
+                        <div class="progress-bar full-analysis-progress-fill" id="full-analysis-progress-bar" style="width: 0%;">
+                            <span class="full-analysis-progress-glow" aria-hidden="true"></span>
+                        </div>
+                    </div>
+                    <span class="full-analysis-progress-pct" id="full-analysis-progress-pct" aria-hidden="true">0&nbsp;%</span>
+                </div>
+                <div id="full-analysis-progress-error" class="progress-message error full-analysis-progress-error" role="alert" hidden></div>
+                <ul id="full-analysis-steps" class="step-timeline" aria-live="polite"></ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="full-analysis-results" class="full-analysis-page" style="display: none;" data-external-analyse-base="https://danielcraft.fr/analyse">
+    <div class="card" style="margin-bottom: 1.5rem;">
+        <div class="card-header">
+            <h2>Résultats</h2>
+        </div>
+        <div class="card-body">
+            <p id="full-analysis-summary-line"></p>
+            <p class="full-analysis-result-actions">
+                <a id="full-analysis-link-entreprise" href="#" class="btn btn-secondary">Fiche entreprise</a>
+                <a id="full-analysis-link-rapport" href="#" class="btn btn-secondary" style="display: none;">Rapport d’audit</a>
+                <button type="button" id="full-analysis-copy-share-link" class="btn btn-outline" aria-label="Copier le lien vers l’aperçu public DanielCraft">
+                    <i class="fa-solid fa-link" aria-hidden="true"></i> Copier le lien public
+                </button>
+            </p>
+        </div>
+    </div>
+
+    <div class="charts-grid">
+        <div class="chart-card chart-card--bar">
+            <h3>Scores (aperçu)</h3>
+            <div class="chart-canvas-host chart-canvas-host--bar">
+                <canvas id="chart-scores" aria-label="Graphique des scores"></canvas>
+            </div>
+        </div>
+        <div class="chart-card chart-card--donut">
+            <h3>Scraping (volumes)</h3>
+            <div class="chart-canvas-host chart-canvas-host--donut">
+                <canvas id="chart-scrape" aria-label="Graphique scraping"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div class="card full-analysis-gallery-card" style="margin-top: 1.5rem;">
+        <div class="card-header">
+            <h2>Images extraites (échantillon)</h2>
+        </div>
+        <div class="card-body">
+            <div id="full-analysis-gallery" class="image-gallery"></div>
+            <p id="full-analysis-gallery-empty" class="no-results" style="display: none;">Aucune image renvoyée dans l’échantillon du scraper.</p>
+        </div>
+    </div>
+
+    <div class="report-sections card" style="margin-top: 1.5rem;">
+        <div class="card-header">
+            <h2>Détail par domaine (données en base)</h2>
+        </div>
+        <div class="card-body report-accordion-root" id="full-analysis-report-accordion">
+            <p class="report-accordion-intro">Une section à la fois — résumé lisible ; le JSON reste disponible pour le détail technique.</p>
+            <details class="report-accordion-item" open>
+                <summary class="report-accordion-summary">
+                    <span class="report-summary-icon" aria-hidden="true"><i class="fa-solid fa-spider"></i></span>
+                    <span class="report-summary-text">Scraping</span>
+                    <span class="report-summary-badge" id="full-analysis-badge-scraping"></span>
+                </summary>
+                <div class="report-accordion-body">
+                    <div class="report-accordion-body-inner">
+                        <div class="report-panel">
+                            <div id="full-analysis-human-scraping" class="report-human"></div>
+                            <details class="report-json-toggle">
+                                <summary>Afficher les données brutes (JSON)</summary>
+                                <pre id="full-analysis-json-scraping" class="json-preview"></pre>
+                            </details>
+                        </div>
+                    </div>
+                </div>
+            </details>
+            <details class="report-accordion-item">
+                <summary class="report-accordion-summary">
+                    <span class="report-summary-icon" aria-hidden="true"><i class="fa-solid fa-microchip"></i></span>
+                    <span class="report-summary-text">Analyse technique</span>
+                    <span class="report-summary-badge" id="full-analysis-badge-technical"></span>
+                </summary>
+                <div class="report-accordion-body">
+                    <div class="report-accordion-body-inner">
+                        <div class="report-panel">
+                            <div id="full-analysis-human-technical" class="report-human"></div>
+                            <details class="report-json-toggle">
+                                <summary>Afficher les données brutes (JSON)</summary>
+                                <pre id="full-analysis-json-technical" class="json-preview"></pre>
+                            </details>
+                        </div>
+                    </div>
+                </div>
+            </details>
+            <details class="report-accordion-item">
+                <summary class="report-accordion-summary">
+                    <span class="report-summary-icon" aria-hidden="true"><i class="fa-solid fa-magnifying-glass-chart"></i></span>
+                    <span class="report-summary-text">SEO</span>
+                    <span class="report-summary-badge" id="full-analysis-badge-seo"></span>
+                </summary>
+                <div class="report-accordion-body">
+                    <div class="report-accordion-body-inner">
+                        <div class="report-panel">
+                            <div id="full-analysis-human-seo" class="report-human"></div>
+                            <details class="report-json-toggle">
+                                <summary>Afficher les données brutes (JSON)</summary>
+                                <pre id="full-analysis-json-seo" class="json-preview"></pre>
+                            </details>
+                        </div>
+                    </div>
+                </div>
+            </details>
+            <details class="report-accordion-item">
+                <summary class="report-accordion-summary">
+                    <span class="report-summary-icon" aria-hidden="true"><i class="fa-solid fa-user-secret"></i></span>
+                    <span class="report-summary-text">OSINT</span>
+                    <span class="report-summary-badge" id="full-analysis-badge-osint"></span>
+                </summary>
+                <div class="report-accordion-body">
+                    <div class="report-accordion-body-inner">
+                        <div class="report-panel">
+                            <div id="full-analysis-human-osint" class="report-human"></div>
+                            <details class="report-json-toggle">
+                                <summary>Afficher les données brutes (JSON)</summary>
+                                <pre id="full-analysis-json-osint" class="json-preview"></pre>
+                            </details>
+                        </div>
+                    </div>
+                </div>
+            </details>
+            <details class="report-accordion-item">
+                <summary class="report-accordion-summary">
+                    <span class="report-summary-icon" aria-hidden="true"><i class="fa-solid fa-shield-halved"></i></span>
+                    <span class="report-summary-text">Pentest</span>
+                    <span class="report-summary-badge" id="full-analysis-badge-pentest"></span>
+                </summary>
+                <div class="report-accordion-body">
+                    <div class="report-accordion-body-inner">
+                        <div class="report-panel">
+                            <div id="full-analysis-human-pentest" class="report-human"></div>
+                            <details class="report-json-toggle">
+                                <summary>Afficher les données brutes (JSON)</summary>
+                                <pre id="full-analysis-json-pentest" class="json-preview"></pre>
+                            </details>
+                        </div>
+                    </div>
+                </div>
+            </details>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/analyse_site_complet.js') }}" defer></script>
+{% endblock %}

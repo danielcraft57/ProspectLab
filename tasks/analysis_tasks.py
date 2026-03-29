@@ -483,3 +483,39 @@ def analyze_entreprise_task(self, filepath, output_path, max_workers=4, delay=0.
         logger.error(f'Erreur lors de l\'analyse: {e}', exc_info=True)
         raise
 
+
+@celery.task(
+    bind=True,
+    time_limit=3600,
+    soft_time_limit=3500,
+    # Nom stable : les workers chargent toujours analysis_tasks ; évite NotRegistered
+    # si le module tasks.full_website_analysis n’était pas importé au démarrage du worker.
+    name='tasks.full_website_analysis.full_website_analysis_task',
+)
+def full_website_analysis_task(
+    self,
+    url,
+    entreprise_id,
+    analyse_id=None,
+    max_depth=2,
+    max_workers=5,
+    max_time=240,
+    max_pages=40,
+    enable_nmap=False,
+    use_lighthouse=False,
+):
+    from tasks.full_website_analysis import run_full_website_analysis_impl
+
+    return run_full_website_analysis_impl(
+        self,
+        url,
+        entreprise_id,
+        analyse_id=analyse_id,
+        max_depth=max_depth,
+        max_workers=max_workers,
+        max_time=max_time,
+        max_pages=max_pages,
+        enable_nmap=enable_nmap,
+        use_lighthouse=use_lighthouse,
+    )
+

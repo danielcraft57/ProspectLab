@@ -1488,8 +1488,11 @@ class UnifiedScraper:
         except Exception as e:
             logger.error(f'[UnifiedScraper] Erreur dans scrape(): {e}', exc_info=True)
         
+        # Attendre la fin réelle de tous les workers avant de construire le résultat.
+        # Un join(timeout=2) faisait retourner scrape() pendant que des pages étaient encore traitées,
+        # ce qui lançait les analyses suivantes (pack « site complet ») en parallèle du scraping.
         for thread in threads:
-            thread.join(timeout=2)
+            thread.join()
         
         end_time = time.time()
         duration = end_time - self.start_time

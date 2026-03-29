@@ -27,12 +27,32 @@ try:
         SEO_FETCH_CONNECT_TIMEOUT,
         SEO_FETCH_READ_TIMEOUT,
         CHROME_PATH,
+        SEO_FETCH_RATE_LIMIT_MAX_RETRIES,
+        SEO_FETCH_RATE_LIMIT_BASE_DELAY_SEC,
     )
 except ImportError:
     SEO_TOOL_TIMEOUT = int(os.environ.get('SEO_TOOL_TIMEOUT', '120'))
     SEO_FETCH_CONNECT_TIMEOUT = float(os.environ.get('SEO_FETCH_CONNECT_TIMEOUT', '12'))
     SEO_FETCH_READ_TIMEOUT = float(os.environ.get('SEO_FETCH_READ_TIMEOUT', '25'))
     CHROME_PATH = (os.environ.get('CHROME_PATH') or os.environ.get('LIGHTHOUSE_CHROME_PATH') or '').strip() or None
+    SEO_FETCH_RATE_LIMIT_MAX_RETRIES = max(0, int(os.environ.get('SEO_FETCH_RATE_LIMIT_MAX_RETRIES', '5')))
+    SEO_FETCH_RATE_LIMIT_BASE_DELAY_SEC = float(os.environ.get('SEO_FETCH_RATE_LIMIT_BASE_DELAY_SEC', '4'))
+
+
+def _http_rate_limit_retry_delay(response: requests.Response, attempt_index: int) -> float:
+    """Délai avant un nouvel essai après HTTP 429 / 503 (Retry-After ou backoff)."""
+    h = response.headers.get('Retry-After')
+    if h:
+        try:
+            return min(max(float(str(h).strip()), 0.5), 120.0)
+        except ValueError:
+            pass
+    base = SEO_FETCH_RATE_LIMIT_BASE_DELAY_SEC
+    return min(base * (2 ** attempt_index), 60.0)
+
+
+def _status_is_rate_limited(code: Optional[int]) -> bool:
+    return code in (429, 503)
 
 
 def _lighthouse_chrome_executable() -> Optional[str]:
@@ -259,21 +279,67 @@ class SEOAnalyzer:
                         if len(short) > 72:
                             short = short[:69] + '...'
                         progress_callback(f'Nouvel essai : {short}')
-                    resp = requests.get(
-                        candidate,
-                        headers=self.headers,
-                        timeout=timeout_fetch,
-                        allow_redirects=True,
-                    )
-                    resp.raise_for_status()
-                    response = resp
-                    last_candidate_ok = candidate
-                    fetch_log.append({'url': candidate, 'ok': True, 'status': resp.status_code})
+                    attempt_rl = 0
+                    resp = None
+                    while True:
+                        resp = requests.get(
+                            candidate,
+                            headers=self.headers,
+                            timeout=timeout_fetch,
+                            allow_redirects=True,
+                        )
+                        code = resp.status_code
+                        if _status_is_rate_limited(code):
+                            fetch_log.append({
+                                'url': candidate,
+                                'ok': False,
+                                'http_status': code,
+                                'rate_limit_attempt': attempt_rl,
+                            })
+                            if attempt_rl < SEO_FETCH_RATE_LIMIT_MAX_RETRIES:
+                                delay = _http_rate_limit_retry_delay(resp, attempt_rl)
+                                logger.warning(
+                                    'HTTP %s pour %s (SEO), attente %.1fs puis retry %s/%s',
+                                    code,
+                                    candidate,
+                                    delay,
+                                    attempt_rl + 1,
+                                    SEO_FETCH_RATE_LIMIT_MAX_RETRIES,
+                                )
+                                if progress_callback:
+                                    progress_callback(
+                                        f'Limite de débit (HTTP {code}), attente {delay:.0f}s…'
+                                    )
+                                time.sleep(delay)
+                                attempt_rl += 1
+                                continue
+                            try:
+                                resp.raise_for_status()
+                            except requests.HTTPError as rate_err:
+                                last_error = rate_err
+                                raise
+                        if code in (401, 403) and idx + 1 < len(candidates):
+                            fetch_log.append({'url': candidate, 'ok': False, 'http_status': code})
+                            logger.warning(f'HTTP {code} pour {candidate} lors de l\'analyse SEO')
+                            if progress_callback:
+                                progress_callback('Accès refusé, essai d’une autre variante d’URL...')
+                            break
+                        resp.raise_for_status()
+                        response = resp
+                        last_candidate_ok = candidate
+                        fetch_log.append({'url': candidate, 'ok': True, 'status': resp.status_code})
+                        break
+                    if response is not None:
+                        break
+                    if idx + 1 < len(candidates):
+                        continue
                     break
                 except requests.HTTPError as e:
                     last_error = e
                     status = e.response.status_code if e.response is not None else None
-                    fetch_log.append({'url': candidate, 'ok': False, 'http_status': status})
+                    # 429/503 : déjà journalisés dans la boucle de retry
+                    if status not in (429, 503):
+                        fetch_log.append({'url': candidate, 'ok': False, 'http_status': status})
                     logger.warning(f'HTTP {status} pour {candidate} lors de l\'analyse SEO')
                     if status in (401, 403) and idx + 1 < len(candidates):
                         if progress_callback:
@@ -300,6 +366,17 @@ class SEOAnalyzer:
                         msg = (
                             f'Le site a refusé l\'accès (HTTP {status}). '
                             f'Certaines protections bloquent les robots : l’analyse SEO détaillée n’est pas possible.'
+                        )
+                    elif status == 429:
+                        msg = (
+                            'Limite de débit (HTTP 429) : le serveur refuse encore la page après plusieurs '
+                            'attentes. Réessayez dans quelques minutes, ou augmentez les variables '
+                            'SEO_FETCH_RATE_LIMIT_MAX_RETRIES / FULL_ANALYSIS_INTER_STEP_PAUSE_SEC.'
+                        )
+                    elif status == 503:
+                        msg = (
+                            'Service indisponible (HTTP 503) après plusieurs tentatives. '
+                            'Réessayez plus tard.'
                         )
                     else:
                         msg = f'Erreur HTTP {status} lors de la récupération de la page.'

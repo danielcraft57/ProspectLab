@@ -57,6 +57,9 @@ celery.conf.update(
         Queue('pentest', routing_key='pentest'),
         # Queue legacy conservée (compat). A terme, tout doit être routé ailleurs.
         Queue('heavy', routing_key='heavy'),
+        # Pack « analyse site complet » : file dédiée pour éviter qu’un vieux worker (file celery
+        # seule) vole le job et renvoie NotRegistered alors qu’un autre nœud a le code à jour.
+        Queue('website_full', routing_key='website_full'),
     ),
     # Dict pattern -> route (Celery 5 / kombu : une *liste* de tuples casse MapRoute qui itère
     # chaque entrée en « k, v » — le 1er élément est une str → too many values to unpack).
@@ -68,6 +71,9 @@ celery.conf.update(
         'tasks.pentest_tasks.*': {'queue': 'pentest'},
         # Analyse Excel "pack" : plutôt côté technique (inclut notamment génération des sous-tâches).
         'tasks.analysis_tasks.*': {'queue': 'technical'},
+        # Pack site unique : même file que les analyses techniques par défaut (voir CELERY_FULL_ANALYSIS_QUEUE).
+        # La queue « website_full » reste disponible pour un worker dédié (isolation / charge).
+        'tasks.full_website_analysis.*': {'queue': 'technical'},
     },
     task_create_missing_queues=True,
     worker_prefetch_multiplier=CELERY_WORKER_PREFETCH_MULTIPLIER,
@@ -159,4 +165,5 @@ except ImportError as e:
     # C'est normal si on importe celery_app avant que les tâches soient définies
     import logging
     logging.warning(f"Impossible d'importer les tâches Celery: {e}")
+
 

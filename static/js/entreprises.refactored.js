@@ -269,12 +269,11 @@
     }
     
     function buildFiltersMementoState() {
-        // Note: on ne stocke pas "opportunite" dans un champ dédié UI,
-        // elle est conservée via data-attribute sur <body>.
         return {
             search: getElValue('search-input'),
             secteur: getElValue('filter-secteur'),
             groupe: getElValue('filter-groupe'), // '' | 'none' | <id>
+            opportunite: getElValue('filter-opportunite'),
             statut: getElValue('filter-statut'),
             security_min: getElValue('filter-security-min'),
             security_max: getElValue('filter-security-max'),
@@ -291,8 +290,7 @@
             has_tunnel: getElChecked('filter-has-tunnel'),
             cms: getElValue('filter-cms'),
             framework: getElValue('filter-framework'),
-            tags: Array.isArray(activeTagFilters) ? activeTagFilters.slice() : [],
-            opportunite: document.body && document.body.dataset ? (document.body.dataset.initialOpportunite || null) : null
+            tags: Array.isArray(activeTagFilters) ? activeTagFilters.slice() : []
         };
     }
     
@@ -327,6 +325,8 @@
             
             const filterGroupe = document.getElementById('filter-groupe');
             if (filterGroupe && typeof s.groupe === 'string') filterGroupe.value = s.groupe;
+            const filterOpportunite = document.getElementById('filter-opportunite');
+            if (filterOpportunite && typeof s.opportunite === 'string') filterOpportunite.value = s.opportunite;
             
             const filterStatutHidden = document.getElementById('filter-statut');
             const statut = typeof s.statut === 'string' ? s.statut : '';
@@ -380,12 +380,6 @@
                     suggestions.innerHTML = '';
                     suggestions.classList.add('hidden');
                 }
-            }
-            
-            // Opportunite est traitée comme un filtre backend injecté via data-attribute.
-            if (document.body && document.body.dataset) {
-                if (s.opportunite) document.body.dataset.initialOpportunite = s.opportunite;
-                else delete document.body.dataset.initialOpportunite;
             }
             
             syncScoreNullSlidersDisabled();
@@ -444,18 +438,23 @@
         return (e && e.nom) ? String(e.nom) : 'Entreprise';
     }
     
-    async function triggerScrapingRelaunch(entrepriseId) {
+    async function triggerScrapingRelaunch(entrepriseId, options = {}) {
+        const notify = options.notify !== false;
         const entreprise = allEntreprises.find(e => e && e.id === entrepriseId)
             || filteredEntreprises.find(e => e && e.id === entrepriseId);
         const url = entreprise && entreprise.website ? String(entreprise.website).trim() : '';
         if (!url) {
-            Notifications.show('Aucune URL de site pour relancer le scraping.', 'warning');
+            if (notify) {
+                Notifications.show('Aucune URL de site pour relancer le scraping.', 'warning');
+            }
             return;
         }
 
         const socket = window.wsManager && window.wsManager.socket;
         if (!socket) {
-            Notifications.show('Connexion temps réel non disponible. Rechargez la page.', 'warning');
+            if (notify) {
+                Notifications.show('Connexion temps réel non disponible. Rechargez la page.', 'warning');
+            }
             return;
         }
 
@@ -469,7 +468,9 @@
         }
 
         const nom = entreprise && entreprise.nom ? entreprise.nom : getEntrepriseNom(entrepriseId);
-        Notifications.show(nom + ' — Scraping lancé...', 'info', 'fa-spider');
+        if (notify) {
+            Notifications.show(nom + ' — Scraping lancé...', 'info', 'fa-spider');
+        }
 
         socket.emit('start_scraping', {
             url: url,
@@ -494,6 +495,34 @@
             });
         } catch (error) {
             console.error('Erreur lors du chargement des secteurs:', error);
+        }
+    }
+
+    async function loadOpportunites() {
+        try {
+            const opportunites = await EntreprisesAPI.loadOpportunites();
+            const select = document.getElementById('filter-opportunite');
+            if (!select) return;
+
+            const currentValue = select.value;
+            // Conserver uniquement l'option par defaut, puis recharger avec les valeurs reelles de la base.
+            select.innerHTML = '<option value="">Toutes les opportunités</option>';
+            opportunites.forEach((opportunite) => {
+                if (!opportunite) return;
+                const option = document.createElement('option');
+                option.value = opportunite;
+                option.textContent = opportunite;
+                select.appendChild(option);
+            });
+
+            if (currentValue) {
+                const matchingOption = select.querySelector(`option[value="${currentValue}"]`);
+                if (matchingOption) {
+                    select.value = currentValue;
+                }
+            }
+        } catch (error) {
+            console.error('Erreur lors du chargement des opportunités:', error);
         }
     }
 
@@ -552,6 +581,9 @@
             input.value = '';
         }
         renderTagFilterChips();
+        if (typeof updateAdvancedFiltersBadge === 'function') {
+            updateAdvancedFiltersBadge();
+        }
         if (typeof applyFilters === 'function') {
             applyFilters();
         }
@@ -672,6 +704,7 @@
         const search = (get('search-input') || '').trim();
         const secteur = get('filter-secteur') || '';
         const groupeFilter = get('filter-groupe') || '';
+        const opportunite = get('filter-opportunite') || '';
         const statut = get('filter-statut') || '';
         const securityMinRaw = get('filter-security-min') || '0';
         const securityMaxRaw = get('filter-security-max') || '100';
@@ -715,6 +748,7 @@
             }
         }
         if (statut) filters.statut = statut;
+        if (opportunite) filters.opportunite = opportunite;
         const hasEmailCheckbox = document.getElementById('filter-has-email');
         if (hasEmailCheckbox && hasEmailCheckbox.checked) {
             filters.has_email = 'true';
@@ -832,12 +866,13 @@
                 hasAnyUrlFilter = true;
             }
 
-            // Opportunité -> seulement backend (pas encore de champ dans le formulaire)
+            // Opportunité -> select dédié
             const opportuniteParam = params.get('opportunite');
             if (opportuniteParam) {
-                // On encode dans un attribut data pour que getCurrentFilters puisse l'ajouter si besoin plus tard
-                const root = document.body;
-                if (root) root.dataset.initialOpportunite = opportuniteParam;
+                const opportuniteSelect = document.getElementById('filter-opportunite');
+                if (opportuniteSelect) {
+                    opportuniteSelect.value = opportuniteParam;
+                }
                 hasAnyUrlFilter = true;
             }
 
@@ -849,7 +884,8 @@
                     activeTagFilters = Array.from(new Set([...(activeTagFilters || []), ...parts]));
                     const input = document.getElementById('filter-tags');
                     if (input) {
-                        input.value = activeTagFilters.join(', ');
+                        // L'input reste visuellement vide: l'etat est porte par les chips.
+                        input.value = '';
                     }
                     renderTagFilterChips();
                     hasAnyUrlFilter = true;
@@ -868,11 +904,6 @@
     async function loadEntreprises() {
         try {
             const filters = getCurrentFilters();
-            // Opportunité passée dans l'URL (data-attribute sur body)
-            const body = document.body;
-            if (body && body.dataset.initialOpportunite && !filters.opportunite) {
-                filters.opportunite = body.dataset.initialOpportunite;
-            }
             const data = await EntreprisesAPI.loadAll(filters, currentPage, itemsPerPage, false, initialAnalyseId);
             const items = data && data.items ? data.items : [];
             allEntreprises = items;
@@ -1176,7 +1207,24 @@
         `;
     }
     
+    function buildOpportunityTagHtml(entreprise) {
+        const niveau = entreprise && typeof entreprise.opportunite === 'string'
+            ? entreprise.opportunite.trim()
+            : '';
+        if (!niveau) return '';
+
+        // On ne met en avant que les opportunites interessantes.
+        if (niveau === 'Très élevée') {
+            return '<span class="tag tag-opportunity tag-opportunity-very-high" data-tag="opportunite:tres-elevee">Opportunité: Très élevée</span>';
+        }
+        if (niveau === 'Élevée') {
+            return '<span class="tag tag-opportunity tag-opportunity-high" data-tag="opportunite:elevee">Opportunité: Élevée</span>';
+        }
+        return '';
+    }
+
     function createEntrepriseCard(entreprise) {
+        const opportunityTagHtml = buildOpportunityTagHtml(entreprise);
         const tagsHtml = entreprise.tags && entreprise.tags.length > 0
             ? entreprise.tags
                 .slice() // ne pas muter l'array originale
@@ -1283,6 +1331,7 @@
                 return `<span class="${base}${extra}" data-tag="${Formatters.escapeHtml(tag)}">${Formatters.escapeHtml(label)}</span>`;
             }).join('')
             : '';
+        const visibleTagsHtml = [opportunityTagHtml, tagsHtml].filter(Boolean).join('');
         
         let resumePreview = '';
         if (entreprise.resume) {
@@ -1418,7 +1467,7 @@
                     ${entreprise.website ? `<p><strong>Site:</strong> <a href="${entreprise.website}" target="_blank">${Formatters.escapeHtml(getDisplayDomain(entreprise.website))}</a></p>` : ''}
                     ${entreprise.secteur ? `<p><strong>Secteur:</strong> ${Formatters.escapeHtml(entreprise.secteur)}</p>` : ''}
                     ${scoresSection}
-                    ${tagsHtml ? `<div class="tags-container">${tagsHtml}</div>` : ''}
+                    ${visibleTagsHtml ? `<div class="tags-container">${visibleTagsHtml}</div>` : ''}
                 </div>
                 <div class="card-footer">
                     <div class="card-footer-left">
@@ -1436,6 +1485,7 @@
     }
     
     function createEntrepriseRow(entreprise) {
+        const opportunityTagHtml = buildOpportunityTagHtml(entreprise);
         let langChipLabel = null;
         if (entreprise.tags && Array.isArray(entreprise.tags)) {
             for (const t of entreprise.tags) {
@@ -1560,6 +1610,7 @@
                 return `<span class="${base}${extra}" data-tag="${Formatters.escapeHtml(tag)}">${Formatters.escapeHtml(label)}</span>`;
             }).join('')
             : '';
+        const visibleTagsHtml = [opportunityTagHtml, tagsHtml].filter(Boolean).join('');
 
         const hasSecurityScore = typeof entreprise.score_securite !== 'undefined' && entreprise.score_securite !== null;
         const hasSeoScore = typeof entreprise.score_seo !== 'undefined' && entreprise.score_seo !== null;
@@ -1650,7 +1701,7 @@
                             <i class="fas fa-exclamation-triangle row-pentest-warn" style="color: ${entreprise.score_pentest >= 70 ? '#ef4444' : '#f59e0b'};" title="Score Pentest: ${entreprise.score_pentest}/100"></i>
                             ` : ''}
                         </div>
-                        ${tagsHtml ? `<div class="tags-container">${tagsHtml}</div>` : ''}
+                        ${visibleTagsHtml ? `<div class="tags-container">${visibleTagsHtml}</div>` : ''}
                     </div>
                     <div class="row-meta">
                         ${entreprise.secteur ? `<span class="row-chip row-chip-sector" title="Secteur"><i class="fas fa-industry" aria-hidden="true"></i> ${Formatters.escapeHtml(entreprise.secteur)}</span>` : ''}
@@ -2011,32 +2062,41 @@
         }
     }
 
-    async function triggerAnalysisRelaunch(entrepriseId, analysisType) {
+    async function triggerAnalysisRelaunch(entrepriseId, analysisType, options = {}) {
+        const notify = options.notify !== false;
         const entreprise = allEntreprises.find(e => e && e.id === entrepriseId)
             || filteredEntreprises.find(e => e && e.id === entrepriseId);
         const url = entreprise && entreprise.website ? String(entreprise.website).trim() : '';
         if (!url) {
-            Notifications.show('Aucune URL de site pour relancer l\'analyse.', 'warning');
+            if (notify) {
+                Notifications.show('Aucune URL de site pour relancer l\'analyse.', 'warning');
+            }
             return;
         }
 
         const socket = window.wsManager && window.wsManager.socket;
         if (!socket) {
-            Notifications.show('Connexion temps réel non disponible. Rechargez la page.', 'warning');
+            if (notify) {
+                Notifications.show('Connexion temps réel non disponible. Rechargez la page.', 'warning');
+            }
             return;
         }
 
         ensureModalWebSocketListeners();
         setScoreRelaunchLoading(entrepriseId, analysisType, true);
 
-        const launchLabels = { technique: 'technique', seo: 'SEO', pentest: 'Pentest' };
+        const launchLabels = { technique: 'technique', seo: 'SEO', osint: 'OSINT', pentest: 'Pentest' };
         const nom = entreprise && entreprise.nom ? entreprise.nom : getEntrepriseNom(entrepriseId);
-        Notifications.show(nom + ' — Analyse ' + (launchLabels[analysisType] || analysisType) + ' lancée...', 'info', 'fa-play-circle');
+        if (notify) {
+            Notifications.show(nom + ' — Analyse ' + (launchLabels[analysisType] || analysisType) + ' lancée...', 'info', 'fa-play-circle');
+        }
 
         if (analysisType === 'technique') {
             socket.emit('start_technical_analysis', { url, entreprise_id: entrepriseId });
         } else if (analysisType === 'seo') {
             socket.emit('start_seo_analysis', { url, entreprise_id: entrepriseId, use_lighthouse: true });
+        } else if (analysisType === 'osint') {
+            socket.emit('start_osint_analysis', { url, entreprise_id: entrepriseId });
         } else if (analysisType === 'pentest') {
             socket.emit('start_pentest_analysis', { url, entreprise_id: entrepriseId });
         }
@@ -2437,6 +2497,7 @@
         const advancedFilterIds = [
             'filter-secteur',
             'filter-groupe',
+            'filter-opportunite',
             'filter-statut',
             'filter-security-min',
             'filter-security-max',
@@ -2447,8 +2508,14 @@
             'filter-security-null',
             'filter-seo-null',
             'filter-pentest-null',
-            'filter-has-email'
+            'filter-has-email',
+            'filter-cms',
+            'filter-framework',
+            'filter-has-blog',
+            'filter-has-form',
+            'filter-has-tunnel'
         ];
+        const handledAdvancedFilterIds = new Set(advancedFilterIds);
 
         advancedFilterIds.forEach(id => {
             const el = document.getElementById(id);
@@ -2462,6 +2529,20 @@
                 });
             }
         });
+
+        // Filet de sécurité: tout nouveau filtre ajouté dans #advanced-filters
+        // avec un id "filter-*" déclenche aussi le refresh auto, même s'il n'est
+        // pas encore listé explicitement ci-dessus.
+        const advancedFiltersRoot = document.getElementById('advanced-filters');
+        if (advancedFiltersRoot) {
+            advancedFiltersRoot.addEventListener('change', (e) => {
+                const target = e.target;
+                if (!target || !target.id || !String(target.id).startsWith('filter-')) return;
+                if (handledAdvancedFilterIds.has(target.id)) return;
+                updateAdvancedFiltersBadge();
+                debouncedApplyFilters();
+            });
+        }
 
         // Pills de statut
         const statutPills = document.querySelectorAll('#filter-statut-pills .pill');
@@ -2627,16 +2708,32 @@
                 }
 
                 try {
-                    if (action === 'launch-technique' || action === 'launch-seo' || action === 'launch-pentest' || action === 'launch-all') {
-                        const types = action === 'launch-all'
-                            ? ['technique', 'seo', 'pentest']
-                            : [action.replace('launch-', '')];
+                    if (action === 'launch-technique' || action === 'launch-seo' || action === 'launch-osint' || action === 'launch-pentest') {
+                        const types = [action.replace('launch-', '')];
                         /** @type {{ id: number, t: string }[]} */
                         const jobs = [];
+                        let skippedNoUrl = 0;
                         ids.forEach((id) => {
+                            const entreprise = allEntreprises.find(e => e && e.id === id)
+                                || filteredEntreprises.find(e => e && e.id === id);
+                            const hasUrl = !!(entreprise && entreprise.website && String(entreprise.website).trim());
+                            if (!hasUrl) {
+                                skippedNoUrl++;
+                                return;
+                            }
                             types.forEach((t) => jobs.push({ id, t }));
                         });
-                        const staggerMs = jobs.length > 20 ? 700 : 300;
+                        const isOsint = action === 'launch-osint';
+                        const staggerMs = isOsint
+                            ? (jobs.length > 20 ? 1200 : 700)
+                            : (jobs.length > 20 ? 700 : 300);
+                        if (jobs.length === 0) {
+                            Notifications.show(
+                                'Aucune entreprise valide à relancer (URL manquante).',
+                                'warning'
+                            );
+                            return;
+                        }
                         if (jobs.length > 3) {
                             Notifications.show(
                                 `${jobs.length} analyse(s) planifiées (lancement étalé ~${staggerMs} ms entre chaque pour ne pas saturer Celery).`,
@@ -2644,14 +2741,38 @@
                                 'fa-layer-group'
                             );
                         }
+                        if (skippedNoUrl > 0) {
+                            Notifications.show(
+                                `${skippedNoUrl} entreprise${skippedNoUrl > 1 ? 's' : ''} ignorée${skippedNoUrl > 1 ? 's' : ''} (URL manquante).`,
+                                'warning'
+                            );
+                        }
                         jobs.forEach((job, i) => {
                             setTimeout(() => {
-                                triggerAnalysisRelaunch(job.id, job.t);
+                                triggerAnalysisRelaunch(job.id, job.t, { notify: true });
                             }, i * staggerMs);
                         });
                     } else if (action === 'launch-scraping') {
-                        const jobs = ids.map((id) => ({ id }));
-                        const staggerMs = jobs.length > 20 ? 700 : 300;
+                        const jobs = [];
+                        let skippedNoUrl = 0;
+                        ids.forEach((id) => {
+                            const entreprise = allEntreprises.find(e => e && e.id === id)
+                                || filteredEntreprises.find(e => e && e.id === id);
+                            const hasUrl = !!(entreprise && entreprise.website && String(entreprise.website).trim());
+                            if (!hasUrl) {
+                                skippedNoUrl++;
+                                return;
+                            }
+                            jobs.push({ id });
+                        });
+                        const staggerMs = jobs.length > 20 ? 900 : 450;
+                        if (jobs.length === 0) {
+                            Notifications.show(
+                                'Aucune entreprise valide à relancer (URL manquante).',
+                                'warning'
+                            );
+                            return;
+                        }
                         if (jobs.length > 3) {
                             Notifications.show(
                                 `${jobs.length} scraping(s) planifiés (lancement étalé ~${staggerMs} ms entre chaque pour ne pas saturer Celery).`,
@@ -2659,9 +2780,15 @@
                                 'fa-layer-group'
                             );
                         }
+                        if (skippedNoUrl > 0) {
+                            Notifications.show(
+                                `${skippedNoUrl} entreprise${skippedNoUrl > 1 ? 's' : ''} ignorée${skippedNoUrl > 1 ? 's' : ''} (URL manquante).`,
+                                'warning'
+                            );
+                        }
                         jobs.forEach((job, i) => {
                             setTimeout(() => {
-                                triggerScrapingRelaunch(job.id);
+                                triggerScrapingRelaunch(job.id, { notify: true });
                             }, i * staggerMs);
                         });
                     } else if (action === 'delete-bulk') {
@@ -2749,6 +2876,27 @@
                             }
                         } catch (e) {
                             console.error('[entreprises] Erreur refresh bulk groups après action de masse:', e);
+                        }
+                    } else if (action === 'recalculate-opportunity') {
+                        Notifications.show(
+                            `${ids.length} recalcul(s) d'opportunité en cours...`,
+                            'info',
+                            'fa-calculator'
+                        );
+                        const resp = await EntreprisesAPI.recalculateOpportunitiesBulk(ids);
+                        const okCount = resp && typeof resp.ok === 'number' ? resp.ok : 0;
+                        const failCount = resp && typeof resp.failed === 'number' ? resp.failed : 0;
+                        await applyFilters();
+                        if (failCount > 0) {
+                            Notifications.show(
+                                `Recalcul terminé: ${okCount} OK, ${failCount} en échec.`,
+                                'warning'
+                            );
+                        } else {
+                            Notifications.show(
+                                `${okCount} opportunité${okCount > 1 ? 's' : ''} recalculée${okCount > 1 ? 's' : ''}`,
+                                'success'
+                            );
                         }
                     }
                 } catch (e) {
@@ -2938,10 +3086,11 @@
             return;
         }
 
-        let count = 0;
         const secteur = document.getElementById('filter-secteur')?.value;
         const groupe = document.getElementById('filter-groupe')?.value;
+        const opportunite = document.getElementById('filter-opportunite')?.value;
         const statut = document.getElementById('filter-statut')?.value;
+        const tagsInputValue = (document.getElementById('filter-tags')?.value || '').trim();
         const securityMin = document.getElementById('filter-security-min')?.value;
         const securityMax = document.getElementById('filter-security-max')?.value;
         const seoMin = document.getElementById('filter-seo-min')?.value;
@@ -2950,19 +3099,52 @@
         const pentestMax = document.getElementById('filter-pentest-max')?.value;
         const hasEmail = document.getElementById('filter-has-email')?.checked;
 
-        if (secteur) count += 1;
-        if (groupe) count += 1;
-        if (statut) count += 1;
-        if (securityMin && parseInt(securityMin, 10) > 0) count += 1;
-        if (securityMax && parseInt(securityMax, 10) < 100) count += 1;
-        if (seoMin && parseInt(seoMin, 10) > 0) count += 1;
-        if (seoMax && parseInt(seoMax, 10) < 100) count += 1;
-        if (pentestMin && parseInt(pentestMin, 10) > 0) count += 1;
-        if (pentestMax && parseInt(pentestMax, 10) < 100) count += 1;
-        if (document.getElementById('filter-security-null')?.checked) count += 1;
-        if (document.getElementById('filter-seo-null')?.checked) count += 1;
-        if (document.getElementById('filter-pentest-null')?.checked) count += 1;
-        if (hasEmail) count += 1;
+        const hasActiveTags = Array.isArray(activeTagFilters) && activeTagFilters.length > 0;
+        const typedTags = tagsInputValue
+            ? tagsInputValue.split(/[, ]+/).map((s) => s.trim()).filter(Boolean)
+            : [];
+        const tagCount = Array.from(new Set([...(hasActiveTags ? activeTagFilters : []), ...typedTags])).length;
+
+        const segmentationCount =
+            (secteur ? 1 : 0) +
+            (groupe ? 1 : 0) +
+            (opportunite ? 1 : 0) +
+            (statut ? 1 : 0) +
+            (hasEmail ? 1 : 0);
+        const scoresCount =
+            ((securityMin && parseInt(securityMin, 10) > 0) ? 1 : 0) +
+            ((securityMax && parseInt(securityMax, 10) < 100) ? 1 : 0) +
+            ((seoMin && parseInt(seoMin, 10) > 0) ? 1 : 0) +
+            ((seoMax && parseInt(seoMax, 10) < 100) ? 1 : 0) +
+            ((pentestMin && parseInt(pentestMin, 10) > 0) ? 1 : 0) +
+            ((pentestMax && parseInt(pentestMax, 10) < 100) ? 1 : 0) +
+            (document.getElementById('filter-security-null')?.checked ? 1 : 0) +
+            (document.getElementById('filter-seo-null')?.checked ? 1 : 0) +
+            (document.getElementById('filter-pentest-null')?.checked ? 1 : 0);
+        const techCount =
+            ((document.getElementById('filter-cms')?.value ? 1 : 0)) +
+            ((document.getElementById('filter-framework')?.value ? 1 : 0));
+        const behaviorCount =
+            tagCount +
+            (document.getElementById('filter-has-blog')?.checked ? 1 : 0) +
+            (document.getElementById('filter-has-form')?.checked ? 1 : 0) +
+            (document.getElementById('filter-has-tunnel')?.checked ? 1 : 0);
+        const count = segmentationCount + scoresCount + techCount + behaviorCount;
+
+        const setSectionCount = (id, value) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            if (value > 0) {
+                el.textContent = String(value);
+                el.style.display = 'inline-flex';
+            } else {
+                el.style.display = 'none';
+            }
+        };
+        setSectionCount('section-filter-count-segmentation', segmentationCount);
+        setSectionCount('section-filter-count-scores', scoresCount);
+        setSectionCount('section-filter-count-tech', techCount);
+        setSectionCount('section-filter-count-behavior', behaviorCount);
 
         if (count > 0) {
             badge.textContent = String(count);
@@ -4515,6 +4697,11 @@
             await loadSecteurs();
         } catch (e) {
             console.error('[entreprises] Erreur init secteurs:', e);
+        }
+        try {
+            await loadOpportunites();
+        } catch (e) {
+            console.error('[entreprises] Erreur init opportunites:', e);
         }
         try {
             await loadGroupFilter();

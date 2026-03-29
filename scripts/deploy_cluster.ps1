@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory=$false)]
-    [string[]]$Nodes = @('node10.lan','node11.lan','node12.lan','node13.lan', 'node14.lan'),
+    [string[]]$Nodes = @('node8.lan','node9.lan','node10.lan','node11.lan','node12.lan','node13.lan', 'node14.lan'),
 
     [Parameter(Mandatory=$false)]
     [string]$User = 'pi',
