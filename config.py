@@ -152,3 +152,18 @@ CELERY_FULL_ANALYSIS_QUEUE = (
 # URL de base pour le tracking des emails (doit être accessible publiquement)
 # Exemple: https://votre-domaine.com ou http://votre-ip:5000
 BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5000')
+
+# Scan automatique des bounces (IMAP -> tags/statuts)
+BOUNCE_SCAN_ENABLED = os.environ.get('BOUNCE_SCAN_ENABLED', 'true').lower() in ('1', 'true', 'yes', 'on')
+# Profils IMAP à scanner (doit correspondre à IMAP_PROFILES et variables IMAP_*_PROFIL)
+BOUNCE_SCAN_PROFILES = (os.environ.get('BOUNCE_SCAN_PROFILES') or os.environ.get('IMAP_PROFILES') or 'default').strip()
+# Fenêtre de scan périodique en jours (cron 2x/jour)
+BOUNCE_SCAN_DAYS = max(1, int(os.environ.get('BOUNCE_SCAN_DAYS', '14')))
+# Fenêtre de scan pour le run déclenché peu après lancement d'une campagne
+BOUNCE_SCAN_AFTER_CAMPAIGN_DAYS = max(1, int(os.environ.get('BOUNCE_SCAN_AFTER_CAMPAIGN_DAYS', '2')))
+# 0 = sans limite de messages IMAP, >0 = limite
+BOUNCE_SCAN_LIMIT = int(os.environ.get('BOUNCE_SCAN_LIMIT', '0'))
+# true = déplacer/supprimer les bounces traités côté IMAP (Gmail/node12)
+BOUNCE_SCAN_DELETE_PROCESSED = os.environ.get('BOUNCE_SCAN_DELETE_PROCESSED', 'true').lower() in ('1', 'true', 'yes', 'on')
+# Délai (secondes) après lancement campagne avant 1er scan auto
+BOUNCE_SCAN_POST_CAMPAIGN_DELAY_SEC = max(30, int(os.environ.get('BOUNCE_SCAN_POST_CAMPAIGN_DELAY_SEC', '1800')))

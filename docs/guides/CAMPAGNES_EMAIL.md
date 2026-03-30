@@ -100,6 +100,66 @@ Le système de campagnes email permet d'envoyer des emails en masse à des entre
 - **`emails_envoyes`** : Détails de chaque email envoyé (avec `tracking_token`)
 - **`email_tracking_events`** : Événements de tracking (open, click)
 
+## Délivrabilité et bounces (retours "Undelivered")
+
+### Statuts d'emails (table `emails_envoyes`)
+
+- `sent` : email envoyé (tentative SMTP OK)
+- `failed` : erreur d'envoi (SMTP refusé, paramètre manquant, etc.)
+- `bounced` : retour NDR reçu après coup (Undelivered / returned to sender)
+
+### Statuts de campagne (table `campagnes_email`)
+
+- `completed` : campagne terminée sans erreurs d'envoi
+- `completed_with_errors` : campagne terminée avec erreurs (au moins 1 succès + au moins 1 échec)
+- `failed` : zéro email n'a pu être envoyé avec succès
+
+### KPI "Taux de délivrabilité" (strict)
+
+Sur les cartes et dans la modale, le taux affiché est **strict**:
+
+- **Délivrabilité** = \((total\_reussis - total\_bounced) / total\_destinataires\)
+
+Donc ça exclut:
+- les erreurs d'envoi (car elles ne sont pas dans `total_reussis`)
+- les bounces (taggés après coup via IMAP)
+
+### Tags CRM automatiques (table `entreprises.tags`)
+
+Pour faciliter le filtrage dans les prospects:
+- `email_envoye`
+- `email_echec_envoi`
+- `email_ouvert`
+- `email_clique`
+- `bounce` + `email_invalide`
+
+## Récupération automatique des bounces (IMAP)
+
+ProspectLab n'analyse pas ta boite mail "tout seul" par magie. Pour tagger les bounces, on lit une (ou plusieurs) boites IMAP et on recroise avec `emails_envoyes`.
+
+### Script IMAP
+
+- `scripts/fetch_bounces_imap.py`
+
+Support:
+- multi-profils (`IMAP_PROFILES=gmail,node12`)
+- suppression des bounces traités côté IMAP (Gmail: labels `\\Trash` / `\\Inbox`)
+
+### Automatisation Celery
+
+Le scan est automatisé:
+- 1ère exécution **30 min après le lancement réel** d'une campagne (y compris les campagnes programmées)
+- puis **2 fois par jour** via Celery Beat
+
+Variables (`.env`) associées:
+- `BOUNCE_SCAN_ENABLED`
+- `BOUNCE_SCAN_PROFILES`
+- `BOUNCE_SCAN_DAYS`
+- `BOUNCE_SCAN_AFTER_CAMPAIGN_DAYS`
+- `BOUNCE_SCAN_LIMIT` (0 = sans limite)
+- `BOUNCE_SCAN_DELETE_PROCESSED`
+- `BOUNCE_SCAN_POST_CAMPAIGN_DELAY_SEC`
+
 ### Formatage des noms
 
 Le système utilise `utils/name_formatter.py` pour formater les noms de contacts depuis :
@@ -130,7 +190,7 @@ Le système utilise `utils/name_formatter.py` pour formater les noms de contacts
 
 - Cliquer sur "Voir détails" pour voir :
   - Liste des emails envoyés
-  - Statut de chaque email (sent, failed)
+  - Statut de chaque email (sent, failed, bounced)
   - Statistiques de tracking (ouvertures, clics)
 
 ## Configuration
@@ -192,7 +252,6 @@ Les logs des campagnes sont enregistrés dans `logs/email_tasks.log` avec :
 
 ## Améliorations futures
 
-- [ ] Statistiques avancées (taux d'ouverture, taux de clic)
 - [ ] A/B testing de templates
 - [ ] Templates personnalisables par l'utilisateur
 - [ ] Export des résultats en CSV/Excel

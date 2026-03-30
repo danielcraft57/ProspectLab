@@ -433,11 +433,29 @@ class CampagneManager(DatabaseBase):
                     new_statut='À qualifier',
                     allowed_previous={None, '', 'Nouveau'}
                 )
+                # Tags CRM email utiles pour filtrage
+                if statut == 'sent':
+                    self._add_entreprise_tag_safe(entreprise_id, 'email_envoye')
+                elif statut == 'failed':
+                    self._add_entreprise_tag_safe(entreprise_id, 'email_echec_envoi')
         except Exception:
             # Ne jamais casser l'envoi d'emails pour un problème de statut
             pass
 
         return email_id
+
+    def _add_entreprise_tag_safe(self, entreprise_id, tag):
+        """
+        Ajoute un tag d'entreprise sans jamais casser le flux appelant.
+        """
+        try:
+            if not entreprise_id or not tag:
+                return False
+            from services.database.entreprises import EntrepriseManager
+            em = EntrepriseManager()
+            return em.add_entreprise_tag(int(entreprise_id), str(tag))
+        except Exception:
+            return False
 
     def mark_email_bounced(self, email_id: int, reason: str | None = None) -> bool:
         """
@@ -479,6 +497,15 @@ class CampagneManager(DatabaseBase):
 
         conn.commit()
         updated = int(getattr(cursor, 'rowcount', 0) or 0) > 0
+        # Certains drivers / configs peuvent renvoyer rowcount=0 même si la ligne existe
+        # (ou si la valeur était déjà identique). Si la ligne existe, on considère l'opération ok.
+        if not updated:
+            try:
+                self.execute_sql(cursor, 'SELECT 1 FROM emails_envoyes WHERE id = ? LIMIT 1', (email_id,))
+                exists = cursor.fetchone() is not None
+                updated = bool(exists)
+            except Exception:
+                pass
         conn.close()
 
         # Mise à jour entreprise (statut + tag) hors transaction email
@@ -488,6 +515,7 @@ class CampagneManager(DatabaseBase):
                 em = EntrepriseManager()
                 em.update_entreprise_statut(int(entreprise_id), 'Bounce')
                 em.add_entreprise_tag(int(entreprise_id), 'bounce')
+                em.add_entreprise_tag(int(entreprise_id), 'email_invalide')
         except Exception:
             pass
 
@@ -523,7 +551,7 @@ class CampagneManager(DatabaseBase):
                 '''
                 SELECT id
                 FROM emails_envoyes
-                WHERE email = ? AND campagne_id = ?
+                WHERE LOWER(email) = LOWER(?) AND campagne_id = ?
                 ORDER BY date_envoi DESC
                 LIMIT 1
                 ''',
@@ -535,7 +563,7 @@ class CampagneManager(DatabaseBase):
                 '''
                 SELECT id
                 FROM emails_envoyes
-                WHERE email = ?
+                WHERE LOWER(email) = LOWER(?)
                 ORDER BY date_envoi DESC
                 LIMIT 1
                 ''',
@@ -744,6 +772,7 @@ class CampagneManager(DatabaseBase):
                         new_statut='À qualifier',
                         allowed_previous={'Nouveau', 'À qualifier'}
                     )
+                    self._add_entreprise_tag_safe(entreprise_id, 'email_ouvert')
                 elif event_type == 'click':
                     # Un clic est un signal d'intention très fort:
                     # on passe en "Relance" pour traiter le prospect comme chaud.
@@ -752,6 +781,7 @@ class CampagneManager(DatabaseBase):
                         new_statut='Relance',
                         allowed_previous={'Nouveau', 'À qualifier', 'Relance', 'À rappeler'}
                     )
+                    self._add_entreprise_tag_safe(entreprise_id, 'email_clique')
         except Exception:
             # Ne pas impacter le tracking en cas de souci
             pass
@@ -989,6 +1019,14 @@ class CampagneManager(DatabaseBase):
         # row_factory est déjà configuré dans get_connection() (SQLite) ou via RealDictCursor (PostgreSQL)
         cursor = conn.cursor()
 
+        # Charger aussi les compteurs campagne pour aligner les KPI avec la vue cartes
+        campagne_row = None
+        try:
+            self.execute_sql(cursor, 'SELECT total_destinataires, total_envoyes, total_reussis FROM campagnes_email WHERE id = ?', (campagne_id,))
+            campagne_row = cursor.fetchone()
+        except Exception:
+            campagne_row = None
+
         self.execute_sql(cursor,
             '''
             SELECT
@@ -1012,6 +1050,7 @@ class CampagneManager(DatabaseBase):
 
         emails = [dict(row) for row in cursor.fetchall()]
         email_ids = [e['id'] for e in emails]
+        total_bounced = sum(1 for e in emails if (e.get('statut') == 'bounced'))
 
         # Pas d'emails => stats vides
         if not email_ids:
@@ -1023,6 +1062,11 @@ class CampagneManager(DatabaseBase):
                 'total_clicks': 0,
                 'open_rate': 0,
                 'click_rate': 0,
+                'total_bounced': 0,
+                'total_destinataires': 0,
+                'total_reussis': 0,
+                'total_delivered_strict': 0,
+                'deliverability_rate_strict': 0.0,
                 'avg_read_time': None,
                 'emails': []
             }
@@ -1031,6 +1075,21 @@ class CampagneManager(DatabaseBase):
         try:
             self.execute_sql(cursor,"SELECT 1 FROM email_tracking_events LIMIT 1")
         except Exception:
+            # Calculs campagne (sans tracking)
+            td = 0
+            tr = 0
+            try:
+                if campagne_row:
+                    if isinstance(campagne_row, dict):
+                        td = int(campagne_row.get('total_destinataires') or 0)
+                        tr = int(campagne_row.get('total_reussis') or 0)
+                    else:
+                        td = int(campagne_row[0] or 0)
+                        tr = int(campagne_row[2] or 0)
+            except Exception:
+                td = 0
+                tr = 0
+            delivered_strict = max(0, int(tr) - int(total_bounced))
             conn.close()
             return {
                 'campagne_id': campagne_id,
@@ -1039,6 +1098,11 @@ class CampagneManager(DatabaseBase):
                 'total_clicks': 0,
                 'open_rate': 0,
                 'click_rate': 0,
+                'total_bounced': int(total_bounced),
+                'total_destinataires': int(td),
+                'total_reussis': int(tr),
+                'total_delivered_strict': int(delivered_strict),
+                'deliverability_rate_strict': (delivered_strict / td * 100.0) if td > 0 else 0.0,
                 'avg_read_time': None,
                 'emails': emails
             }
@@ -1128,6 +1192,22 @@ class CampagneManager(DatabaseBase):
         total_opens = stats_by_type.get('open', {}).get('unique_emails', 0)
         total_clicks = stats_by_type.get('click', {}).get('unique_emails', 0)
 
+        # Compteurs campagne (pour délivrabilité stricte)
+        td = 0
+        tr = 0
+        try:
+            if campagne_row:
+                if isinstance(campagne_row, dict):
+                    td = int(campagne_row.get('total_destinataires') or 0)
+                    tr = int(campagne_row.get('total_reussis') or 0)
+                else:
+                    td = int(campagne_row[0] or 0)
+                    tr = int(campagne_row[2] or 0)
+        except Exception:
+            td = 0
+            tr = 0
+        delivered_strict = max(0, int(tr) - int(total_bounced))
+
         return {
             'campagne_id': campagne_id,
             'total_emails': total_emails,
@@ -1135,6 +1215,11 @@ class CampagneManager(DatabaseBase):
             'total_clicks': total_clicks,
             'open_rate': (total_opens / total_emails * 100) if total_emails > 0 else 0,
             'click_rate': (total_clicks / total_emails * 100) if total_emails > 0 else 0,
+            'total_bounced': int(total_bounced),
+            'total_destinataires': int(td),
+            'total_reussis': int(tr),
+            'total_delivered_strict': int(delivered_strict),
+            'deliverability_rate_strict': (delivered_strict / td * 100.0) if td > 0 else 0.0,
             'avg_read_time': avg_read_time,
             'stats_by_type': stats_by_type,
             'emails': emails

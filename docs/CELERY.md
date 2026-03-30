@@ -74,6 +74,36 @@ celery -A celery_app worker --pool=threads --concurrency=6 -Q celery,scraping,sc
 
 Variables utiles (`.env`) : `CELERY_WORKERS`, `CELERY_WORKER_QUEUES`, `CELERY_WORKER_QUEUE_PRESET` (Linux), `CELERY_FULL_ANALYSIS_QUEUE`, `CELERY_BULK_STAGGER_SEC`, `CELERY_WORKER_PREFETCH_MULTIPLIER`, `CELERY_TASK_ACKS_LATE`, ainsi que les timeouts SEO / OSINT / Pentest (section « Analyses lourdes » dans `.env`).
 
+## Tâches périodiques (Beat) - campagnes et bounces
+
+ProspectLab utilise Celery Beat pour plusieurs tâches de fond:
+
+- Lancement des campagnes programmées (toutes les minutes)
+- Rapports campagnes (matin/soir)
+- Monitoring des variations (toutes les 30 min)
+- **Scan des bounces IMAP (2 fois par jour)**
+
+### Scan bounces IMAP
+
+Tâche:
+- `tasks.email_tasks.run_bounce_scan_task`
+
+Planification (heure de Paris via `CELERY_TIMEZONE`):
+- `08:10`
+- `20:10`
+
+Déclenchement post-campagne:
+- une exécution est planifiée **30 min après le lancement réel** d'une campagne (`send_campagne_task`)
+
+Variables `.env`:
+- `BOUNCE_SCAN_ENABLED`
+- `BOUNCE_SCAN_PROFILES` (ex: `gmail,node12`)
+- `BOUNCE_SCAN_DAYS` (fenêtre en jours pour les runs 2x/jour)
+- `BOUNCE_SCAN_AFTER_CAMPAIGN_DAYS` (fenêtre courte post-campagne)
+- `BOUNCE_SCAN_LIMIT` (0 = sans limite)
+- `BOUNCE_SCAN_DELETE_PROCESSED` (supprime/déplace en corbeille après tagging)
+- `BOUNCE_SCAN_POST_CAMPAIGN_DELAY_SEC` (défaut 1800 = 30 min)
+
 ### Configuration Celery
 
 Fichier `celery_app.py` :

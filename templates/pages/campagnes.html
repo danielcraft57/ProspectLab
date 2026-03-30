@@ -359,6 +359,6 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{{ url_for('static', filename='js/campagnes.js') }}?v=3steps"></script>
+<script src="{{ url_for('static', filename='js/campagnes.js') }}?v={{ asset_version }}"></script>
 {% endblock %}
 

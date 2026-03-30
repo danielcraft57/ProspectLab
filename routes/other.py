@@ -5,6 +5,7 @@ Contient les routes pour les emails, templates, scraping et téléchargements.
 """
 
 from flask import Blueprint, render_template, request, jsonify, send_file, redirect, url_for, flash
+import time
 import os
 from services.email_sender import EmailSender
 from config import MAIL_DEFAULT_RECIPIENT
@@ -17,6 +18,11 @@ other_bp = Blueprint('other', __name__)
 
 # Initialiser les services
 template_manager = TemplateManager()
+
+# Cache très léger en mémoire pour /api/tracking/campagne/<id>
+# Objectif: éviter de retaper la BDD toutes les 5s quand la modale est ouverte.
+_CAMPAGNE_TRACKING_CACHE = {}
+_CAMPAGNE_TRACKING_CACHE_TTL_SEC = 45
 
 
 @other_bp.route('/analyse/scraping')
@@ -371,6 +377,116 @@ def api_list_campagnes():
     campagne_manager = CampagneManager()
     statut = request.args.get('statut')
     campagnes = campagne_manager.list_campagnes(statut=statut, limit=100)
+
+    # Ajouter des métriques de délivrabilité (bounces) calculées depuis emails_envoyes.
+    # On ne modifie pas les compteurs historiques stockés dans campagnes_email,
+    # on enrichit juste la réponse API pour l'UI.
+    try:
+        ids = [c.get('id') for c in (campagnes or []) if c and c.get('id') is not None]
+        ids = [int(x) for x in ids if str(x).isdigit()]
+    except Exception:
+        ids = []
+
+    bounced_by_cid = {}
+    open_unique_by_cid = {}
+    click_unique_by_cid = {}
+    if ids:
+        try:
+            conn = campagne_manager.get_connection()
+            cursor = conn.cursor()
+            placeholders = ','.join(['?'] * len(ids))
+            campagne_manager.execute_sql(
+                cursor,
+                f'''
+                SELECT campagne_id, COUNT(*) as cnt
+                FROM emails_envoyes
+                WHERE campagne_id IN ({placeholders}) AND statut = ?
+                GROUP BY campagne_id
+                ''',
+                tuple(ids) + ('bounced',),
+            )
+            for row in cursor.fetchall() or []:
+                cid = row.get('campagne_id') if isinstance(row, dict) else row[0]
+                cnt = row.get('cnt') if isinstance(row, dict) else row[1]
+                try:
+                    bounced_by_cid[int(cid)] = int(cnt or 0)
+                except Exception:
+                    continue
+
+            # Open / click uniques par campagne (1 requête pour tout le lot)
+            campagne_manager.execute_sql(
+                cursor,
+                f'''
+                SELECT
+                    e.campagne_id as campagne_id,
+                    et.event_type as event_type,
+                    COUNT(DISTINCT et.email_id) as unique_emails
+                FROM email_tracking_events et
+                JOIN emails_envoyes e ON e.id = et.email_id
+                WHERE e.campagne_id IN ({placeholders})
+                  AND et.event_type IN ('open', 'click')
+                GROUP BY e.campagne_id, et.event_type
+                ''',
+                tuple(ids),
+            )
+            for row in cursor.fetchall() or []:
+                cid = row.get('campagne_id') if isinstance(row, dict) else row[0]
+                etype = row.get('event_type') if isinstance(row, dict) else row[1]
+                uniq = row.get('unique_emails') if isinstance(row, dict) else row[2]
+                try:
+                    cid_int = int(cid)
+                except Exception:
+                    continue
+                if str(etype) == 'open':
+                    open_unique_by_cid[cid_int] = int(uniq or 0)
+                else:
+                    click_unique_by_cid[cid_int] = int(uniq or 0)
+
+            conn.close()
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    for c in campagnes or []:
+        try:
+            cid = int(c.get('id')) if c and c.get('id') is not None else None
+        except Exception:
+            cid = None
+        bcnt = bounced_by_cid.get(cid, 0) if cid is not None else 0
+        c['total_bounced'] = int(bcnt)
+        try:
+            total_envoyes = int(c.get('total_envoyes') or 0)
+            c['total_delivered'] = max(0, total_envoyes - int(bcnt))
+        except Exception:
+            c['total_delivered'] = None
+
+        # Délivrabilité stricte = réussites - bounces
+        # (donc exclut aussi les erreurs d'envoi, puisqu'elles ne sont pas dans total_reussis)
+        try:
+            total_reussis = int(c.get('total_reussis') or 0)
+            c['total_delivered_strict'] = max(0, total_reussis - int(bcnt))
+        except Exception:
+            c['total_delivered_strict'] = None
+
+        # Métriques open/click directement sur la réponse (évite 1 fetch par carte)
+        opens_u = int(open_unique_by_cid.get(cid, 0) if cid is not None else 0)
+        clicks_u = int(click_unique_by_cid.get(cid, 0) if cid is not None else 0)
+        c['total_opens'] = opens_u
+        c['total_clicks'] = clicks_u
+        try:
+            denom = int(c.get('total_emails') or c.get('total_envoyes') or 0)
+            if denom <= 0:
+                c['open_rate'] = 0.0
+                c['click_rate'] = 0.0
+            else:
+                c['open_rate'] = (opens_u / denom) * 100.0
+                c['click_rate'] = (clicks_u / denom) * 100.0
+        except Exception:
+            c['open_rate'] = 0.0
+            c['click_rate'] = 0.0
+
     return jsonify(campagnes)
 
 
@@ -1102,8 +1218,15 @@ def api_get_campagne_tracking(campagne_id):
     from services.database.campagnes import CampagneManager
     
     campagne_manager = CampagneManager()
+    now = time.time()
+    cached = _CAMPAGNE_TRACKING_CACHE.get(int(campagne_id))
+    if cached:
+        ts, payload = cached
+        if (now - ts) < _CAMPAGNE_TRACKING_CACHE_TTL_SEC:
+            return jsonify(payload)
+
     stats = campagne_manager.get_campagne_tracking_stats(campagne_id)
-    
+    _CAMPAGNE_TRACKING_CACHE[int(campagne_id)] = (now, stats)
     return jsonify(stats)
 
 

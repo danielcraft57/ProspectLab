@@ -190,11 +190,15 @@ function displayCampagnes(campagnes) {
         return;
     }
 
-    grid.innerHTML = campagnes.map(campagne => `
+    grid.innerHTML = campagnes.map(campagne => {
+        const effectiveStatus = getEffectiveCampaignStatus(campagne);
+        const failedCount = Math.max(0, Number(campagne.total_envoyes || 0) - Number(campagne.total_reussis || 0));
+        const bouncedCount = Number(campagne.total_bounced || 0);
+        return `
         <div class="campagne-card" data-campagne-id="${campagne.id}">
             <div class="campagne-header">
                 <h3 class="campagne-title">${escapeHtml(campagne.nom)}</h3>
-                <span class="campagne-statut statut-${campagne.statut}">${campagne.statut}</span>
+                <span class="campagne-statut statut-${effectiveStatus}">${getCampaignStatusLabel(effectiveStatus)}</span>
             </div>
             <div class="campagne-meta">
                 <div class="campagne-meta-main">
@@ -202,9 +206,11 @@ function displayCampagnes(campagnes) {
                     <span>${formatRelativeDate(campagne.date_creation)}</span>
                 </div>
                 <div class="campagne-meta-timeline">
-                    <span class="meta-pill ${campagne.statut === 'scheduled' ? 'is-active' : ''}">Créée</span>
+                    <span class="meta-pill ${effectiveStatus === 'scheduled' ? 'is-active' : ''}">Créée</span>
                     <span class="meta-pill ${(campagne.total_envoyes || 0) > 0 ? 'is-active' : ''}">Envoyés</span>
                     <span class="meta-pill ${(campagne.total_reussis || 0) > 0 ? 'is-active' : ''}">Réussis</span>
+                    <span class="meta-pill ${failedCount > 0 ? 'is-active' : ''}">Échecs</span>
+                    <span class="meta-pill ${bouncedCount > 0 ? 'is-active' : ''}">Bounces</span>
                 </div>
             </div>
             <div class="campagne-stats">
@@ -224,38 +230,40 @@ function displayCampagnes(campagnes) {
             <div class="campagne-kpi-grid">
                 <div class="kpi-line">
                     <div class="kpi-label-row">
-                        <span>Taux d'envoi</span>
-                        <strong>${formatPercent(safeRate(campagne.total_envoyes, campagne.total_destinataires))}</strong>
+                    <span>Envoi</span>
+                    <strong>${formatPercent(safeRate((campagne.total_delivered_strict != null ? campagne.total_delivered_strict : (campagne.total_delivered != null ? campagne.total_delivered : campagne.total_envoyes)), campagne.total_destinataires))}</strong>
                     </div>
-                    <div class="kpi-bar"><span style="width:${clampPercent(safeRate(campagne.total_envoyes, campagne.total_destinataires))}%"></span></div>
+                <div class="kpi-bar"><span style="width:${clampPercent(safeRate((campagne.total_delivered_strict != null ? campagne.total_delivered_strict : (campagne.total_delivered != null ? campagne.total_delivered : campagne.total_envoyes)), campagne.total_destinataires))}%"></span></div>
                 </div>
                 <div class="kpi-line">
                     <div class="kpi-label-row">
                         <span>Ouverture</span>
-                        <strong data-metric="open-rate">-</strong>
+                    <strong data-metric="open-rate">${typeof campagne.open_rate === 'number' ? formatPercent(campagne.open_rate) : '-'}</strong>
                     </div>
-                    <div class="kpi-bar kpi-open"><span data-metric-bar="open-rate" style="width:0%"></span></div>
+                <div class="kpi-bar kpi-open"><span data-metric-bar="open-rate" style="width:${clampPercent(typeof campagne.open_rate === 'number' ? campagne.open_rate : 0)}%"></span></div>
                 </div>
                 <div class="kpi-line">
                     <div class="kpi-label-row">
                         <span>Clic</span>
-                        <strong data-metric="click-rate">-</strong>
+                    <strong data-metric="click-rate">${typeof campagne.click_rate === 'number' ? formatPercent(campagne.click_rate) : '-'}</strong>
                     </div>
-                    <div class="kpi-bar kpi-click"><span data-metric-bar="click-rate" style="width:0%"></span></div>
+                <div class="kpi-bar kpi-click"><span data-metric-bar="click-rate" style="width:${clampPercent(typeof campagne.click_rate === 'number' ? campagne.click_rate : 0)}%"></span></div>
                 </div>
             </div>
             <div class="campagne-actions">
                 <button class="btn-action btn-view" onclick="viewCampagne(${campagne.id})">
                     Voir détails
                 </button>
-                <button class="btn-action btn-relaunch" onclick="relaunchCampagne(${campagne.id})">
+                ${shouldShowRelaunchButton(campagne) ? `
+                <button class="btn-action btn-relaunch" onclick="relaunchCampagne(${campagne.id})" title="Relancer si envoi très faible ou campagne en échec">
                     Relancer
                 </button>
+                ` : ''}
                 <button class="btn-action btn-delete" onclick="deleteCampagne(${campagne.id})">
                     Supprimer
                 </button>
             </div>
-            ${campagne.statut === 'running' ? `
+            ${effectiveStatus === 'running' ? `
                 <div class="progress-bar-container">
                     <div class="progress-bar">
                         <div class="progress-fill" style="width: ${Math.round((campagne.total_envoyes / Math.max(campagne.total_destinataires, 1)) * 100)}%">                                                                                           
@@ -266,7 +274,7 @@ function displayCampagnes(campagnes) {
                 </div>
             ` : ''}
         </div>
-    `).join('');
+    `;}).join('');
 
     if (countEl) {
         const total = Array.isArray(campagnesData) ? campagnesData.length : campagnes.length;
@@ -279,7 +287,13 @@ function displayCampagnes(campagnes) {
         }
     }
 
-    hydrateCampagneCardsMetrics(campagnes);
+    // Si l'API /api/campagnes fournit déjà open_rate/click_rate, on évite de refaire 1 fetch par carte.
+    const missingMetrics = (campagnes || []).filter(function(c) {
+        return !(c && typeof c.open_rate === 'number' && typeof c.click_rate === 'number');
+    });
+    if (missingMetrics.length > 0) {
+        hydrateCampagneCardsMetrics(missingMetrics);
+    }
 }
 
 async function hydrateCampagneCardsMetrics(campagnes) {
@@ -289,7 +303,10 @@ async function hydrateCampagneCardsMetrics(campagnes) {
     campagneMetricsRequestToken = token;
 
     const completed = campagnes.filter(function(campagne) {
-        return ['completed', 'running', 'scheduled'].indexOf(campagne.statut) !== -1;
+        const s = (campagne && campagne.statut != null ? String(campagne.statut) : '').trim().toLowerCase();
+        // Même si une campagne est "failed", on veut afficher open/click
+        // (et surtout éviter des cartes à "-" partout).
+        return ['completed', 'completed_with_errors', 'running', 'scheduled', 'failed'].indexOf(s) !== -1;
     });
 
     await Promise.allSettled(completed.map(async function(campagne) {
@@ -1819,7 +1836,7 @@ function openResultsModal(campagneId, campagneName) {
         if (currentResultsCampagneId) {
             loadCampagneResults(currentResultsCampagneId, true);
         }
-    }, 5000);
+    }, 8000);
 }
 
 // Fermer la modale de résultats
@@ -1898,11 +1915,22 @@ function displayCampagneResults(stats, silentRefresh) {
     const sentCount = stats.total_emails || 0;
     const openCount = stats.total_opens || 0;
     const clickCount = stats.total_clicks || 0;
+    const bouncedCount = typeof stats.total_bounced === 'number'
+        ? stats.total_bounced
+        : (Array.isArray(stats.emails)
+            ? stats.emails.filter(function(e) { return e && e.statut === 'bounced'; }).length
+            : 0);
+    const deliverability = typeof stats.deliverability_rate_strict === 'number'
+        ? stats.deliverability_rate_strict
+        : 0;
     const hasReadTime = stats.avg_read_time != null && !isNaN(stats.avg_read_time);
     const avgReadTime = hasReadTime ? Math.round(stats.avg_read_time) : null;
 
     // Fonction pour obtenir le badge de statut
     function getStatusBadge(statut, hasOpened, hasClicked) {
+        if (statut === 'bounced') {
+            return '<span class="status-badge status-bounced">Bounce</span>';
+        }
         if (statut === 'failed') {
             return '<span class="status-badge status-failed">Échec</span>';
         }
@@ -1922,19 +1950,23 @@ function displayCampagneResults(stats, silentRefresh) {
         if (container) {
             // Mettre à jour le header de synthèse
             const sentEl = container.querySelector('[data-summary="sent"]');
+            const delivEl = container.querySelector('[data-summary="deliv"]');
             const openEl = container.querySelector('[data-summary="open"]');
             const clickEl = container.querySelector('[data-summary="click"]');
             const readEl = container.querySelector('[data-summary="read"]');
+            const bounceEl = container.querySelector('[data-summary="bounce"]');
             if (sentEl) sentEl.textContent = sentCount;
+            if (delivEl) delivEl.textContent = `${(Number(deliverability) || 0).toFixed(1)}%`;
             if (openEl) openEl.textContent = `${openRate}%`;
             if (clickEl) clickEl.textContent = `${clickRate}%`;
             if (readEl) readEl.textContent = avgReadTime !== null ? `${avgReadTime}s` : 'Non mesuré';
+            if (bounceEl) bounceEl.textContent = bouncedCount;
 
             // Mettre à jour le mini graphe de performance
             const miniChart = container.querySelector('.campaign-mini-chart');
             if (miniChart) {
-                // La première barre représente la base du tunnel (toujours 100%).
-                const sendRate = 100;
+                // Base du tunnel = délivrabilité stricte (réussis - bounces) / destinataires
+                const sendRate = Number(deliverability) || 0;
                 const openNum = Number(openRate) || 0;
                 const clickNum = Number(clickRate) || 0;
                 const bars = miniChart.querySelectorAll('.mini-chart-bar-fill');
@@ -1945,7 +1977,7 @@ function displayCampagneResults(stats, silentRefresh) {
                     bars[2].style.width = clampPercent(clickNum) + '%';
                 }
                 if (labels.length >= 3) {
-                    labels[0].textContent = '100%';
+                    labels[0].textContent = `${(Number(deliverability) || 0).toFixed(1)}%`;
                     labels[1].textContent = `${openRate}%`;
                     labels[2].textContent = `${clickRate}%`;
                 }
@@ -1967,8 +1999,11 @@ function displayCampagneResults(stats, silentRefresh) {
             const tbody = container.querySelector('.results-table tbody');
             if (tbody && stats.emails && stats.emails.length > 0) {
                 tbody.innerHTML = stats.emails.map(function(email) {
+                    const rowClass = (email && email.statut === 'bounced')
+                        ? 'row-bounced'
+                        : (email.has_clicked ? 'row-clicked' : (email.has_opened ? 'row-opened' : ''));
                     return (
-                        '<tr class="' + (email.has_clicked ? 'row-clicked' : (email.has_opened ? 'row-opened' : '')) + '">' +
+                        '<tr class="' + rowClass + '">' +
                             '<td>' +
                                 '<div class="contact-name">' + formatContactName(email.nom_destinataire) + '</div>' +
                                 '<div class="contact-email">' + escapeHtml(email.email) + '</div>' +
@@ -2022,7 +2057,7 @@ function displayCampagneResults(stats, silentRefresh) {
                         </thead>
                         <tbody>
                             ${stats.emails.map(email => `
-                                <tr class="${email.has_clicked ? 'row-clicked' : email.has_opened ? 'row-opened' : ''}">    
+                                <tr class="${email && email.statut === 'bounced' ? 'row-bounced' : (email.has_clicked ? 'row-clicked' : email.has_opened ? 'row-opened' : '')}">    
                                     <td>
                                         <div class="contact-name">${formatContactName(email.nom_destinataire)}</div>      
                                         <div class="contact-email">${escapeHtml(email.email)}</div>
@@ -2059,6 +2094,14 @@ function displayCampagneResults(stats, silentRefresh) {
                     <strong data-summary="sent">${sentCount}</strong>
                 </div>
                 <div class="summary-chip">
+                    <span>Envoi</span>
+                    <strong data-summary="deliv">${(Number(deliverability) || 0).toFixed(1)}%</strong>
+                </div>
+                <div class="summary-chip">
+                    <span>Bounces</span>
+                    <strong data-summary="bounce">${bouncedCount}</strong>
+                </div>
+                <div class="summary-chip">
                     <span>Taux d'ouverture</span>
                     <strong data-summary="open">${openRate}%</strong>
                 </div>
@@ -2078,9 +2121,9 @@ function displayCampagneResults(stats, silentRefresh) {
                     <div class="campaign-mini-chart">
                         <div class="mini-chart-row">
                             <span>Envoi</span>
-                            <strong>100%</strong>
+                            <strong>${(Number(deliverability) || 0).toFixed(1)}%</strong>
                         </div>
-                        <div class="mini-chart-bar"><span class="mini-chart-bar-fill" style="width:100%"></span></div>
+                        <div class="mini-chart-bar"><span class="mini-chart-bar-fill" style="width:${clampPercent(Number(deliverability))}%"></span></div>
                         <div class="mini-chart-row">
                             <span>Ouverture</span>
                             <strong>${openRate}%</strong>
@@ -2091,7 +2134,7 @@ function displayCampagneResults(stats, silentRefresh) {
                             <strong>${clickRate}%</strong>
                         </div>
                         <div class="mini-chart-bar mini-chart-click"><span class="mini-chart-bar-fill" style="width:${clampPercent(Number(clickRate))}%"></span></div>
-                        <div class="mini-chart-hint">Base 100% = emails envoyés</div>
+                        <div class="mini-chart-hint">Base = envoi (délivrabilité stricte)</div>
                     </div>
                 </div>
                 <div class="results-visual-card">
@@ -2460,11 +2503,7 @@ function escapeHtml(text) {
 
 function formatDate(dateString) {
     if (!dateString) return '-';
-    let toParse = String(dateString).trim().replace(' ', 'T');
-    if (!/Z$|[+-]\d{2}:?\d{2}$/.test(toParse) && /^\d{4}-\d{2}-\d{2}/.test(toParse)) {
-        toParse = toParse;
-    }
-    const date = new Date(toParse);
+    const date = parseDateLoose(dateString);
     if (Number.isNaN(date.getTime())) return dateString;
     return date.toLocaleDateString('fr-FR', {
         year: 'numeric',
@@ -2478,7 +2517,7 @@ function formatDate(dateString) {
 
 function formatRelativeDate(dateString) {
     if (!dateString) return 'Date inconnue';
-    const date = new Date(String(dateString).trim().replace(' ', 'T'));
+    const date = parseDateLoose(dateString);
     if (Number.isNaN(date.getTime())) return 'Date inconnue';
 
     const now = new Date();
@@ -2500,6 +2539,72 @@ function formatRelativeDate(dateString) {
     const d = Math.floor(diffMs / day);
     if (d < 7) return 'Il y a ' + d + ' jour' + (d > 1 ? 's' : '');
     return 'Il y a ' + Math.floor(d / 7) + ' sem';
+}
+
+function parseDateLoose(value) {
+    if (!value) return new Date('invalid');
+    const raw = String(value).trim();
+
+    // 1) Tentative directe (gère RFC1123 type "Fri, 27 Mar 2026 10:00:36 GMT")
+    let d = new Date(raw);
+    if (!Number.isNaN(d.getTime())) return d;
+
+    // 2) Normalisation simple des formats DB "YYYY-MM-DD HH:MM:SS"
+    let s = raw.replace(/\s+GMT$/i, 'Z').replace(/\s+UTC$/i, 'Z');
+    s = s.replace(' ', 'T');
+    d = new Date(s);
+    if (!Number.isNaN(d.getTime())) return d;
+
+    // 3) Dernier essai: enlever un suffixe timezone texte (ex: "GMT+0000 (UTC)")
+    s = raw.replace(/\s+GMT[+-]\d{4}.*$/i, '').trim().replace(' ', 'T');
+    d = new Date(s);
+    return d;
+}
+
+function getCampaignStatusLabel(statut) {
+    const s = String(statut || '').trim().toLowerCase();
+    if (s === 'completed_with_errors') return 'Terminée avec erreurs';
+    if (s === 'completed') return 'Terminée';
+    if (s === 'running') return 'En cours';
+    if (s === 'scheduled') return 'Programmée';
+    if (s === 'failed') return 'Échec';
+    if (s === 'draft') return 'Brouillon';
+    return statut || 'Inconnu';
+}
+
+function getEffectiveCampaignStatus(campagne) {
+    const raw = String((campagne && campagne.statut) || '').trim().toLowerCase();
+    const totalReussis = Number(campagne && campagne.total_reussis) || 0;
+    const totalEnvoyes = Number(campagne && campagne.total_envoyes) || 0;
+    // Compat historique: certaines campagnes anciennes restent en "failed"
+    // alors qu'il y a eu des envois réussis.
+    if (raw === 'failed' && totalReussis > 0 && totalEnvoyes > 0) {
+        return 'completed_with_errors';
+    }
+    return raw || 'draft';
+}
+
+function shouldShowRelaunchButton(campagne) {
+    const status = String((campagne && campagne.statut) || '').trim().toLowerCase();
+    if (status === 'failed') return true;
+
+    const dest = Number(campagne && campagne.total_destinataires) || 0;
+    if (dest < 10) return false;
+
+    // On utilise la même base que l'UI "Envoi" pour éviter tout écart.
+    // Priorité: total_delivered_strict (API) -> sinon total_delivered -> sinon total_envoyes.
+    const delivered = (campagne && campagne.total_delivered_strict != null)
+        ? Number(campagne.total_delivered_strict)
+        : (campagne && campagne.total_delivered != null)
+            ? Number(campagne.total_delivered)
+            : Number(campagne && campagne.total_envoyes);
+
+    if (!Number.isFinite(delivered)) return false;
+    const rate = safeRate(delivered, dest);
+
+    // "Envoi très faible" : on évite d'afficher le bouton si c'est juste une campagne avec quelques bounces.
+    // Seuil volontairement strict (relancer uniquement quand ça a vraiment foiré).
+    return rate < 40;
 }
 
 function safeRate(part, total) {

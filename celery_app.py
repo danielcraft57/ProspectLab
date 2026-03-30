@@ -134,6 +134,15 @@ celery.conf.update(
             'task': 'tasks.email_tasks.check_campaigns_significant_changes_task',
             'schedule': 1800.0,  # Toutes les 30 minutes
         },
+        # Scan IMAP des bounces: 2 fois par jour (sans limite de messages par défaut)
+        'bounce-scan-morning': {
+            'task': 'tasks.email_tasks.run_bounce_scan_task',
+            'schedule': crontab(hour=8, minute=10),
+        },
+        'bounce-scan-evening': {
+            'task': 'tasks.email_tasks.run_bounce_scan_task',
+            'schedule': crontab(hour=20, minute=10),
+        },
     },
 )
 
