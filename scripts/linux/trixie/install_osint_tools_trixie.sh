@@ -29,10 +29,8 @@ export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
 echo "[*] Outils APT (réseau / DNS / recon)..."
 install_pkg theharvester || true
 if ! command -v theharvester >/dev/null 2>&1; then
-  echo "  - theharvester absent des dépôts, tentative via pipx..."
-  # Nom du paquet parfois sensible à la casse, on essaie plusieurs variantes
-  pipx install theHarvester || true
-  pipx install theharvester || true
+  echo "  - theharvester absent des dépôts APT, tentative via pipx (git)..."
+  pipx install "git+https://github.com/laramies/theHarvester.git" || true
 fi
 install_pkg dnsrecon
 install_pkg whatweb
@@ -89,7 +87,7 @@ if ! command -v findomain >/dev/null 2>&1; then
     sudo mv /tmp/findomain /usr/local/bin/findomain
     sudo chmod +x /usr/local/bin/findomain
     echo "    ✓ findomain installé"
-  } || echo "    ⚠ findomain non installé (téléchargement manuel requis)"
+  } || echo "    ⚠ findomain non installé (release indisponible pour cette arch/distro)"
 fi
 
 # DNSenum
@@ -138,17 +136,41 @@ if ! command -v wafw00f >/dev/null 2>&1; then
 fi
 
 echo "[*] Outils de recherche de personnes supplémentaires..."
-# PhoneInfoga
+# PhoneInfoga v2 (binaire Go — le paquet PyPI « phoneinfoga » 0.1 est obsolète)
 if ! command -v phoneinfoga >/dev/null 2>&1; then
-  echo "  - Installation de phoneinfoga..."
-  pipx install phoneinfoga || echo "    ⚠ phoneinfoga non disponible via pipx"
+  echo "  - Installation de PhoneInfoga (release GitHub)..."
+  ARCH=$(uname -m)
+  case "$ARCH" in
+    x86_64) PI_ARCH=x86_64 ;;
+    aarch64) PI_ARCH=arm64 ;;
+    armv7l) PI_ARCH=armv7 ;;
+    armv6l) PI_ARCH=armv6 ;;
+    *) PI_ARCH=x86_64 ;;
+  esac
+  PI_TAG=$(curl -fsSL https://api.github.com/repos/sundowndev/phoneinfoga/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+  PI_TAG=${PI_TAG:-v2.11.0}
+  TMPD=$(mktemp -d)
+  if curl -fsSL "https://github.com/sundowndev/phoneinfoga/releases/download/${PI_TAG}/phoneinfoga_Linux_${PI_ARCH}.tar.gz" -o "$TMPD/pi.tgz" && tar -xzf "$TMPD/pi.tgz" -C "$TMPD"; then
+    if [ -f "$TMPD/phoneinfoga" ]; then
+      sudo mv "$TMPD/phoneinfoga" /usr/local/bin/phoneinfoga
+      sudo chmod +x /usr/local/bin/phoneinfoga
+      echo "    ✓ PhoneInfoga $PI_TAG → /usr/local/bin/phoneinfoga"
+    fi
+  else
+    echo "    ⚠ Binaire GitHub indisponible, repli pipx (ancien client)..."
+    pipx install phoneinfoga || true
+  fi
+  rm -rf "$TMPD"
+else
+  echo "  - PhoneInfoga déjà présent"
 fi
 
 echo "[*] Outils de métadonnées..."
 # Metagoofil (extraction de métadonnées de documents)
 if ! command -v metagoofil >/dev/null 2>&1; then
   echo "  - Installation de metagoofil..."
-  install_pkg metagoofil || echo "    ⚠ metagoofil non disponible via apt"
+  install_pkg metagoofil || true
+  command -v metagoofil >/dev/null 2>&1 || echo "    ⚠ metagoofil non disponible via apt (repo upstream non packagé pipx)"
 fi
 
 # ExifTool (extraction de métadonnées d'images)
@@ -161,7 +183,7 @@ echo "[*] Frameworks OSINT..."
 # Recon-ng
 if ! command -v recon-ng >/dev/null 2>&1; then
   echo "  - Installation de recon-ng..."
-  pipx install recon-ng || echo "    ⚠ recon-ng non disponible via pipx"
+  command -v recon-ng >/dev/null 2>&1 || echo "    ⚠ recon-ng non disponible via apt/pipx sur Trixie (installation manuelle)"
 fi
 
 echo "[*] APIs CLI (nécessitent des clés API)..."
@@ -183,18 +205,12 @@ echo "  - spiderfoot peut être installé manuellement selon l'usage."
 # Module Python whois (optionnel)
 install_pkg python3-whois 2>/dev/null || true
 
-# Complément: installer python-whois comme module Python (import whois)
+# Complément: installer python-whois UNIQUEMENT dans le venv ProspectLab
+# (évite l'erreur PEP 668 "externally-managed-environment" sur Python système).
 if [ -x "/opt/prospectlab/env/bin/pip" ]; then
-  /opt/prospectlab/env/bin/pip install python-whois || true
-fi
-# Egalement côté Python système (utilisé par certains scripts de test)
-pip3 install --user python-whois || true
-
-# Complément: installer python-whois dans l'environnement ProspectLab si disponible
-if [ -x "/opt/prospectlab/env/bin/pip" ]; then
-  /opt/prospectlab/env/bin/pip install python-whois || true
+  /opt/prospectlab/env/bin/pip install --upgrade python-whois dnspython || true
 else
-  pip3 install --user python-whois || true
+  echo "[!] /opt/prospectlab/env/bin/pip introuvable, skip installation python-whois via pip"
 fi
 
 echo "[*] Vérifications rapides..."
@@ -206,7 +222,13 @@ echo "=================="
 tools=("theharvester" "dnsrecon" "whatweb" "sslscan" "nmap" "masscan" "sublist3r" "amass" "sherlock" "maigret" "holehe" "socialscan" "hibp" "subfinder" "findomain" "dnsenum" "fierce" "testssl.sh" "wafw00f" "nikto" "gobuster" "phoneinfoga" "metagoofil" "exiftool" "recon-ng" "shodan" "censys")
 
 for tool in "${tools[@]}"; do
-  if [ "$tool" = "hibp" ]; then
+  if [ "$tool" = "theharvester" ]; then
+    if command -v theharvester >/dev/null 2>&1 || command -v theHarvester >/dev/null 2>&1; then
+      echo "[OK] theharvester détecté"
+    else
+      echo "[KO] theharvester manquant"
+    fi
+  elif [ "$tool" = "hibp" ]; then
     if command -v hibp >/dev/null 2>&1 || command -v hibpcli >/dev/null 2>&1; then
       echo "[OK] hibp détecté"
     else
@@ -221,7 +243,11 @@ done
 
 echo ""
 echo "Modules Python (vérification optionnelle)..."
-python3 - << 'EOF' || true
+PY_CHECK_BIN="python3"
+if [ -x "/opt/prospectlab/env/bin/python" ]; then
+  PY_CHECK_BIN="/opt/prospectlab/env/bin/python"
+fi
+"$PY_CHECK_BIN" - << 'EOF' || true
 import importlib
 modules = ["whois", "dns.resolver"]
 for name in modules:

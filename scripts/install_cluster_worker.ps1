@@ -1,9 +1,9 @@
 param(
     [Parameter(Mandatory=$false)]
-    [string]$Server = 'node14.lan',
+    [string]$Server = 'worker1.lan',
 
     [Parameter(Mandatory=$false)]
-    [string]$User = 'pi',
+    [string]$User = 'deploy',
 
     [Parameter(Mandatory=$false)]
     [string]$RemotePath = '/opt/prospectlab'
@@ -195,14 +195,14 @@ Write-Host ""
 # 5) Rappel pour le .env et le démarrage du service
 Write-Host "[5/5] Étapes restantes manuelles importantes" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "1. Sur le master (node15.lan), copie ton .env vers le worker :" -ForegroundColor Cyan
-Write-Host "   ssh pi@node15.lan 'cat /opt/prospectlab/.env' > .env.master" -ForegroundColor Gray
+Write-Host "1. Sur le master, copie ton .env vers le worker :" -ForegroundColor Cyan
+Write-Host "   ssh <user>@<master-host> 'cat /opt/prospectlab/.env' > .env.master" -ForegroundColor Gray
 Write-Host "   scp .env.master $User@$Server`:$RemotePath/.env" -ForegroundColor Gray
 Write-Host ""
 Write-Host "2. Sur le worker ($Server), adapte au minimum dans $RemotePath/.env :" -ForegroundColor Cyan
-Write-Host "   - CELERY_BROKER_URL=redis://node15.lan:6379/1" -ForegroundColor Gray
-Write-Host "   - CELERY_RESULT_BACKEND=redis://node15.lan:6379/1" -ForegroundColor Gray
-Write-Host "   - DATABASE_URL=postgresql://prospectlab:TON_MDP@node15.lan:5432/prospectlab" -ForegroundColor Gray
+Write-Host "   - CELERY_BROKER_URL=redis://<master-host>:6379/1" -ForegroundColor Gray
+Write-Host "   - CELERY_RESULT_BACKEND=redis://<master-host>:6379/1" -ForegroundColor Gray
+Write-Host "   - DATABASE_URL=postgresql://<db_user>:<db_password>@<master-host>:5432/<db_name>" -ForegroundColor Gray
 Write-Host ""
 Write-Host "3. Ensuite démarre le service worker sur le Raspberry :" -ForegroundColor Cyan
 Write-Host "   ssh $User@$Server 'sudo systemctl enable prospectlab-celery && sudo systemctl start prospectlab-celery && sudo systemctl status prospectlab-celery'" -ForegroundColor Gray

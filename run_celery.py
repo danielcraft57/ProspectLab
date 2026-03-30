@@ -20,7 +20,7 @@ except ImportError:
     CELERY_WORKERS = int(os.environ.get('CELERY_WORKERS', '4'))
     CELERY_WORKER_QUEUES = os.environ.get(
         'CELERY_WORKER_QUEUES',
-        'celery,scraping,technical,seo,osint,pentest,heavy,website_full',
+        'celery,scraping,scraping_interactive,technical,seo,osint,pentest,heavy,website_full',
     )
 
 def kill_process_tree(pid):

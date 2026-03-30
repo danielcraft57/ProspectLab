@@ -19,14 +19,14 @@ scripts/
 #### `deploy_cluster.ps1` - Déploiement multi-noeuds + envoi `.env.cluster`
 Déploie ProspectLab sur plusieurs noeuds du cluster en s'appuyant sur `install_cluster_worker.ps1`, puis copie `.env.cluster` vers `.env` sur chaque noeud et redémarre le service Celery.
 
-**Utilisation (par défaut: node13 + node14) :**
+**Utilisation (par défaut: worker1 + worker2) :**
 ```powershell
 .\scripts\deploy_cluster.ps1
 ```
 
 **Utilisation avec noeuds explicites :**
 ```powershell
-.\scripts\deploy_cluster.ps1 -Nodes "node13.lan","node14.lan","node15.lan" -EnvFile ".env.cluster"
+.\scripts\deploy_cluster.ps1 -Nodes "worker1.lan","worker2.lan","master.lan" -EnvFile ".env.cluster"
 ```
 
 **Options utiles :**
@@ -128,12 +128,12 @@ Crée un dump PostgreSQL compressé (`.sql.gz`) sur le serveur distant, le tél�
 
 **Utilisation :**
 ```powershell
-.\scripts\windows\backup-postgres-remote.ps1 -Server "node15.lan" -User "pi"
+.\scripts\windows\backup-postgres-remote.ps1 -Server "db-server.lan" -User "deploy"
 ```
 
 **Exemple avec options :**
 ```powershell
-.\scripts\windows\backup-postgres-remote.ps1 -Server "node15.lan" -User "pi" -DbName "prospectlab" -DbUser "prospectlab" -DbPassword "VOTRE_MOT_DE_PASSE" -LocalOutputDir ".\backups" -KeepRemoteFile
+.\scripts\windows\backup-postgres-remote.ps1 -Server "db-server.lan" -User "deploy" -DbName "prospectlab" -DbUser "prospectlab" -DbPassword "VOTRE_MOT_DE_PASSE" -LocalOutputDir ".\backups" -KeepRemoteFile
 ```
 
 **Note :**
@@ -145,12 +145,12 @@ Envoie un dump local (`.sql` ou `.sql.gz`) vers le serveur distant et restaure l
 
 **Utilisation :**
 ```powershell
-.\scripts\windows\restore-postgres-remote.ps1 -Server "node15.lan" -User "pi" -BackupFile ".\backups\prospectlab_backup_YYYYMMDD_HHMMSS.sql.gz" -DbPassword "VOTRE_MOT_DE_PASSE"
+.\scripts\windows\restore-postgres-remote.ps1 -Server "db-server.lan" -User "deploy" -BackupFile ".\backups\prospectlab_backup_YYYYMMDD_HHMMSS.sql.gz" -DbPassword "VOTRE_MOT_DE_PASSE"
 ```
 
 **Exemple avec recréation de base :**
 ```powershell
-.\scripts\windows\restore-postgres-remote.ps1 -Server "node15.lan" -User "pi" -BackupFile ".\backups\prospectlab_backup_YYYYMMDD_HHMMSS.sql.gz" -RecreateDatabase
+.\scripts\windows\restore-postgres-remote.ps1 -Server "db-server.lan" -User "deploy" -BackupFile ".\backups\prospectlab_backup_YYYYMMDD_HHMMSS.sql.gz" -RecreateDatabase
 ```
 
 #### `tests/test_multicanal_send.py` - Teste l'envoi multicanal (X/Meta)
@@ -305,7 +305,7 @@ ProspectLab nécessite Redis pour fonctionner avec Celery. Tu peux utiliser soit
 
 Les scripts WSL utilisent les variables de configuration depuis `config.py` :
 - `WSL_DISTRO` : Distribution WSL à utiliser (défaut: kali-linux)
-- `WSL_USER` : Utilisateur WSL (défaut: loupix)
+- `WSL_USER` : Utilisateur WSL (défaut: utilisateur local)
 
 ### Permissions
 

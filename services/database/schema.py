@@ -989,6 +989,7 @@ class DatabaseSchema(DatabaseBase):
                 domain TEXT,
                 name_info TEXT,
                 is_person INTEGER DEFAULT 0,
+                analysis_extras TEXT,
                 analyzed_at TIMESTAMP,
                 date_found TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (scraper_id) REFERENCES scrapers(id) ON DELETE CASCADE,
@@ -1004,6 +1005,13 @@ class DatabaseSchema(DatabaseBase):
                 entreprise_id INTEGER NOT NULL,
                 phone TEXT NOT NULL,
                 page_url TEXT,
+                phone_e164 TEXT,
+                carrier TEXT,
+                location TEXT,
+                line_type TEXT,
+                phone_valid INTEGER,
+                osint_json TEXT,
+                analyzed_at TIMESTAMP,
                 date_found TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (scraper_id) REFERENCES scrapers(id) ON DELETE CASCADE,
                 FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE,
@@ -1277,6 +1285,34 @@ class DatabaseSchema(DatabaseBase):
             conn.commit()
         except Exception:
             # La colonne existe déjà, ignorer l'erreur
+            conn.rollback()
+        
+        # Migration : JSON Hunter / Abstract / erreurs API (enrichissement email)
+        try:
+            self.execute_sql(cursor,'ALTER TABLE scraper_emails ADD COLUMN analysis_extras TEXT')
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        
+        # Migrations scraper_phones : OSINT complet (libphonenumber, PhoneInfoga, Numverify, Abstract, etc.)
+        for _sql in (
+            'ALTER TABLE scraper_phones ADD COLUMN phone_e164 TEXT',
+            'ALTER TABLE scraper_phones ADD COLUMN carrier TEXT',
+            'ALTER TABLE scraper_phones ADD COLUMN location TEXT',
+            'ALTER TABLE scraper_phones ADD COLUMN line_type TEXT',
+            'ALTER TABLE scraper_phones ADD COLUMN phone_valid INTEGER',
+            'ALTER TABLE scraper_phones ADD COLUMN osint_json TEXT',
+            'ALTER TABLE scraper_phones ADD COLUMN analyzed_at TIMESTAMP',
+        ):
+            try:
+                self.execute_sql(cursor, _sql)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+        try:
+            self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_scraper_phones_e164 ON scraper_phones(phone_e164)')
+            conn.commit()
+        except Exception:
             conn.rollback()
         
         # Créer l'index pour is_person après la migration

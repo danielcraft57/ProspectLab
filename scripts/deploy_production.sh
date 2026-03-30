@@ -201,8 +201,8 @@ fi
 echo ""
 
 # Nettoyage du cache et redémarrage des services
-echo "[8/9] Nettoyage du cache et redémarrage des services..."
-ssh "$USER@$SERVER" "cd $REMOTE_PATH; if [ -x scripts/linux/clear-logs.sh ]; then ./scripts/linux/clear-logs.sh; fi"
+echo "[8/9] Nettoyage Redis/Logs et redémarrage des services..."
+ssh "$USER@$SERVER" "cd $REMOTE_PATH; if [ -x scripts/linux/clear-redis.sh ]; then ./scripts/linux/clear-redis.sh; fi; if [ -x scripts/linux/clear-logs.sh ]; then ./scripts/linux/clear-logs.sh; fi"
 ssh "$USER@$SERVER" "sudo systemctl restart prospectlab prospectlab-celery prospectlab-celerybeat"
 echo "✅ Cache vidé et services redémarrés"
 echo ""

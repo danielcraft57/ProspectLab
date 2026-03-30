@@ -17,7 +17,9 @@ const API_DOC_FAMILIES = [
                     { method: 'GET', path: '/entreprises/<id>', desc: 'Détails d\'une entreprise.' },
                     { method: 'GET', path: '/entreprises/by-email', desc: 'Récupère une entreprise à partir d\'un email (scraping ou email_principal).', params: [{ name: 'email', type: 'str', desc: 'Requis' }, { name: 'include_emails', type: 'bool', desc: 'Optionnel (inclut tous les emails connus)' }] },
                     { method: 'GET', path: '/entreprises/by-website', desc: 'Récupère l\'entreprise ProspectLab à partir d\'un website (URL ou domaine).', params: [{ name: 'website', type: 'str', desc: 'Requis (URL ou domaine)' }] },
-                    { method: 'GET', path: '/entreprises/<id>/emails', desc: 'Emails scrapés d\'une entreprise.' }
+                    { method: 'GET', path: '/entreprises/by-phone', desc: 'Récupère une entreprise à partir d\'un numéro (+33, 06…, international).', params: [{ name: 'phone', type: 'str', desc: 'Requis' }, { name: 'include_phones', type: 'bool', desc: 'Optionnel (tous les numéros connus)' }] },
+                    { method: 'GET', path: '/entreprises/<id>/emails', desc: 'Emails scrapés d\'une entreprise.' },
+                    { method: 'GET', path: '/entreprises/<id>/campagnes', desc: 'Campagnes email liées à l\'entreprise.', params: [{ name: 'limit', type: 'int' }, { name: 'offset', type: 'int' }, { name: 'statut', type: 'str' }] }
                 ]
             },
             {
@@ -42,7 +44,7 @@ const API_DOC_FAMILIES = [
                     { method: 'GET', path: '/emails', desc: 'Liste de tous les emails.', params: [{ name: 'limit', type: 'int' }, { name: 'offset', type: 'int' }, { name: 'entreprise_id', type: 'int' }] },
                     { method: 'GET', path: '/entreprises/<id>/emails/all', desc: 'Tous les emails d\'une entreprise (email_principal + scrapers) avec infos personne/analyse.', params: [{ name: 'include_primary', type: 'bool', desc: 'Optionnel (défaut true)' }] },
                     { method: 'GET', path: '/statistics', desc: 'Statistiques globales.' },
-                    { method: 'GET', path: '/campagnes', desc: 'Liste des campagnes email.', params: [{ name: 'limit', type: 'int' }, { name: 'offset', type: 'int' }, { name: 'statut', type: 'str' }] },
+                    { method: 'GET', path: '/campagnes', desc: 'Liste des campagnes email.', params: [{ name: 'limit', type: 'int' }, { name: 'offset', type: 'int' }, { name: 'statut', type: 'str' }, { name: 'entreprise_id', type: 'int', desc: 'Optionnel (filtre par entreprise)' }] },
                     { method: 'GET', path: '/campagnes/<id>', desc: 'Détails d\'une campagne.' },
                     { method: 'GET', path: '/campagnes/<id>/emails', desc: 'Emails envoyés d\'une campagne.', params: [{ name: 'limit', type: 'int' }, { name: 'offset', type: 'int' }, { name: 'statut', type: 'str' }] },
                     { method: 'GET', path: '/campagnes/<id>/statistics', desc: 'Statistiques de tracking (ouvertures, clics).' }

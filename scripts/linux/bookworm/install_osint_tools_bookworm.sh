@@ -29,8 +29,7 @@ export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
 echo "[*] Outils APT (réseau / DNS / recon)..."
 install_pkg theharvester || true
 if ! command -v theharvester >/dev/null 2>&1; then
-  echo "  - theharvester absent des dépôts, tentative via pipx..."
-  pipx install theHarvester || true
+  echo "  - theharvester absent des dépôts APT sur cette distro (skip pipx, paquet non CLI)"
 fi
 install_pkg dnsrecon
 install_pkg whatweb
@@ -136,10 +135,33 @@ if ! command -v wafw00f >/dev/null 2>&1; then
 fi
 
 echo "[*] Outils de recherche de personnes supplémentaires..."
-# PhoneInfoga
+# PhoneInfoga v2 (binaire Go — le paquet PyPI « phoneinfoga » 0.1 est obsolète)
 if ! command -v phoneinfoga >/dev/null 2>&1; then
-  echo "  - Installation de phoneinfoga..."
-  pipx install phoneinfoga || echo "    ⚠ phoneinfoga non disponible via pipx"
+  echo "  - Installation de PhoneInfoga (release GitHub)..."
+  ARCH=$(uname -m)
+  case "$ARCH" in
+    x86_64) PI_ARCH=x86_64 ;;
+    aarch64) PI_ARCH=arm64 ;;
+    armv7l) PI_ARCH=armv7 ;;
+    armv6l) PI_ARCH=armv6 ;;
+    *) PI_ARCH=x86_64 ;;
+  esac
+  PI_TAG=$(curl -fsSL https://api.github.com/repos/sundowndev/phoneinfoga/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+  PI_TAG=${PI_TAG:-v2.11.0}
+  TMPD=$(mktemp -d)
+  if curl -fsSL "https://github.com/sundowndev/phoneinfoga/releases/download/${PI_TAG}/phoneinfoga_Linux_${PI_ARCH}.tar.gz" -o "$TMPD/pi.tgz" && tar -xzf "$TMPD/pi.tgz" -C "$TMPD"; then
+    if [ -f "$TMPD/phoneinfoga" ]; then
+      sudo mv "$TMPD/phoneinfoga" /usr/local/bin/phoneinfoga
+      sudo chmod +x /usr/local/bin/phoneinfoga
+      echo "    ✓ PhoneInfoga $PI_TAG → /usr/local/bin/phoneinfoga"
+    fi
+  else
+    echo "    ⚠ Binaire GitHub indisponible, repli pipx (ancien client)..."
+    pipx install phoneinfoga || true
+  fi
+  rm -rf "$TMPD"
+else
+  echo "  - PhoneInfoga déjà présent"
 fi
 
 echo "[*] Outils de métadonnées..."
@@ -159,7 +181,7 @@ echo "[*] Frameworks OSINT..."
 # Recon-ng
 if ! command -v recon-ng >/dev/null 2>&1; then
   echo "  - Installation de recon-ng..."
-  pipx install recon-ng || echo "    ⚠ recon-ng non disponible via pipx"
+  echo "    ⚠ recon-ng non disponible via apt/pipx sur cette distro (installation manuelle requise)"
 fi
 
 echo "[*] APIs CLI (nécessitent des clés API)..."
@@ -179,6 +201,14 @@ echo "[*] Outils supplémentaires (git clone manuel si besoin)..."
 echo "  - spiderfoot peut être installé manuellement selon l'usage."
 
 install_pkg python3-whois 2>/dev/null || true
+
+# Complément: installer python-whois UNIQUEMENT dans le venv ProspectLab
+# (évite l'erreur PEP 668 sur Python système).
+if [ -x "/opt/prospectlab/env/bin/pip" ]; then
+  /opt/prospectlab/env/bin/pip install --upgrade python-whois || true
+else
+  echo "[!] /opt/prospectlab/env/bin/pip introuvable, skip installation python-whois via pip"
+fi
 
 echo "[*] Vérifications rapides..."
 export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"

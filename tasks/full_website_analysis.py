@@ -15,6 +15,7 @@ from tasks.scraping_tasks import scrape_emails_task
 from tasks.technical_analysis_tasks import technical_analysis_task
 from tasks.seo_tasks import seo_analysis_task
 from tasks.osint_tasks import osint_analysis_task
+from tasks.phone_tasks import analyze_phones_task
 from tasks.pentest_tasks import pentest_analysis_task
 
 try:
@@ -290,7 +291,22 @@ def run_full_website_analysis_impl(
         logger.exception('Full analysis: SEO échouée')
         steps['seo'] = f'erreur: {e!s}'[:200]
 
-    # 4) OSINT
+    # 4) OSINT (téléphones : tâche dédiée analyze_phones_task, comme analyze_emails_task)
+    phone_pack = None
+    try:
+        if phones_osint:
+            progress('phone_osint', 58, 'Analyse OSINT des numéros de téléphone…')
+            phone_pack = _run_subtask_eager(
+                analyze_phones_task,
+                phones=phones_osint,
+                source_url=url,
+                entreprise_id=entreprise_id,
+            )
+            steps['phone_osint'] = 'ok'
+    except Exception as e:
+        logger.exception('Full analysis: analyse téléphones échouée')
+        steps['phone_osint'] = f'erreur: {e!s}'[:200]
+
     try:
         progress('osint', 65, 'Analyse OSINT…')
         _run_subtask_eager(
@@ -301,6 +317,7 @@ def run_full_website_analysis_impl(
             emails_from_scrapers=emails_osint or None,
             social_profiles_from_scrapers=social_osint or None,
             phones_from_scrapers=phones_osint or None,
+            phone_osint_result=phone_pack,
         )
         steps['osint'] = 'ok'
     except Exception as e:

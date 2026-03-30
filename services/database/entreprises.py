@@ -1440,6 +1440,70 @@ class EntrepriseManager(DatabaseBase):
         
         conn.commit()
         conn.close()
+
+    def add_entreprise_tag(self, entreprise_id: int, tag: str) -> bool:
+        """
+        Ajoute un tag (sans doublon) à une entreprise.
+
+        Args:
+            entreprise_id (int): ID de l'entreprise
+            tag (str): Tag à ajouter
+
+        Returns:
+            bool: True si une mise à jour a été faite, False sinon
+        """
+        if not entreprise_id:
+            return False
+        t = (tag or '').strip()
+        if not t:
+            return False
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        self.execute_sql(cursor, 'SELECT tags FROM entreprises WHERE id = ?', (entreprise_id,))
+        row = cursor.fetchone()
+        raw_tags = None
+        if row:
+            try:
+                raw_tags = row.get('tags') if isinstance(row, dict) else row[0]
+            except Exception:
+                raw_tags = None
+
+        tags: list[str] = []
+        if raw_tags:
+            try:
+                tags = json.loads(raw_tags) if isinstance(raw_tags, str) else list(raw_tags)
+            except Exception:
+                tags = []
+        if not isinstance(tags, list):
+            tags = []
+
+        before = set(str(x).strip() for x in tags if isinstance(x, str) and str(x).strip())
+        if t in before:
+            conn.close()
+            return False
+
+        tags.append(t)
+        # dédoublonnage conservant l'ordre
+        seen = set()
+        deduped: list[str] = []
+        for x in tags:
+            xs = str(x).strip()
+            if not xs or xs in seen:
+                continue
+            seen.add(xs)
+            deduped.append(xs)
+
+        self.execute_sql(
+            cursor,
+            'UPDATE entreprises SET tags = ? WHERE id = ?',
+            (json.dumps(deduped) if deduped else None, entreprise_id),
+        )
+        conn.commit()
+        updated = int(getattr(cursor, 'rowcount', 0) or 0) > 0
+        conn.close()
+        return updated
     
     def update_entreprise_notes(self, entreprise_id, notes):
         """

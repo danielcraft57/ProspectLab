@@ -8,6 +8,7 @@ from flask import Blueprint, request, jsonify
 from services.database import Database
 from services.api_auth import api_token_required, require_api_permission
 import json
+import re
 from urllib.parse import urlparse
 
 api_public_bp = Blueprint('api_public', __name__, url_prefix='/api/public')
@@ -22,6 +23,232 @@ def _normalize_email(raw: str) -> str | None:
     if not s or '@' not in s:
         return None
     return s
+
+
+def _digits_only_phone(raw: str) -> str:
+    return re.sub(r'\D', '', raw or '')
+
+
+def _phone_digit_equivalence_keys(d: str) -> set[str]:
+    """Clés numériques pour comparer FR (+33 / 0…) et formats internationaux."""
+    if not d:
+        return set()
+    keys = {d}
+    # France métropolitaine : 0X XX XX XX XX ↔ 33X…
+    if len(d) == 10 and d.startswith('0'):
+        keys.add('33' + d[1:])
+    if len(d) == 11 and d.startswith('33') and d[2] in '123456789':
+        keys.add('0' + d[2:])
+    # Appel international depuis l'étranger : 00… → même suite qu'avec +
+    if d.startswith('00') and len(d) >= 12:
+        keys.add(d[2:])
+    return keys
+
+
+def _phone_lookup_variants(raw: str) -> list[str]:
+    """
+    Variantes de chaînes susceptibles d'être stockées telles quelles en base
+    (scrapers, saisie utilisateur, formats +33, 06…, 00…).
+    """
+    s = (raw or '').strip()
+    if not s:
+        return []
+    variants: set[str] = set()
+    d = _digits_only_phone(s)
+    if not d:
+        return []
+
+    def add(v: str | None):
+        if v and v.strip():
+            variants.add(v.strip())
+
+    add(s)
+    add(d)
+    # Éviter "+0612…" (invalide) : le cas FR est couvert plus bas (+33…).
+    if not (len(d) == 10 and d.startswith('0')):
+        add('+' + d)
+    if s.startswith('+'):
+        add(s[1:])
+    if d.startswith('00') and len(d) >= 10:
+        add('+' + d[2:])
+        add(d[2:])
+    # France
+    if len(d) == 10 and d.startswith('0'):
+        intl = '33' + d[1:]
+        add(intl)
+        add('+' + intl)
+        add('00' + intl)
+    if len(d) == 11 and d.startswith('33'):
+        add(d)
+        add('+' + d)
+        add('0' + d[2:])
+        add('00' + d)
+    # International (hors cas FR ci-dessus)
+    if len(d) >= 10 and not (len(d) == 10 and d.startswith('0')):
+        add(d)
+        add('+' + d)
+        if not d.startswith('00'):
+            add('00' + d)
+
+    return list(variants)
+
+
+def _sql_phone_digits_expr(alias: str = 'phone') -> str:
+    """Expression SQL (SQLite / PG) : ne garde que les chiffres pour comparaison."""
+    # PostgreSQL et SQLite acceptent || pour concaténer des REPLACE imbriqués.
+    e = f"COALESCE({alias}, '')" if alias else "COALESCE(phone, '')"
+    for ch in (' ', '-', '.', '(', ')', '+'):
+        e = f"REPLACE({e}, '{ch}', '')"
+    return e
+
+
+def _find_entreprise_row_by_phone(db: Database, phone_raw: str) -> tuple[int | None, dict | None]:
+    """
+    Cherche une entreprise par numéro : scraper_phones puis entreprises.telephone.
+    Retourne (entreprise_id, match_info) ou (None, None).
+    """
+    variants = _phone_lookup_variants(phone_raw)
+    d = _digits_only_phone(phone_raw)
+    digit_keys = _phone_digit_equivalence_keys(d)
+    if not d:
+        return None, None
+
+    conn = db.get_connection()
+    cursor = conn.cursor()
+    row = None
+    row2 = None
+    match: dict | None = None
+
+    vlist = [v for v in variants if v][:64]
+    if vlist:
+        ph = ','.join(['?'] * len(vlist))
+        db.execute_sql(cursor, f'''
+            SELECT entreprise_id, phone, page_url, date_found, phone_e164, osint_json
+            FROM scraper_phones
+            WHERE phone IN ({ph}) OR phone_e164 IN ({ph})
+            ORDER BY date_found DESC
+            LIMIT 1
+        ''', tuple(vlist) + tuple(vlist))
+        row = cursor.fetchone()
+
+    if not row and digit_keys:
+        klist = list(digit_keys)[:16]
+        if klist:
+            expr = _sql_phone_digits_expr('phone')
+            expr164 = _sql_phone_digits_expr('phone_e164')
+            ph2 = ','.join(['?'] * len(klist))
+            db.execute_sql(cursor, f'''
+                SELECT entreprise_id, phone, page_url, date_found, phone_e164, osint_json
+                FROM scraper_phones
+                WHERE {expr} IN ({ph2}) OR (phone_e164 IS NOT NULL AND phone_e164 != '' AND {expr164} IN ({ph2}))
+                ORDER BY date_found DESC
+                LIMIT 1
+            ''', tuple(klist) + tuple(klist))
+            row = cursor.fetchone()
+
+    if row:
+        r = dict(row) if not isinstance(row, dict) else row
+        eid = r.get('entreprise_id')
+        match = {
+            'source': 'scraper',
+            'phone': r.get('phone'),
+            'page_url': r.get('page_url'),
+            'date_found': r.get('date_found'),
+            'phone_e164': r.get('phone_e164'),
+        }
+        raw_oj = r.get('osint_json')
+        if raw_oj:
+            try:
+                match['osint'] = json.loads(raw_oj)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        conn.close()
+        return int(eid), match
+
+    if vlist:
+        ph = ','.join(['?'] * len(vlist))
+        db.execute_sql(cursor, f'''
+            SELECT id
+            FROM entreprises
+            WHERE telephone IN ({ph})
+            LIMIT 1
+        ''', tuple(vlist))
+        row2 = cursor.fetchone()
+
+    if not row2 and digit_keys:
+        klist = list(digit_keys)[:16]
+        expr = _sql_phone_digits_expr('telephone')
+        ph2 = ','.join(['?'] * len(klist))
+        db.execute_sql(cursor, f'''
+            SELECT id
+            FROM entreprises
+            WHERE {expr} IN ({ph2})
+            LIMIT 1
+        ''', tuple(klist))
+        row2 = cursor.fetchone()
+
+    conn.close()
+
+    if row2:
+        eid = row2.get('id') if isinstance(row2, dict) else row2[0]
+        return int(eid), {
+            'source': 'principal',
+            'phone': d,
+            'page_url': None,
+            'date_found': None,
+        }
+
+    return None, None
+
+
+def _get_entreprise_phones_list(entreprise_id: int, include_primary: bool = True) -> list[dict]:
+    """Téléphones scrapés + optionnellement telephone de l'entreprise."""
+    out: list[dict] = []
+    conn = database.get_connection()
+    cursor = conn.cursor()
+    database.execute_sql(cursor, '''
+        SELECT phone, page_url, date_found, phone_e164, carrier, location, line_type, phone_valid,
+               osint_json, analyzed_at
+        FROM scraper_phones
+        WHERE entreprise_id = ?
+        ORDER BY date_found DESC
+    ''', (entreprise_id,))
+    for row in cursor.fetchall() or []:
+        r = dict(row) if not isinstance(row, dict) else row
+        pv = r.get('phone_valid')
+        item = {
+            'source': 'scraper',
+            'phone': r.get('phone'),
+            'page_url': r.get('page_url'),
+            'date_found': r.get('date_found'),
+            'phone_e164': r.get('phone_e164'),
+            'carrier': r.get('carrier'),
+            'location': r.get('location'),
+            'line_type': r.get('line_type'),
+            'valid': bool(pv) if pv is not None else None,
+            'analyzed_at': r.get('analyzed_at'),
+        }
+        raw_oj = r.get('osint_json')
+        if raw_oj:
+            try:
+                item['osint'] = json.loads(raw_oj)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        out.append(item)
+    conn.close()
+
+    if include_primary:
+        ent = database.get_entreprise(entreprise_id)
+        if ent and (ent.get('telephone') or '').strip():
+            tel = (ent.get('telephone') or '').strip()
+            if not any((x.get('phone') or '').strip() == tel for x in out):
+                out.insert(0, {
+                    'source': 'principal',
+                    'phone': tel,
+                    'page_url': None,
+                    'date_found': None,
+                })
+    return out
 
 
 def _extract_person_from_name_info(name_info) -> dict | None:
@@ -649,6 +876,51 @@ def get_entreprise_by_website():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@api_public_bp.route('/entreprises/by-phone', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+def get_entreprise_by_phone():
+    """
+    API publique : retrouver une entreprise à partir d'un numéro de téléphone.
+
+    Query params:
+        phone (str, requis) : numéro tel quel (ex. +33 6 12 34 56 78, 06 12 34 56 78, 0033…, numéros étrangers).
+        include_phones (bool, optionnel) : si true, liste les téléphones connus (scraping + téléphone principal).
+    """
+    try:
+        phone_raw = request.args.get('phone', '')
+        if not (phone_raw or '').strip():
+            return jsonify({'success': False, 'error': 'Paramètre "phone" requis.'}), 400
+
+        include_phones = str(request.args.get('include_phones', '')).lower() in ('1', 'true', 'yes')
+
+        entreprise_id, match = _find_entreprise_row_by_phone(database, phone_raw)
+        if not entreprise_id:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable pour ce numéro.'}), 404
+
+        entreprise = database.get_entreprise(int(entreprise_id))
+        if not entreprise:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable.'}), 404
+
+        from utils.helpers import clean_json_dict
+        entreprise = clean_json_dict(entreprise)
+
+        payload = {
+            'success': True,
+            'data': {
+                'entreprise': entreprise,
+                'match': match,
+            },
+        }
+        if include_phones:
+            payload['data']['phones'] = _get_entreprise_phones_list(int(entreprise_id), include_primary=True)
+            payload['data']['phones_count'] = len(payload['data']['phones'])
+
+        return jsonify(payload)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @api_public_bp.route('/entreprises/<int:entreprise_id>/emails', methods=['GET'])
 @api_token_required
 @require_api_permission('entreprises')
@@ -1001,6 +1273,8 @@ def get_campagnes():
         limit (int): Nombre maximum de résultats (défaut: 100, max: 1000)
         offset (int): Offset pour la pagination (défaut: 0)
         statut (str): Filtrer par statut (draft, running, completed, failed)
+        entreprise_id (int, optionnel): Ne retourner que les campagnes associées à cette entreprise
+            (envois enregistrés et campagnes programmées dont les destinataires incluent l'entreprise).
         
     Returns:
         JSON: Liste des campagnes avec leurs informations
@@ -1011,15 +1285,22 @@ def get_campagnes():
         limit = min(int(request.args.get('limit', 100)), 1000)
         offset = int(request.args.get('offset', 0))
         statut = request.args.get('statut')
+        entreprise_id = request.args.get('entreprise_id', type=int)
         
         campagne_manager = CampagneManager()
-        campagnes = campagne_manager.list_campagnes(statut=statut, limit=limit, offset=offset)
+        campagnes = campagne_manager.list_campagnes(
+            statut=statut,
+            limit=limit,
+            offset=offset,
+            entreprise_id=entreprise_id,
+        )
         
         return jsonify({
             'success': True,
             'count': len(campagnes),
             'limit': limit,
             'offset': offset,
+            'entreprise_id': entreprise_id,
             'data': campagnes
         })
     except Exception as e:
@@ -1027,6 +1308,43 @@ def get_campagnes():
             'success': False,
             'error': str(e)
         }), 500
+
+
+@api_public_bp.route('/entreprises/<int:entreprise_id>/campagnes', methods=['GET'])
+@api_token_required
+@require_api_permission('campagnes')
+def get_campagnes_by_entreprise(entreprise_id: int):
+    """
+    API publique : campagnes liées à une entreprise (même filtre que GET /campagnes?entreprise_id=).
+    """
+    try:
+        from services.database.campagnes import CampagneManager
+
+        ent = database.get_entreprise(entreprise_id)
+        if not ent:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable'}), 404
+
+        limit = min(int(request.args.get('limit', 100)), 1000)
+        offset = int(request.args.get('offset', 0))
+        statut = request.args.get('statut')
+
+        campagne_manager = CampagneManager()
+        campagnes = campagne_manager.list_campagnes(
+            statut=statut,
+            limit=limit,
+            offset=offset,
+            entreprise_id=entreprise_id,
+        )
+        return jsonify({
+            'success': True,
+            'count': len(campagnes),
+            'limit': limit,
+            'offset': offset,
+            'entreprise_id': entreprise_id,
+            'data': campagnes,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @api_public_bp.route('/campagnes/<int:campagne_id>', methods=['GET'])

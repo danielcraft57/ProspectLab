@@ -19,7 +19,15 @@ logger = logging.getLogger(__name__)
 
 # Importer la configuration
 try:
-    from config import SIRENE_API_KEY, SIRENE_API_URL, WSL_DISTRO, WSL_USER, OSINT_TOOL_TIMEOUT
+    from config import (
+        SIRENE_API_KEY,
+        SIRENE_API_URL,
+        WSL_DISTRO,
+        WSL_USER,
+        OSINT_TOOL_TIMEOUT,
+        PHONE_DEFAULT_REGION,
+        PHONE_OSINT_MAX_NUMBERS,
+    )
 except ImportError:
     # Valeurs par défaut si config n'est pas disponible
     SIRENE_API_KEY = os.environ.get('SIRENE_API_KEY', '')
@@ -27,6 +35,8 @@ except ImportError:
     WSL_DISTRO = os.environ.get('WSL_DISTRO', 'kali-linux')
     WSL_USER = os.environ.get('WSL_USER', 'loupix')
     OSINT_TOOL_TIMEOUT = int(os.environ.get('OSINT_TOOL_TIMEOUT', '60'))
+    PHONE_DEFAULT_REGION = os.environ.get('PHONE_DEFAULT_REGION', 'FR')
+    PHONE_OSINT_MAX_NUMBERS = int(os.environ.get('PHONE_OSINT_MAX_NUMBERS', '8'))
 
 try:
     import whois
@@ -275,6 +285,34 @@ class OSINTAnalyzer:
                 return {'error': 'Timeout'}
             except Exception as e2:
                 return {'error': str(e2)}
+    
+    def _run_osint_cli(self, command: List[str], timeout: int = 30) -> Dict:
+        """
+        Exécute un outil CLI OSINT : WSL si disponible (Windows), sinon processus natif (Linux worker).
+        """
+        if not command:
+            return {'error': 'Commande vide'}
+        if self.wsl_available:
+            return self._run_wsl_command(command, timeout=timeout)
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='ignore',
+                timeout=timeout,
+            )
+            return {
+                'success': result.returncode == 0,
+                'stdout': result.stdout or '',
+                'stderr': result.stderr or '',
+                'returncode': result.returncode,
+            }
+        except subprocess.TimeoutExpired:
+            return {'error': 'Timeout'}
+        except Exception as e:
+            return {'error': str(e)}
     
     def discover_subdomains(self, domain: str, progress_callback=None) -> List[str]:
         """
@@ -704,25 +742,189 @@ class OSINTAnalyzer:
         
         return profiles
     
+    def _phone_libphonenumber_meta(self, raw_phone: str) -> Dict:
+        """Métadonnées localement dérivées (pas d'appel réseau) via la lib Google libphonenumber."""
+        try:
+            import phonenumbers
+            from phonenumbers import geocoder, carrier
+            from phonenumbers.phonenumberutil import NumberParseException
+        except ImportError:
+            return {}
+        try:
+            num = phonenumbers.parse(raw_phone, PHONE_DEFAULT_REGION)
+        except NumberParseException:
+            return {'valid': False, 'libphonenumber_parse_ok': False}
+        nt = phonenumbers.number_type(num)
+        labels = {
+            phonenumbers.PhoneNumberType.FIXED_LINE: 'FIXED_LINE',
+            phonenumbers.PhoneNumberType.MOBILE: 'MOBILE',
+            phonenumbers.PhoneNumberType.FIXED_LINE_OR_MOBILE: 'FIXED_LINE_OR_MOBILE',
+            phonenumbers.PhoneNumberType.TOLL_FREE: 'TOLL_FREE',
+            phonenumbers.PhoneNumberType.PREMIUM_RATE: 'PREMIUM_RATE',
+            phonenumbers.PhoneNumberType.SHARED_COST: 'SHARED_COST',
+            phonenumbers.PhoneNumberType.VOIP: 'VOIP',
+            phonenumbers.PhoneNumberType.PERSONAL_NUMBER: 'PERSONAL_NUMBER',
+            phonenumbers.PhoneNumberType.PAGER: 'PAGER',
+            phonenumbers.PhoneNumberType.UAN: 'UAN',
+            phonenumbers.PhoneNumberType.VOICEMAIL: 'VOICEMAIL',
+            phonenumbers.PhoneNumberType.UNKNOWN: 'UNKNOWN',
+        }
+        line_label = labels.get(nt, str(nt))
+        carrier_name = carrier.name_for_number(num, 'fr') or carrier.name_for_number(num, 'en')
+        loc = geocoder.description_for_number(num, 'fr') or geocoder.description_for_number(num, 'en')
+        return {
+            'valid': phonenumbers.is_valid_number(num),
+            'possible': phonenumbers.is_possible_number(num),
+            'e164': phonenumbers.format_number(num, phonenumbers.PhoneNumberFormat.E164),
+            'country_calling_code': num.country_code,
+            'location': loc or None,
+            'line_type': line_label,
+            'carrier': carrier_name or None,
+            'sources': ['libphonenumber'],
+            'libphonenumber_parse_ok': True,
+        }
+    
+    def _run_phoneinfoga_scan(self, phone: str) -> Optional[Dict]:
+        """Exécute PhoneInfoga v2 (`scan -n`) ou ancienne CLI (`--number`) sur WSL ou Linux natif."""
+        if not self.tools.get('phoneinfoga'):
+            return None
+        timeout = max(OSINT_TOOL_TIMEOUT, 45)
+        last_text = ''
+        for cmd in (
+            ['phoneinfoga', 'scan', '-n', phone],
+            ['phoneinfoga', 'scan', '--number', phone],
+        ):
+            result = self._run_osint_cli(cmd, timeout=timeout)
+            out = (result.get('stdout') or '').strip()
+            if not out:
+                out = (result.get('stderr') or '').strip()
+            if not out:
+                continue
+            last_text = self._clean_ansi_codes(out)
+            text = last_text
+            try:
+                if text.lstrip().startswith('{'):
+                    data = json.loads(text)
+                    if isinstance(data, dict):
+                        data.setdefault('sources', [])
+                        if 'phoneinfoga' not in data['sources']:
+                            data['sources'].append('phoneinfoga')
+                        return data
+            except json.JSONDecodeError:
+                pass
+            m = re.search(r'\{[\s\S]{2,120000}\}', text)
+            if m:
+                try:
+                    data = json.loads(m.group(0))
+                    if isinstance(data, dict):
+                        data.setdefault('sources', [])
+                        if 'phoneinfoga' not in data['sources']:
+                            data['sources'].append('phoneinfoga')
+                        return data
+                except json.JSONDecodeError:
+                    pass
+            parsed: Dict = {'raw_output': text[:12000], 'sources': ['phoneinfoga']}
+            if 'Carrier:' in text:
+                cm = re.search(r'Carrier:\s*([^\n]+)', text)
+                if cm:
+                    parsed['carrier'] = cm.group(1).strip()
+            if 'Location:' in text:
+                lm = re.search(r'Location:\s*([^\n]+)', text)
+                if lm:
+                    parsed['location'] = lm.group(1).strip()
+            return parsed
+        return None
+
+    def _fetch_phone_external_apis(self, phone: str, libmeta: Optional[Dict] = None) -> Dict:
+        """Numverify (APILayer) et Abstract Phone — optionnels, clés dans .env."""
+        out: Dict = {}
+        try:
+            from config import NUMVERIFY_API_KEY, ABSTRACT_PHONE_API_KEY
+        except ImportError:
+            NUMVERIFY_API_KEY = os.environ.get('NUMVERIFY_API_KEY', '')
+            ABSTRACT_PHONE_API_KEY = os.environ.get('ABSTRACT_PHONE_API_KEY', '')
+
+        dial = phone
+        if libmeta and libmeta.get('e164'):
+            dial = libmeta['e164']
+
+        if NUMVERIFY_API_KEY:
+            try:
+                r = requests.get(
+                    'https://apilayer.net/api/validate',
+                    params={'access_key': NUMVERIFY_API_KEY, 'number': dial},
+                    timeout=12,
+                )
+                if r.status_code == 200:
+                    j = r.json()
+                    if isinstance(j, dict):
+                        if j.get('success') is False:
+                            err = j.get('error') or {}
+                            out['numverify_error'] = str(err.get('info') or err.get('type') or err)[:200]
+                        else:
+                            out['numverify'] = {
+                                'valid': j.get('valid'),
+                                'number': j.get('number'),
+                                'local_format': j.get('local_format'),
+                                'international_format': j.get('international_format'),
+                                'country_prefix': j.get('country_prefix'),
+                                'country_code': j.get('country_code'),
+                                'country_name': j.get('country_name'),
+                                'location': j.get('location'),
+                                'carrier': j.get('carrier'),
+                                'line_type': j.get('line_type'),
+                                'sources': ['numverify'],
+                            }
+            except Exception as e:
+                out['numverify_error'] = str(e)[:200]
+
+        if ABSTRACT_PHONE_API_KEY:
+            try:
+                r = requests.get(
+                    'https://phonevalidation.abstractapi.com/v1/',
+                    params={'api_key': ABSTRACT_PHONE_API_KEY, 'phone': dial},
+                    timeout=12,
+                )
+                if r.status_code == 200:
+                    j = r.json()
+                    if isinstance(j, dict):
+                        country = j.get('country')
+                        if isinstance(country, dict):
+                            country_name = country.get('name')
+                        else:
+                            country_name = country
+                        fmt = j.get('format')
+                        if isinstance(fmt, dict):
+                            intl_fmt = fmt.get('international')
+                        else:
+                            intl_fmt = fmt
+                        out['abstract_phone'] = {
+                            'is_valid': j.get('is_valid'),
+                            'country': country_name,
+                            'carrier': j.get('carrier'),
+                            'line_type': j.get('type') or j.get('line_type'),
+                            'location': j.get('location'),
+                            'format': intl_fmt,
+                            'sources': ['abstractapi.com'],
+                        }
+            except Exception as e:
+                out['abstract_phone_error'] = str(e)[:200]
+
+        return out
+    
     def analyze_phones_osint(self, phones: List[str], progress_callback=None) -> Dict:
         """
-        Analyse OSINT approfondie des numéros de téléphone
-        Utilise PhoneInfoga et d'autres sources pour trouver des informations
-        
-        Args:
-            phones: Liste des numéros de téléphone à analyser
-            progress_callback: Callback pour la progression
-        
-        Returns:
-            Dictionnaire avec les informations trouvées pour chaque téléphone
+        Analyse OSINT des numéros : libphonenumber, APIs optionnelles (Numverify, Abstract),
+        PhoneInfoga si installé, recherche web légère.
         """
         phone_data = {}
+        max_n = max(1, min(PHONE_OSINT_MAX_NUMBERS, 20))
         
-        for phone in phones[:5]:  # Limiter à 5 pour éviter les timeouts
+        for phone in phones[:max_n]:
             if progress_callback:
                 progress_callback(f'Analyse OSINT du téléphone {phone}...')
             
-            phone_info = {
+            phone_info: Dict = {
                 'phone': phone,
                 'carrier': None,
                 'location': None,
@@ -730,47 +932,80 @@ class OSINTAnalyzer:
                 'valid': None,
                 'social_profiles': [],
                 'data_breaches': [],
-                'sources': []
+                'sources': [],
             }
             
-            # Utiliser PhoneInfoga si disponible
-            if self.tools.get('phoneinfoga'):
-                try:
-                    result = self._run_wsl_command([
-                        'phoneinfoga',
-                        'scan',
-                        '--number', phone,
-                        '--output', 'json'
-                    ], timeout=30)
-                    
-                    if result.get('success'):
-                        try:
-                            phoneinfoga_data = json.loads(result['stdout'])
-                            if isinstance(phoneinfoga_data, dict):
-                                phone_info['carrier'] = phoneinfoga_data.get('carrier')
-                                phone_info['location'] = phoneinfoga_data.get('location')
-                                phone_info['line_type'] = phoneinfoga_data.get('line_type')
-                                phone_info['valid'] = phoneinfoga_data.get('valid')
-                                phone_info['sources'].append('phoneinfoga')
-                        except:
-                            # Parser le texte si JSON échoue
-                            output = result['stdout']
-                            if 'Carrier:' in output:
-                                carrier_match = re.search(r'Carrier:\s*([^\n]+)', output)
-                                if carrier_match:
-                                    phone_info['carrier'] = carrier_match.group(1).strip()
-                            if 'Location:' in output:
-                                loc_match = re.search(r'Location:\s*([^\n]+)', output)
-                                if loc_match:
-                                    phone_info['location'] = loc_match.group(1).strip()
-                except Exception as e:
-                    logger.debug(f'Erreur PhoneInfoga pour {phone}: {e}')
+            libmeta = self._phone_libphonenumber_meta(phone)
+            phone_info['libphonenumber'] = libmeta
+            if libmeta:
+                if libmeta.get('carrier'):
+                    phone_info['carrier'] = libmeta['carrier']
+                if libmeta.get('location'):
+                    phone_info['location'] = libmeta['location']
+                if libmeta.get('line_type'):
+                    phone_info['line_type'] = libmeta['line_type']
+                if libmeta.get('valid') is not None:
+                    phone_info['valid'] = libmeta['valid']
+                for s in libmeta.get('sources') or []:
+                    if s and s not in phone_info['sources']:
+                        phone_info['sources'].append(s)
+
+            try:
+                ext = self._fetch_phone_external_apis(phone, libmeta or None)
+                if ext.get('numverify'):
+                    nv = ext['numverify']
+                    phone_info['numverify'] = nv
+                    if nv.get('carrier') and not phone_info.get('carrier'):
+                        phone_info['carrier'] = nv['carrier']
+                    if nv.get('location') and not phone_info.get('location'):
+                        phone_info['location'] = nv['location']
+                    if nv.get('line_type') and not phone_info.get('line_type'):
+                        phone_info['line_type'] = nv['line_type']
+                    if nv.get('valid') is not None and phone_info.get('valid') is None:
+                        phone_info['valid'] = nv['valid']
+                    if 'numverify' not in phone_info['sources']:
+                        phone_info['sources'].append('numverify')
+                if ext.get('numverify_error'):
+                    phone_info['numverify_error'] = ext['numverify_error']
+                if ext.get('abstract_phone'):
+                    ap = ext['abstract_phone']
+                    phone_info['abstract_phone'] = ap
+                    if ap.get('carrier') and not phone_info.get('carrier'):
+                        phone_info['carrier'] = ap['carrier']
+                    if ap.get('location') and not phone_info.get('location'):
+                        phone_info['location'] = ap['location']
+                    if ap.get('line_type') and not phone_info.get('line_type'):
+                        phone_info['line_type'] = ap['line_type']
+                    if 'abstractapi.com' not in str(phone_info['sources']):
+                        phone_info['sources'].append('abstract_phone')
+                if ext.get('abstract_phone_error'):
+                    phone_info['abstract_phone_error'] = ext['abstract_phone_error']
+            except Exception as e:
+                logger.debug(f'APIs téléphone externes pour {phone}: {e}')
             
-            # Recherche via APIs publiques
+            try:
+                pi = self._run_phoneinfoga_scan(phone)
+                if pi:
+                    phone_info['phoneinfoga'] = pi
+                    if pi.get('carrier'):
+                        phone_info['carrier'] = pi['carrier']
+                    if pi.get('location'):
+                        phone_info['location'] = pi['location']
+                    if pi.get('line_type'):
+                        phone_info['line_type'] = pi['line_type']
+                    if pi.get('valid') is not None:
+                        phone_info['valid'] = pi['valid']
+                    if 'phoneinfoga' not in phone_info['sources']:
+                        phone_info['sources'].append('phoneinfoga')
+            except Exception as e:
+                logger.debug(f'Erreur PhoneInfoga pour {phone}: {e}')
+            
             try:
                 search_results = self._search_phone_online(phone)
                 if search_results:
                     phone_info.update(search_results)
+                    if search_results.get('web_mentions') is not None and 'duckduckgo_html' not in phone_info['sources']:
+                        phone_info['sources'].append('duckduckgo_html')
             except Exception as e:
                 logger.debug(f'Erreur recherche web pour {phone}: {e}')
             
@@ -1892,7 +2127,8 @@ class OSINTAnalyzer:
     
     def analyze_osint(self, url: str, progress_callback=None, people_from_scrapers=None,
                      emails_from_scrapers=None, social_profiles_from_scrapers=None,
-                     phones_from_scrapers=None, names_from_scraper_emails=None) -> Dict:
+                     phones_from_scrapers=None, names_from_scraper_emails=None,
+                     phone_osint_premerge: Optional[Dict] = None) -> Dict:
         """
         Analyse OSINT complète d'un domaine/URL
         Retourne toutes les informations collectées
@@ -1904,6 +2140,7 @@ class OSINTAnalyzer:
             emails_from_scrapers: Liste des emails trouvés par les scrapers (optionnel)
             social_profiles_from_scrapers: Liste des profils sociaux trouvés par les scrapers (optionnel)
             phones_from_scrapers: Liste des téléphones trouvés par les scrapers (optionnel)
+            phone_osint_premerge: Résultat de tasks.phone_tasks.analyze_phones_task (dict numéro -> infos), sans relancer l'analyse ici.
         """
         parsed = urlparse(url)
         domain = parsed.netloc or parsed.path.split('/')[0]
@@ -2052,27 +2289,11 @@ class OSINTAnalyzer:
                 progress_callback(f'Ajout de {len(phones_from_scrapers)} téléphone(s) du scraper...')
             results['phones_from_scrapers'] = phones_from_scrapers
         
-        # Recherche OSINT avancée sur les téléphones (normaliser: accepter str ou dict)
-        if phones_from_scrapers and len(phones_from_scrapers) > 0:
-            if progress_callback:
-                progress_callback('Analyse OSINT des numéros de téléphone...')
-            try:
-                phones_normalized = []
-                for p in phones_from_scrapers[:10]:
-                    if isinstance(p, str) and p.strip():
-                        phones_normalized.append(p.strip())
-                    elif isinstance(p, dict):
-                        phones_normalized.append(
-                            (p.get('phone') or p.get('value') or p.get('number') or '').strip()
-                        )
-                    elif p is not None:
-                        phones_normalized.append(str(p).strip())
-                phones_normalized = [x for x in phones_normalized if x]
-                phone_osint_data = self.analyze_phones_osint(phones_normalized[:5], progress_callback)
-                results['phone_osint'] = phone_osint_data
-            except Exception as e:
-                logger.warning(f'Erreur lors de l\'analyse OSINT des téléphones: {e}')
-                results['phone_osint_error'] = str(e)
+        # Analyse téléphone : effectuée par la tâche Celery analyze_phones_task (pas ici)
+        if phone_osint_premerge is not None:
+            results['phone_osint'] = phone_osint_premerge
+        else:
+            results['phone_osint'] = {}
         
         # Recherche OSINT avancée sur les personnes (famille, localisation, etc.)
         if people_from_scrapers and len(people_from_scrapers) > 0:

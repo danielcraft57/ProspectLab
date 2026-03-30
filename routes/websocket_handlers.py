@@ -1285,7 +1285,6 @@ def register_websocket_handlers(socketio, app):
                         entreprise_id=entreprise_id,
                     ),
                     countdown=cd,
-                    queue='scraping',
                 )
             except Exception as e:
                 logger.exception(
@@ -1304,7 +1303,7 @@ def register_websocket_handlers(socketio, app):
                 active_tasks[session_id] = {'task_id': task.id, 'type': 'scraping'}
 
             logger.info(
-                '[Socket.IO] scraping enfilée task_id=%s entreprise_id=%s countdown=%.2fs queue=scraping url=%s',
+                '[Socket.IO] scraping enfilée task_id=%s entreprise_id=%s countdown=%.2fs queue=scraping_interactive url=%s',
                 task.id,
                 entreprise_id,
                 cd,

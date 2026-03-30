@@ -59,12 +59,12 @@ python run_celery.py
 
 **Linux/Mac :**
 ```bash
-celery -A celery_app worker --pool=threads --concurrency=6 -Q celery,scraping,technical,seo,osint,pentest,heavy --loglevel=info
+celery -A celery_app worker --pool=threads --concurrency=6 -Q celery,scraping,scraping_interactive,technical,seo,osint,pentest,heavy --loglevel=info
 ```
 
 ### Files d'attente, charge « bulk » et workers
 
-- **Files Celery dédiées** : `celery` (tâches courtes : emails, cron, etc.), et `scraping`, `technical`, `seo`, `osint`, `pentest` (tâches lourdes spécialisées). Le worker **doit** consommer au minimum toutes les files lourdes : `-Q celery,scraping,technical,seo,osint,pentest` (le `heavy` est conservé en compat si des tâches historiques y sont encore routées).
+- **Files Celery dédiées** : `celery` (tâches courtes : emails, cron, etc.), `scraping` (bulk : `scrape_analysis_task`, packs API avec `queue='scraping'`), **`scraping_interactive`** (scrape unitaire Socket.IO / défaut `scrape_emails_task`), et `technical`, `seo`, `osint`, `pentest`. Le worker **doit** consommer au minimum ces files lourdes : `-Q celery,scraping,scraping_interactive,technical,seo,osint,pentest` (le `heavy` est conservé en compat si des tâches historiques y sont encore routées). Sous **systemd Linux**, `CELERY_WORKER_QUEUE_PRESET=scraping_only` ou `non_scraping` permet de scinder les nœuds (voir `scripts/linux/start_celery_worker.sh`).
 - **Préchargement** : `CELERY_WORKER_PREFETCH_MULTIPLIER=1` — chaque worker ne réserve qu’une tâche à la fois, meilleure répartition sous pic.
 - **Accusés tardifs** : `CELERY_TASK_ACKS_LATE=true` — la tâche n’est acquise qu’après exécution (moins de perte si crash worker).
 - **Étalement des sous-tâches** : lors d’un scraping multi-entreprises, chaque sous-tâche (technique, OSINT, SEO, Pentest) est planifiée avec un `countdown` croissant (`CELERY_BULK_STAGGER_SEC`, défaut **0,75 s** entre chaque index), pour ne pas poster 200 messages instantanément sur le broker.
@@ -72,7 +72,7 @@ celery -A celery_app worker --pool=threads --concurrency=6 -Q celery,scraping,te
 - **API `website-analysis`** (interne / publique) : le pack scraping + technique + SEO + OSINT + pentest est planifié avec le même étalement (`tasks.heavy_schedule.BulkSubtaskStagger`), pas cinq `.delay()` simultanés.
 - **Pack « Analyse site complet » (page dédiée)** : la tâche est enqueued sur la file `CELERY_FULL_ANALYSIS_QUEUE` (défaut **`technical`**, comme les autres analyses lourdes). Si l’interface reste sur « Tâche en file… » avec l’état Celery `PENDING`, aucun worker ne consomme cette file : vérifiez `CELERY_WORKER_QUEUES` sur le serveur (doit inclure au minimum `technical`). Une file dédiée `website_full` est possible pour isoler le pack ; dans ce cas, ajoutez `website_full` aux workers concernés.
 
-Variables utiles (`.env`) : `CELERY_WORKERS`, `CELERY_WORKER_QUEUES`, `CELERY_FULL_ANALYSIS_QUEUE`, `CELERY_BULK_STAGGER_SEC`, `CELERY_WORKER_PREFETCH_MULTIPLIER`, `CELERY_TASK_ACKS_LATE`, ainsi que les timeouts SEO / OSINT / Pentest (section « Analyses lourdes » dans `.env`).
+Variables utiles (`.env`) : `CELERY_WORKERS`, `CELERY_WORKER_QUEUES`, `CELERY_WORKER_QUEUE_PRESET` (Linux), `CELERY_FULL_ANALYSIS_QUEUE`, `CELERY_BULK_STAGGER_SEC`, `CELERY_WORKER_PREFETCH_MULTIPLIER`, `CELERY_TASK_ACKS_LATE`, ainsi que les timeouts SEO / OSINT / Pentest (section « Analyses lourdes » dans `.env`).
 
 ### Configuration Celery
 

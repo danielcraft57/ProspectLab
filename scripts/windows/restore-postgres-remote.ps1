@@ -1,9 +1,9 @@
 param(
     [Parameter(Mandatory=$false)]
-    [string]$Server = 'node15.lan',
+    [string]$Server = 'db-server.lan',
 
     [Parameter(Mandatory=$false)]
-    [string]$User = 'pi',
+    [string]$User = 'deploy',
 
     [Parameter(Mandatory=$true)]
     [string]$BackupFile,

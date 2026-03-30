@@ -14,6 +14,7 @@ import logging
 import threading
 import time
 from pathlib import Path
+from tasks.phone_tasks import analyze_phones_dict_for_storage
 
 # Configurer le logger pour cette tâche
 logger = setup_logger(__name__, 'analysis_tasks.log', level=logging.DEBUG)
@@ -346,6 +347,19 @@ def analyze_entreprise_task(self, filepath, output_path, max_workers=4, delay=0.
                                         metadata_value = scraper_data.get('metadata', {})
                                         metadata_total = len(metadata_value) if isinstance(metadata_value, dict) else 0
                                         
+                                        phone_analyses = {}
+                                        phones_s = scraper_data.get('phones') or []
+                                        if phones_s:
+                                            try:
+                                                phone_analyses = analyze_phones_dict_for_storage(
+                                                    phones_s,
+                                                    source_url=row_dict.get('website') or scraper_data.get('url'),
+                                                )
+                                            except Exception as pe:
+                                                logger.warning(
+                                                    'Analyse téléphones pour scraper BDD: %s', pe
+                                                )
+                                        
                                         database.save_scraper(
                                             entreprise_id=entreprise_id,
                                             url=row_dict.get('website') or scraper_data.get('url'),
@@ -365,7 +379,8 @@ def analyze_entreprise_task(self, filepath, output_path, max_workers=4, delay=0.
                                             total_technologies=scraper_data.get('total_technologies', 0),
                                             total_metadata=metadata_total,
                                             total_images=scraper_data.get('total_images', 0),
-                                            duration=scraper_data.get('duration', 0)
+                                            duration=scraper_data.get('duration', 0),
+                                            phone_analyses=phone_analyses if phone_analyses else None,
                                         )
                                     except Exception as e:
                                         logger.warning(f'Erreur lors de la sauvegarde du scraper pour {row.get("name", "inconnu")}: {e}')

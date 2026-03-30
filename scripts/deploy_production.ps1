@@ -291,8 +291,8 @@ if ($LASTEXITCODE -eq 0) { Write-Host "✅ Services systemd mis à jour" -Foregr
 Write-Host ""
 
 # Nettoyage du cache et redémarrage des services
-Write-Host "[8/9] Nettoyage du cache et redémarrage des services..." -ForegroundColor Yellow
-ssh "$User@$Server" "cd $RemotePath && if [ -x scripts/clear-cache.sh ]; then ./scripts/clear-cache.sh; fi" | Out-Null
+Write-Host "[8/9] Nettoyage Redis/Logs et redémarrage des services..." -ForegroundColor Yellow
+ssh "$User@$Server" "cd $RemotePath && if [ -x scripts/linux/clear-redis.sh ]; then ./scripts/linux/clear-redis.sh; fi && if [ -x scripts/linux/clear-logs.sh ]; then ./scripts/linux/clear-logs.sh; fi" | Out-Null
 ssh "$User@$Server" "sudo systemctl restart prospectlab prospectlab-celery prospectlab-celerybeat" | Out-Null
 Write-Host "✅ Cache vidé et services redémarrés" -ForegroundColor Green
 Write-Host ""

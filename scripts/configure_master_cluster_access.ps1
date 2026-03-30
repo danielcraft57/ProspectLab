@@ -1,9 +1,9 @@
 param(
     [Parameter(Mandatory=$false)]
-    [string]$Server = 'node15.lan',
+    [string]$Server = 'master.lan',
 
     [Parameter(Mandatory=$false)]
-    [string]$User = 'pi',
+    [string]$User = 'deploy',
 
     [Parameter(Mandatory=$false)]
     [string]$RemotePath = '/opt/prospectlab'
@@ -68,8 +68,8 @@ Write-Host "      sudo systemctl status redis-server" -ForegroundColor Gray
 Write-Host "  - Sur $Server, vérifier PostgreSQL :" -ForegroundColor Gray
 Write-Host "      sudo systemctl status postgresql" -ForegroundColor Gray
 Write-Host ""
-Write-Host "  - Depuis un worker (node13/14), tester Redis :" -ForegroundColor Gray
-Write-Host "      redis-cli -h node15.lan -p 6379 ping" -ForegroundColor Gray
+Write-Host "  - Depuis un worker, tester Redis :" -ForegroundColor Gray
+Write-Host "      redis-cli -h <master-host> -p 6379 ping" -ForegroundColor Gray
 Write-Host ""
 Write-Host "✅ Configuration du master pour le cluster terminée." -ForegroundColor Green
 

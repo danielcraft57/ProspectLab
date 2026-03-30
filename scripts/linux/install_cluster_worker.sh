@@ -60,6 +60,9 @@ echo "[1/6] Installation des dépendances système de base..."
 sudo apt-get update
 sudo apt-get install -y \
     build-essential \
+    python3-full \
+    python3-venv \
+    python3-pip \
     python3-dev \
     libpq-dev \
     libssl-dev \
@@ -67,9 +70,6 @@ sudo apt-get install -y \
     pkg-config \
     git \
     curl
-
-# Optionnel mais utile sur Debian (PEP 668 / packaging) : parfois nécessaire pour venv/pip.
-sudo apt-get install -y python3-full 2>/dev/null || true
 echo "[✓] Dépendances système installées"
 echo
 

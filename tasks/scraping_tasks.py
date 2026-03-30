@@ -21,6 +21,7 @@ from typing import Dict
 logger = setup_logger(__name__, 'scraping_tasks.log', level=logging.INFO)
 
 from tasks.heavy_schedule import BulkSubtaskStagger
+from tasks.phone_tasks import analyze_phones_dict_for_storage
 
 try:
     from config import CELERY_BULK_STAGGER_SEC
@@ -154,6 +155,100 @@ def _safe_update_state(task, task_id, **kwargs):
             logger.warning(f'update_state impossible: {exc}')
 
 
+def _build_email_analyses_dict(emails_found, source_url: str, log_prefix: str = '') -> Dict:
+    """Analyse les emails scrapés (MX, Hunter, Abstract, etc.) pour la persistance scraper_emails."""
+    email_analyses: Dict = {}
+    if not emails_found:
+        return email_analyses
+    prefix = f'{log_prefix} ' if log_prefix else ''
+    logger.info(f'{prefix}{len(emails_found)} email(s) trouvé(s), lancement de l\'analyse...')
+    try:
+        from services.email_analyzer import EmailAnalyzer
+
+        emails_list = []
+        for email in emails_found:
+            if isinstance(email, dict):
+                email_str = email.get('email') or email.get('value') or str(email)
+            else:
+                email_str = str(email)
+            if email_str:
+                emails_list.append(email_str)
+
+        analyzer = EmailAnalyzer()
+        analyzed_count = 0
+        for idx, email_str in enumerate(emails_list, start=1):
+            try:
+                logger.debug(f'{prefix}Analyse de {email_str} ({idx}/{len(emails_list)})')
+                analysis = analyzer.analyze_email(email_str, source_url=source_url)
+                if analysis:
+                    email_analyses[email_str] = analysis
+                    analyzed_count += 1
+                    logger.debug(
+                        f'{prefix}✓ {email_str} analysé: type={analysis.get("type")}, '
+                        f'provider={analysis.get("provider")}, mx_valid={analysis.get("mx_valid")}'
+                    )
+            except Exception as email_error:
+                logger.warning(f'{prefix}Erreur lors de l\'analyse de {email_str}: {email_error}')
+
+        logger.info(
+            f'{prefix}Analyse des emails terminée: {analyzed_count}/{len(emails_list)} analysé(s)'
+        )
+    except Exception as email_error:
+        logger.error(f'{prefix}Erreur lors de l\'analyse des emails: {email_error}', exc_info=True)
+    return email_analyses
+
+
+def _persist_personnes_from_email_analyses(db, entreprise_id: int, email_analyses: Dict, log_context: str) -> int:
+    """Enregistre les contacts détectés depuis les analyses d'emails (table personnes)."""
+    if not email_analyses:
+        return 0
+    people_saved = 0
+    for email_str, analysis in email_analyses.items():
+        if not analysis.get('is_person') or not analysis.get('name_info'):
+            continue
+        name_info = analysis['name_info']
+        first_name = name_info.get('first_name')
+        last_name = name_info.get('last_name')
+        if not (first_name and last_name):
+            continue
+        validated = validate_name_pair(first_name, last_name)
+        if not validated:
+            full_name = f'{first_name} {last_name}'
+            if not is_valid_human_name(full_name):
+                logger.debug(
+                    f'{log_context} ⚠ Nom invalide ignoré depuis email: '
+                    f'{first_name} {last_name} ({email_str})'
+                )
+                continue
+            if not is_valid_human_name(first_name) or not is_valid_human_name(last_name):
+                logger.debug(
+                    f'{log_context} ⚠ Nom invalide ignoré depuis email: '
+                    f'{first_name} {last_name} ({email_str})'
+                )
+                continue
+        else:
+            first_name, last_name = validated
+        try:
+            db.save_personne(
+                entreprise_id=entreprise_id,
+                prenom=first_name,
+                nom=last_name,
+                email=email_str,
+                source='scraper_email',
+            )
+            people_saved += 1
+            logger.debug(
+                f'{log_context} ✓ Personne enregistrée: {first_name} {last_name} ({email_str})'
+            )
+        except Exception as person_error:
+            logger.warning(
+                f'{log_context} ⚠ Erreur enregistrement personne {first_name} {last_name}: {person_error}'
+            )
+    if people_saved > 0:
+        logger.info(f'{log_context} ✓ {people_saved} personne(s) enregistrée(s) depuis les emails')
+    return people_saved
+
+
 @celery.task(bind=True)
 def scrape_emails_task(self, url, max_depth=3, max_workers=5, max_time=300, 
                        max_pages=50, on_email_found=None, on_person_found=None,
@@ -233,7 +328,19 @@ def scrape_emails_task(self, url, max_depth=3, max_workers=5, max_time=300,
                 
                 metadata_value = results.get('metadata', {})
                 metadata_total = len(metadata_value) if isinstance(metadata_value, dict) else 0
-                
+
+                emails_found = results.get('emails') or []
+                email_analyses = _build_email_analyses_dict(
+                    emails_found,
+                    url,
+                    log_prefix=f'[Relance scraping entreprise_id={entreprise_id}]',
+                )
+
+                phone_analyses = {}
+                phones_found = results.get('phones') or []
+                if phones_found:
+                    phone_analyses = analyze_phones_dict_for_storage(phones_found, source_url=url)
+
                 db.save_scraper(
                     entreprise_id=entreprise_id,
                     url=url,
@@ -245,6 +352,7 @@ def scrape_emails_task(self, url, max_depth=3, max_workers=5, max_time=300,
                     technologies=results.get('technologies'),
                     metadata=metadata_value,
                     images=results.get('images'),
+                    forms=results.get('forms'),
                     visited_urls=visited_urls_count,
                     total_emails=results.get('total_emails', 0),
                     total_people=results.get('total_people', 0),
@@ -253,7 +361,16 @@ def scrape_emails_task(self, url, max_depth=3, max_workers=5, max_time=300,
                     total_technologies=results.get('total_technologies', 0),
                     total_metadata=metadata_total,
                     total_images=results.get('total_images', 0),
-                    duration=results.get('duration', 0)
+                    total_forms=results.get('total_forms', 0),
+                    duration=results.get('duration', 0),
+                    email_analyses=email_analyses if email_analyses else None,
+                    phone_analyses=phone_analyses if phone_analyses else None,
+                )
+                _persist_personnes_from_email_analyses(
+                    db,
+                    entreprise_id,
+                    email_analyses,
+                    f'[Relance scraping entreprise_id={entreprise_id}]',
                 )
             except Exception as e:
                 logger.warning(f'Erreur lors de la sauvegarde du scraper pour {url}: {e}')
@@ -553,65 +670,29 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
             
             results = scraper.scrape()
             
-            # Analyser les emails trouvés avant de sauvegarder
             emails_found = results.get('emails', [])
-            email_analyses = {}
-            
-            if emails_found:
-                logger.info(
-                    f'[Scraping Analyse {analysis_id}] {len(emails_found)} email(s) trouvé(s) pour {entreprise_name}, '
-                    f'lancement de l\'analyse...'
-                )
-                try:
-                    from services.email_analyzer import EmailAnalyzer
-                    
-                    # Extraire les emails sous forme de liste de strings
-                    emails_list = []
-                    for email in emails_found:
-                        if isinstance(email, dict):
-                            email_str = email.get('email') or email.get('value') or str(email)
-                        else:
-                            email_str = str(email)
-                        if email_str:
-                            emails_list.append(email_str)
-                    
-                    # Analyser directement les emails (sans passer par une tâche Celery)
-                    analyzer = EmailAnalyzer()
-                    analyzed_count = 0
-                    
-                    for idx, email_str in enumerate(emails_list, start=1):
-                        try:
-                            logger.debug(
-                                f'[Scraping Analyse {analysis_id}] Analyse de {email_str} ({idx}/{len(emails_list)}) pour {entreprise_name}'
-                            )
-                            analysis = analyzer.analyze_email(email_str, source_url=website_str)
-                            if analysis:
-                                email_analyses[email_str] = analysis
-                                analyzed_count += 1
-                                logger.debug(
-                                    f'[Scraping Analyse {analysis_id}] ✓ {email_str} analysé: '
-                                    f'type={analysis.get("type")}, provider={analysis.get("provider")}, '
-                                    f'mx_valid={analysis.get("mx_valid")}'
-                                )
-                        except Exception as email_error:
-                            logger.warning(
-                                f'[Scraping Analyse {analysis_id}] ⚠ Erreur lors de l\'analyse de {email_str}: {email_error}'
-                            )
-                    
-                    logger.info(
-                        f'[Scraping Analyse {analysis_id}] ✓ Analyse des emails terminée pour {entreprise_name}: '
-                        f'{analyzed_count}/{len(emails_list)} email(s) analysé(s)'
-                    )
-                except Exception as email_error:
-                    logger.error(
-                        f'[Scraping Analyse {analysis_id}] ✗ Erreur lors de l\'analyse des emails pour {entreprise_name}: {email_error}',
-                        exc_info=True
-                    )
-            else:
+            if not emails_found:
                 logger.info(
                     f'[Scraping Analyse {analysis_id}] Aucun email trouvé pour {entreprise_name}, '
                     f'pas d\'analyse nécessaire'
                 )
+            email_analyses = _build_email_analyses_dict(
+                emails_found,
+                website_str,
+                log_prefix=f'[Scraping Analyse {analysis_id}] {entreprise_name}',
+            )
+            
+            phone_analyses = {}
+            phones_found = results.get('phones') or []
+            if phones_found:
+                try:
+                    phone_analyses = analyze_phones_dict_for_storage(
+                        phones_found, source_url=website_str
+                    )
+                except Exception as pe:
+                    logger.warning(
+                        f'[Scraping Analyse {analysis_id}] Analyse téléphones pour BDD: {pe}'
+                    )
             
             # Sauvegarder les résultats complets en BDD avec les analyses
             try:
@@ -649,65 +730,16 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                     total_images=results.get('total_images', 0),
                     total_forms=results.get('total_forms', 0),
                     duration=results.get('duration', 0),
-                    email_analyses=email_analyses if email_analyses else None
+                    email_analyses=email_analyses if email_analyses else None,
+                    phone_analyses=phone_analyses if phone_analyses else None,
                 )
                 
-                # Enregistrer les personnes détectées depuis les emails dans la table personnes
-                if email_analyses:
-                    people_saved = 0
-                    for email_str, analysis in email_analyses.items():
-                        if analysis.get('is_person') and analysis.get('name_info'):
-                            name_info = analysis['name_info']
-                            first_name = name_info.get('first_name')
-                            last_name = name_info.get('last_name')
-                            
-                            if first_name and last_name:
-                                # Valider que c'est bien un nom humain avant de sauvegarder
-                                validated = validate_name_pair(first_name, last_name)
-                                if not validated:
-                                    # Si validate_name_pair échoue, essayer avec is_valid_human_name
-                                    full_name = f'{first_name} {last_name}'
-                                    if not is_valid_human_name(full_name):
-                                        logger.debug(
-                                            f'[Scraping Analyse {analysis_id}] ⚠ Nom invalide ignoré depuis email: '
-                                            f'{first_name} {last_name} ({email_str})'
-                                        )
-                                        continue
-                                    # Valider chaque partie individuellement
-                                    if not is_valid_human_name(first_name) or not is_valid_human_name(last_name):
-                                        logger.debug(
-                                            f'[Scraping Analyse {analysis_id}] ⚠ Nom invalide ignoré depuis email: '
-                                            f'{first_name} {last_name} ({email_str})'
-                                        )
-                                        continue
-                                else:
-                                    # Utiliser les versions validées
-                                    first_name, last_name = validated
-                                
-                                try:
-                                    personne_id = db.save_personne(
-                                        entreprise_id=entreprise_id,
-                                        prenom=first_name,
-                                        nom=last_name,
-                                        email=email_str,
-                                        source='scraper_email'
-                                    )
-                                    people_saved += 1
-                                    logger.debug(
-                                        f'[Scraping Analyse {analysis_id}] ✓ Personne enregistrée: '
-                                        f'{first_name} {last_name} ({email_str})'
-                                    )
-                                except Exception as person_error:
-                                    logger.warning(
-                                        f'[Scraping Analyse {analysis_id}] ⚠ Erreur lors de l\'enregistrement '
-                                        f'de la personne {first_name} {last_name}: {person_error}'
-                                    )
-                    
-                    if people_saved > 0:
-                        logger.info(
-                            f'[Scraping Analyse {analysis_id}] ✓ {people_saved} personne(s) enregistrée(s) '
-                            f'depuis les emails pour {entreprise_name}'
-                        )
+                _persist_personnes_from_email_analyses(
+                    db,
+                    entreprise_id,
+                    email_analyses,
+                    f'[Scraping Analyse {analysis_id}] {entreprise_name}',
+                )
                 
                 # Enregistrer les personnes trouvées dans les textes des pages
                 scraper_people = results.get('people', [])

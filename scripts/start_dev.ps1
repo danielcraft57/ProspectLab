@@ -3,7 +3,7 @@
 # - Celery (worker + beat) dans une autre console via run_celery.py
 #
 # Files du worker : CELERY_WORKER_QUEUES dans .env (défaut config : toutes les files dont heavy).
-# Équivalent typique : ... -Q celery,scraping,technical,seo,osint,pentest,heavy,website_full
+# Équivalent typique : ... -Q celery,scraping,scraping_interactive,technical,seo,osint,pentest,heavy,website_full
 # run_celery.py ajoute --pool=threads, --concurrency (config) et lance beat en parallèle.
 #
 # Usage : .\scripts\start_dev.ps1

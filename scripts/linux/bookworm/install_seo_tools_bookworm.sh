@@ -36,6 +36,16 @@ echo "[*] Outils réseau de base (déjà installés normalement)..."
 install_pkg curl
 install_pkg wget
 
+echo "[*] Chromium pour Lighthouse..."
+if command -v chromium >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1; then
+  echo "[✓] Chromium déjà présent"
+else
+  install_pkg chromium
+  if ! command -v chromium >/dev/null 2>&1; then
+    install_pkg chromium-browser
+  fi
+fi
+
 echo "[*] Bibliothèques Python pour SEO..."
 # Détecter si on est dans un venv
 if [ -n "$VIRTUAL_ENV" ]; then
@@ -73,6 +83,15 @@ else
   echo "[!] lighthouse : non trouvé (peut être installé via: npm install -g lighthouse)"
 fi
 
+# Vérifier Chromium
+if command -v chromium >/dev/null 2>&1; then
+  echo "[✓] chromium : $(command -v chromium)"
+elif command -v chromium-browser >/dev/null 2>&1; then
+  echo "[✓] chromium-browser : $(command -v chromium-browser)"
+else
+  echo "[!] Chromium non trouvé : Lighthouse peut échouer sans CHROME_PATH valide"
+fi
+
 # Vérifier Python libs
 echo "[*] Vérification bibliothèques Python..."
 python3 -c "import bs4; print('[✓] beautifulsoup4 OK')" 2>/dev/null || echo "[✗] beautifulsoup4 manquant"
@@ -85,6 +104,9 @@ echo "[*] Outils disponibles :"
 echo "  - curl, wget : requêtes HTTP"
 echo "  - Python + beautifulsoup4, requests : parsing HTML, meta tags"
 echo "  - Lighthouse (si npm OK) : audit SEO/perfs"
+echo "  - Chromium : moteur navigateur pour Lighthouse"
+echo ""
+echo "[*] Si besoin, définir dans .env : CHROME_PATH=/usr/bin/chromium"
 echo ""
 echo "[*] Pour tester Lighthouse :"
 echo "  lighthouse https://example.com --output=json --output-path=/tmp/lighthouse.json"

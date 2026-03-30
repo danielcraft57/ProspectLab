@@ -53,6 +53,21 @@ sudo sed -i '1i host    prospectlab    prospectlab    127.0.0.1/32    md5' /etc/
 sudo systemctl restart postgresql
 ```
 
+Si **PostgreSQL** tourne sur le même hôte que l’app mais que des **workers Celery** sur d’autres machines du LAN se connectent à la base (même `DATABASE_URL` pointant vers `node15.lan`), autorisez le sous-réseau dans `pg_hba.conf` (adaptez la version PostgreSQL et le chemin) :
+
+```bash
+echo 'host    prospectlab    prospectlab    192.168.1.0/24    scram-sha-256' | sudo tee -a /etc/postgresql/17/main/pg_hba.conf
+sudo systemctl reload postgresql
+```
+
+**`max_connections`** : chaque worker Celery en `--pool=threads` avec concurrence `N` peut ouvrir plusieurs connexions selon les tâches ; l’app Gunicorn en fait autant. Ordre de grandeur : `(workers_gunicorn × 2 à 5) + (nombre_de_processus_celery × CELERY_WORKERS × 1 à 3) + marge 10`. Si la somme approche la valeur par défaut (**100**), augmentez dans `postgresql.conf` :
+
+```conf
+max_connections = 150
+```
+
+Puis `sudo systemctl restart postgresql`. Sur matériel modeste (RPi), privilégiez moins de concurrence par worker et quelques nœuds supplémentaires plutôt qu’un seul worker à très forte concurrence.
+
 ### 1.3. Configuration Redis
 
 Vérifier que Redis est actif :
@@ -62,6 +77,28 @@ sudo systemctl enable redis-server
 sudo systemctl start redis-server
 redis-cli ping  # Doit répondre PONG
 ```
+
+#### Redis sur le LAN uniquement (ex. `pi@node15.lan`, sous-réseau `192.168.1.0/24`)
+
+Pour que le broker soit joignable par les **workers sur d’autres machines** du LAN, sans exposer le port sur Internet :
+
+1. Sur le serveur qui héberge Redis (ex. node15), exécuter le script (détection automatique de l’IP `192.168.1.x` ou `REDIS_BIND_IP` explicite) :
+
+```bash
+cd /opt/prospectlab
+sudo REDIS_LAN_CIDR=192.168.1.0/24 bash scripts/linux/configure_redis_lan_only.sh
+```
+
+Le script configure `bind 127.0.0.1 <IP_LAN>`, `protected-mode no` (le filtrage repose sur le **pare-feu**), et des règles **iptables** : acceptation de `127.0.0.1` et du CIDR sur le port 6379, puis refus du reste. Installez `iptables-persistent` / `netfilter-persistent` si vous voulez conserver les règles après reboot. Alternative : `UFW_MODE=1` avec `ufw` déjà configuré.
+
+2. Sur **tous** les clients (app + workers), aligner les URLs :
+
+```bash
+CELERY_BROKER_URL=redis://node15.lan:6379/1
+CELERY_RESULT_BACKEND=redis://node15.lan:6379/1
+```
+
+3. **Charge** : plus de workers Celery = plus de connexions simultanées à Redis et plus de mémoire broker. Sur Raspberry Pi, gardez `maxmemory` dans `redis.conf` (ex. 512 Mo) et surveillez `INFO memory`. Ajustez `CELERY_WORKERS` (concurrence par processus worker) plutôt que multiplier des dizaines de processus identiques sur le même nœud faible CPU.
 
 ### 1.4. Déploiement de l'application
 
@@ -154,7 +191,7 @@ WantedBy=multi-user.target
 
 Créer le script `/opt/prospectlab/scripts/linux/start_celery_worker.sh` :
 
-Le script `scripts/linux/start_celery_worker.sh` lance le worker avec **`-Q`** listant `celery`, `scraping`, `technical`, `seo`, `osint`, `pentest`, `heavy`, `website_full` (surchargeable via `CELERY_WORKER_QUEUES` dans `.env`). Sans les files spécialisées (`technical`, `scraping`, etc.), les analyses lourdes restent en **PENDING** (« Tâche en file… »). Le pack **Analyse site complet** utilise par défaut la file **`technical`** (`CELERY_FULL_ANALYSIS_QUEUE`) ; une valeur `website_full` n’est utile que si vous dédiez un worker à cette file uniquement.
+Le script `scripts/linux/start_celery_worker.sh` lance le worker avec **`-Q`** listant par défaut `celery`, `scraping`, `scraping_interactive`, `technical`, `seo`, `osint`, `pentest`, `heavy`, `website_full` (surchargeable via `CELERY_WORKER_QUEUES` ; preset optionnel `CELERY_WORKER_QUEUE_PRESET=scraping_only` ou `non_scraping`). Sans les files spécialisées (`technical`, `scraping`, `scraping_interactive`, etc.), les analyses lourdes restent en **PENDING** (« Tâche en file… »). Le pack **Analyse site complet** utilise par défaut la file **`technical`** (`CELERY_FULL_ANALYSIS_QUEUE`) ; une valeur `website_full` n’est utile que si vous dédiez un worker à cette file uniquement.
 
 Rendre exécutable :
 

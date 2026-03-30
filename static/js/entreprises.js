@@ -1747,11 +1747,8 @@
         if (phonesList) {
             phonesList.innerHTML = '';
             scrapingResultsData.phones.forEach(phoneData => {
-                // phoneData peut être un objet {phone: "...", page_url: "..."} ou une string
-                const phoneStr = typeof phoneData === 'object' && phoneData !== null && phoneData.phone 
-                    ? phoneData.phone 
-                    : (typeof phoneData === 'string' ? phoneData : String(phoneData));
-                addPhoneToModal(phoneStr);
+                // phoneData peut être un objet {phone: "...", page_url: "...", ...osint fields} ou une string
+                addPhoneToModal(phoneData);
             });
             updateModalCount('phones', scrapingResultsData.phones.length);
         }
@@ -1848,6 +1845,18 @@
             }
         }
         
+        let metaLine = '';
+        if (analysis) {
+            const parts = [];
+            if (analysis.provider) parts.push(analysis.provider);
+            if (analysis.mx_valid === true) parts.push('MX OK');
+            else if (analysis.mx_valid === false) parts.push('MX KO');
+            if (analysis.risk_score !== undefined && analysis.risk_score !== null && analysis.risk_score !== '') {
+                parts.push(`Score ${analysis.risk_score}`);
+            }
+            metaLine = parts.slice(0, 3).join(' • ');
+        }
+        
         const existingEmail = Array.from(list.children).find(item => {
             const emailText = item.querySelector('.result-item-title')?.textContent;
             return emailText === emailStr;
@@ -1864,6 +1873,7 @@
                     ${analysis && analysis.type ? `<span class="result-item-badge">${escapeHtml(analysis.type)}</span>` : ''}
                 </div>
                 ${analysis && analysis.provider ? `<div class="result-item-meta">Fournisseur: ${escapeHtml(analysis.provider)}</div>` : ''}
+                ${metaLine && analysis ? `<div class="result-item-meta" style="color:#64748b; font-size:0.9rem; margin-top:0.25rem; word-break: break-word;">${escapeHtml(metaLine)}</div>` : ''}
             </div>
         `;
         list.appendChild(item);
@@ -1931,7 +1941,7 @@
         }, 10);
     }
     
-    function addPhoneToModal(phone) {
+    function addPhoneToModal(phoneData) {
         const list = document.getElementById('phones-list-modal');
         if (!list) return;
         
@@ -1939,6 +1949,14 @@
         if (emptyState) {
             emptyState.remove();
         }
+        
+        const phoneObj = (typeof phoneData === 'object' && phoneData !== null) ? phoneData : null;
+        const phone = phoneObj && phoneObj.phone ? phoneObj.phone : (typeof phoneData === 'string' ? phoneData : String(phoneData));
+        const phoneE164 = phoneObj ? (phoneObj.phone_e164 || '') : '';
+        const carrier = phoneObj ? (phoneObj.carrier || '') : '';
+        const location = phoneObj ? (phoneObj.location || '') : '';
+        const lineType = phoneObj ? (phoneObj.line_type || '') : '';
+        const valid = phoneObj ? phoneObj.valid : null;
         
         const existingPhone = Array.from(list.children).find(item => {
             const phoneText = item.querySelector('.result-item-title')?.textContent;
@@ -1948,13 +1966,25 @@
         
         const item = document.createElement('div');
         item.className = 'result-item phone-item';
+        
+        const metaParts = [];
+        if (phoneE164 && phoneE164 !== phone) metaParts.push(`E.164 ${phoneE164}`);
+        if (carrier) metaParts.push(carrier);
+        if (lineType) metaParts.push(lineType);
+        if (location) metaParts.push(location);
+        const metaLine = metaParts.slice(0, 3).join(' • ');
+        const validBadge = (valid === true) ? 'Validé' : ((valid === false) ? 'Invalide' : '');
+        const validBadgeHtml = validBadge ? `<span class="result-item-badge" style="background: rgba(16,185,129,0.15); color: #059669; padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600;">${escapeHtml(validBadge)}</span>` : '';
+        
         item.innerHTML = `
             <div class="result-item-icon"><i class="fas fa-phone"></i></div>
             <div class="result-item-content">
                 <div class="result-item-header">
                     <strong class="result-item-title">${escapeHtml(phone)}</strong>
+                    ${validBadgeHtml}
                 </div>
                 <div class="result-item-meta"><a href="tel:${escapeHtml(phone)}" class="phone-link">Appeler</a></div>
+                ${metaLine ? `<div class="result-item-meta" style="color:#64748b; font-size:0.9rem; margin-top:0.25rem; word-break: break-word;">${escapeHtml(metaLine)}</div>` : ''}
             </div>
         `;
         list.appendChild(item);

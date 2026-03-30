@@ -21,7 +21,7 @@ logger = setup_logger(__name__, 'osint_tasks.log', level=logging.INFO)
 @celery.task(bind=True)
 def osint_analysis_task(self, url, entreprise_id=None, people_from_scrapers=None, 
                         emails_from_scrapers=None, social_profiles_from_scrapers=None, 
-                        phones_from_scrapers=None):
+                        phones_from_scrapers=None, phone_osint_result=None):
     """
     Tâche Celery pour effectuer une analyse OSINT d'un site web
     
@@ -33,6 +33,7 @@ def osint_analysis_task(self, url, entreprise_id=None, people_from_scrapers=None
         emails_from_scrapers (list, optional): Liste des emails trouvés par les scrapers
         social_profiles_from_scrapers (list, optional): Liste des profils sociaux trouvés par les scrapers
         phones_from_scrapers (list, optional): Liste des téléphones trouvés par les scrapers
+        phone_osint_result (dict, optional): Résultat déjà calculé par analyze_phones_task (évite un double passage)
         
     Returns:
         dict: Résultats de l'analyse OSINT avec analysis_id
@@ -265,19 +266,27 @@ def osint_analysis_task(self, url, entreprise_id=None, people_from_scrapers=None
                 logger.warning(f'Erreurs lors de la récupération des profils sociaux des scrapers: {e}')
                 social_profiles_from_scrapers = []
         
-        if not phones_from_scrapers and entreprise_id:
+        phones_from_scrapers = list(phones_from_scrapers or [])
+        if entreprise_id:
             try:
+                seen_p = {str(p).strip() for p in phones_from_scrapers if p}
                 scrapers = database.get_scrapers_by_entreprise(entreprise_id)
-                phones_from_scrapers = []
                 for scraper in scrapers:
                     phones = database.get_scraper_phones(scraper['id'])
                     for phone_data in phones:
                         phone_str = phone_data.get('phone') or phone_data.get('value') or str(phone_data)
                         if phone_str:
-                            phones_from_scrapers.append(phone_str)
+                            ps = str(phone_str).strip()
+                            if ps and ps not in seen_p:
+                                seen_p.add(ps)
+                                phones_from_scrapers.append(phone_str)
+                ent_row = database.get_entreprise(entreprise_id)
+                if ent_row and (ent_row.get('telephone') or '').strip():
+                    pt = str(ent_row.get('telephone')).strip()
+                    if pt and pt not in seen_p:
+                        phones_from_scrapers.append(pt)
             except Exception as e:
                 logger.warning(f'Erreurs lors de la récupération des téléphones des scrapers: {e}')
-                phones_from_scrapers = []
         
         logger.info(
             f'Données scraper: {len(people_from_scrapers or [])} personne(s), '
@@ -285,6 +294,28 @@ def osint_analysis_task(self, url, entreprise_id=None, people_from_scrapers=None
             f'{len(social_profiles_from_scrapers or [])} réseau(x) social, '
             f'{len(phones_from_scrapers or [])} téléphone(s)'
         )
+
+        phone_osint_premerge: Dict = {}
+        if phone_osint_result is not None:
+            if isinstance(phone_osint_result, dict) and 'phone_osint' in phone_osint_result:
+                phone_osint_premerge = phone_osint_result.get('phone_osint') or {}
+            elif isinstance(phone_osint_result, dict):
+                phone_osint_premerge = phone_osint_result
+        elif phones_from_scrapers:
+            from tasks.phone_tasks import analyze_phones_task, normalize_phones_for_osint
+
+            norm = normalize_phones_for_osint(phones_from_scrapers)
+            if norm:
+                try:
+                    pr = analyze_phones_task.apply(
+                        kwargs=dict(phones=norm, source_url=url, entreprise_id=entreprise_id),
+                    )
+                    if pr.successful():
+                        res = pr.result or {}
+                        phone_osint_premerge = res.get('phone_osint') or {}
+                except Exception as pe:
+                    logger.warning(f'OSINT: analyze_phones_task.apply échoué: {pe}')
+
         osint_data = analyzer.analyze_osint(
             url, 
             progress_callback=progress_update, 
@@ -292,7 +323,8 @@ def osint_analysis_task(self, url, entreprise_id=None, people_from_scrapers=None
             emails_from_scrapers=emails_from_scrapers,
             social_profiles_from_scrapers=social_profiles_from_scrapers,
             phones_from_scrapers=phones_from_scrapers,
-            names_from_scraper_emails=names_from_scraper_emails  # Passer les noms extraits des emails
+            names_from_scraper_emails=names_from_scraper_emails,
+            phone_osint_premerge=phone_osint_premerge,
         )
         # Attacher le diagnostic d'outils pour faciliter le debug et le suivi en BDD
         if diag is not None and isinstance(osint_data, dict):

@@ -1,9 +1,9 @@
 param(
     [Parameter(Mandatory=$false)]
-    [string[]]$Nodes = @('node8.lan','node9.lan','node10.lan','node11.lan','node12.lan','node13.lan', 'node14.lan'),
+    [string[]]$Nodes = @('worker1.lan','worker2.lan'),
 
     [Parameter(Mandatory=$false)]
-    [string]$User = 'pi',
+    [string]$User = 'deploy',
 
     [Parameter(Mandatory=$false)]
     [string]$RemotePath = '/opt/prospectlab',
@@ -23,6 +23,12 @@ $ErrorActionPreference = 'Stop'
 $projectDir = (Get-Item (Split-Path -Parent $PSScriptRoot)).FullName
 $installScript = Join-Path $PSScriptRoot 'install_cluster_worker.ps1'
 $envFilePath = Join-Path $projectDir $EnvFile
+
+# Tolérer un passage CSV unique:
+# -Nodes "node10.lan,node11.lan"
+if ($Nodes.Count -eq 1 -and $Nodes[0] -like '*,*') {
+    $Nodes = $Nodes[0].Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+}
 
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "Déploiement multi-noeuds du cluster ProspectLab" -ForegroundColor Cyan
@@ -45,7 +51,7 @@ if (-not (Test-Path $envFilePath)) {
 }
 
 if ($Nodes.Count -eq 0) {
-    Write-Host "Aucun noeud fourni. Utilise -Nodes node13.lan,node14.lan par exemple." -ForegroundColor Red
+    Write-Host "Aucun noeud fourni. Utilise -Nodes worker1.lan,worker2.lan par exemple." -ForegroundColor Red
     exit 1
 }
 
@@ -61,7 +67,7 @@ foreach ($node in $Nodes) {
     $nodeErrors = @()
 
     try {
-        Write-Host "[1/4] Vérification SSH..." -ForegroundColor Yellow
+        Write-Host "[1/5] Vérification SSH..." -ForegroundColor Yellow
         $null = ssh -o ConnectTimeout=8 "$User@$node" "echo OK" 2>&1
         if ($LASTEXITCODE -ne 0) {
             throw "Connexion SSH impossible vers $User@$node"
@@ -74,7 +80,7 @@ foreach ($node in $Nodes) {
 
     if ($nodeOk -and -not $SkipInstall) {
         try {
-            Write-Host "[2/4] Installation/synchronisation worker..." -ForegroundColor Yellow
+            Write-Host "[2/5] Installation/synchronisation worker..." -ForegroundColor Yellow
             & $installScript -Server $node -User $User -RemotePath $RemotePath
             if ($LASTEXITCODE -ne 0) {
                 throw "install_cluster_worker.ps1 a échoué pour $node"
@@ -85,12 +91,12 @@ foreach ($node in $Nodes) {
             $nodeErrors += $_.Exception.Message
         }
     } elseif ($nodeOk) {
-        Write-Host "[2/4] Install ignorée (-SkipInstall)." -ForegroundColor DarkYellow
+        Write-Host "[2/5] Install ignorée (-SkipInstall)." -ForegroundColor DarkYellow
     }
 
     if ($nodeOk) {
         try {
-            Write-Host "[3/4] Copie de $EnvFile vers $RemotePath/.env..." -ForegroundColor Yellow
+            Write-Host "[3/5] Copie de $EnvFile vers $RemotePath/.env..." -ForegroundColor Yellow
             $null = scp "$envFilePath" "$User@$node`:$RemotePath/.env" 2>&1
             if ($LASTEXITCODE -ne 0) {
                 throw "Copie .env échouée vers $node"
@@ -104,7 +110,15 @@ foreach ($node in $Nodes) {
 
     if ($nodeOk -and -not $SkipRestart) {
         try {
-            Write-Host "[4/4] Redémarrage service Celery..." -ForegroundColor Yellow
+            Write-Host "[4/5] Nettoyage des logs applicatifs (scripts/linux/clear-logs.sh)..." -ForegroundColor Yellow
+            $null = ssh "$User@$node" "cd $RemotePath && bash scripts/linux/clear-logs.sh" 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "Avertissement : clear-logs a échoué sur $node (non bloquant)." -ForegroundColor DarkYellow
+            } else {
+                Write-Host "Logs nettoyés dans $RemotePath/logs" -ForegroundColor Green
+            }
+
+            Write-Host "[5/5] Redémarrage service Celery..." -ForegroundColor Yellow
             $null = ssh "$User@$node" "sudo systemctl enable prospectlab-celery" 2>&1
             if ($LASTEXITCODE -ne 0) {
                 throw "Impossible d'activer le service prospectlab-celery sur $node"
@@ -126,7 +140,7 @@ foreach ($node in $Nodes) {
             $nodeErrors += $_.Exception.Message
         }
     } elseif ($nodeOk) {
-        Write-Host "[4/4] Restart ignoré (-SkipRestart)." -ForegroundColor DarkYellow
+        Write-Host "[4/5]-[5/5] Clear logs + restart ignorés (-SkipRestart)." -ForegroundColor DarkYellow
     }
 
     if ($nodeOk) {

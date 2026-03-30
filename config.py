@@ -65,6 +65,11 @@ SHODAN_API_KEY = os.environ.get('SHODAN_API_KEY', '')
 CENSYS_API_ID = os.environ.get('CENSYS_API_ID', '')
 CENSYS_API_SECRET = os.environ.get('CENSYS_API_SECRET', '')
 HUNTER_API_KEY = os.environ.get('HUNTER_API_KEY', '')
+# Abstract (https://www.abstractapi.com/) — validation email / téléphone en option
+ABSTRACT_EMAIL_API_KEY = os.environ.get('ABSTRACT_EMAIL_API_KEY', '')
+ABSTRACT_PHONE_API_KEY = os.environ.get('ABSTRACT_PHONE_API_KEY', '')
+# Numverify (APILayer) — ligne type / pays / opérateur pour un E.164
+NUMVERIFY_API_KEY = os.environ.get('NUMVERIFY_API_KEY', '')
 BUILTWITH_API_KEY = os.environ.get('BUILTWITH_API_KEY', '')
 HIBP_API_KEY = os.environ.get('HIBP_API_KEY', '')
 
@@ -74,6 +79,11 @@ WSL_USER = os.environ.get('WSL_USER', 'loupix')
 
 # Configuration timeout pour les outils externes
 OSINT_TOOL_TIMEOUT = int(os.environ.get('OSINT_TOOL_TIMEOUT', '60'))  # secondes
+
+# Parse des numéros (lib phonenumbers) et cap analyse OSINT téléphone
+PHONE_DEFAULT_REGION = os.environ.get('PHONE_DEFAULT_REGION', 'FR')
+PHONE_OSINT_MAX_NUMBERS = int(os.environ.get('PHONE_OSINT_MAX_NUMBERS', '8'))
+# PhoneInfoga v2 : scanners optionnels via variables documentées upstream (ex. NUMVERIFY_API_KEY).
 PENTEST_TOOL_TIMEOUT = int(os.environ.get('PENTEST_TOOL_TIMEOUT', '120'))  # secondes
 
 # Analyse SEO : timeouts séparés connexion / lecture (plusieurs URL candidates)
@@ -124,7 +134,7 @@ CELERY_TASK_ACKS_LATE = os.environ.get('CELERY_TASK_ACKS_LATE', 'true').lower() 
 # (scraping/technical/seo/osint/pentest), sinon les tâches routées ne sont jamais exécutées.
 CELERY_WORKER_QUEUES = os.environ.get(
     'CELERY_WORKER_QUEUES',
-    'celery,scraping,technical,seo,osint,pentest,heavy,website_full'
+    'celery,scraping,scraping_interactive,technical,seo,osint,pentest,heavy,website_full',
 )
 
 # File d’enqueue pour le pack « analyse site complet ».
@@ -134,6 +144,10 @@ CELERY_WORKER_QUEUES = os.environ.get(
 CELERY_FULL_ANALYSIS_QUEUE = (
     (os.environ.get('CELERY_FULL_ANALYSIS_QUEUE') or 'technical').strip() or 'technical'
 )
+
+# Mise à l’échelle (cluster) : plusieurs workers → même CELERY_BROKER_URL vers Redis (ex. node15.lan).
+# Pas de variable « nombre de workers » côté app : chaque nœud définit CELERY_WORKERS localement.
+# Surveiller Redis (mémoire) et PostgreSQL max_connections — voir docs/configuration/DEPLOIEMENT_PRODUCTION.md.
 
 # URL de base pour le tracking des emails (doit être accessible publiquement)
 # Exemple: https://votre-domaine.com ou http://votre-ip:5000

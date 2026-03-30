@@ -160,7 +160,7 @@ class CampagneManager(DatabaseBase):
             return dict(row)
         return None
 
-    def list_campagnes(self, statut=None, limit=100, offset=0):
+    def list_campagnes(self, statut=None, limit=100, offset=0, entreprise_id=None):
         """
         Liste les campagnes.
 
@@ -168,13 +168,78 @@ class CampagneManager(DatabaseBase):
             statut (str|None): Filtrer par statut (optionnel)
             limit (int): Nombre maximum de résultats
             offset (int): Offset pour la pagination
+            entreprise_id (int|None): Si renseigné, uniquement les campagnes liées à cette entreprise
+                (emails envoyés et/ou destinataires dans campaign_params_json pour les brouillons programmés).
 
         Returns:
             list[dict]: Liste des campagnes
         """
         conn = self.get_connection()
-        # row_factory est déjà configuré dans get_connection() (SQLite) ou via RealDictCursor (PostgreSQL)
         cursor = conn.cursor()
+
+        if entreprise_id is not None:
+            eid = int(entreprise_id)
+            if self.is_postgresql():
+                subq = '''
+                    SELECT campagne_id FROM emails_envoyes WHERE entreprise_id = ?
+                    UNION
+                    SELECT c.id FROM campagnes_email c
+                    WHERE c.campaign_params_json IS NOT NULL AND TRIM(c.campaign_params_json) <> ''
+                    AND EXISTS (
+                        SELECT 1
+                        FROM jsonb_array_elements(COALESCE(c.campaign_params_json::jsonb->'recipients', '[]'::jsonb)) AS r
+                        WHERE (r->>'entreprise_id') IS NOT NULL
+                        AND (r->>'entreprise_id')::integer = ?
+                    )
+                '''
+            else:
+                subq = '''
+                    SELECT campagne_id FROM emails_envoyes WHERE entreprise_id = ?
+                    UNION
+                    SELECT c.id FROM campagnes_email c
+                    WHERE c.campaign_params_json IS NOT NULL AND TRIM(c.campaign_params_json) <> ''
+                    AND EXISTS (
+                        SELECT 1 FROM json_each(json_extract(c.campaign_params_json, '$.recipients')) AS j
+                        WHERE json_extract(j.value, '$.entreprise_id') IS NOT NULL
+                        AND CAST(json_extract(j.value, '$.entreprise_id') AS INTEGER) = ?
+                    )
+                '''
+
+            params = [eid, eid]
+            where_sql = f'id IN ({subq})'
+            if statut:
+                where_sql += ' AND statut = ?'
+                params.append(statut)
+            params.extend([limit, offset])
+            sql = f'''
+                SELECT * FROM campagnes_email
+                WHERE {where_sql}
+                ORDER BY date_creation DESC
+                LIMIT ? OFFSET ?
+            '''
+            try:
+                self.execute_sql(cursor, sql, tuple(params))
+            except Exception:
+                # JSON invalide ou fonction JSON indisponible : restreindre aux campagnes avec emails envoyés
+                conn.close()
+                conn = self.get_connection()
+                cursor = conn.cursor()
+                params2 = [eid]
+                where2 = 'id IN (SELECT DISTINCT campagne_id FROM emails_envoyes WHERE entreprise_id = ?)'
+                if statut:
+                    where2 += ' AND statut = ?'
+                    params2.append(statut)
+                params2.extend([limit, offset])
+                self.execute_sql(cursor, f'''
+                    SELECT * FROM campagnes_email
+                    WHERE {where2}
+                    ORDER BY date_creation DESC
+                    LIMIT ? OFFSET ?
+                ''', tuple(params2))
+
+            rows = cursor.fetchall()
+            conn.close()
+            return [dict(row) for row in rows]
 
         if statut:
             self.execute_sql(cursor,
@@ -373,6 +438,124 @@ class CampagneManager(DatabaseBase):
             pass
 
         return email_id
+
+    def mark_email_bounced(self, email_id: int, reason: str | None = None) -> bool:
+        """
+        Marque un email envoyé comme bounced (retour NDR).
+
+        Effets:
+        - emails_envoyes.statut -> 'bounced'
+        - emails_envoyes.erreur -> reason (si fourni)
+        - entreprises.statut -> 'Bounce' (si entreprise_id présent)
+        - ajoute le tag 'bounce' sur l'entreprise
+        """
+        if not email_id:
+            return False
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        self.execute_sql(cursor, 'SELECT entreprise_id FROM emails_envoyes WHERE id = ?', (email_id,))
+        row = cursor.fetchone()
+        entreprise_id = None
+        if row:
+            try:
+                entreprise_id = row.get('entreprise_id') if isinstance(row, dict) else row[0]
+            except Exception:
+                entreprise_id = None
+
+        if reason is not None:
+            self.execute_sql(
+                cursor,
+                'UPDATE emails_envoyes SET statut = ?, erreur = ? WHERE id = ?',
+                ('bounced', str(reason), email_id),
+            )
+        else:
+            self.execute_sql(
+                cursor,
+                'UPDATE emails_envoyes SET statut = ? WHERE id = ?',
+                ('bounced', email_id),
+            )
+
+        conn.commit()
+        updated = int(getattr(cursor, 'rowcount', 0) or 0) > 0
+        conn.close()
+
+        # Mise à jour entreprise (statut + tag) hors transaction email
+        try:
+            if entreprise_id:
+                from services.database.entreprises import EntrepriseManager
+                em = EntrepriseManager()
+                em.update_entreprise_statut(int(entreprise_id), 'Bounce')
+                em.add_entreprise_tag(int(entreprise_id), 'bounce')
+        except Exception:
+            pass
+
+        return updated
+
+    def mark_latest_email_bounced_for_recipient(
+        self,
+        recipient_email: str,
+        campagne_id: int | None = None,
+        reason: str | None = None,
+    ) -> int | None:
+        """
+        Cherche le dernier email_envoye correspondant à un destinataire et le marque bounced.
+
+        Args:
+            recipient_email: adresse du destinataire
+            campagne_id: optionnel, pour restreindre à une campagne
+            reason: texte stocké dans emails_envoyes.erreur
+
+        Returns:
+            int|None: email_id marqué bounced, ou None si aucun match
+        """
+        email = (recipient_email or '').strip()
+        if not email or '@' not in email:
+            return None
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        if campagne_id:
+            self.execute_sql(
+                cursor,
+                '''
+                SELECT id
+                FROM emails_envoyes
+                WHERE email = ? AND campagne_id = ?
+                ORDER BY date_envoi DESC
+                LIMIT 1
+                ''',
+                (email, int(campagne_id)),
+            )
+        else:
+            self.execute_sql(
+                cursor,
+                '''
+                SELECT id
+                FROM emails_envoyes
+                WHERE email = ?
+                ORDER BY date_envoi DESC
+                LIMIT 1
+                ''',
+                (email,),
+            )
+
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return None
+
+        email_id = row.get('id') if isinstance(row, dict) else row[0]
+        try:
+            email_id_int = int(email_id)
+        except Exception:
+            return None
+
+        ok = self.mark_email_bounced(email_id_int, reason=reason)
+        return email_id_int if ok else None
 
     def get_email_envoye(self, email_id):
         """

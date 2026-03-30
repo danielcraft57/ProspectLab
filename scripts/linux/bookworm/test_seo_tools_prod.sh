@@ -30,6 +30,28 @@ check_tool "npm"
 echo "[*] Lighthouse (audit SEO / performances)"
 check_tool "lighthouse"
 
+echo "[*] Chromium (moteur navigateur pour Lighthouse)"
+if command -v chromium >/dev/null 2>&1; then
+  echo "[OK] chromium trouvé: $(command -v chromium)"
+elif command -v chromium-browser >/dev/null 2>&1; then
+  echo "[OK] chromium-browser trouvé: $(command -v chromium-browser)"
+else
+  echo "[KO] Chromium non trouvé dans le PATH"
+fi
+echo
+
+echo "[*] Vérification CHROME_PATH (si défini)"
+if [ -n "${CHROME_PATH:-}" ]; then
+  if [ -x "$CHROME_PATH" ]; then
+    echo "[OK] CHROME_PATH valide: $CHROME_PATH"
+  else
+    echo "[KO] CHROME_PATH défini mais binaire introuvable/inexécutable: $CHROME_PATH"
+  fi
+else
+  echo "[i] CHROME_PATH non défini (fallback auto via chemins standards)"
+fi
+echo
+
 echo "[*] Bibliothèques Python pour parsing HTML / SEO"
 python3 - << 'EOF' || true
 import importlib

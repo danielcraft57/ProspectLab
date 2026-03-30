@@ -51,6 +51,8 @@ celery.conf.update(
     task_queues=(
         Queue('celery', routing_key='celery'),
         Queue('scraping', routing_key='scraping'),
+        # Relances UI / API unitaires : ne pas se faire bloquer derrière un bulk multi-sites
+        Queue('scraping_interactive', routing_key='scraping_interactive'),
         Queue('technical', routing_key='technical'),
         Queue('seo', routing_key='seo'),
         Queue('osint', routing_key='osint'),
@@ -64,10 +66,13 @@ celery.conf.update(
     # Dict pattern -> route (Celery 5 / kombu : une *liste* de tuples casse MapRoute qui itère
     # chaque entrée en « k, v » — le 1er élément est une str → too many values to unpack).
     task_routes={
+        # scrape_emails sans queue explicite → relances UI ; le bulk API garde apply_async(..., queue='scraping')
+        'tasks.scraping_tasks.scrape_emails_task': {'queue': 'scraping_interactive'},
         'tasks.scraping_tasks.*': {'queue': 'scraping'},
         'tasks.technical_analysis_tasks.*': {'queue': 'technical'},
         'tasks.seo_tasks.*': {'queue': 'seo'},
         'tasks.osint_tasks.*': {'queue': 'osint'},
+        'tasks.phone_tasks.*': {'queue': 'osint'},
         'tasks.pentest_tasks.*': {'queue': 'pentest'},
         # Analyse Excel "pack" : plutôt côté technique (inclut notamment génération des sous-tâches).
         'tasks.analysis_tasks.*': {'queue': 'technical'},
@@ -86,6 +91,7 @@ celery.conf.update(
         'tasks.scraping_tasks',
         'tasks.technical_analysis_tasks',
         'tasks.osint_tasks',
+        'tasks.phone_tasks',
         'tasks.pentest_tasks',
         'tasks.seo_tasks',
         'tasks.email_tasks',
