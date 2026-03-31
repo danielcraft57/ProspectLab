@@ -76,6 +76,74 @@ def _lighthouse_chrome_executable() -> Optional[str]:
     return None
 
 
+def _lighthouse_cli_executable() -> Optional[str]:
+    """Retourne un binaire lighthouse exécutable, même avec PATH systemd incomplet."""
+    candidate = shutil.which('lighthouse')
+    if candidate:
+        return candidate
+    common_path = '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
+    candidate = shutil.which('lighthouse', path=common_path)
+    if candidate:
+        return candidate
+    # Emplacements usuels npm global (Raspberry / Debian)
+    for p in (
+        '/usr/local/bin/lighthouse',
+        '/usr/bin/lighthouse',
+        '/home/pi/.npm-global/bin/lighthouse',
+        '/home/pi/.local/bin/lighthouse',
+        '/root/.npm-global/bin/lighthouse',
+        '/root/.local/bin/lighthouse',
+    ):
+        if os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+    return None
+
+
+def _node_executable() -> Optional[str]:
+    """Retourne un binaire node exécutable, même avec PATH systemd incomplet."""
+    candidate = shutil.which('node')
+    if candidate:
+        return candidate
+    common_path = '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
+    candidate = shutil.which('node', path=common_path)
+    if candidate:
+        return candidate
+    for p in (
+        '/usr/bin/node',
+        '/usr/local/bin/node',
+        '/home/pi/.nvm/versions/node/current/bin/node',
+        '/root/.nvm/versions/node/current/bin/node',
+    ):
+        if os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+    return None
+
+
+def _build_runtime_path(base_path: Optional[str]) -> str:
+    """PATH robuste pour exécuter les binaires npm/global sous systemd."""
+    parts = [
+        '/usr/local/sbin',
+        '/usr/local/bin',
+        '/usr/sbin',
+        '/usr/bin',
+        '/sbin',
+        '/bin',
+        '/home/pi/.local/bin',
+        '/home/pi/.npm-global/bin',
+        '/root/.local/bin',
+        '/root/.npm-global/bin',
+    ]
+    if base_path:
+        parts.extend([p for p in str(base_path).split(':') if p])
+    out: List[str] = []
+    seen = set()
+    for p in parts:
+        if p and p not in seen:
+            seen.add(p)
+            out.append(p)
+    return ':'.join(out)
+
+
 def _host_is_ip(hostname: Optional[str]) -> bool:
     if not hostname:
         return False
@@ -181,14 +249,32 @@ class SEOAnalyzer:
     def _check_tools_availability(self):
         """Vérifie la disponibilité des outils SEO"""
         self.tools = {
-            'lighthouse': self._check_tool('lighthouse'),
+            'lighthouse': _lighthouse_cli_executable() is not None,
             'curl': self._check_tool('curl'),
             'wget': self._check_tool('wget'),
         }
     
     def _check_tool(self, tool_name: str) -> bool:
         """Vérifie si un outil est disponible (natif uniquement, pas de WSL pour SEO)"""
-        return shutil.which(tool_name) is not None
+        # 1) Résolution standard via PATH courant du process Celery
+        if shutil.which(tool_name) is not None:
+            return True
+
+        # 2) Fallback robuste: certains services systemd exposent un PATH incomplet.
+        common_path = '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
+        if shutil.which(tool_name, path=common_path) is not None:
+            return True
+
+        # 3) Fallback chemins absolus connus pour les outils SEO principaux
+        known_bins = {
+            'curl': ('/usr/bin/curl', '/bin/curl'),
+            'wget': ('/usr/bin/wget', '/bin/wget'),
+            'lighthouse': ('/usr/local/bin/lighthouse', '/usr/bin/lighthouse'),
+        }
+        for candidate in known_bins.get(tool_name, ()):
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                return True
+        return False
     
     def get_diagnostic(self) -> Dict:
         """
@@ -665,7 +751,8 @@ class SEOAnalyzer:
     
     def _run_lighthouse(self, url: str) -> Optional[Dict]:
         """Exécute Lighthouse pour un audit SEO/perfs"""
-        if not self.tools['lighthouse']:
+        lighthouse_bin = _lighthouse_cli_executable()
+        if not lighthouse_bin:
             return None
         
         try:
@@ -676,8 +763,7 @@ class SEOAnalyzer:
             
             # Exécuter Lighthouse (chrome-launcher exige CHROME_PATH si Chrome n’est pas détecté, ex. Raspberry Pi)
             chrome_bin = _lighthouse_chrome_executable()
-            cmd = [
-                'lighthouse',
+            cmd_args = [
                 url,
                 '--output=json',
                 '--output-path=' + output_path,
@@ -686,11 +772,21 @@ class SEOAnalyzer:
                 '--only-categories=seo,performance',
             ]
             if chrome_bin:
-                cmd.insert(2, '--chrome-path=' + chrome_bin)
+                cmd_args.insert(1, '--chrome-path=' + chrome_bin)
 
             run_env = os.environ.copy()
+            run_env['PATH'] = _build_runtime_path(run_env.get('PATH'))
             if chrome_bin:
                 run_env['CHROME_PATH'] = chrome_bin
+            node_bin = _node_executable()
+
+            # Beaucoup d'installations npm exposent un script lighthouse avec shebang "/usr/bin/env node".
+            # En service systemd, "node" peut être absent du PATH; on force alors "node <lighthouse>".
+            cmd: List[str]
+            if node_bin:
+                cmd = [node_bin, lighthouse_bin, *cmd_args]
+            else:
+                cmd = [lighthouse_bin, *cmd_args]
 
             result = subprocess.run(
                 cmd,

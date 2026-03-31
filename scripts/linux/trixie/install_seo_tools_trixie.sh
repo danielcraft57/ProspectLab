@@ -38,7 +38,14 @@ fi
 # Mettre à jour npm si ancienne version
 if command -v npm >/dev/null 2>&1; then
   echo "[*] Mise à jour npm..."
-  sudo npm install -g npm@latest || true
+  sudo npm install -g npm@latest || {
+    echo "[!] npm semble cassé (ex: MODULE_NOT_FOUND). Tentative de réparation..."
+    # Réparer une install npm global cassée (NodeSource). On réinstalle nodejs (inclut npm).
+    sudo apt-get update >/dev/null 2>&1 || true
+    sudo apt-get install -y --reinstall nodejs || true
+    # Dernier essai : mise à jour npm
+    sudo npm install -g npm@latest || true
+  }
 fi
 
 echo "[*] Outils réseau de base (déjà installés normalement)..."

@@ -15,10 +15,34 @@ param(
     [switch]$SkipInstall,
 
     [Parameter(Mandatory=$false)]
-    [switch]$SkipRestart
+    [switch]$CopyOnly,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$SkipRestart,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$SkipNfsClient
 )
 
 $ErrorActionPreference = 'Stop'
+
+function Get-DotEnvValue {
+    param(
+        [Parameter(Mandatory = $true)] [string] $FilePath,
+        [Parameter(Mandatory = $true)] [string] $Key
+    )
+    if (-not (Test-Path -LiteralPath $FilePath)) { return '' }
+    $prefix = $Key + '='
+    foreach ($raw in Get-Content -LiteralPath $FilePath) {
+        $line = $raw.Trim()
+        if ($line.StartsWith('#')) { continue }
+        if ($line -eq '') { continue }
+        if ($line.StartsWith($prefix)) {
+            return $line.Substring($prefix.Length).Trim()
+        }
+    }
+    return ''
+}
 
 $projectDir = (Get-Item (Split-Path -Parent $PSScriptRoot)).FullName
 $installScript = Join-Path $PSScriptRoot 'install_cluster_worker.ps1'
@@ -78,7 +102,19 @@ foreach ($node in $Nodes) {
         $nodeErrors += $_.Exception.Message
     }
 
-    if ($nodeOk -and -not $SkipInstall) {
+    if ($nodeOk -and $CopyOnly) {
+        try {
+            Write-Host "[2/5] Copie code uniquement (-CopyOnly) ..." -ForegroundColor Yellow
+            & $installScript -Server $node -User $User -RemotePath $RemotePath -SkipRemoteInstallScript
+            if ($LASTEXITCODE -ne 0) {
+                throw "install_cluster_worker.ps1 a échoué en mode copie-only pour $node"
+            }
+            Write-Host "Copie code OK (pas d'installation distante)" -ForegroundColor Green
+        } catch {
+            $nodeOk = $false
+            $nodeErrors += $_.Exception.Message
+        }
+    } elseif ($nodeOk -and -not $SkipInstall) {
         try {
             Write-Host "[2/5] Installation/synchronisation worker..." -ForegroundColor Yellow
             & $installScript -Server $node -User $User -RemotePath $RemotePath
@@ -92,6 +128,65 @@ foreach ($node in $Nodes) {
         }
     } elseif ($nodeOk) {
         Write-Host "[2/5] Install ignorée (-SkipInstall)." -ForegroundColor DarkYellow
+    }
+
+    if ($nodeOk -and -not $SkipNfsClient) {
+        try {
+            $nfsSkipMountRaw = Get-DotEnvValue -FilePath $envFilePath -Key 'NFS_SKIP_CLIENT_MOUNT'
+            $nfsSkipNode = $false
+            if (-not [string]::IsNullOrWhiteSpace($nfsSkipMountRaw)) {
+                $tskip = $nfsSkipMountRaw.Trim().ToLowerInvariant()
+                $nfsSkipNode = @('1', 'true', 'yes', 'on') -contains $tskip
+            }
+            $nfsServerNode = Get-DotEnvValue -FilePath $envFilePath -Key 'NFS_SERVER'
+            $nfsExportNode = Get-DotEnvValue -FilePath $envFilePath -Key 'NFS_EXPORT_ROOT'
+            if ([string]::IsNullOrWhiteSpace($nfsExportNode)) {
+                $nfsExportNode = '/srv/nfs/prospectlab'
+            }
+            if ($nfsSkipNode) {
+                Write-Host "[2b/5] Montage NFS ignoré sur $node (NFS_SKIP_CLIENT_MOUNT)." -ForegroundColor DarkYellow
+            }
+            if (-not $nfsSkipNode -and -not [string]::IsNullOrWhiteSpace($nfsServerNode)) {
+                $nfsAutoStashRaw = Get-DotEnvValue -FilePath $envFilePath -Key 'NFS_AUTO_STASH'
+                if ([string]::IsNullOrWhiteSpace($nfsAutoStashRaw)) {
+                    $nfsAutoStashVal = '1'
+                } else {
+                    $nfsAutoStashNorm = $nfsAutoStashRaw.Trim().ToLowerInvariant()
+                    if (@('0', 'false', 'no', 'off') -contains $nfsAutoStashNorm) {
+                        $nfsAutoStashVal = '0'
+                    } else {
+                        $nfsAutoStashVal = '1'
+                    }
+                }
+                Write-Host "[2b/5] Montage NFS client ($nfsServerNode, NFS_AUTO_STASH=$nfsAutoStashVal)..." -ForegroundColor Yellow
+                $nfsRemoteScript = "$RemotePath/scripts/linux/setup_nfs_client_prospectlab.sh"
+                $nfsLocalScript = Join-Path $projectDir 'scripts\linux\setup_nfs_client_prospectlab.sh'
+                if (-not (Test-Path -LiteralPath $nfsLocalScript)) {
+                    throw "Script local introuvable : $nfsLocalScript"
+                }
+                $null = ssh "$User@$node" "mkdir -p $RemotePath/scripts/linux" 2>&1
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Impossible de créer $RemotePath/scripts/linux sur $node"
+                }
+                $null = ssh "$User@$node" "test -f $nfsRemoteScript" 2>&1
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Host "   Copie du script NFS depuis le poste local (-SkipInstall)..." -ForegroundColor Gray
+                    scp $nfsLocalScript "${User}@${node}:${RemotePath}/scripts/linux/setup_nfs_client_prospectlab.sh" 2>&1 | Out-Null
+                    if ($LASTEXITCODE -ne 0) {
+                        throw "SCP du script NFS vers $node a échoué"
+                    }
+                    $null = ssh "$User@$node" "chmod +x $nfsRemoteScript" 2>&1
+                }
+                $null = ssh "$User@$node" "sudo env REMOTE_PATH=$RemotePath NFS_SERVER=$nfsServerNode NFS_EXPORT_ROOT=$nfsExportNode NFS_AUTO_STASH=$nfsAutoStashVal bash $nfsRemoteScript" 2>&1
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Montage NFS échoué sur $node"
+                }
+                Write-Host "Montage NFS OK" -ForegroundColor Green
+            }
+        } catch {
+            $nodeOk = $false
+            $nodeErrors += $_.Exception.Message
+        }
     }
 
     if ($nodeOk) {

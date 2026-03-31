@@ -15,11 +15,32 @@ param(
     [string]$ProxyServer = '',
     
     [Parameter(Mandatory=$false)]
-    [string]$ProxyUser = 'deploy'
+    [string]$ProxyUser = 'deploy',
+
+    [Parameter(Mandatory=$false)]
+    [switch]$SkipNfsClient
 )
 # Usage: .\deploy_production.ps1 -Server serveur-app.lan -User deploy -ProxyServer serveur-proxy.lan -ProxyUser deploy
 
 $ErrorActionPreference = 'Stop'
+
+function Get-DotEnvValue {
+    param(
+        [Parameter(Mandatory = $true)] [string] $FilePath,
+        [Parameter(Mandatory = $true)] [string] $Key
+    )
+    if (-not (Test-Path -LiteralPath $FilePath)) { return '' }
+    $prefix = $Key + '='
+    foreach ($raw in Get-Content -LiteralPath $FilePath) {
+        $line = $raw.Trim()
+        if ($line.StartsWith('#')) { continue }
+        if ($line -eq '') { continue }
+        if ($line.StartsWith($prefix)) {
+            return $line.Substring($prefix.Length).Trim()
+        }
+    }
+    return ''
+}
 
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "Déploiement ProspectLab en production" -ForegroundColor Cyan
@@ -238,6 +259,51 @@ foreach ($dir in $dirsToSync) {
 }
 Write-Host "✅ Dossiers synchronisés (routes, services, tasks, templates, static, utils, scripts)" -ForegroundColor Green
 Write-Host ""
+
+# Montage NFS (uploads + exports partagés) si NFS_SERVER est dans .env.prod — voir docs/configuration/DEPLOIEMENT_PRODUCTION.md
+# Sur la même machine que le stockage : UPLOAD_FOLDER=/srv/nfs/prospectlab/uploads + NFS_SKIP_CLIENT_MOUNT=true
+if (-not $SkipNfsClient) {
+    $envProdForNfs = Join-Path $PROJECT_DIR '.env.prod'
+    $nfsSkipMountRaw = Get-DotEnvValue -FilePath $envProdForNfs -Key 'NFS_SKIP_CLIENT_MOUNT'
+    $nfsSkipClientMount = $false
+    if (-not [string]::IsNullOrWhiteSpace($nfsSkipMountRaw)) {
+        $tskip = $nfsSkipMountRaw.Trim().ToLowerInvariant()
+        $nfsSkipClientMount = @('1', 'true', 'yes', 'on') -contains $tskip
+    }
+    if ($nfsSkipClientMount) {
+        Write-Host "[5b/9] Montage NFS client ignoré (NFS_SKIP_CLIENT_MOUNT dans .env.prod)." -ForegroundColor DarkYellow
+        Write-Host "   Utilise des chemins directs vers l'export (ex. /srv/nfs/prospectlab/uploads) sur ce nœud." -ForegroundColor Gray
+        Write-Host ""
+    }
+    $nfsServerDeploy = Get-DotEnvValue -FilePath $envProdForNfs -Key 'NFS_SERVER'
+    $nfsExportRootDeploy = Get-DotEnvValue -FilePath $envProdForNfs -Key 'NFS_EXPORT_ROOT'
+    if ([string]::IsNullOrWhiteSpace($nfsExportRootDeploy)) {
+        $nfsExportRootDeploy = '/srv/nfs/prospectlab'
+    }
+    if (-not $nfsSkipClientMount -and -not [string]::IsNullOrWhiteSpace($nfsServerDeploy)) {
+        $nfsAutoStashRaw = Get-DotEnvValue -FilePath $envProdForNfs -Key 'NFS_AUTO_STASH'
+        if ([string]::IsNullOrWhiteSpace($nfsAutoStashRaw)) {
+            $nfsAutoStashVal = '1'
+        } else {
+            $nfsAutoStashNorm = $nfsAutoStashRaw.Trim().ToLowerInvariant()
+            if (@('0', 'false', 'no', 'off') -contains $nfsAutoStashNorm) {
+                $nfsAutoStashVal = '0'
+            } else {
+                $nfsAutoStashVal = '1'
+            }
+        }
+        Write-Host "[5b/9] Montage NFS client (serveur $nfsServerDeploy, NFS_AUTO_STASH=$nfsAutoStashVal)..." -ForegroundColor Yellow
+        $nfsClientScript = "$RemotePath/scripts/linux/setup_nfs_client_prospectlab.sh"
+        $nfsClientOut = ssh "$User@$Server" "sudo env REMOTE_PATH=$RemotePath NFS_SERVER=$nfsServerDeploy NFS_EXPORT_ROOT=$nfsExportRootDeploy NFS_AUTO_STASH=$nfsAutoStashVal bash $nfsClientScript" 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Échec montage NFS client sur le serveur app" -ForegroundColor Red
+            Write-Host $nfsClientOut -ForegroundColor Gray
+            exit 1
+        }
+        Write-Host "Montage NFS OK (${RemotePath}/uploads et exports)" -ForegroundColor Green
+        Write-Host ""
+    }
+}
 
 # Déployer .env.prod local → .env sur le serveur
 Write-Host "[5.5/9] Envoi de .env.prod vers le serveur (copie en .env)..." -ForegroundColor Yellow

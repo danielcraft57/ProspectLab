@@ -7,6 +7,12 @@ param(
 
     [Parameter(Mandatory=$false)]
     [string]$RemotePath = '/opt/prospectlab'
+    ,
+
+    # Si true : synchronise uniquement le code (tasks, utils, scripts linux, etc.)
+    # mais ne relance pas le script d'installation distant (install_cluster_worker.sh).
+    [Parameter(Mandatory=$false)]
+    [switch]$SkipRemoteInstallScript
 )
 
 $ErrorActionPreference = 'Stop'
@@ -156,8 +162,8 @@ foreach ($relPath in $linuxScriptsToCopy) {
 Write-Host "✅ Scripts Linux mis à jour sur $Server" -ForegroundColor Green
 Write-Host ""
 
-# 4) Rendre les scripts exécutables et lancer le script d'installation Linux
-Write-Host "[4/5] Execution du script d'installation du worker sur le Raspberry..." -ForegroundColor Yellow
+# 4) Rendre les scripts exécutables et (optionnel) lancer le script d'installation Linux
+Write-Host "[4/5] (optionnel) Execution du script d'installation du worker sur le Raspberry..." -ForegroundColor Yellow
 
 $remoteScriptPath = "$RemotePath/scripts/linux/install_cluster_worker.sh"
 
@@ -174,23 +180,38 @@ if (-not (Test-Path $localInstallScript)) {
     exit 1
 }
 
-Write-Host "   Copie de install_cluster_worker.sh vers le Raspberry via scp..." -ForegroundColor Gray
+Write-Host "   Copie des scripts linux (*.sh) vers le Raspberry via scp..." -ForegroundColor Gray
+ssh "$User@$Server" "mkdir -p $RemotePath/scripts/linux" 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "❌ Impossible de créer $RemotePath/scripts/linux sur $Server" -ForegroundColor Red
+    exit 1
+}
+
 scp $localInstallScript "$User@$Server`:$RemotePath/scripts/linux/" 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "❌ Impossible de copier install_cluster_worker.sh sur $Server" -ForegroundColor Red
-    exit 1
+    Write-Host "⚠️  Impossible de copier install_cluster_worker.sh sur $Server (mais on continue si SkipRemoteInstallScript). " -ForegroundColor Yellow
+    if (-not $SkipRemoteInstallScript) {
+        exit 1
+    }
 }
 
-# Donner les droits d'exécution puis lancer le script côté Raspberry
-ssh "$User@$Server" "cd $RemotePath; chmod +x scripts/linux/*.sh 2>/dev/null || true; bash scripts/linux/install_cluster_worker.sh" 2>&1
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "❌ Erreur lors de l'exécution de install_cluster_worker.sh sur $Server" -ForegroundColor Red
-    Write-Host "   Vérifie les logs affichés ci-dessus." -ForegroundColor Yellow
-    exit 1
-}
+# Donner les droits d'exécution (utile même en copie-only)
+ssh "$User@$Server" "cd $RemotePath; chmod +x scripts/linux/*.sh 2>/dev/null || true" 2>&1 | Out-Null
 
-Write-Host "✅ Script d'installation du worker exécuté avec succès" -ForegroundColor Green
-Write-Host ""
+if (-not $SkipRemoteInstallScript) {
+    # Lancer le script côté Raspberry
+    ssh "$User@$Server" "cd $RemotePath; bash scripts/linux/install_cluster_worker.sh" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "❌ Erreur lors de l'exécution de install_cluster_worker.sh sur $Server" -ForegroundColor Red
+        Write-Host "   Vérifie les logs affichés ci-dessus." -ForegroundColor Yellow
+        exit 1
+    }
+    Write-Host "✅ Script d'installation du worker exécuté avec succès" -ForegroundColor Green
+    Write-Host ""
+} else {
+    Write-Host "✅ Copie du code OK (SkipRemoteInstallScript=true), pas d'installation distante." -ForegroundColor Green
+    Write-Host ""
+}
 
 # 5) Rappel pour le .env et le démarrage du service
 Write-Host "[5/5] Étapes restantes manuelles importantes" -ForegroundColor Yellow

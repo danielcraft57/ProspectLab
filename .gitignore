@@ -85,6 +85,7 @@ htmlcov/
 # Documentation temporaire
 docs/developpement/cursor_*.md
 cursor_*.md
+docs/configuration/CLUSTER_NODES_DEBIAN_MODELS.md
 
 # Fichiers temporaires
 *.tmp

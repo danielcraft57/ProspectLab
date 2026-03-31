@@ -17,6 +17,22 @@ install_pkg() {
   fi
 }
 
+apt_has_pkg() {
+  local pkg="$1"
+  local candidate
+  candidate="$(apt-cache policy "$pkg" 2>/dev/null | awk '/Candidate:/ {print $2}')"
+  [ -n "$candidate" ] && [ "$candidate" != "(none)" ]
+}
+
+install_pkg_if_available() {
+  local pkg="$1"
+  if apt_has_pkg "$pkg"; then
+    install_pkg "$pkg"
+  else
+    echo "[!] $pkg absent des dépôts APT (skip)"
+  fi
+}
+
 echo "[*] Pré-requis..."
 install_pkg curl
 install_pkg git
@@ -27,7 +43,7 @@ pipx ensurepath || true
 export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
 
 echo "[*] Outils APT (réseau / DNS / recon)..."
-install_pkg theharvester || true
+install_pkg_if_available theharvester || true
 if ! command -v theharvester >/dev/null 2>&1; then
   echo "  - theharvester absent des dépôts APT, tentative via pipx (git)..."
   pipx install "git+https://github.com/laramies/theHarvester.git" || true
@@ -75,19 +91,58 @@ fi
 # Findomain (binaire)
 if ! command -v findomain >/dev/null 2>&1; then
   echo "  - Installation de findomain..."
-  ARCH=$(uname -m)
-  if [ "$ARCH" = "x86_64" ]; then
-    ARCH="x86_64"
-  elif [ "$ARCH" = "aarch64" ]; then
-    ARCH="aarch64"
-  else
-    ARCH="x86_64"
+  ARCH_RAW="$(uname -m)"
+  case "$ARCH_RAW" in
+    x86_64) ARCH="x86_64" ;;
+    aarch64) ARCH="aarch64" ;;
+    *) ARCH="x86_64" ;;
+  esac
+
+  _tmp="/tmp/findomain"
+  rm -f "$_tmp" 2>/dev/null || true
+
+  # 1) Tentative via API GitHub (plus robuste que /latest/download selon assets)
+  tag="$(curl -fsSL https://api.github.com/repos/Findomain/Findomain/releases/latest 2>/dev/null | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)"
+  if [ -n "$tag" ]; then
+    # Quelques noms d'assets possibles selon release
+    for asset in \
+      "findomain-linux-${ARCH}" \
+      "findomain-linux-${ARCH_RAW}" \
+      "findomain-linux" \
+      "findomain"; do
+      url="https://github.com/Findomain/Findomain/releases/download/${tag}/${asset}"
+      if curl -fsSL "$url" -o "$_tmp" 2>/dev/null; then
+        break
+      fi
+    done
   fi
-  wget -q "https://github.com/Findomain/Findomain/releases/latest/download/findomain-linux-${ARCH}" -O /tmp/findomain 2>/dev/null && {
-    sudo mv /tmp/findomain /usr/local/bin/findomain
+
+  # 2) Fallback direct latest/download (si API rate limit)
+  if [ ! -s "$_tmp" ]; then
+    curl -fsSL "https://github.com/Findomain/Findomain/releases/latest/download/findomain-linux-${ARCH}" -o "$_tmp" 2>/dev/null || true
+  fi
+
+  if [ -s "$_tmp" ]; then
+    sudo mv "$_tmp" /usr/local/bin/findomain
     sudo chmod +x /usr/local/bin/findomain
     echo "    ✓ findomain installé"
-  } || echo "    ⚠ findomain non installé (release indisponible pour cette arch/distro)"
+  else
+    echo "    ⚠ findomain non installé (asset introuvable)."
+    echo "    ⚠ Fallback: compilation locale via Rust (cargo) si disponible..."
+    if ! command -v cargo >/dev/null 2>&1; then
+      echo "    - Installation de cargo (APT)..."
+      install_pkg_if_available cargo || true
+    fi
+    if command -v cargo >/dev/null 2>&1; then
+      cargo install findomain --locked 2>/dev/null || cargo install findomain 2>/dev/null || true
+      if [ -f "$HOME/.cargo/bin/findomain" ]; then
+        sudo ln -sf "$HOME/.cargo/bin/findomain" /usr/local/bin/findomain
+        echo "    ✓ findomain installé (cargo)"
+      fi
+    else
+      echo "    ⚠ cargo absent: installation impossible (APT). Alternative: rustup puis relancer."
+    fi
+  fi
 fi
 
 # DNSenum
@@ -105,12 +160,35 @@ fi
 echo "[*] Outils d'analyse web supplémentaires..."
 # Nikto (scanner de vulnérabilités web)
 if ! command -v nikto >/dev/null 2>&1; then
-  install_pkg nikto || echo "    ⚠ nikto non disponible via apt"
+  install_pkg_if_available nikto || true
 fi
 
 # Gobuster (énumération de répertoires)
 if ! command -v gobuster >/dev/null 2>&1; then
   install_pkg gobuster || echo "    ⚠ gobuster non disponible via apt"
+fi
+
+# Nikto (scanner de vulnérabilités web) — absent sur certaines variantes Trixie.
+# Fallback: install via git clone + symlink.
+if ! command -v nikto >/dev/null 2>&1; then
+  echo "  - Installation de nikto (fallback git)..."
+  install_pkg_if_available nikto || true
+  if ! command -v nikto >/dev/null 2>&1; then
+    install_pkg_if_available perl || true
+    install_pkg_if_available libwww-perl || true
+    install_pkg_if_available libnet-ssleay-perl || true
+    install_pkg_if_available openssl || true
+    if [ ! -d "$HOME/nikto" ]; then
+      git clone --depth 1 https://github.com/sullo/nikto.git "$HOME/nikto" 2>/dev/null || true
+    fi
+    if [ -f "$HOME/nikto/program/nikto.pl" ]; then
+      sudo ln -sf "$HOME/nikto/program/nikto.pl" /usr/local/bin/nikto
+      sudo chmod +x "$HOME/nikto/program/nikto.pl" 2>/dev/null || true
+      echo "    ✓ nikto installé (/usr/local/bin/nikto)"
+    else
+      echo "    ⚠ nikto non installé (clone/chemin invalide)"
+    fi
+  fi
 fi
 
 # testssl.sh (analyse SSL/TLS complète)
@@ -169,8 +247,29 @@ echo "[*] Outils de métadonnées..."
 # Metagoofil (extraction de métadonnées de documents)
 if ! command -v metagoofil >/dev/null 2>&1; then
   echo "  - Installation de metagoofil..."
-  install_pkg metagoofil || true
-  command -v metagoofil >/dev/null 2>&1 || echo "    ⚠ metagoofil non disponible via apt (repo upstream non packagé pipx)"
+  install_pkg_if_available metagoofil || true
+  if ! command -v metagoofil >/dev/null 2>&1; then
+    echo "    ⚠ metagoofil non disponible via apt, tentative via pipx..."
+    pipx install metagoofil 2>/dev/null || true
+    if ! command -v metagoofil >/dev/null 2>&1; then
+      # Fallback git (si PyPI indisponible)
+      pipx install "git+https://github.com/opsdisk/metagoofil.git" 2>/dev/null || true
+    fi
+    if ! command -v metagoofil >/dev/null 2>&1; then
+      echo "    ⚠ metagoofil non installé (pipx/git). Fallback: script wrapper (git clone)."
+      if [ ! -d "$HOME/metagoofil" ]; then
+        git clone --depth 1 https://github.com/opsdisk/metagoofil.git "$HOME/metagoofil" 2>/dev/null || true
+      fi
+      if [ -f "$HOME/metagoofil/metagoofil.py" ]; then
+        sudo tee /usr/local/bin/metagoofil >/dev/null << 'EOF'
+#!/usr/bin/env bash
+exec python3 "$HOME/metagoofil/metagoofil.py" "$@"
+EOF
+        sudo chmod +x /usr/local/bin/metagoofil
+        echo "    ✓ metagoofil installé (wrapper /usr/local/bin/metagoofil)"
+      fi
+    fi
+  fi
 fi
 
 # ExifTool (extraction de métadonnées d'images)
@@ -183,7 +282,10 @@ echo "[*] Frameworks OSINT..."
 # Recon-ng
 if ! command -v recon-ng >/dev/null 2>&1; then
   echo "  - Installation de recon-ng..."
-  command -v recon-ng >/dev/null 2>&1 || echo "    ⚠ recon-ng non disponible via apt/pipx sur Trixie (installation manuelle)"
+  # Sur Trixie, le paquet APT peut manquer et recon-ng n'est pas toujours sur PyPI.
+  # Fallback: pipx depuis GitHub.
+  pipx install "git+https://github.com/lanmaster53/recon-ng.git" 2>/dev/null || true
+  command -v recon-ng >/dev/null 2>&1 || echo "    ⚠ recon-ng non installé (pipx git)."
 fi
 
 echo "[*] APIs CLI (nécessitent des clés API)..."
@@ -203,15 +305,8 @@ echo "[*] Outils supplémentaires (git clone manuel si besoin)..."
 echo "  - spiderfoot peut être installé manuellement selon l'usage."
 
 # Module Python whois (optionnel)
-install_pkg python3-whois 2>/dev/null || true
-
-# Complément: installer python-whois UNIQUEMENT dans le venv ProspectLab
-# (évite l'erreur PEP 668 "externally-managed-environment" sur Python système).
-if [ -x "/opt/prospectlab/env/bin/pip" ]; then
-  /opt/prospectlab/env/bin/pip install --upgrade python-whois dnspython || true
-else
-  echo "[!] /opt/prospectlab/env/bin/pip introuvable, skip installation python-whois via pip"
-fi
+install_pkg_if_available python3-whois 2>/dev/null || true
+echo "[i] Note: le venv /opt/prospectlab/env est géré par requirements.txt (on évite de le modifier ici)."
 
 echo "[*] Vérifications rapides..."
 export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"

@@ -8,7 +8,7 @@ from flask import Blueprint, request, jsonify, session
 from services.database import Database
 from services.export_manager import ExportManager
 from services.auth import login_required
-from config import CELERY_FULL_ANALYSIS_QUEUE
+from config import CELERY_FULL_ANALYSIS_QUEUE, SEO_USE_LIGHTHOUSE_DEFAULT
 import json
 import pandas as pd
 from urllib.parse import urlparse
@@ -1028,7 +1028,7 @@ def website_analysis():
     max_time = int(payload.get('max_time', 180) or 180)
     max_pages = int(payload.get('max_pages', 30) or 30)
     enable_nmap = bool(payload.get('enable_nmap', False))
-    use_lighthouse = bool(payload.get('use_lighthouse', False))
+    use_lighthouse = bool(payload.get('use_lighthouse', SEO_USE_LIGHTHOUSE_DEFAULT))
 
     from tasks.scraping_tasks import scrape_emails_task
     from tasks.technical_analysis_tasks import technical_analysis_task
@@ -1092,7 +1092,7 @@ def website_analysis():
         pentest_task = pentest_analysis_task.apply_async(
             kwargs=dict(url=website, entreprise_id=entreprise_id, options={}),
             countdown=_st.next_countdown(),
-            queue='pentest',
+            queue='heavy',
         )
         tasks_launched['pentest_task_id'] = pentest_task.id
     except Exception as e:
@@ -1206,7 +1206,7 @@ def website_full_analysis_start():
     max_time = int(payload.get('max_time', 240) or 240)
     max_pages = int(payload.get('max_pages', 40) or 40)
     enable_nmap = bool(payload.get('enable_nmap', False))
-    use_lighthouse = bool(payload.get('use_lighthouse', False))
+    use_lighthouse = bool(payload.get('use_lighthouse', SEO_USE_LIGHTHOUSE_DEFAULT))
 
     try:
         from tasks.analysis_tasks import full_website_analysis_task

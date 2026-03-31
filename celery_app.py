@@ -68,6 +68,11 @@ celery.conf.update(
     task_routes={
         # scrape_emails sans queue explicite → relances UI ; le bulk API garde apply_async(..., queue='scraping')
         'tasks.scraping_tasks.scrape_emails_task': {'queue': 'scraping_interactive'},
+        # Bulk "analyse site" : isoler sur la queue heavy (utile pour donner plus de temps au node rapide).
+        'tasks.scraping_tasks.scrape_analysis_orchestrator_task': {'queue': 'heavy'},
+        'tasks.scraping_tasks.scrape_analysis_task': {'queue': 'heavy'},
+        # Pentest dédié sur heavy (évite qu’un worker plus lent prenne trop de tâches).
+        'tasks.pentest_tasks.pentest_analysis_task': {'queue': 'heavy'},
         'tasks.scraping_tasks.*': {'queue': 'scraping'},
         'tasks.technical_analysis_tasks.*': {'queue': 'technical'},
         'tasks.seo_tasks.*': {'queue': 'seo'},

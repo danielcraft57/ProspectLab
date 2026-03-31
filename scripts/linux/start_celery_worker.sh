@@ -30,6 +30,18 @@ if [ -z "$CELERY_Q" ]; then
     CELERY_Q="celery,scraping,scraping_interactive,technical,seo,osint,pentest,heavy,website_full"
 fi
 
+# Aide au diagnostic cluster : si « scraping » n’est pas dans -Q, les bulk (scrape_analysis_*)
+# ne seront jamais pris sur ce nœud (seul un worker qui écoute « scraping » les exécute).
+case ",${CELERY_Q}," in
+    *,scraping,*) ;;
+    *)
+        echo "prospectlab-celery: ATTENTION: la file « scraping » est absente de -Q (${CELERY_Q})." >&2
+        echo "prospectlab-celery: Les tâches bulk de scraping ne seront pas exécutées sur ce nœud." >&2
+        echo "prospectlab-celery: Ajoute « scraping » à CELERY_WORKER_QUEUES ou enlève CELERY_WORKER_QUEUE_PRESET=non_scraping." >&2
+        ;;
+esac
+echo "prospectlab-celery: démarrage avec -Q ${CELERY_Q}" >&2
+
 exec /opt/prospectlab/env/bin/celery -A celery_app worker \
     --loglevel=info \
     --logfile=/opt/prospectlab/logs/celery_worker.log \

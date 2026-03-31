@@ -24,9 +24,13 @@ from tasks.heavy_schedule import BulkSubtaskStagger
 from tasks.phone_tasks import analyze_phones_dict_for_storage
 
 try:
-    from config import CELERY_BULK_STAGGER_SEC
+    from config import CELERY_BULK_STAGGER_SEC, SEO_USE_LIGHTHOUSE_DEFAULT
 except ImportError:
     CELERY_BULK_STAGGER_SEC = 0.75
+    SEO_USE_LIGHTHOUSE_DEFAULT = False
+
+_SCRAPE_ANALYSIS_BATCH_SIZE = max(1, int(os.environ.get('SCRAPE_ANALYSIS_BATCH_SIZE', '20')))
+_SCRAPE_ANALYSIS_BATCH_RETRY_MAX = max(0, int(os.environ.get('SCRAPE_ANALYSIS_BATCH_RETRY_MAX', '1')))
 
 
 # Verrou global optionnel (désactivé par défaut) : si activé, un seul scrape à la fois sur tout le cluster.
@@ -396,7 +400,8 @@ def scrape_emails_task(self, url, max_depth=3, max_workers=5, max_time=300,
 
 @celery.task(bind=True)
 def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers: int = 5,
-                         max_time: int = 180, max_pages: int = 30) -> Dict:
+                         max_time: int = 180, max_pages: int = 30,
+                         entreprise_ids: list | None = None) -> Dict:
     """
     Tâche Celery pour scraper automatiquement toutes les entreprises d'une analyse.
     
@@ -441,7 +446,8 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
     conn = db.get_connection()
     cursor = conn.cursor()
     
-    db.execute_sql(cursor,
+    db.execute_sql(
+        cursor,
         '''
         SELECT id, nom, website
         FROM entreprises
@@ -453,6 +459,23 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
     )
     rows = cursor.fetchall()
     conn.close()
+
+    if entreprise_ids:
+        allowed = set()
+        for rid in entreprise_ids:
+            try:
+                allowed.add(int(rid))
+            except Exception:
+                continue
+        filtered_rows = []
+        for row in rows:
+            try:
+                row_id = row.get('id') if isinstance(row, dict) else row[0]
+                if row_id is not None and int(row_id) in allowed:
+                    filtered_rows.append(row)
+            except Exception:
+                continue
+        rows = filtered_rows
     
     if not rows:
         logger.info(f'Aucune entreprise avec website pour l analyse {analysis_id}')
@@ -889,7 +912,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                             kwargs=dict(
                                 url=website_str,
                                 entreprise_id=entreprise_id,
-                                use_lighthouse=False,
+                                use_lighthouse=SEO_USE_LIGHTHOUSE_DEFAULT,
                             ),
                             countdown=seo_cd,
                             queue='seo',
@@ -929,7 +952,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                                 forms_from_scrapers=forms_from_scrapers,
                             ),
                             countdown=pentest_cd,
-                            queue='pentest',
+                            queue='heavy',
                         )
 
                         # Stocker pour le monitoring (liste alimentée à chaque fin de site scrapé)
@@ -1069,7 +1092,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                         forms_from_scrapers=None,
                     ),
                     countdown=pentest_cd,
-                    queue='pentest',
+                    queue='heavy',
                 )
                 
                 pentest_tasks.append({
@@ -1128,5 +1151,219 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
             {'task_id': t['task_id'], 'entreprise_id': t['entreprise_id'], 'url': t['url'], 'nom': t['nom']}
             for t in pentest_tasks
         ]
+    }
+
+
+@celery.task(bind=True)
+def scrape_analysis_orchestrator_task(
+    self,
+    analysis_id: int,
+    max_depth: int = 2,
+    max_workers: int = 5,
+    max_time: int = 180,
+    max_pages: int = 30,
+    batch_size: int = _SCRAPE_ANALYSIS_BATCH_SIZE,
+) -> Dict:
+    """
+    Orchestrateur du scraping d'analyse:
+    - découpe les entreprises en lots,
+    - lance un scrape_analysis_task par lot,
+    - agrège la progression websocket,
+    - retry simple par lot en cas d'échec.
+    """
+    logger.info(
+        '[Scraping Orchestrator %s] Démarrage analysis_id=%s batch_size=%s',
+        getattr(self.request, 'id', None),
+        analysis_id,
+        batch_size,
+    )
+
+    db = Database()
+    conn = db.get_connection()
+    cursor = conn.cursor()
+    db.execute_sql(
+        cursor,
+        '''
+        SELECT id
+        FROM entreprises
+        WHERE analyse_id = ?
+          AND website IS NOT NULL
+          AND TRIM(website) <> ''
+        ''',
+        (analysis_id,),
+    )
+    raw_ids = cursor.fetchall()
+    conn.close()
+
+    entreprise_ids = []
+    for row in raw_ids:
+        try:
+            eid = row.get('id') if isinstance(row, dict) else row[0]
+            if eid is not None:
+                entreprise_ids.append(int(eid))
+        except Exception:
+            continue
+
+    total_entreprises = len(entreprise_ids)
+    if total_entreprises == 0:
+        return {
+            'success': True,
+            'analysis_id': analysis_id,
+            'scraped_count': 0,
+            'total_entreprises': 0,
+            'stats': {
+                'total_emails': 0,
+                'total_people': 0,
+                'total_phones': 0,
+                'total_social_platforms': 0,
+                'total_technologies': 0,
+                'total_images': 0,
+            },
+            'tech_tasks': [],
+            'osint_tasks': [],
+            'seo_tasks': [],
+            'pentest_tasks': [],
+            'failed_batches': [],
+        }
+
+    bs = max(1, int(batch_size or _SCRAPE_ANALYSIS_BATCH_SIZE))
+    batches = [entreprise_ids[i:i + bs] for i in range(0, total_entreprises, bs)]
+
+    # Aggregats globaux
+    global_stats = {
+        'total_emails': 0,
+        'total_people': 0,
+        'total_phones': 0,
+        'total_social_platforms': 0,
+        'total_technologies': 0,
+        'total_images': 0,
+    }
+    scraped_count = 0
+    tech_tasks_all = {}
+    osint_tasks_all = {}
+    seo_tasks_all = {}
+    pentest_tasks_all = {}
+    failed_batches = []
+
+    # Map tid -> metadata batch
+    running = {}
+    completed_tids = set()
+
+    def _launch_batch(batch_idx: int, ids: list[int], retry_count: int = 0):
+        res = scrape_analysis_task.apply_async(
+            kwargs=dict(
+                analysis_id=analysis_id,
+                max_depth=max_depth,
+                max_workers=max_workers,
+                max_time=max_time,
+                max_pages=max_pages,
+                entreprise_ids=ids,
+            ),
+            queue='heavy',
+        )
+        running[res.id] = {
+            'batch_idx': batch_idx,
+            'ids': ids,
+            'retry_count': retry_count,
+        }
+
+    for idx, ids in enumerate(batches):
+        _launch_batch(idx, ids, retry_count=0)
+
+    while len(completed_tids) < len(running):
+        # snapshot car running peut changer (retry -> nouveau tid)
+        for tid, meta in list(running.items()):
+            if tid in completed_tids:
+                continue
+            r = celery.AsyncResult(tid)
+            state = r.state
+
+            if state == 'PROGRESS':
+                info = r.info if isinstance(r.info, dict) else {}
+                for t in info.get('tech_tasks_launched_ids', []) or []:
+                    if isinstance(t, dict) and t.get('task_id'):
+                        tech_tasks_all[t['task_id']] = t
+                for t in info.get('osint_tasks_launched_ids', []) or []:
+                    if isinstance(t, dict) and t.get('task_id'):
+                        osint_tasks_all[t['task_id']] = t
+                for t in info.get('seo_tasks_launched_ids', []) or []:
+                    if isinstance(t, dict) and t.get('task_id'):
+                        seo_tasks_all[t['task_id']] = t
+                for t in info.get('pentest_tasks_launched_ids', []) or []:
+                    if isinstance(t, dict) and t.get('task_id'):
+                        pentest_tasks_all[t['task_id']] = t
+
+            elif state == 'SUCCESS':
+                completed_tids.add(tid)
+                res = r.result if isinstance(r.result, dict) else {}
+                scraped_count += int(res.get('scraped_count', 0) or 0)
+                s = res.get('stats', {}) if isinstance(res.get('stats', {}), dict) else {}
+                for k in global_stats.keys():
+                    global_stats[k] += int(s.get(k, 0) or 0)
+
+                for t in res.get('tech_tasks', []) or []:
+                    if isinstance(t, dict) and t.get('task_id'):
+                        tech_tasks_all[t['task_id']] = t
+                for t in res.get('osint_tasks', []) or []:
+                    if isinstance(t, dict) and t.get('task_id'):
+                        osint_tasks_all[t['task_id']] = t
+                for t in res.get('seo_tasks', []) or []:
+                    if isinstance(t, dict) and t.get('task_id'):
+                        seo_tasks_all[t['task_id']] = t
+                for t in res.get('pentest_tasks', []) or []:
+                    if isinstance(t, dict) and t.get('task_id'):
+                        pentest_tasks_all[t['task_id']] = t
+
+            elif state in ('FAILURE', 'REVOKED'):
+                retry_count = int(meta.get('retry_count', 0) or 0)
+                if retry_count < _SCRAPE_ANALYSIS_BATCH_RETRY_MAX:
+                    # Retry du batch uniquement
+                    completed_tids.add(tid)
+                    _launch_batch(meta['batch_idx'], meta['ids'], retry_count=retry_count + 1)
+                else:
+                    completed_tids.add(tid)
+                    failed_batches.append(
+                        {
+                            'batch_idx': meta.get('batch_idx'),
+                            'size': len(meta.get('ids') or []),
+                            'error': str(r.info),
+                        }
+                    )
+
+        percentage = int((scraped_count / total_entreprises) * 100) if total_entreprises > 0 else 0
+        self.update_state(
+            state='PROGRESS',
+            meta={
+                'analysis_id': analysis_id,
+                'current': scraped_count,
+                'total': total_entreprises,
+                'message': f'Scraping en cours ({scraped_count}/{total_entreprises})',
+                'total_emails': global_stats['total_emails'],
+                'total_people': global_stats['total_people'],
+                'total_phones': global_stats['total_phones'],
+                'total_social_platforms': global_stats['total_social_platforms'],
+                'total_technologies': global_stats['total_technologies'],
+                'total_images': global_stats['total_images'],
+                'tech_tasks_launched_ids': list(tech_tasks_all.values()),
+                'osint_tasks_launched_ids': list(osint_tasks_all.values()),
+                'seo_tasks_launched_ids': list(seo_tasks_all.values()),
+                'pentest_tasks_launched_ids': list(pentest_tasks_all.values()),
+                'failed_batches': failed_batches,
+                'progress': percentage,
+            },
+        )
+        time.sleep(1.0)
+
+    return {
+        'success': len(failed_batches) == 0,
+        'analysis_id': analysis_id,
+        'scraped_count': scraped_count,
+        'total_entreprises': total_entreprises,
+        'stats': global_stats,
+        'tech_tasks': list(tech_tasks_all.values()),
+        'osint_tasks': list(osint_tasks_all.values()),
+        'seo_tasks': list(seo_tasks_all.values()),
+        'pentest_tasks': list(pentest_tasks_all.values()),
+        'failed_batches': failed_batches,
     }
 

@@ -5,6 +5,7 @@ Authentification par token API
 """
 
 from flask import Blueprint, request, jsonify
+from config import SEO_USE_LIGHTHOUSE_DEFAULT
 from services.database import Database
 from services.api_auth import api_token_required, require_api_permission
 import json
@@ -1185,7 +1186,7 @@ def public_website_analysis():
     max_time = int(payload.get('max_time', 180) or 180)
     max_pages = int(payload.get('max_pages', 30) or 30)
     enable_nmap = bool(payload.get('enable_nmap', False))
-    use_lighthouse = bool(payload.get('use_lighthouse', False))
+    use_lighthouse = bool(payload.get('use_lighthouse', SEO_USE_LIGHTHOUSE_DEFAULT))
 
     from tasks.scraping_tasks import scrape_emails_task
     from tasks.technical_analysis_tasks import technical_analysis_task
@@ -1246,7 +1247,7 @@ def public_website_analysis():
         pentest_task = pentest_analysis_task.apply_async(
             kwargs=dict(url=website, entreprise_id=entreprise_id, options={}),
             countdown=_st.next_countdown(),
-            queue='pentest',
+            queue='heavy',
         )
         tasks_launched['pentest_task_id'] = pentest_task.id
     except Exception as e:

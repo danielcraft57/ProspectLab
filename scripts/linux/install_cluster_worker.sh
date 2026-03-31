@@ -34,8 +34,13 @@ CONDA_INSTALL_URL=""
 CONDA_INSTALL_CANDIDATES=""
 FORCE_NO_CONDA=0
 case "$ARCH" in
+    x86_64|amd64)
+        CONDA_INSTALL_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"
+        CONDA_INSTALL_CANDIDATES="$CONDA_INSTALL_URL"
+        ;;
     aarch64|arm64)
         CONDA_INSTALL_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh"
+        CONDA_INSTALL_CANDIDATES="$CONDA_INSTALL_URL"
         ;;
     armv7l|armv7|armhf)
         # armv7l (32-bit ARM): Conda/Miniforge n'est plus fiable/maintenu partout.
@@ -168,10 +173,12 @@ else
                 fi
                 if [ -z "$CONDA_INSTALL_URL" ]; then
                     echo "[!] Impossible d'installer Conda automatiquement: URL inconnue pour ARCH=$ARCH"
-                    echo "    Candidats testés (armv7l):"
-                    for candidate in $CONDA_INSTALL_CANDIDATES; do
-                        echo "    - $candidate"
-                    done
+                    if [ -n "$CONDA_INSTALL_CANDIDATES" ]; then
+                        echo "    Candidats testés:"
+                        for candidate in $CONDA_INSTALL_CANDIDATES; do
+                            echo "    - $candidate"
+                        done
+                    fi
                     exit 1
                 fi
                 echo "   [i] Téléchargement Conda pour ARCH=$ARCH"

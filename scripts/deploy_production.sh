@@ -147,6 +147,69 @@ done
 echo "✅ Dossiers synchronisés"
 echo ""
 
+# Lit une clé depuis un fichier .env (ignorer # et lignes vides)
+get_env_val_from_file() {
+  f="$1"
+  key="$2"
+  if [ ! -f "$f" ]; then
+    printf '%s\n' ""
+    return
+  fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      \#*|'') continue ;;
+    esac
+    case "$line" in
+      "${key}="*)
+        val="${line#*=}"
+        # trim espaces début/fin (sans sed pour rester portable)
+        val="${val#"${val%%[![:space:]]*}"}"
+        val="${val%"${val##*[![:space:]]}"}"
+        printf '%s\n' "$val"
+        return
+        ;;
+    esac
+  done < "$f"
+  printf '%s\n' ""
+}
+
+# Montage NFS si NFS_SERVER est défini dans .env.prod (sauf NFS_SKIP_CLIENT_MOUNT)
+SKIP_NFS="${SKIP_NFS_CLIENT:-0}"
+if [ "$SKIP_NFS" != "1" ]; then
+  NFS_SKIP_MOUNT="$(get_env_val_from_file "$PROJECT_DIR/.env.prod" "NFS_SKIP_CLIENT_MOUNT")"
+  case "$(printf '%s' "$NFS_SKIP_MOUNT" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on)
+      echo "[5b/9] Montage NFS client ignoré (NFS_SKIP_CLIENT_MOUNT dans .env.prod)."
+      echo ""
+      NFS_SERVER_DEPLOY=""
+      ;;
+    *)
+      NFS_SERVER_DEPLOY="$(get_env_val_from_file "$PROJECT_DIR/.env.prod" "NFS_SERVER")"
+      ;;
+  esac
+  NFS_EXPORT_DEPLOY="$(get_env_val_from_file "$PROJECT_DIR/.env.prod" "NFS_EXPORT_ROOT")"
+  if [ -z "$NFS_EXPORT_DEPLOY" ]; then
+    NFS_EXPORT_DEPLOY="/srv/nfs/prospectlab"
+  fi
+  if [ -n "$NFS_SERVER_DEPLOY" ]; then
+    NFS_AUTO_DEPLOY="$(get_env_val_from_file "$PROJECT_DIR/.env.prod" "NFS_AUTO_STASH")"
+    if [ -z "$NFS_AUTO_DEPLOY" ]; then
+      NFS_AUTO_DEPLOY="1"
+    fi
+    case "$(printf '%s' "$NFS_AUTO_DEPLOY" | tr '[:upper:]' '[:lower:]')" in
+      0|false|no|off) NFS_AUTO_DEPLOY="0" ;;
+      *) NFS_AUTO_DEPLOY="1" ;;
+    esac
+    echo "[5b/9] Montage NFS client (serveur $NFS_SERVER_DEPLOY, NFS_AUTO_STASH=$NFS_AUTO_DEPLOY)..."
+    if ! ssh "$USER@$SERVER" "sudo env REMOTE_PATH=$REMOTE_PATH NFS_SERVER=$NFS_SERVER_DEPLOY NFS_EXPORT_ROOT=$NFS_EXPORT_DEPLOY NFS_AUTO_STASH=$NFS_AUTO_DEPLOY bash $REMOTE_PATH/scripts/linux/setup_nfs_client_prospectlab.sh"; then
+      echo "Échec montage NFS client"
+      exit 1
+    fi
+    echo "Montage NFS OK"
+    echo ""
+  fi
+fi
+
 # Déployer la configuration : .env.prod local → .env sur le serveur
 echo "[5.5/9] Envoi de .env.prod vers le serveur (copie en .env)..."
 ENV_PROD_LOCAL="$PROJECT_DIR/.env.prod"

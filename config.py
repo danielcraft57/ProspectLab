@@ -90,6 +90,8 @@ PENTEST_TOOL_TIMEOUT = int(os.environ.get('PENTEST_TOOL_TIMEOUT', '120'))  # sec
 SEO_FETCH_CONNECT_TIMEOUT = float(os.environ.get('SEO_FETCH_CONNECT_TIMEOUT', '12'))
 SEO_FETCH_READ_TIMEOUT = float(os.environ.get('SEO_FETCH_READ_TIMEOUT', '25'))
 SEO_TOOL_TIMEOUT = int(os.environ.get('SEO_TOOL_TIMEOUT', '120'))
+# Active Lighthouse par défaut via l'environnement (prod recommandé).
+SEO_USE_LIGHTHOUSE_DEFAULT = os.environ.get('SEO_USE_LIGHTHOUSE_DEFAULT', 'false').lower() in ('1', 'true', 'yes', 'on')
 # HTTP 429 / 503 : nouveaux essais avec attente (Retry-After ou backoff exponentiel)
 SEO_FETCH_RATE_LIMIT_MAX_RETRIES = max(
     0, int(os.environ.get('SEO_FETCH_RATE_LIMIT_MAX_RETRIES', '5'))

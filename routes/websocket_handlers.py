@@ -9,8 +9,8 @@ from flask import request
 from flask_socketio import emit
 from utils.helpers import safe_emit
 from celery_app import celery
-from tasks.analysis_tasks import analyze_entreprise_task
-from tasks.scraping_tasks import scrape_emails_task, scrape_analysis_task
+from tasks.analysis_tasks import analyze_entreprise_orchestrator_task
+from tasks.scraping_tasks import scrape_emails_task, scrape_analysis_orchestrator_task
 from tasks.technical_analysis_tasks import technical_analysis_task
 from tasks.pentest_tasks import pentest_analysis_task
 from tasks.osint_tasks import osint_analysis_task
@@ -156,15 +156,23 @@ def register_websocket_handlers(socketio, app):
 
             # Mode cluster (app Windows -> workers Linux): copier le fichier sur les noeuds avant d'enfiler la tâche
             # Sinon les workers reçoivent un chemin C:\... et échouent "fichier introuvable".
+            # Avec NFS ou partage identique sur les workers : CLUSTER_SKIP_WORKER_SCP=true
+            # (chemin Celery = CLUSTER_REMOTE_PATH/uploads/filename, déjà visible sur les nœuds).
             try:
-                if is_windows_path(filepath) and (os.environ.get('CLUSTER_WORKER_NODES') or '').strip():
-                    safe_emit(socketio, 'analysis_progress', {
-                        'current': 0,
-                        'total': 0,
-                        'percentage': 0,
-                        'message': 'Copie du fichier vers le cluster...'
-                    }, room=session_id)
-                    filepath = cluster_copy_upload_to_workers(filepath, remote_filename=filename)
+                cluster_nodes = (os.environ.get('CLUSTER_WORKER_NODES') or '').strip()
+                skip_scp = os.environ.get('CLUSTER_SKIP_WORKER_SCP', '').lower() in ('1', 'true', 'yes', 'on')
+                if is_windows_path(filepath) and cluster_nodes:
+                    if skip_scp:
+                        remote_root = (os.environ.get('CLUSTER_REMOTE_PATH') or '/opt/prospectlab').strip().rstrip('/')
+                        filepath = f"{remote_root}/uploads/{filename}"
+                    else:
+                        safe_emit(socketio, 'analysis_progress', {
+                            'current': 0,
+                            'total': 0,
+                            'percentage': 0,
+                            'message': 'Copie du fichier vers le cluster...'
+                        }, room=session_id)
+                        filepath = cluster_copy_upload_to_workers(filepath, remote_filename=filename)
             except Exception as e:
                 safe_emit(socketio, 'analysis_error', {
                     'error': f'Erreur copie fichier vers cluster: {str(e)}'
@@ -196,7 +204,7 @@ def register_websocket_handlers(socketio, app):
             
             # Lancer la tâche Celery
             try:
-                task = analyze_entreprise_task.apply_async(
+                task = analyze_entreprise_orchestrator_task.apply_async(
                     kwargs=dict(
                         filepath=filepath,
                         output_path=output_path,
@@ -315,9 +323,9 @@ def register_websocket_handlers(socketio, app):
                                         else:
                                             logger.info(f'Lancement de la tâche de scraping pour analysis_id={analysis_id}')
                                             try:
-                                                scraping_task = scrape_analysis_task.apply_async(
+                                                scraping_task = scrape_analysis_orchestrator_task.apply_async(
                                                     kwargs=dict(analysis_id=analysis_id),
-                                                    queue='scraping',
+                                                    queue='heavy',
                                                 )
                                                 logger.info(f'Tâche de scraping lancée avec task_id={scraping_task.id}')
                                                 scraping_launched = True
@@ -1637,7 +1645,7 @@ def register_websocket_handlers(socketio, app):
                         forms_from_scrapers=forms_from_scrapers,
                     ),
                     countdown=cd,
-                    queue='pentest',
+                    queue='heavy',
                 )
             except Exception as e:
                 logger.exception(
@@ -1742,7 +1750,8 @@ def register_websocket_handlers(socketio, app):
         try:
             url = data.get('url')
             entreprise_id = data.get('entreprise_id')
-            use_lighthouse = data.get('use_lighthouse', False)
+            from config import SEO_USE_LIGHTHOUSE_DEFAULT
+            use_lighthouse = data.get('use_lighthouse', SEO_USE_LIGHTHOUSE_DEFAULT)
             session_id = request.sid
 
             # app.logger : même cible que setup_root_logger (prospectlab.log sous Gunicorn)

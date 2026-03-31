@@ -112,11 +112,26 @@ class DatabaseBase:
                 "psycopg2-binary n'est pas installé. "
                 "Installez-le avec: pip install psycopg2-binary"
             )
-        
-        conn = psycopg2.connect(self.database_url)
-        # Utiliser RealDictCursor pour avoir un comportement similaire à sqlite3.Row
-        conn.cursor_factory = RealDictCursor
-        return conn
+
+        # Réessais courts pour les pannes DNS/transitoires réseau du cluster
+        # (ex: "Temporary failure in name resolution" sur node15.lan).
+        retries = max(1, int(os.environ.get('DATABASE_CONNECT_RETRIES', '3')))
+        retry_delay = max(0.1, float(os.environ.get('DATABASE_CONNECT_RETRY_DELAY_SEC', '0.75')))
+        last_exc = None
+
+        for attempt in range(1, retries + 1):
+            try:
+                conn = psycopg2.connect(self.database_url)
+                # Utiliser RealDictCursor pour avoir un comportement similaire à sqlite3.Row
+                conn.cursor_factory = RealDictCursor
+                return conn
+            except Exception as exc:
+                last_exc = exc
+                if attempt >= retries:
+                    break
+                time.sleep(retry_delay)
+
+        raise last_exc
     
     def is_postgresql(self) -> bool:
         """
