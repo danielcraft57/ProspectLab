@@ -12,6 +12,8 @@ import json
 import re
 from urllib.parse import urlparse
 
+from services.public_api_response_cache import public_response_cache
+
 api_public_bp = Blueprint('api_public', __name__, url_prefix='/api/public')
 
 # Initialiser la base de données
@@ -527,6 +529,7 @@ def _build_website_analysis_report(database: Database, entreprise_id: int, full:
 @api_public_bp.route('/entreprises', methods=['GET'])
 @api_token_required
 @require_api_permission('entreprises')
+@public_response_cache(25)
 def get_entreprises():
     """
     API publique : Liste des entreprises
@@ -536,6 +539,7 @@ def get_entreprises():
         offset (int): Offset pour la pagination (défaut: 0)
         secteur (str): Filtrer par secteur
         statut (str): Filtrer par statut
+        opportunite (str): Filtrer par opportunite / score d'opportunite affiche
         search (str): Recherche textuelle (nom, website)
         
     Returns:
@@ -550,22 +554,33 @@ def get_entreprises():
             filters['secteur'] = request.args.get('secteur')
         if request.args.get('statut'):
             filters['statut'] = _maybe_expand_statut_filter(request.args.get('statut'))
+        if request.args.get('opportunite'):
+            filters['opportunite'] = request.args.get('opportunite')
         if request.args.get('search'):
             filters['search'] = request.args.get('search')
         
         entreprises = database.get_entreprises(filters=filters if filters else None, limit=limit, offset=offset)
-        
+
+        # Total correspondant aux mêmes filtres (liste + recherche) : une seule requête COUNT
+        # sur la première page pour limiter le coût lors du « load more ».
+        total = None
+        if offset == 0:
+            total = database.count_entreprises(filters=filters if filters else None)
+
         # Nettoyer les valeurs NaN pour la sérialisation JSON
         from utils.helpers import clean_json_dict
         entreprises = clean_json_dict(entreprises)
-        
-        return jsonify({
+
+        payload = {
             'success': True,
             'count': len(entreprises),
             'limit': limit,
             'offset': offset,
-            'data': entreprises
-        })
+            'data': entreprises,
+        }
+        if total is not None:
+            payload['total'] = int(total)
+        return jsonify(payload)
     except Exception as e:
         return jsonify({
             'success': False,
@@ -576,6 +591,7 @@ def get_entreprises():
 @api_public_bp.route('/entreprises/statuses', methods=['GET'])
 @api_token_required
 @require_api_permission('entreprises')
+@public_response_cache(300)
 def get_entreprise_statuses():
     """
     API publique : Liste des statuts d'entreprise supportés.
@@ -712,6 +728,7 @@ def entreprise_callback_public(entreprise_id: int):
 @api_public_bp.route('/entreprises/<int:entreprise_id>', methods=['GET'])
 @api_token_required
 @require_api_permission('entreprises')
+@public_response_cache(35)
 def get_entreprise(entreprise_id):
     """
     API publique : Détails d'une entreprise
@@ -750,6 +767,7 @@ def get_entreprise(entreprise_id):
 @api_token_required
 @require_api_permission('entreprises')
 @require_api_permission('emails')
+@public_response_cache(35)
 def get_entreprise_by_email():
     """
     API publique : retrouver une entreprise à partir d'un email.
@@ -842,6 +860,7 @@ def get_entreprise_by_email():
 @api_public_bp.route('/entreprises/by-website', methods=['GET'])
 @api_token_required
 @require_api_permission('entreprises')
+@public_response_cache(35)
 def get_entreprise_by_website():
     """
     API publique : retrouver l'entreprise via son URL/domaine.
@@ -880,6 +899,7 @@ def get_entreprise_by_website():
 @api_public_bp.route('/entreprises/by-phone', methods=['GET'])
 @api_token_required
 @require_api_permission('entreprises')
+@public_response_cache(35)
 def get_entreprise_by_phone():
     """
     API publique : retrouver une entreprise à partir d'un numéro de téléphone.
@@ -926,6 +946,7 @@ def get_entreprise_by_phone():
 @api_token_required
 @require_api_permission('entreprises')
 @require_api_permission('emails')
+@public_response_cache(20)
 def get_entreprise_emails(entreprise_id):
     """
     API publique : Emails d'une entreprise
@@ -991,6 +1012,7 @@ def get_entreprise_emails(entreprise_id):
 @api_token_required
 @require_api_permission('entreprises')
 @require_api_permission('emails')
+@public_response_cache(20)
 def get_entreprise_emails_all(entreprise_id: int):
     """
     API publique : Tous les emails d'une entreprise (email_principal + emails scrapés),
@@ -1016,9 +1038,39 @@ def get_entreprise_emails_all(entreprise_id: int):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@api_public_bp.route('/entreprises/<int:entreprise_id>/phones', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+@public_response_cache(20)
+def get_entreprise_phones_public(entreprise_id: int):
+    """
+    API publique : telephones connus pour une entreprise (scraping + telephone principal).
+
+    Query params:
+        include_primary (bool, optionnel): inclure telephone principal (defaut: true)
+    """
+    try:
+        entreprise = database.get_entreprise(entreprise_id)
+        if not entreprise:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable'}), 404
+        include_primary = str(request.args.get('include_primary', '1')).lower() in ('1', 'true', 'yes')
+        items = _get_entreprise_phones_list(entreprise_id, include_primary=include_primary)
+        from utils.helpers import clean_json_dict
+        items = clean_json_dict(items)
+        return jsonify({
+            'success': True,
+            'entreprise_id': entreprise_id,
+            'count': len(items),
+            'data': items,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @api_public_bp.route('/emails', methods=['GET'])
 @api_token_required
 @require_api_permission('emails')
+@public_response_cache(20)
 def get_all_emails():
     """
     API publique : Liste de tous les emails
@@ -1097,9 +1149,42 @@ def get_all_emails():
         }), 500
 
 
+@api_public_bp.route('/token/info', methods=['GET'])
+@api_token_required
+@public_response_cache(15)
+def public_api_token_info():
+    """
+    API publique : metadonnees du token courant (sans exposer la valeur complete).
+
+    Permet au client mobile de verifier la validite du token et les permissions.
+    """
+    td = getattr(request, 'api_token', None) or {}
+    raw = (td.get('token') or '') or ''
+    preview = (raw[:10] + '…') if len(raw) > 10 else ('***' if raw else None)
+    return jsonify({
+        'success': True,
+        'data': {
+            'id': td.get('id'),
+            'name': td.get('name'),
+            'token_preview': preview,
+            'app_url': td.get('app_url'),
+            'user_id': td.get('user_id'),
+            'permissions': {
+                'entreprises': bool(td.get('can_read_entreprises')),
+                'emails': bool(td.get('can_read_emails')),
+                'statistics': bool(td.get('can_read_statistics')),
+                'campagnes': bool(td.get('can_read_campagnes')),
+            },
+            'last_used': str(td.get('last_used')) if td.get('last_used') is not None else None,
+            'date_creation': str(td.get('date_creation')) if td.get('date_creation') is not None else None,
+        },
+    })
+
+
 @api_public_bp.route('/statistics', methods=['GET'])
 @api_token_required
 @require_api_permission('statistics')
+@public_response_cache(45)
 def get_statistics():
     """
     API publique : Statistiques globales
@@ -1121,9 +1206,67 @@ def get_statistics():
         }), 500
 
 
+@api_public_bp.route('/statistics/overview', methods=['GET'])
+@api_token_required
+@require_api_permission('statistics')
+@public_response_cache(45)
+def get_statistics_overview():
+    """
+    API publique : vue compacte pour mobile (KPI + tendance journaliere des entreprises).
+
+    Query params:
+        days (int, optionnel): fenetere pour la serie (defaut: 7, max: 90).
+    """
+    try:
+        raw_days = request.args.get('days', '')
+        try:
+            days = int(raw_days) if raw_days not in (None, '') else 7
+        except Exception:
+            days = 7
+        days = max(1, min(days, 90))
+        data = database.get_mobile_dashboard_overview(trend_days=days)
+        from utils.helpers import clean_json_dict
+        return jsonify({'success': True, 'data': clean_json_dict(data)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@api_public_bp.route('/reference/ciblage', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+@public_response_cache(120)
+def public_reference_ciblage():
+    """
+    API publique : listes de valeurs distinctes pour filtres (secteur, opportunite, statut entreprise, tags).
+    """
+    try:
+        data = database.get_ciblage_suggestions()
+        from utils.helpers import clean_json_dict
+        return jsonify({'success': True, 'data': clean_json_dict(data)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@api_public_bp.route('/reference/ciblage/counts', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+@public_response_cache(120)
+def public_reference_ciblage_counts():
+    """
+    API publique : meme chose que /reference/ciblage avec effectifs par valeur (pour pickers / facettes).
+    """
+    try:
+        data = database.get_ciblage_suggestions_with_counts()
+        from utils.helpers import clean_json_dict
+        return jsonify({'success': True, 'data': clean_json_dict(data)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @api_public_bp.route('/website-analysis', methods=['GET', 'POST'])
 @api_token_required
 @require_api_permission('entreprises')
+@public_response_cache(90)
 def public_website_analysis():
     """
     API publique (token) : Analyse d'un site web (par URL).
@@ -1263,9 +1406,24 @@ def public_website_analysis():
     }), 202
 
 
+@api_public_bp.route('/campagnes/statuses', methods=['GET'])
+@api_token_required
+@require_api_permission('campagnes')
+@public_response_cache(600)
+def public_campagne_statuses():
+    """
+    API publique : statuts possibles pour une campagne email (filtrage / UI).
+    """
+    return jsonify({
+        'success': True,
+        'data': ['draft', 'scheduled', 'running', 'completed', 'failed'],
+    })
+
+
 @api_public_bp.route('/campagnes', methods=['GET'])
 @api_token_required
 @require_api_permission('campagnes')
+@public_response_cache(25)
 def get_campagnes():
     """
     API publique : Liste des campagnes email
@@ -1314,6 +1472,7 @@ def get_campagnes():
 @api_public_bp.route('/entreprises/<int:entreprise_id>/campagnes', methods=['GET'])
 @api_token_required
 @require_api_permission('campagnes')
+@public_response_cache(25)
 def get_campagnes_by_entreprise(entreprise_id: int):
     """
     API publique : campagnes liées à une entreprise (même filtre que GET /campagnes?entreprise_id=).
@@ -1351,6 +1510,7 @@ def get_campagnes_by_entreprise(entreprise_id: int):
 @api_public_bp.route('/campagnes/<int:campagne_id>', methods=['GET'])
 @api_token_required
 @require_api_permission('campagnes')
+@public_response_cache(25)
 def get_campagne(campagne_id):
     """
     API publique : Détails d'une campagne email
@@ -1387,6 +1547,7 @@ def get_campagne(campagne_id):
 @api_public_bp.route('/campagnes/<int:campagne_id>/emails', methods=['GET'])
 @api_token_required
 @require_api_permission('campagnes')
+@public_response_cache(25)
 def get_campagne_emails(campagne_id):
     """
     API publique : Emails envoyés d'une campagne
@@ -1449,6 +1610,7 @@ def get_campagne_emails(campagne_id):
 @api_public_bp.route('/campagnes/<int:campagne_id>/statistics', methods=['GET'])
 @api_token_required
 @require_api_permission('campagnes')
+@public_response_cache(25)
 def get_campagne_statistics(campagne_id):
     """
     API publique : Statistiques de tracking d'une campagne

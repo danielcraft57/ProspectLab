@@ -169,3 +169,8 @@ BOUNCE_SCAN_LIMIT = int(os.environ.get('BOUNCE_SCAN_LIMIT', '0'))
 BOUNCE_SCAN_DELETE_PROCESSED = os.environ.get('BOUNCE_SCAN_DELETE_PROCESSED', 'true').lower() in ('1', 'true', 'yes', 'on')
 # Délai (secondes) après lancement campagne avant 1er scan auto
 BOUNCE_SCAN_POST_CAMPAIGN_DELAY_SEC = max(30, int(os.environ.get('BOUNCE_SCAN_POST_CAMPAIGN_DELAY_SEC', '1800')))
+
+# Cache mémoire des réponses GET /api/public (décorateur public_response_cache).
+# PUBLIC_API_RESPONSE_CACHE=false pour désactiver.
+# TTL par défaut (secondes) si un décorateur ne fixe pas de durée : PUBLIC_API_CACHE_TTL_DEFAULT=30
+# Taille max du cache (entrées) : PUBLIC_API_CACHE_MAX_ENTRIES=512

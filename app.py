@@ -122,11 +122,20 @@ except Exception:
     _am = 'erreur'
 app.logger.info('ProspectLab Socket.IO prêt (async_mode=%s)', _am)
 
-# CORS : autoriser l'app prospection (ex: Vite sur localhost:5173) à appeler l'API
-ALLOWED_CORS_ORIGINS = [
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-]
+# CORS : autoriser les clients web locaux (Vite, Expo Web, etc.) à appeler l'API.
+# Surchargable via CORS_ALLOWED_ORIGINS="https://foo,https://bar"
+_cors_origins_env = os.environ.get('CORS_ALLOWED_ORIGINS', '')
+if _cors_origins_env.strip():
+    ALLOWED_CORS_ORIGINS = [o.strip() for o in _cors_origins_env.split(',') if o.strip()]
+else:
+    ALLOWED_CORS_ORIGINS = [
+        'http://localhost:5173',
+        'http://127.0.0.1:5173',
+        'http://localhost:8081',
+        'http://127.0.0.1:8081',
+        'http://localhost:19006',
+        'http://127.0.0.1:19006',
+    ]
 
 @app.after_request
 def add_cors_headers(response):

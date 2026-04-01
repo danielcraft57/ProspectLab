@@ -2064,6 +2064,115 @@ class EntrepriseManager(DatabaseBase):
         
         conn.close()
         return stats
+
+    def get_mobile_dashboard_overview(self, trend_days: int = 7) -> dict:
+        """
+        Statistiques compactes pour clients mobiles (KPI + série journalière).
+
+        Args:
+            trend_days: nombre de jours (inclus) pour la série \"nouvelles entreprises\" par jour.
+
+        Returns:
+            dict avec totaux, emails envoyés, tendance journalière.
+        """
+        from datetime import datetime, timedelta
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        n = max(1, min(int(trend_days or 7), 90))
+        out: dict = {
+            'total_entreprises': 0,
+            'total_analyses': 0,
+            'total_campagnes': 0,
+            'total_emails': 0,
+            'emails_envoyes': 0,
+            'trend_entreprises': [],
+        }
+        def _count_c(row) -> int:
+            if not row:
+                return 0
+            try:
+                d = dict(row)
+                return int(d.get('c') or 0)
+            except Exception:
+                try:
+                    return int(row['c'])
+                except Exception:
+                    return 0
+
+        try:
+            self.execute_sql(cursor, 'SELECT COUNT(*) as c FROM entreprises')
+            out['total_entreprises'] = _count_c(cursor.fetchone())
+        except Exception:
+            pass
+        try:
+            self.execute_sql(cursor, 'SELECT COUNT(*) as c FROM analyses')
+            out['total_analyses'] = _count_c(cursor.fetchone())
+        except Exception:
+            pass
+        try:
+            self.execute_sql(cursor, 'SELECT COUNT(*) as c FROM campagnes_email')
+            out['total_campagnes'] = _count_c(cursor.fetchone())
+        except Exception:
+            pass
+        try:
+            self.execute_sql(cursor, '''
+                SELECT COUNT(*) as c FROM scraper_emails
+                WHERE email IS NOT NULL AND TRIM(email) != ''
+            ''')
+            out['total_emails'] = _count_c(cursor.fetchone())
+        except Exception:
+            pass
+        try:
+            self.execute_sql(cursor, '''
+                SELECT COUNT(*) as c FROM emails_envoyes WHERE statut = 'sent'
+            ''')
+            out['emails_envoyes'] = _count_c(cursor.fetchone())
+        except Exception:
+            pass
+
+        start = datetime.utcnow().date() - timedelta(days=n - 1)
+        start_str = start.isoformat()
+        rows_map: dict[str, int] = {}
+        try:
+            if self.is_postgresql():
+                self.execute_sql(cursor, '''
+                    SELECT CAST(date_analyse AS DATE) AS d, COUNT(*)::bigint AS c
+                    FROM entreprises
+                    WHERE date_analyse IS NOT NULL
+                      AND CAST(date_analyse AS DATE) >= CAST(? AS DATE)
+                    GROUP BY CAST(date_analyse AS DATE)
+                    ORDER BY 1
+                ''', (start_str,))
+            else:
+                self.execute_sql(cursor, '''
+                    SELECT date(date_analyse) AS d, COUNT(*) AS c
+                    FROM entreprises
+                    WHERE date_analyse IS NOT NULL
+                      AND date(date_analyse) >= date(?)
+                    GROUP BY date(date_analyse)
+                    ORDER BY 1
+                ''', (start_str,))
+            for row in cursor.fetchall() or []:
+                d = dict(row) if not isinstance(row, dict) else row
+                dk = d.get('d')
+                if hasattr(dk, 'isoformat'):
+                    key = dk.isoformat()
+                else:
+                    key = str(dk)[:10]
+                rows_map[key] = int(d.get('c') or 0)
+        except Exception:
+            pass
+
+        trend: list[dict] = []
+        for i in range(n):
+            dday = start + timedelta(days=i)
+            key = dday.isoformat()
+            trend.append({'date': key, 'count': int(rows_map.get(key, 0))})
+        out['trend_entreprises'] = trend
+
+        conn.close()
+        return out
     
     def get_ciblage_suggestions(self):
         """

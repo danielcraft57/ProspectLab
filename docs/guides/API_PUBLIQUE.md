@@ -1,484 +1,295 @@
-# Guide de l'API Publique
+# Guide de l’API publique ProspectLab
 
-## Vue d'ensemble
+Documentation de référence pour le préfixe **`/api/public`**. Pour l’app mobile (client Expo, cache client, variables d’env), voir aussi [**Intégration API mobile**](../mobile/API_INTEGRATION.md).
 
-L'API publique de ProspectLab permet d'accéder aux données d'entreprises et d'emails depuis des applications externes (facturation, devis, comptabilité, etc.). L'authentification se fait via des tokens API sécurisés.
+---
+
+## Liens connexes
+
+| Document | Contenu |
+|----------|---------|
+| [Intégration API mobile](../mobile/API_INTEGRATION.md) | Base URL, permissions, tableau des routes côté client, cache applicatif |
+| [Index de la documentation](../INDEX.md) | Menu général |
+| [Architecture mobile](../mobile/ARCHITECTURE_MOBILE.md) | Couches UI → `ProspectLabApi` |
+
+---
+
+## Vue d’ensemble
+
+L’API publique permet d’accéder aux données d’entreprises, emails, campagnes et statistiques depuis des applications externes. L’authentification se fait par **token API** (généré côté admin).
+
+---
+
+## Sommaire
+
+1. [Authentification](#authentification)  
+2. [Permissions](#permissions)  
+3. [Cache des réponses GET](#cache-des-réponses-get)  
+4. [Base URL](#base-url)  
+5. [Table de référence des endpoints](#table-de-référence-des-endpoints)  
+6. [Détail et exemples](#détail-par-domaine)  
+7. [Gestion des tokens API (admin)](#gestion-des-tokens-api-admin)  
+8. [Codes HTTP et format des réponses](#codes-de-réponse-http)  
+9. [Exemples d’intégration](#exemples-dintégration)  
+10. [Sécurité et limitations](#sécurité)
+
+---
 
 ## Authentification
 
-### Génération d'un token API
+### Génération d’un token API
 
-Les tokens API sont générés par un administrateur via l'interface d'administration :
+Les tokens sont créés par un administrateur (interface dédiée ou API admin).
 
-1. Se connecter en tant qu'administrateur
-2. Accéder à l'endpoint `/api/tokens` (POST)
-3. Fournir un nom pour le token
-4. Sauvegarder immédiatement le token retourné (il ne sera plus affiché)
+1. Se connecter en tant qu’administrateur  
+2. Utiliser l’interface **Tokens API** ou l’API admin documentée plus bas  
+3. **Conserver** le token affiché : il ne sera en général plus montré en clair  
 
 ### Utilisation du token
 
-Le token peut être fourni de deux manières :
+**1. Header `Authorization` (recommandé)**
 
-#### 1. Header Authorization (recommandé)
-```
+```http
 Authorization: Bearer <votre_token>
 ```
 
-#### 2. Paramètre de requête
-```
+**2. Paramètre de requête (à éviter sur mobile)**
+
+```text
 ?api_token=<votre_token>
 ```
 
-## Endpoints disponibles
+---
 
-### Base URL
-```
-http://votre-domaine.com/api/public
-```
+## Permissions
 
-### 1. Liste des entreprises
+Chaque token possède des flags en base (`api_tokens`) :
 
-**GET** `/api/public/entreprises`
+| Permission API | Champ | Rôle |
+|----------------|-------|------|
+| Entreprises | `can_read_entreprises` | Listes, détails, recherche, analyse site, téléphones, références ciblage |
+| Emails | `can_read_emails` | Emails (y compris routes combinées avec entreprises) |
+| Statistiques | `can_read_statistics` | `/statistics`, `/statistics/overview` |
+| Campagnes | `can_read_campagnes` | Campagnes, emails / stats de campagne, statuts campagne |
 
-**Paramètres de requête** :
-- `limit` (int, optionnel) : Nombre maximum de résultats (défaut: 100, max: 1000)
-- `offset` (int, optionnel) : Offset pour la pagination (défaut: 0)
-- `secteur` (string, optionnel) : Filtrer par secteur
-- `statut` (string, optionnel) : Filtrer sur `entreprises.statut`.
-  - Si `statut` vaut `Gagné`, `Perdu` ou `Relance`, la requête inclut aussi les statuts événementiels associés (ex : `Réponse positive` pour `Gagné`, etc.).
-  - Sinon, le filtre est une valeur exacte.
-- `search` (string, optionnel) : Recherche textuelle (nom, website)
+Certaines routes exigent **plusieurs** permissions (ex. `by-email` avec `include_emails`). La route **`GET /token/info`** exige seulement un **token valide** et permet de vérifier les permissions sans appeler les données métier.
 
-**Exemple de requête** :
-```bash
-curl -H "Authorization: Bearer votre_token" \
-  "http://localhost:5000/api/public/entreprises?limit=50&secteur=Informatique"
-```
+En cas de permission manquante, la réponse est **`403 Forbidden`** avec un message explicite.
 
-**Réponse** :
-```json
-{
-  "success": true,
-  "count": 50,
-  "limit": 50,
-  "offset": 0,
-  "data": [
-    {
-      "id": 1,
-      "nom": "Entreprise Example",
-      "website": "https://example.com",
-      "secteur": "Informatique",
-      "statut": "Nouveau",
-      "email_principal": "contact@example.com",
-      "telephone": "+33123456789",
-      "address_1": "123 Rue Example",
-      "address_2": "75001 Paris",
-      "longitude": 2.3522,
-      "latitude": 48.8566,
-      "note_google": 4.5,
-      "nb_avis_google": 120,
-      "tags": ["client", "important"],
-      "og_data": {...}
-    }
-  ]
-}
+---
+
+## Cache des réponses GET
+
+Les réponses **GET** de nombreuses routes sont mises en **cache mémoire** côté serveur (clé : identifiant du token + chemin + query string ; TTL par route).
+
+- **Désactiver** : variable d’environnement `PUBLIC_API_RESPONSE_CACHE=false`  
+- **Paramètres** : voir commentaires en fin de `config.py` (`PUBLIC_API_CACHE_TTL_DEFAULT`, `PUBLIC_API_CACHE_MAX_ENTRIES`)
+
+Les clients doivent accepter un léger délai de cohérence ou prévoir un **rafraîchissement forcé** côté UI si besoin. L’app mobile gère un cache client distinct (voir [API_INTEGRATION.md](../mobile/API_INTEGRATION.md)).
+
+---
+
+## Base URL
+
+```text
+https://<votre-domaine>/api/public
 ```
 
-### Statuts d'entreprise supportés
+Exemples :
 
-**GET** `/api/public/entreprises/statuses`
+- Développement local : `http://localhost:5000/api/public`  
+- Production : `https://prospectlab.danielcraft.fr/api/public`  
 
-Retourne la liste des statuts supportés par ProspectLab (pipeline + statuts délivrabilité/opt-out).
+Tous les chemins ci‑dessous sont **relatifs** à `/api/public`.
 
-**Exemple** :
+---
 
-```bash
-curl -H "Authorization: Bearer votre_token" \
-  "http://localhost:5000/api/public/entreprises/statuses"
-```
+## Table de référence des endpoints
 
-### Mapping retours emails -> statuts
+| Méthode | Chemin | Permission(s) | Description |
+|---------|--------|---------------|-------------|
+| **GET** | `/token/info` | Token valide | Métadonnées du token (nom, aperçu masqué, permissions, dates) |
+| **GET** | `/statistics` | Statistiques | Statistiques globales détaillées |
+| **GET** | `/statistics/overview` | Statistiques | Vue compacte + série journalière (`?days=`, max 90) |
+| **GET** | `/reference/ciblage` | Entreprises | Listes secteurs, opportunités, statuts entreprise, tags |
+| **GET** | `/reference/ciblage/counts` | Entreprises | Idem avec effectifs `{ value, count }` |
+| **GET** | `/entreprises/statuses` | Entreprises | Statuts entreprise supportés (pipeline, délivrabilité) |
+| **GET** | `/campagnes/statuses` | Campagnes | `draft`, `scheduled`, `running`, `completed`, `failed` |
+| **GET** | `/entreprises` | Entreprises | Liste paginée (`limit`, `offset`, `secteur`, `statut`, `search`) |
+| **GET** | `/entreprises/<id>` | Entreprises | Détail entreprise |
+| **GET** | `/entreprises/by-website` | Entreprises | Recherche par site (`website`) |
+| **GET** | `/entreprises/by-email` | Entreprises + emails | Recherche par email (`include_emails`) |
+| **GET** | `/entreprises/by-phone` | Entreprises | Recherche par téléphone (`include_phones`) |
+| **PATCH**/**POST** | `/entreprises/<id>/statut` | Entreprises | Mise à jour du statut (+ `note` optionnelle) |
+| **POST** | `/entreprises/<id>/unsubscribe` | Entreprises | Raccourcis événements (voir section dédiée) |
+| **POST** | `/entreprises/<id>/negative-reply` | Entreprises | |
+| **POST** | `/entreprises/<id>/bounce` | Entreprises | |
+| **POST** | `/entreprises/<id>/positive-reply` | Entreprises | |
+| **POST** | `/entreprises/<id>/spam-complaint` | Entreprises | |
+| **POST** | `/entreprises/<id>/do-not-contact` | Entreprises | |
+| **POST** | `/entreprises/<id>/callback` | Entreprises | |
+| **GET** | `/entreprises/<id>/emails` | Entreprises + emails | Emails format court |
+| **GET** | `/entreprises/<id>/emails/all` | Entreprises + emails | Emails enrichis (`include_primary`) |
+| **GET** | `/entreprises/<id>/phones` | Entreprises | Téléphones scrapés + principal (`include_primary`) |
+| **GET** | `/entreprises/<id>/campagnes` | Campagnes | Campagnes liées à l’entreprise |
+| **GET** | `/emails` | Emails | Liste globale (`limit`, `offset`, `entreprise_id`) |
+| **GET** | `/campagnes` | Campagnes | Liste (`limit`, `offset`, `statut`, `entreprise_id`) |
+| **GET** | `/campagnes/<id>` | Campagnes | Détail campagne |
+| **GET** | `/campagnes/<id>/emails` | Campagnes | Emails envoyés |
+| **GET** | `/campagnes/<id>/statistics` | Campagnes | Tracking (ouvertures, clics) |
+| **GET** | `/website-analysis` | Entreprises | Rapport agrégé (`website`, `full`) |
+| **POST** | `/website-analysis` | Entreprises | Lance les analyses asynchrones (réponse typique **202**) |
 
-Tu peux traduire les retours de boîte mail en appelant les endpoints “raccourcis” :
+---
 
-- Undelivered / non livré -> `POST /api/public/entreprises/<id>/bounce` (statut = `Bounce`)
-- Réponse automatique (auto-reply) -> `POST /api/public/entreprises/<id>/callback` (statut = `À rappeler`)
-- Réponse “normale” négative -> `POST /api/public/entreprises/<id>/negative-reply` (statut = `Réponse négative`)
-- Réponse “normale” positive -> `POST /api/public/entreprises/<id>/positive-reply` (statut = `Réponse positive`)
-- Désabonnement / stop pub -> `POST /api/public/entreprises/<id>/unsubscribe` (statut = `Désabonné`) ou `do-not-contact` (statut = `Ne pas contacter`)
-- Spam complaint -> `POST /api/public/entreprises/<id>/spam-complaint` (statut = `Plainte spam`)
+## Détail par domaine
 
-### Mettre à jour le statut d'une entreprise (public)
+### Métadonnées du token
 
-**PATCH** `/api/public/entreprises/<entreprise_id>/statut`
+**GET** `/token/info`
 
-**Body (JSON)** :
-- `statut` (string, requis) : valeur parmi `GET /api/public/entreprises/statuses`
-- `note` (string, optionnel) : texte libre (audit) ajouté aux notes si fourni
+Réponse type :
 
-**Exemple** :
-
-```bash
-curl -X PATCH -H "Authorization: Bearer votre_token" -H "Content-Type: application/json" \
-  -d "{\"statut\": \"Désabonné\", \"note\": \"Opt-out depuis formulaire / unsubscribe\"}" \
-  "http://localhost:5000/api/public/entreprises/42/statut"
-```
-
-### Raccourcis (opt-out / négatif / bounce)
-
-**POST** `/api/public/entreprises/<entreprise_id>/unsubscribe`
-
-**POST** `/api/public/entreprises/<entreprise_id>/negative-reply`
-
-**POST** `/api/public/entreprises/<entreprise_id>/bounce`
-
-**POST** `/api/public/entreprises/<entreprise_id>/positive-reply`
-
-**POST** `/api/public/entreprises/<entreprise_id>/spam-complaint`
-
-**POST** `/api/public/entreprises/<entreprise_id>/do-not-contact`
-
-**POST** `/api/public/entreprises/<entreprise_id>/callback`
-
-Body JSON optionnel : `{ "note": "..." }`
-
-### 2. Détails d'une entreprise
-
-**GET** `/api/public/entreprises/<entreprise_id>`
-
-**Exemple de requête** :
-```bash
-curl -H "Authorization: Bearer votre_token" \
-  "http://localhost:5000/api/public/entreprises/1"
-```
-
-**Réponse** :
 ```json
 {
   "success": true,
   "data": {
     "id": 1,
-    "nom": "Entreprise Example",
-    "website": "https://example.com",
-    "secteur": "Informatique",
-    "statut": "Nouveau",
-    "email_principal": "contact@example.com",
-    "telephone": "+33123456789",
-    "address_1": "123 Rue Example",
-    "address_2": "75001 Paris",
-    "longitude": 2.3522,
-    "latitude": 48.8566,
-    "note_google": 4.5,
-    "nb_avis_google": 120,
-    "tags": ["client", "important"],
-    "og_data": {...}
-  }
-}
-```
-
-### 2.1. Entreprise par website
-
-**GET** `/api/public/entreprises/by-website?website=...`
-
-Retourne l'entreprise (donc l'`id`) à partir d'un `website` (URL ou domaine).
-
-**Exemple** :
-
-```bash
-curl -H "Authorization: Bearer votre_token" \
-  "http://localhost:5000/api/public/entreprises/by-website?website=danielcraft.fr"
-```
-
-### 2.2. Entreprise par email
-
-**GET** `/api/public/entreprises/by-email?email=...`
-
-Retourne l'entreprise (donc l'`id`) à partir d'un email (soit trouvé dans `scraper_emails`, soit via `entreprises.email_principal`).
-
-Paramètres :
-- `email` (string, requis)
-- `include_emails` (bool, optionnel) : si true, inclut aussi tous les emails connus de l'entreprise
-
-**Exemple** :
-
-```bash
-curl -H "Authorization: Bearer votre_token" \
-  "http://localhost:5000/api/public/entreprises/by-email?email=contact@danielcraft.fr"
-```
-
-### 3. Emails d'une entreprise
-
-**GET** `/api/public/entreprises/<entreprise_id>/emails`
-
-**Exemple de requête** :
-```bash
-curl -H "Authorization: Bearer votre_token" \
-  "http://localhost:5000/api/public/entreprises/1/emails"
-```
-
-**Réponse** :
-```json
-{
-  "success": true,
-  "entreprise_id": 1,
-  "count": 3,
-  "data": [
-    {
-      "email": "contact@example.com",
-      "nom": "John Doe",
-      "page_url": "https://example.com/contact",
-      "date_scraping": "2026-01-22 10:30:00"
+    "name": "Token mobile",
+    "token_preview": "AbCdEf1234…",
+    "app_url": null,
+    "user_id": null,
+    "permissions": {
+      "entreprises": true,
+      "emails": true,
+      "statistics": true,
+      "campagnes": true
     },
-    {
-      "email": "info@example.com",
-      "nom": null,
-      "page_url": "https://example.com",
-      "date_scraping": "2026-01-22 10:30:00"
-    }
-  ]
-}
-```
-
-### 3.1. Tous les emails d'une entreprise (complet)
-
-**GET** `/api/public/entreprises/<entreprise_id>/emails/all`
-
-Retourne :
-- `email_principal` (si présent) + emails scrapés
-- infos d'analyse quand disponibles (provider/type/risk_score/name_info/is_person)
-- un champ `person` normalisé si on a des infos (nom/prénom)
-
-Paramètres :
-- `include_primary` (bool, optionnel, défaut true) : inclure `email_principal`
-
-**Exemple** :
-
-```bash
-curl -H "Authorization: Bearer votre_token" \
-  "http://localhost:5000/api/public/entreprises/1/emails/all"
-```
-
-### 4. Liste de tous les emails
-
-**GET** `/api/public/emails`
-
-**Paramètres de requête** :
-- `limit` (int, optionnel) : Nombre maximum de résultats (défaut: 100, max: 1000)
-- `offset` (int, optionnel) : Offset pour la pagination (défaut: 0)
-- `entreprise_id` (int, optionnel) : Filtrer par entreprise
-
-**Exemple de requête** :
-```bash
-curl -H "Authorization: Bearer votre_token" \
-  "http://localhost:5000/api/public/emails?limit=100&entreprise_id=1"
-```
-
-**Réponse** :
-```json
-{
-  "success": true,
-  "count": 100,
-  "limit": 100,
-  "offset": 0,
-  "data": [
-    {
-      "email": "contact@example.com",
-      "nom": "John Doe",
-      "entreprise_id": 1,
-      "entreprise_nom": "Entreprise Example",
-      "page_url": "https://example.com/contact",
-      "date_scraping": "2026-01-22 10:30:00"
-    }
-  ]
-}
-```
-
-### 5. Liste des campagnes email
-
-**GET** `/api/public/campagnes`
-
-**Paramètres de requête** :
-- `limit` (int, optionnel) : Nombre maximum de résultats (défaut: 100, max: 1000)
-- `offset` (int, optionnel) : Offset pour la pagination (défaut: 0)
-- `statut` (string, optionnel) : Filtrer par statut (draft, running, completed, failed)
-
-**Exemple de requête** :
-```bash
-curl -H "Authorization: Bearer votre_token" \
-  "http://localhost:5000/api/public/campagnes?limit=50&statut=completed"
-```
-
-**Réponse** :
-```json
-{
-  "success": true,
-  "count": 50,
-  "limit": 50,
-  "offset": 0,
-  "data": [
-    {
-      "id": 1,
-      "nom": "Campagne Janvier 2026",
-      "template_id": "modernisation_technique",
-      "sujet": "Modernisation de votre infrastructure",
-      "total_destinataires": 100,
-      "total_envoyes": 98,
-      "total_reussis": 95,
-      "statut": "completed",
-      "date_creation": "2026-01-22 10:00:00"
-    }
-  ]
-}
-```
-
-### 6. Détails d'une campagne
-
-**GET** `/api/public/campagnes/<campagne_id>`
-
-**Exemple de requête** :
-```bash
-curl -H "Authorization: Bearer votre_token" \
-  "http://localhost:5000/api/public/campagnes/1"
-```
-
-**Réponse** :
-```json
-{
-  "success": true,
-  "data": {
-    "id": 1,
-    "nom": "Campagne Janvier 2026",
-    "template_id": "modernisation_technique",
-    "sujet": "Modernisation de votre infrastructure",
-    "total_destinataires": 100,
-    "total_envoyes": 98,
-    "total_reussis": 95,
-    "statut": "completed",
-    "date_creation": "2026-01-22 10:00:00"
+    "last_used": "2026-04-01 12:00:00",
+    "date_creation": "2026-01-15 10:00:00"
   }
 }
 ```
 
-### 7. Emails d'une campagne
+La **valeur complète** du secret n’est **pas** renvoyée.
 
-**GET** `/api/public/campagnes/<campagne_id>/emails`
+---
 
-**Paramètres de requête** :
-- `limit` (int, optionnel) : Nombre maximum de résultats (défaut: 100, max: 1000)
-- `offset` (int, optionnel) : Offset pour la pagination (défaut: 0)
-- `statut` (string, optionnel) : Filtrer par statut (sent, failed)
+### Statistiques
 
-**Exemple de requête** :
+**GET** `/statistics` — jeu complet (répartition par statut, secteur, campagnes récentes, etc.).
+
+**GET** `/statistics/overview?days=7` — optimisé pour tableaux de bord et apps mobiles :
+
+- `total_entreprises`, `total_analyses`, `total_campagnes`, `total_emails` (lignes `scraper_emails` non vides), `emails_envoyes`  
+- `trend_entreprises` : `[{ "date": "YYYY-MM-DD", "count": n }, ...]` sur `days` jours (max **90**)
+
+---
+
+### Référence et filtres UI
+
+- **`GET /entreprises/statuses`** — liste des statuts entreprise (pipeline + délivrabilité).  
+- **`GET /reference/ciblage`** — `secteurs`, `opportunites`, `statuts`, `tags` (valeurs distinctes).  
+- **`GET /reference/ciblage/counts`** — mêmes dimensions avec comptages pour facettes.  
+- **`GET /campagnes/statuses`** — valeurs de `statut` pour les campagnes email.
+
+---
+
+### Entreprises : liste et recherche
+
+**GET** `/entreprises`
+
+Paramètres : `limit` (défaut 100, max 1000), `offset`, `secteur`, `statut`, `search`.  
+Pour `statut` : si la valeur est `Gagné`, `Perdu` ou `Relance`, le filtre inclut les statuts événementiels associés ; sinon filtre exact.
+
+**GET** `/entreprises/by-website?website=`** — URL ou domaine normalisé.
+
+**GET** `/entreprises/by-email?email=&include_emails=`** — nécessite la permission **emails** si vous chargez les emails associés.
+
+**GET** `/entreprises/by-phone?phone=&include_phones=`** — variantes de numéro acceptées (FR + international).
+
+---
+
+### Emails et téléphones d’une entreprise
+
+- **`GET /entreprises/<id>/emails`** — liste simplifiée.  
+- **`GET /entreprises/<id>/emails/all?include_primary=`** — détail enrichi (analyse, personne, etc.).  
+- **`GET /entreprises/<id>/phones?include_primary=`** — téléphones scrapés + téléphone principal.
+
+---
+
+### Campagnes
+
+- **`GET /campagnes`** — `limit`, `offset`, `statut`, **`entreprise_id`** (campagnes liées à une entreprise).  
+- **`GET /entreprises/<id>/campagnes`** — même logique de filtrage, scoping par ID.  
+- **`GET /campagnes/<id>`**, **`.../emails`**, **`.../statistics`** — détail, envois, métriques de tracking.
+
+---
+
+### Analyse de site
+
+**GET** `/website-analysis?website=&full=`** — rapport SEO / technique / OSINT / pentest (agrégation existante en base). Réponse **404** si aucune entreprise associée au site.
+
+**POST** `/website-analysis` — corps JSON : `website`, `force`, `full`, options de profondeur / workers / Lighthouse / Nmap, etc. Déclenche des tâches Celery ; réponse typique **202** avec identifiants de tâches. Puis interroger le **GET** pour récupérer le rapport.
+
+---
+
+### Événements délivrabilité et statut entreprise
+
+Mapping recommandé (raccourcis **POST**) :
+
+| Cas | Endpoint | Effet statut typique |
+|-----|----------|----------------------|
+| Bounce / non livré | `/entreprises/<id>/bounce` | `Bounce` |
+| Auto-réponse | `/entreprises/<id>/callback` | `À rappeler` |
+| Réponse négative | `/entreprises/<id>/negative-reply` | `Réponse négative` |
+| Réponse positive | `/entreprises/<id>/positive-reply` | `Réponse positive` |
+| Désabonnement | `/entreprises/<id>/unsubscribe` | `Désabonné` |
+| Ne plus contacter | `/entreprises/<id>/do-not-contact` | `Ne pas contacter` |
+| Plainte spam | `/entreprises/<id>/spam-complaint` | `Plainte spam` |
+
+**PATCH** ou **POST** `/entreprises/<id>/statut` — corps : `{ "statut": "...", "note": "..." }` avec une valeur parmi **`GET /entreprises/statuses`**.
+
+Body optionnel sur les POST : `{ "note": "..." }`.
+
+---
+
+### Exemples cURL (extraits)
+
+Liste des entreprises :
+
 ```bash
-curl -H "Authorization: Bearer votre_token" \
-  "http://localhost:5000/api/public/campagnes/1/emails?limit=100"
+curl -H "Authorization: Bearer VOTRE_TOKEN" \
+  "https://votre-domaine/api/public/entreprises?limit=50&search=example"
 ```
 
-**Réponse** :
-```json
-{
-  "success": true,
-  "campagne_id": 1,
-  "count": 100,
-  "total": 98,
-  "limit": 100,
-  "offset": 0,
-  "data": [
-    {
-      "id": 1,
-      "campagne_id": 1,
-      "entreprise_id": 5,
-      "email": "contact@example.com",
-      "nom_destinataire": "John Doe",
-      "entreprise": "Example Corp",
-      "sujet": "Modernisation de votre infrastructure",
-      "date_envoi": "2026-01-22 10:05:00",
-      "statut": "sent",
-      "erreur": null,
-      "tracking_token": "abc123..."
-    }
-  ]
-}
-```
+Vue overview (mobile / dashboard léger) :
 
-### 8. Statistiques d'une campagne
-
-**GET** `/api/public/campagnes/<campagne_id>/statistics`
-
-**Exemple de requête** :
 ```bash
-curl -H "Authorization: Bearer votre_token" \
-  "http://localhost:5000/api/public/campagnes/1/statistics"
+curl -H "Authorization: Bearer VOTRE_TOKEN" \
+  "https://votre-domaine/api/public/statistics/overview?days=14"
 ```
 
-**Réponse** :
-```json
-{
-  "success": true,
-  "campagne_id": 1,
-  "data": {
-    "total_emails": 98,
-    "total_opens": 45,
-    "total_clicks": 12,
-    "open_rate": 45.9,
-    "click_rate": 12.2,
-    "events_by_type": {
-      "open": 45,
-      "click": 12
-    }
-  }
-}
-```
+Infos token :
 
-### 9. Statistiques
-
-**GET** `/api/public/statistics`
-
-Retourne un résumé global des données accessibles via l’API publique.
-
-**Exemple de requête** :
 ```bash
-curl -H "Authorization: Bearer votre_token" \
-  "http://localhost:5000/api/public/statistics"
+curl -H "Authorization: Bearer VOTRE_TOKEN" \
+  "https://votre-domaine/api/public/token/info"
 ```
 
-**Réponse** (exemple) :
-```json
-{
-  "success": true,
-  "data": {
-    "total_analyses": 10,
-    "total_entreprises": 250,
-    "favoris": 15,
-    "par_statut": {
-      "Nouveau": 120,
-      "À qualifier": 60,
-      "Relance": 40,
-      "Gagné": 20,
-      "Perdu": 10
-    },
-    "par_secteur": {
-      "Technologie": 100,
-      "Commerce": 50
-    },
-    "par_opportunite": {
-      "Élevée": 20,
-      "Moyenne": 30
-    }
-  }
-}
-```
+---
 
-## Gestion des tokens API (Admin)
+## Gestion des tokens API (admin)
+
+Hors préfixe `/api/public` : routes réservées à la session admin (voir interface **Tokens API**).
 
 ### Créer un token
 
-**POST** `/api/tokens`
-
-**Headers** :
-- `Authorization: Bearer <token_admin>` (session admin)
+**POST** `/api/tokens`  
+Header : session admin (cookie / session Flask selon votre déploiement).
 
 **Body (JSON)** :
+
 ```json
 {
   "name": "Token pour logiciel de facturation",
@@ -486,58 +297,43 @@ curl -H "Authorization: Bearer votre_token" \
 }
 ```
 
-**Réponse** :
-```json
-{
-  "success": true,
-  "message": "Token créé avec succès. Sauvegardez-le immédiatement, il ne sera plus affiché.",
-  "data": {
-    "id": 1,
-    "token": "votre_token_complet_ici",
-    "name": "Token pour logiciel de facturation",
-    "user_id": 1,
-    "is_active": true
-  }
-}
-```
+Réponse : objet avec `token` en clair **une seule fois** — à sauvegarder immédiatement.
 
 ### Lister les tokens
 
-**GET** `/api/tokens`
+**GET** `/api/tokens`  
+Query : `user_id` (optionnel).
 
-**Query params** :
-- `user_id` (int, optionnel) : Filtrer par utilisateur
+### Révoquer / supprimer
 
-### Révoquer un token
+- **DELETE** `/api/tokens/<token_id>` — désactive le token.  
+- **DELETE** `/api/tokens/<token_id>/delete` — suppression définitive.
 
-**DELETE** `/api/tokens/<token_id>`
-
-Désactive le token (ne le supprime pas).
-
-### Supprimer un token
-
-**DELETE** `/api/tokens/<token_id>/delete`
-
-Supprime définitivement le token.
+---
 
 ## Codes de réponse HTTP
 
-- **200 OK** : Requête réussie
-- **201 Created** : Ressource créée avec succès
-- **400 Bad Request** : Paramètres invalides
-- **401 Unauthorized** : Token manquant ou invalide
-- **404 Not Found** : Ressource introuvable
-- **500 Internal Server Error** : Erreur serveur
+| Code | Signification |
+|------|----------------|
+| **200** | OK |
+| **201** | Ressource créée |
+| **202** | Accepté (ex. analyse lancée) |
+| **400** | Paramètres invalides |
+| **401** | Token manquant ou invalide |
+| **403** | Token valide mais **permission insuffisante** |
+| **404** | Ressource introuvable |
+| **500** | Erreur serveur |
+
+---
 
 ## Format des réponses
 
-Toutes les réponses suivent ce format :
+**Succès** (schéma fréquent) :
 
-**Succès** :
 ```json
 {
   "success": true,
-  "data": {...},
+  "data": { },
   "count": 10,
   "limit": 100,
   "offset": 0
@@ -545,6 +341,7 @@ Toutes les réponses suivent ce format :
 ```
 
 **Erreur** :
+
 ```json
 {
   "success": false,
@@ -553,31 +350,22 @@ Toutes les réponses suivent ce format :
 }
 ```
 
-## Exemples d'intégration
+---
+
+## Exemples d’intégration
 
 ### Python
 
 ```python
 import requests
 
-API_BASE_URL = "http://localhost:5000/api/public"
+API_BASE_URL = "https://votre-domaine/api/public"
 API_TOKEN = "votre_token"
 
-headers = {
-    "Authorization": f"Bearer {API_TOKEN}"
-}
+headers = {"Authorization": f"Bearer {API_TOKEN}"}
 
-# Récupérer les entreprises
-response = requests.get(f"{API_BASE_URL}/entreprises", headers=headers)
-entreprises = response.json()["data"]
-
-# Récupérer les emails d'une entreprise
-entreprise_id = 1
-response = requests.get(
-    f"{API_BASE_URL}/entreprises/{entreprise_id}/emails",
-    headers=headers
-)
-emails = response.json()["data"]
+entreprises = requests.get(f"{API_BASE_URL}/entreprises", headers=headers).json()["data"]
+overview = requests.get(f"{API_BASE_URL}/statistics/overview?days=7", headers=headers).json()["data"]
 ```
 
 ### JavaScript (Node.js)
@@ -585,73 +373,49 @@ emails = response.json()["data"]
 ```javascript
 const axios = require('axios');
 
-const API_BASE_URL = 'http://localhost:5000/api/public';
-const API_TOKEN = 'votre_token';
-
 const api = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    'Authorization': `Bearer ${API_TOKEN}`
-  }
+  baseURL: 'https://votre-domaine/api/public',
+  headers: { Authorization: 'Bearer VOTRE_TOKEN' },
 });
 
-// Récupérer les entreprises
-const entreprises = await api.get('/entreprises');
-console.log(entreprises.data.data);
-
-// Récupérer les emails
-const emails = await api.get('/entreprises/1/emails');
-console.log(emails.data.data);
+const { data } = await api.get('/statistics/overview', { params: { days: 7 } });
+console.log(data.data);
 ```
 
 ### PHP
 
 ```php
 <?php
-$apiBaseUrl = 'http://localhost:5000/api/public';
-$apiToken = 'votre_token';
-
-$ch = curl_init();
-curl_setopt($ch, CURLOPT_URL, $apiBaseUrl . '/entreprises');
-curl_setopt($ch, CURLOPT_HTTPHEADER, [
-    'Authorization: Bearer ' . $apiToken
+$ch = curl_init('https://votre-domaine/api/public/token/info');
+curl_setopt_array($ch, [
+    CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . $apiToken],
+    CURLOPT_RETURNTRANSFER => true,
 ]);
-curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-$response = curl_exec($ch);
-$entreprises = json_decode($response, true);
-
+$info = json_decode(curl_exec($ch), true);
 curl_close($ch);
 ?>
 ```
 
+---
+
 ## Sécurité
 
-### Bonnes pratiques
+1. **Ne jamais** committer les tokens ; préférer variables d’environnement ou coffres secrets.  
+2. **HTTPS** obligatoire en production.  
+3. **Rotation** : révoquer les tokens obsolètes ou compromis.  
+4. **Principe du moindre privilège** : désactiver `can_read_emails` / `can_read_statistics` / `can_read_campagnes` sur le token si l’intégration n’en a pas besoin.  
+5. Éviter `?api_token=` dans des URLs loguées ou partagées.
 
-1. **Stockage des tokens** :
-   - Ne jamais commiter les tokens dans le code source
-   - Utiliser des variables d'environnement
-   - Chiffrer les tokens en base de données si nécessaire
-
-2. **HTTPS** :
-   - Utiliser HTTPS en production pour protéger les tokens en transit
-
-3. **Rotation des tokens** :
-   - Révoquer et recréer les tokens régulièrement
-   - Révoquer immédiatement les tokens compromis
-
-4. **Limitation des accès** :
-   - Créer des tokens spécifiques par application
-   - Révoquer les tokens inutilisés
+---
 
 ## Limitations
 
-- **Rate limiting** : À implémenter en production
-- **Pagination** : Maximum 1000 résultats par requête
-- **Filtres** : Les filtres complexes ne sont pas encore supportés
+- **Pagination** : `limit` maximal typiquement **1000** par requête.  
+- **Rate limiting** : à renforcer au besoin en production (reverse proxy, WAF).  
+- **Cache GET** : données légèrement différées par rapport à la base (voir section cache).
+
+---
 
 ## Support
 
-Pour toute question ou problème, consultez la documentation complète ou contactez l'administrateur.
-
+Pour l’architecture des routes côté code : blueprint `routes/api_public.py`. Pour toute évolution documentaire, croiser avec [API_INTEGRATION.md](../mobile/API_INTEGRATION.md) (mobile) et [INDEX.md](../INDEX.md).

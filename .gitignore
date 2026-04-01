@@ -10,8 +10,9 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Uniquement à la racine du dépôt (évite d’ignorer mobile/src/lib/)
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -111,3 +112,7 @@ templates_local/
 Data/
 scripts/experiments/
 deploy_cluster_worker/
+
+# Mobile / outillage local
+backups/
+scan_report.json

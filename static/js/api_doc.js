@@ -51,10 +51,11 @@
                     ep.params.map(function(p) { return '<tr><td><code>' + escapeHtml(p.name) + '</code></td><td>' + escapeHtml(p.type || '') + '</td><td>' + escapeHtml(p.desc || '') + '</td></tr>'; }).join('') +
                     '</tbody></table></div>';
             }
-            if (ep.body) paramsHtml += '<div class="api-doc-params"><strong>Body</strong>: ' + escapeHtml(ep.body) + '</div>';
+            if (ep.body) paramsHtml += '<div class="api-doc-params"><strong>Body</strong> : ' + escapeHtml(ep.body) + '</div>';
+            var permHtml = ep.permission ? '<div class="api-doc-params" style="margin-top:6px"><strong>Permission(s)</strong> : ' + escapeHtml(ep.permission) + '</div>' : '';
             var authHtml = f.auth ? '<div class="api-doc-auth"><i class="fas fa-lock"></i> ' + escapeHtml(f.auth) + '</div>' : '';
             var fullPath = f.basePath + (ep.path || '');
-            return '<div class="api-doc-endpoint"><div class="api-doc-endpoint-header"><span class="api-doc-method ' + (ep.method || '').toLowerCase() + '">' + ep.method + '</span><span class="api-doc-path">' + escapeHtml(fullPath) + '</span></div><div class="api-doc-endpoint-desc">' + escapeHtml(ep.desc) + '</div>' + paramsHtml + authHtml + '</div>';
+            return '<div class="api-doc-endpoint"><div class="api-doc-endpoint-header"><span class="api-doc-method ' + (ep.method || '').toLowerCase() + '">' + ep.method + '</span><span class="api-doc-path">' + escapeHtml(fullPath) + '</span></div><div class="api-doc-endpoint-desc">' + escapeHtml(ep.desc) + '</div>' + permHtml + paramsHtml + authHtml + '</div>';
         }
 
         content.innerHTML = items.map(function(item, i) {
@@ -62,10 +63,12 @@
             var c = item.category;
             var endpoints = Array.isArray(c.endpoints) ? c.endpoints : (f.endpoints || []);
             var endpointsHtml = endpoints.map(function(ep) { return renderEndpointHtml(ep, f); }).join('');
+            var catExtra = c.categoryDesc ? '<p class="section-desc">' + escapeHtml(c.categoryDesc) + '</p>' : '';
             return '<section class="api-doc-section ' + (i === 0 ? 'is-visible' : '') + '" id="api-doc-page-' + escapeHtml(item.key) + '" role="tabpanel">' +
                 '<h3>' + escapeHtml(item.category.name) + '</h3>' +
                 '<p class="section-desc">' + escapeHtml(f.description) + '</p>' +
-                '<p class="section-desc"><strong>Base:</strong> <code>' + escapeHtml(f.basePath) + '</code></p>' +
+                '<p class="section-desc"><strong>Base :</strong> <code>' + escapeHtml(f.basePath) + '</code></p>' +
+                catExtra +
                 endpointsHtml +
                 '</section>';
         }).join('');
