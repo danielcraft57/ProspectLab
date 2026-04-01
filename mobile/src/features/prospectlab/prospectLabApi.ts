@@ -1,7 +1,7 @@
 import { Config } from '../../core/config';
 import type { CacheRequestOptions } from '../../lib/http/apiMemoryCache';
 import { fetchJsonCached, prospectLabCacheKey } from '../../lib/http/apiMemoryCache';
-import { fetchJson } from '../../lib/http/httpClient';
+import { fetchJson, HttpError } from '../../lib/http/httpClient';
 
 export type ProspectLabStatisticsResponse = {
   success?: boolean;
@@ -67,6 +67,23 @@ export type StatisticsOverviewData = {
 };
 
 export class ProspectLabApi {
+  /** Vérifie le token (sans cache) — 200 OK ou code HTTP (ex. 401). */
+  static async validateToken(token: string): Promise<
+    | { ok: true; status: 200 }
+    | { ok: false; status: number; message: string }
+  > {
+    try {
+      await ProspectLabApi.getTokenInfo(token, { skipCache: true });
+      return { ok: true, status: 200 };
+    } catch (e: unknown) {
+      if (e instanceof HttpError) {
+        return { ok: false, status: e.info.status, message: e.message };
+      }
+      const msg = e instanceof Error ? e.message : String(e);
+      return { ok: false, status: 0, message: msg };
+    }
+  }
+
   static async getTokenInfo(token: string, cache?: CacheRequestOptions) {
     const url = publicUrl('/token/info');
     return fetchJsonCached(

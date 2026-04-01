@@ -14,7 +14,11 @@ export default function TabsLayout() {
     if (loading) return;
     if (token) return;
     if (pathname === '/(tabs)/settings') return;
-    router.replace('/(tabs)/settings');
+    // Autoriser l'écran de scan token même sans token configure
+    if (pathname === '/token-ocr') return;
+    // Dans un navigator Tabs, `replace()` declenche une action REPLACE non supportee.
+    // `push()` bascule correctement vers l'onglet Reglages sans warning.
+    router.push('/(tabs)/settings');
   }, [loading, pathname, router, token]);
 
   /** Sous-pages détail : pas d’onglets en bas pour éviter la confusion de contexte (guidelines iOS/Material). */

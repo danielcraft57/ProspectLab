@@ -198,3 +198,56 @@ def delete_token(token_id):
             'error': str(e)
         }), 500
 
+
+@api_tokens_bp.route('/<int:token_id>/reveal', methods=['GET'])
+@login_required
+@admin_required
+def reveal_token(token_id: int):
+    """
+    Retourne le token complet pour un token existant (admin uniquement).
+
+    Objectif UX: permettre l'affichage dans une modale "Voir token" sans exposer
+    tous les secrets dans la liste par défaut.
+    """
+    try:
+        token_manager = APITokenManager()
+        tokens = token_manager.list_tokens(user_id=None)
+        target = next((t for t in tokens if t.get('id') == token_id), None)
+        if not target:
+            return jsonify({'success': False, 'error': 'Token introuvable'}), 404
+
+        # Recharger depuis la DB sans masquage
+        conn = token_manager.db.get_connection()
+        cursor = conn.cursor()
+        token_manager.db.execute_sql(
+            cursor,
+            '''
+            SELECT id, token, name, app_url, user_id, is_active,
+                   can_read_entreprises, can_read_emails, can_read_statistics, can_read_campagnes,
+                   date_creation, last_used
+            FROM api_tokens
+            WHERE id = ?
+            ''',
+            (token_id,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return jsonify({'success': False, 'error': 'Token introuvable'}), 404
+
+        d = dict(row)
+        return jsonify(
+            {
+                'success': True,
+                'data': {
+                    'id': d.get('id'),
+                    'token': d.get('token'),
+                    'app_url': d.get('app_url'),
+                    'name': d.get('name'),
+                    'is_active': bool(d.get('is_active', 0)),
+                },
+            }
+        )
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+

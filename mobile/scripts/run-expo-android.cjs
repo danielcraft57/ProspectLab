@@ -4,7 +4,43 @@
  */
 const { spawnSync } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+
+/** Premiere IPv4 LAN (pas loopback, pas link-local 169.254.x.x). */
+function getLanIPv4() {
+  const nets = os.networkInterfaces();
+  const preferred = [];
+  const fallback = [];
+
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name] || []) {
+      if (net.family !== 'IPv4' && net.family !== 4) continue;
+      if (net.internal) continue;
+      const a = net.address;
+      if (!a || a.startsWith('169.254.')) continue;
+
+      const lname = String(name).toLowerCase();
+      const isVirtualIface =
+        lname.includes('vethernet') ||
+        lname.includes('virtualbox') ||
+        lname.includes('vmware') ||
+        lname.includes('hyper-v') ||
+        lname.includes('loopback');
+      if (isVirtualIface) continue;
+
+      // Souvent VirtualBox Host-Only
+      if (a.startsWith('192.168.56.')) continue;
+
+      if (lname.includes('wi-fi') || lname.includes('wifi') || lname.includes('wireless') || lname.includes('wlan')) {
+        preferred.push(a);
+      } else {
+        fallback.push(a);
+      }
+    }
+  }
+  return preferred[0] || fallback[0] || null;
+}
 
 const javaBin = process.platform === 'win32' ? 'java.exe' : 'java';
 
@@ -132,6 +168,17 @@ if (sdkRoot) {
   }
 } else {
   console.error('[run-expo-android] SDK Android introuvable. Installe Android SDK (platform-tools, build-tools, platforms).');
+}
+
+const forcedHost = process.env.REACT_NATIVE_PACKAGER_HOSTNAME;
+if (forcedHost && forcedHost.trim()) {
+  console.error(`[run-expo-android] REACT_NATIVE_PACKAGER_HOSTNAME (forced) -> ${forcedHost.trim()}`);
+} else {
+  const lan = getLanIPv4();
+  if (lan) {
+    process.env.REACT_NATIVE_PACKAGER_HOSTNAME = lan;
+    console.error(`[run-expo-android] REACT_NATIVE_PACKAGER_HOSTNAME -> ${lan}`);
+  }
 }
 
 const extra = process.argv.slice(2);

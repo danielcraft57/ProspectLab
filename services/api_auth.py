@@ -24,9 +24,11 @@ class APITokenManager:
         Génère un nouveau token API sécurisé.
         
         Returns:
-            str: Token API (32 caractères hexadécimaux)
+            str: Token API (uniquement lettres/chiffres, sans caractères spéciaux)
         """
-        return secrets.token_urlsafe(32)
+        # token_urlsafe() inclut souvent '-' et '_' (pas souhaité ici).
+        # token_hex() renvoie uniquement [0-9a-f], donc aucun caractère spécial.
+        return secrets.token_hex(32)
     
     def create_token(
         self, 

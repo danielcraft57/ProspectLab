@@ -1,7 +1,8 @@
 import * as ImagePicker from 'expo-image-picker';
 import { useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Alert, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { ProspectLabApi } from '../../src/features/prospectlab/prospectLabApi';
 import { useApiToken } from '../../src/features/prospectlab/useToken';
 import { extractSignals } from '../../src/lib/parsing/extractSignals';
@@ -10,6 +11,7 @@ import { useTheme } from '../../src/ui/theme';
 
 export default function ScanScreen() {
   const t = useTheme();
+  const router = useRouter();
   const { token } = useApiToken();
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [rawText, setRawText] = useState('');
@@ -77,6 +79,30 @@ export default function ScanScreen() {
     <Screen>
       <ScrollView contentContainerStyle={styles.container}>
         <H1>Scan (OCR)</H1>
+
+        <FadeIn>
+          <Card>
+            <View style={styles.row}>
+              <FontAwesome6 name="key" size={14} color="#4f8cff" />
+              <H2>Token API</H2>
+            </View>
+            <View style={{ marginTop: 6 }}>
+              <Muted>Si tu dois configurer le token, utilise le scanner en direct: caméra plein écran + validation.</Muted>
+            </View>
+            <View style={{ marginTop: 10 }}>
+              <PrimaryButton
+                title="Scanner un token (caméra)"
+                onPress={() => {
+                  if (Platform.OS === 'web') {
+                    Alert.alert('Non disponible', "Le scan token n'est pas disponible sur le web.");
+                    return;
+                  }
+                  router.push('/token-ocr');
+                }}
+              />
+            </View>
+          </Card>
+        </FadeIn>
 
         <FadeIn>
           <Card>

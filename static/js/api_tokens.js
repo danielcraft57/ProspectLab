@@ -4,11 +4,13 @@
 
 (function() {
     let tokens = [];
+    let modalState = { token: '', site: '', subtitle: '' };
     
     // Charger les tokens au démarrage
     document.addEventListener('DOMContentLoaded', function() {
         loadTokens();
         setupForm();
+        setupTokenModal();
     });
     
     /**
@@ -77,9 +79,6 @@
                 permissions.push('<span class="badge badge-danger">Campagnes</span>');
             }
             
-            // Échapper le token pour éviter les problèmes avec les guillemets
-            const safeToken = token.token ? token.token.replace(/'/g, "\\'").replace(/"/g, '&quot;') : '';
-            
             return `
                 <div class="token-card ${statusClass}">
                     <div class="token-header">
@@ -88,9 +87,9 @@
                             ${token.app_url ? `<div class="token-url"><i class="fas fa-link"></i> ${escapeHtml(token.app_url)}</div>` : ''}
                         </div>
                         <div class="token-actions">
-                            ${token.is_active && safeToken ? `
-                                <button class="btn-action btn-copy" onclick="copyToken('${safeToken}')" title="Copier le token">
-                                    <i class="fas fa-copy"></i> Copier
+                            ${token.is_active ? `
+                                <button class="btn-action btn-view" onclick="openTokenModal(${token.id})" title="Voir le token">
+                                    <i class="fas fa-eye"></i> Voir
                                 </button>
                                 <button class="btn-action btn-revoke" onclick="revokeToken(${token.id})" title="Révoquer le token">
                                     <i class="fas fa-ban"></i> Révoquer
@@ -226,26 +225,11 @@
      * Affiche le token créé avec un avertissement
      */
     function showTokenCreated(tokenData) {
-        const alert = document.createElement('div');
-        alert.className = 'alert alert-warning';
-        alert.innerHTML = `
-            <strong><i class="fas fa-exclamation-triangle"></i> Important !</strong>
-            <p>Votre token a été généré. <strong>Sauvegardez-le immédiatement</strong>, il ne sera plus affiché après fermeture de cette alerte.</p>
-            <div class="token-display">
-                <span class="token-value">${tokenData.token}</span>
-                <button class="btn-action btn-copy" onclick="copyToken('${tokenData.token}')">
-                    <i class="fas fa-copy"></i> Copier
-                </button>
-            </div>
-        `;
-        
-        const container = document.querySelector('.create-token-section');
-        container.insertBefore(alert, container.firstChild);
-        
-        // Supprimer l'alerte après 30 secondes
-        setTimeout(() => {
-            alert.remove();
-        }, 30000);
+        openTokenModalWithData({
+            token: tokenData.token || '',
+            site: tokenData.app_url || '',
+            subtitle: "Token créé. Copie-le maintenant, il ne sera plus affiché automatiquement ensuite."
+        });
     }
     
     /**
@@ -305,19 +289,132 @@
     /**
      * Copie un token dans le presse-papier
      */
-    window.copyToken = async function(token) {
+    async function copyToClipboard(text) {
         try {
-            await navigator.clipboard.writeText(token);
-            showSuccess('Token copié dans le presse-papier !');
+            await navigator.clipboard.writeText(text);
+            showSuccess('Copié dans le presse-papier !');
         } catch (error) {
-            // Fallback pour les navigateurs plus anciens
             const textarea = document.createElement('textarea');
-            textarea.value = token;
+            textarea.value = text;
             document.body.appendChild(textarea);
             textarea.select();
             document.execCommand('copy');
             document.body.removeChild(textarea);
-            showSuccess('Token copié dans le presse-papier !');
+            showSuccess('Copié dans le presse-papier !');
+        }
+    }
+
+    window.copyToken = async function(token) {
+        return copyToClipboard(token);
+    };
+
+    function setupTokenModal() {
+        const modal = document.getElementById('tokenModal');
+        if (!modal) return;
+
+        modal.querySelectorAll('[data-close-modal="1"]').forEach((el) => {
+            el.addEventListener('click', closeTokenModal);
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeTokenModal();
+        });
+
+        const siteInput = document.getElementById('tokenModalSite');
+        const tokenInput = document.getElementById('tokenModalValue');
+        const copySiteBtn = document.getElementById('tokenModalCopySite');
+        const copyTokenBtn = document.getElementById('tokenModalCopyToken');
+
+        if (copySiteBtn && siteInput) {
+            copySiteBtn.addEventListener('click', async () => {
+                await copyToClipboard(modalState.site || siteInput.value || '');
+            });
+        }
+        if (copyTokenBtn && tokenInput) {
+            copyTokenBtn.addEventListener('click', async () => {
+                await copyToClipboard(modalState.token || tokenInput.value || '');
+            });
+        }
+    }
+
+    function renderTokenQr(token) {
+        const el = document.getElementById('tokenModalQr');
+        if (!el) return;
+        el.innerHTML = '';
+        const t = (token || '').trim();
+        if (!t || typeof QRCode === 'undefined') {
+            if (!t) {
+                el.innerHTML = '<span style="color:#64748b;font-size:12px;">—</span>';
+            } else {
+                el.innerHTML = '<span style="color:#b45309;font-size:11px;">QR indisponible (script bloqué)</span>';
+            }
+            return;
+        }
+        try {
+            new QRCode(el, {
+                text: t,
+                width: 196,
+                height: 196,
+                colorDark: '#0f172a',
+                colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.M,
+            });
+        } catch (e) {
+            console.error(e);
+            el.innerHTML = '<span style="color:#b45309;font-size:11px;">QR erreur</span>';
+        }
+    }
+
+    function openTokenModalWithData({ token, site, subtitle }) {
+        const modal = document.getElementById('tokenModal');
+        if (!modal) return;
+
+        modalState = { token: token || '', site: site || '', subtitle: subtitle || '' };
+
+        const subtitleEl = document.getElementById('tokenModalSubtitle');
+        const siteInput = document.getElementById('tokenModalSite');
+        const tokenInput = document.getElementById('tokenModalValue');
+        const copySiteBtn = document.getElementById('tokenModalCopySite');
+        const copyTokenBtn = document.getElementById('tokenModalCopyToken');
+
+        if (subtitleEl) subtitleEl.textContent = modalState.subtitle || 'Vérifie le site et copie le token.';
+        if (siteInput) siteInput.value = modalState.site || '';
+        if (tokenInput) tokenInput.value = modalState.token || '';
+
+        if (copySiteBtn) copySiteBtn.disabled = !(modalState.site || '').trim();
+        if (copyTokenBtn) copyTokenBtn.disabled = !(modalState.token || '').trim();
+
+        modal.classList.add('is-open');
+        modal.setAttribute('aria-hidden', 'false');
+
+        renderTokenQr(modalState.token);
+    }
+
+    function closeTokenModal() {
+        const modal = document.getElementById('tokenModal');
+        if (!modal) return;
+        const qr = document.getElementById('tokenModalQr');
+        if (qr) qr.innerHTML = '';
+        modal.classList.remove('is-open');
+        modal.setAttribute('aria-hidden', 'true');
+    }
+
+    window.openTokenModal = async function(tokenId) {
+        try {
+            const res = await fetch(`/api/tokens/${tokenId}/reveal`);
+            const data = await res.json();
+            if (!data.success) {
+                showError(data.error || "Impossible d'afficher le token");
+                return;
+            }
+            const d = data.data || {};
+            openTokenModalWithData({
+                token: d.token || '',
+                site: d.app_url || '',
+                subtitle: d.name ? `Token: ${d.name}` : 'Token API',
+            });
+        } catch (e) {
+            showError("Impossible d'afficher le token");
         }
     };
     
