@@ -116,3 +116,4 @@ deploy_cluster_worker/
 # Mobile / outillage local
 backups/
 scan_report.json
+mobile/scripts/.patch-tmp/
