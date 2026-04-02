@@ -19,6 +19,104 @@ api_extended_bp = Blueprint('api_extended', __name__, url_prefix='/api')
 database = Database()
 export_manager = ExportManager()
 
+@api_extended_bp.route('/ml-face/bboxes', methods=['GET'])
+@login_required
+def ml_face_bboxes():
+    """
+    API: Retourne les cadres (bboxes) de visages depuis la BDD.
+
+    Query params (au choix):
+        - run_id (int, requis si identity_id absent): run ML
+        - source_path (str, optionnel): filtre sur une image precise
+        - identity_id (int, optionnel): filtre sur une identite (cluster)
+        - limit (int, optionnel): limite de lignes (defaut 2000)
+
+    Retour:
+        { "items": [ { id, source_path, face_index, box, image_width, image_height, crop_path, probability } ] }
+    """
+    try:
+        run_id = request.args.get('run_id', type=int)
+        identity_id = request.args.get('identity_id', type=int)
+        source_path = (request.args.get('source_path') or '').strip() or None
+        limit = int(request.args.get('limit', 2000) or 2000)
+        limit = max(1, min(limit, 20000))
+
+        if not run_id and not identity_id:
+            return jsonify({'error': 'run_id ou identity_id est requis'}), 400
+
+        conn = database.get_connection()
+        cursor = conn.cursor()
+
+        if identity_id:
+            sql = """
+                SELECT e.id, e.source_path, e.face_index, e.crop_path, e.probability,
+                       e.box_json, e.image_width, e.image_height
+                FROM ml_face_identity_members m
+                JOIN ml_face_embeddings e ON e.id = m.embedding_id
+                WHERE m.identity_id = ?
+                ORDER BY COALESCE(m.rank, 999999), e.id
+                LIMIT ?
+            """
+            database.execute_sql(cursor, sql, (identity_id, limit))
+        else:
+            if source_path:
+                sql = """
+                    SELECT id, source_path, face_index, crop_path, probability, box_json, image_width, image_height
+                    FROM ml_face_embeddings
+                    WHERE run_id = ? AND source_path = ?
+                    ORDER BY id
+                    LIMIT ?
+                """
+                database.execute_sql(cursor, sql, (run_id, source_path, limit))
+            else:
+                sql = """
+                    SELECT id, source_path, face_index, crop_path, probability, box_json, image_width, image_height
+                    FROM ml_face_embeddings
+                    WHERE run_id = ?
+                    ORDER BY id
+                    LIMIT ?
+                """
+                database.execute_sql(cursor, sql, (run_id, limit))
+
+        rows = cursor.fetchall() or []
+        conn.close()
+
+        items = []
+        for r in rows:
+            if isinstance(r, dict):
+                box_json = r.get('box_json')
+                items.append({
+                    'id': r.get('id'),
+                    'source_path': r.get('source_path'),
+                    'face_index': r.get('face_index'),
+                    'crop_path': r.get('crop_path'),
+                    'probability': r.get('probability'),
+                    'image_width': r.get('image_width'),
+                    'image_height': r.get('image_height'),
+                    'box': json.loads(box_json) if box_json else None,
+                })
+            else:
+                box_json = r[5]
+                items.append({
+                    'id': r[0],
+                    'source_path': r[1],
+                    'face_index': r[2],
+                    'crop_path': r[3],
+                    'probability': r[4],
+                    'image_width': r[6],
+                    'image_height': r[7],
+                    'box': json.loads(box_json) if box_json else None,
+                })
+
+        return jsonify({'items': items})
+    except Exception as e:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return jsonify({'error': str(e)}), 500
+
+
 def _normalize_url_for_analysis(raw: str) -> str | None:
     if not raw:
         return None

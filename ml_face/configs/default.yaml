@@ -1,0 +1,21 @@
+project:
+  name: ml_face
+
+paths:
+  data_raw: ml_face/data_raw
+  data: ml_face/data
+  artifacts: ml_face/artifacts
+  runs: ml_face/runs
+
+indexing:
+  allowed_extensions:
+    - .jpg
+    - .jpeg
+    - .png
+    - .webp
+
+faces:
+  # Placeholder: le choix du modele et du detecteur se fera dans `src/`
+  detector: "facenet_pytorch_mtcnn"
+  embedder: "facenet_pytorch_inception_resnet_v1"
+

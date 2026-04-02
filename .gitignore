@@ -113,3 +113,10 @@ scripts/experiments/
 deploy_cluster_worker/
 mobile/
 backups/
+
+# ML Face (donnees generees localement)
+ml_face/data_raw/**
+ml_face/data/**
+ml_face/artifacts/**
+ml_face/runs/**
+ml_face/**/.ipynb_checkpoints/

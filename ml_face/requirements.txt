@@ -1,0 +1,22 @@
+numpy
+pandas
+pyyaml
+tqdm
+pillow
+opencv-python
+requests
+python-dotenv
+
+# Pour perf CPU (BLAS) c'est souvent deja OK via numpy.
+# On garde volontairement peu de deps pour rester simple sur Windows.
+
+# Deep learning (a ajuster selon GPU/CPU et la stack choisie)
+torch
+torchvision
+
+# Visages / embeddings (a choisir selon ce qu'on retient)
+facenet-pytorch
+
+# BDD prod (PostgreSQL) - deja present cote serveur, utile en local si tu pushes vers la prod
+psycopg2-binary
+
