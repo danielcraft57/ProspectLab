@@ -132,6 +132,60 @@ class MLFaceDB(DatabaseBase):
             self.execute_sql(cursor, "CREATE INDEX IF NOT EXISTS idx_ml_face_members_identity ON ml_face_identity_members(identity_id)")
             self.execute_sql(cursor, "CREATE INDEX IF NOT EXISTS idx_ml_face_members_embedding ON ml_face_identity_members(embedding_id)")
 
+            self.execute_sql(
+                cursor,
+                """
+                CREATE TABLE IF NOT EXISTS ml_face_person_gallery_embeddings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    personne_id INTEGER NOT NULL,
+                    entreprise_id INTEGER,
+                    source_url TEXT,
+                    source_path TEXT,
+                    embedding_b64 TEXT NOT NULL,
+                    embedding_dim INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (personne_id) REFERENCES personnes(id) ON DELETE CASCADE,
+                    FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE SET NULL
+                )
+                """,
+            )
+            self.execute_sql(
+                cursor,
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_person_gallery_person_source ON ml_face_person_gallery_embeddings(personne_id, source_url)",
+            )
+            self.execute_sql(
+                cursor,
+                "CREATE INDEX IF NOT EXISTS idx_person_gallery_entreprise ON ml_face_person_gallery_embeddings(entreprise_id)",
+            )
+
+            self.execute_sql(
+                cursor,
+                """
+                CREATE TABLE IF NOT EXISTS ml_face_person_matches (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id INTEGER NOT NULL,
+                    embedding_id INTEGER NOT NULL,
+                    personne_id INTEGER NOT NULL,
+                    score REAL NOT NULL,
+                    method TEXT DEFAULT 'cosine',
+                    status TEXT DEFAULT 'proposed',
+                    confidence TEXT DEFAULT 'medium',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    validated_at TIMESTAMP,
+                    validation_note TEXT,
+                    FOREIGN KEY (run_id) REFERENCES ml_face_runs(id) ON DELETE CASCADE,
+                    FOREIGN KEY (embedding_id) REFERENCES ml_face_embeddings(id) ON DELETE CASCADE,
+                    FOREIGN KEY (personne_id) REFERENCES personnes(id) ON DELETE CASCADE
+                )
+                """,
+            )
+            self.execute_sql(
+                cursor,
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_match_embedding_person ON ml_face_person_matches(embedding_id, personne_id)",
+            )
+            self.execute_sql(cursor, "CREATE INDEX IF NOT EXISTS idx_matches_run_id ON ml_face_person_matches(run_id)")
+            self.execute_sql(cursor, "CREATE INDEX IF NOT EXISTS idx_matches_status ON ml_face_person_matches(status)")
+
             conn.commit()
         finally:
             conn.close()
@@ -316,6 +370,180 @@ class MLFaceDB(DatabaseBase):
                     VALUES (?, ?, ?)
                     """,
                     (int(identity_id), int(embedding_id), None if rank is None else int(rank)),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def upsert_person_gallery_embedding(
+        self,
+        personne_id: int,
+        entreprise_id: int | None,
+        source_url: str | None,
+        source_path: str | None,
+        embedding: np.ndarray,
+    ) -> int:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            emb_b64 = _b64_encode_f32(embedding)
+            emb_dim = int(np.asarray(embedding).shape[-1])
+            if self.is_postgresql():
+                self.execute_sql(
+                    cursor,
+                    """
+                    INSERT INTO ml_face_person_gallery_embeddings
+                        (personne_id, entreprise_id, source_url, source_path, embedding_b64, embedding_dim)
+                    VALUES
+                        (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (personne_id, source_url)
+                    DO UPDATE SET
+                        entreprise_id = EXCLUDED.entreprise_id,
+                        source_path = EXCLUDED.source_path,
+                        embedding_b64 = EXCLUDED.embedding_b64,
+                        embedding_dim = EXCLUDED.embedding_dim
+                    """,
+                    (int(personne_id), entreprise_id, source_url, source_path, emb_b64, emb_dim),
+                )
+            else:
+                self.execute_sql(
+                    cursor,
+                    """
+                    INSERT OR REPLACE INTO ml_face_person_gallery_embeddings
+                        (personne_id, entreprise_id, source_url, source_path, embedding_b64, embedding_dim)
+                    VALUES
+                        (?, ?, ?, ?, ?, ?)
+                    """,
+                    (int(personne_id), entreprise_id, source_url, source_path, emb_b64, emb_dim),
+                )
+            conn.commit()
+            self.execute_sql(
+                cursor,
+                "SELECT id FROM ml_face_person_gallery_embeddings WHERE personne_id=? AND source_url=?",
+                (int(personne_id), source_url),
+            )
+            row = cursor.fetchone()
+            if isinstance(row, dict):
+                return int(row["id"])
+            return int(row[0])
+        finally:
+            conn.close()
+
+    def list_person_gallery(self, entreprise_id: int | None = None) -> list[dict]:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            if entreprise_id is None:
+                self.execute_sql(
+                    cursor,
+                    "SELECT id, personne_id, entreprise_id, source_url, source_path, embedding_b64, embedding_dim FROM ml_face_person_gallery_embeddings",
+                )
+            else:
+                self.execute_sql(
+                    cursor,
+                    "SELECT id, personne_id, entreprise_id, source_url, source_path, embedding_b64, embedding_dim FROM ml_face_person_gallery_embeddings WHERE entreprise_id=?",
+                    (int(entreprise_id),),
+                )
+            rows = cursor.fetchall() or []
+            out: list[dict] = []
+            for r in rows:
+                if isinstance(r, dict):
+                    out.append(dict(r))
+                else:
+                    out.append(
+                        {
+                            "id": r[0],
+                            "personne_id": r[1],
+                            "entreprise_id": r[2],
+                            "source_url": r[3],
+                            "source_path": r[4],
+                            "embedding_b64": r[5],
+                            "embedding_dim": r[6],
+                        }
+                    )
+            return out
+        finally:
+            conn.close()
+
+    def list_run_embeddings(self, run_id: int) -> list[dict]:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            self.execute_sql(
+                cursor,
+                """
+                SELECT id, run_id, image_id, entreprise_id, source_path, source_url, face_index,
+                       crop_path, probability, box_json, image_width, image_height, embedding_b64, embedding_dim
+                FROM ml_face_embeddings
+                WHERE run_id = ?
+                """,
+                (int(run_id),),
+            )
+            rows = cursor.fetchall() or []
+            out: list[dict] = []
+            for r in rows:
+                if isinstance(r, dict):
+                    out.append(dict(r))
+                else:
+                    out.append(
+                        {
+                            "id": r[0],
+                            "run_id": r[1],
+                            "image_id": r[2],
+                            "entreprise_id": r[3],
+                            "source_path": r[4],
+                            "source_url": r[5],
+                            "face_index": r[6],
+                            "crop_path": r[7],
+                            "probability": r[8],
+                            "box_json": r[9],
+                            "image_width": r[10],
+                            "image_height": r[11],
+                            "embedding_b64": r[12],
+                            "embedding_dim": r[13],
+                        }
+                    )
+            return out
+        finally:
+            conn.close()
+
+    def decode_embedding_row(self, embedding_b64: str, embedding_dim: int) -> np.ndarray:
+        return _b64_decode_f32(embedding_b64, int(embedding_dim))
+
+    def upsert_person_match(
+        self,
+        run_id: int,
+        embedding_id: int,
+        personne_id: int,
+        score: float,
+        confidence: str,
+    ) -> None:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            if self.is_postgresql():
+                self.execute_sql(
+                    cursor,
+                    """
+                    INSERT INTO ml_face_person_matches
+                        (run_id, embedding_id, personne_id, score, confidence)
+                    VALUES
+                        (?, ?, ?, ?, ?)
+                    ON CONFLICT (embedding_id, personne_id)
+                    DO UPDATE SET score = EXCLUDED.score, confidence = EXCLUDED.confidence
+                    """,
+                    (int(run_id), int(embedding_id), int(personne_id), float(score), str(confidence)),
+                )
+            else:
+                self.execute_sql(
+                    cursor,
+                    """
+                    INSERT OR REPLACE INTO ml_face_person_matches
+                        (run_id, embedding_id, personne_id, score, confidence)
+                    VALUES
+                        (?, ?, ?, ?, ?)
+                    """,
+                    (int(run_id), int(embedding_id), int(personne_id), float(score), str(confidence)),
                 )
             conn.commit()
         finally:

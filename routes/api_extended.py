@@ -117,6 +117,135 @@ def ml_face_bboxes():
         return jsonify({'error': str(e)}), 500
 
 
+@api_extended_bp.route('/ml-face/person-matches', methods=['GET'])
+@login_required
+def ml_face_person_matches():
+    """
+    API: Liste les propositions visage -> personne pour un run.
+    Query params:
+      - run_id (requis)
+      - status (optionnel: proposed/validated/rejected)
+      - limit (optionnel)
+    """
+    try:
+        run_id = request.args.get('run_id', type=int)
+        status = (request.args.get('status') or '').strip() or None
+        limit = int(request.args.get('limit', 500) or 500)
+        limit = max(1, min(limit, 5000))
+        if not run_id:
+            return jsonify({'error': 'run_id requis'}), 400
+
+        conn = database.get_connection()
+        cursor = conn.cursor()
+        if status:
+            sql = """
+                SELECT m.id, m.run_id, m.embedding_id, m.personne_id, m.score, m.status, m.confidence,
+                       p.nom, p.prenom, p.titre, e.source_path, e.face_index, e.box_json
+                FROM ml_face_person_matches m
+                JOIN personnes p ON p.id = m.personne_id
+                JOIN ml_face_embeddings e ON e.id = m.embedding_id
+                WHERE m.run_id = ? AND m.status = ?
+                ORDER BY m.score DESC
+                LIMIT ?
+            """
+            database.execute_sql(cursor, sql, (run_id, status, limit))
+        else:
+            sql = """
+                SELECT m.id, m.run_id, m.embedding_id, m.personne_id, m.score, m.status, m.confidence,
+                       p.nom, p.prenom, p.titre, e.source_path, e.face_index, e.box_json
+                FROM ml_face_person_matches m
+                JOIN personnes p ON p.id = m.personne_id
+                JOIN ml_face_embeddings e ON e.id = m.embedding_id
+                WHERE m.run_id = ?
+                ORDER BY m.score DESC
+                LIMIT ?
+            """
+            database.execute_sql(cursor, sql, (run_id, limit))
+        rows = cursor.fetchall() or []
+        conn.close()
+
+        items = []
+        for r in rows:
+            if isinstance(r, dict):
+                box = json.loads(r.get('box_json') or 'null')
+                items.append(
+                    {
+                        'id': r.get('id'),
+                        'run_id': r.get('run_id'),
+                        'embedding_id': r.get('embedding_id'),
+                        'personne_id': r.get('personne_id'),
+                        'personne_nom': r.get('nom'),
+                        'personne_prenom': r.get('prenom'),
+                        'personne_titre': r.get('titre'),
+                        'score': r.get('score'),
+                        'status': r.get('status'),
+                        'confidence': r.get('confidence'),
+                        'source_path': r.get('source_path'),
+                        'face_index': r.get('face_index'),
+                        'box': box,
+                    }
+                )
+            else:
+                box = json.loads(r[12] or 'null')
+                items.append(
+                    {
+                        'id': r[0],
+                        'run_id': r[1],
+                        'embedding_id': r[2],
+                        'personne_id': r[3],
+                        'score': r[4],
+                        'status': r[5],
+                        'confidence': r[6],
+                        'personne_nom': r[7],
+                        'personne_prenom': r[8],
+                        'personne_titre': r[9],
+                        'source_path': r[10],
+                        'face_index': r[11],
+                        'box': box,
+                    }
+                )
+        return jsonify({'items': items})
+    except Exception as e:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return jsonify({'error': str(e)}), 500
+
+
+@api_extended_bp.route('/ml-face/person-matches/<int:match_id>/status', methods=['PATCH'])
+@login_required
+def ml_face_person_match_status(match_id: int):
+    """
+    API: valide/rejette une proposition de match.
+    body JSON: { "status": "validated|rejected|proposed", "note": "..." }
+    """
+    try:
+        payload = request.get_json(silent=True) or {}
+        status = str(payload.get('status') or '').strip().lower()
+        note = payload.get('note')
+        if status not in ('proposed', 'validated', 'rejected'):
+            return jsonify({'error': 'status invalide'}), 400
+
+        conn = database.get_connection()
+        cursor = conn.cursor()
+        sql = """
+            UPDATE ml_face_person_matches
+            SET status = ?, validation_note = ?, validated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """
+        database.execute_sql(cursor, sql, (status, note, int(match_id)))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'id': match_id, 'status': status})
+    except Exception as e:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return jsonify({'error': str(e)}), 500
+
+
 def _normalize_url_for_analysis(raw: str) -> str | None:
     if not raw:
         return None

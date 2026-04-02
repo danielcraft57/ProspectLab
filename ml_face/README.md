@@ -120,6 +120,26 @@ Quand tu utilises un lot telecharge depuis `download_prod_images.py`, les metado
 - `ml_face_embeddings.entreprise_id` est renseigne pour retrouver directement l'entreprise
 - tu peux joindre `ml_face_embeddings -> images -> entreprises` pour enrichir l'affichage
 
+## Matching des personnes (assisté)
+
+Objectif: proposer une personne pour chaque visage detecte, avec validation humaine.
+
+1) Construire la galerie de reference des personnes (URLs dans `personnes_photos`, et/ou JSON `photos_urls` dans `personnes_osint_details`). Sans aucune de ces sources, le matching personnes restera vide.
+
+```bash
+python ml_face\\scripts\\build_person_gallery_embeddings.py --env-file ".env.cluster" --entreprise-id 0 --device cpu
+```
+
+2) Lancer le matching pour un run de visages
+
+```bash
+python ml_face\\scripts\\match_faces_to_persons.py --env-file ".env.cluster" --run-id 5 --topk 3 --min-score 0.55
+```
+
+3) API de review
+- `GET /api/ml-face/person-matches?run_id=5`
+- `PATCH /api/ml-face/person-matches/<match_id>/status` avec `{ "status": "validated" }`
+
 Exemple de jointure utile:
 
 ```sql

@@ -120,3 +120,4 @@ ml_face/data/**
 ml_face/artifacts/**
 ml_face/runs/**
 ml_face/**/.ipynb_checkpoints/
+scan_report.json
