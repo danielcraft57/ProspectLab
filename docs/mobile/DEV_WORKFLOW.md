@@ -33,6 +33,31 @@ Fichiers sensibles locaux (non commites, voir `mobile/.gitignore`) : `google-ser
 
 Pour un APK avec FCM, prevvoir un build dev client ou EAS selon la doc Expo (`google-services.json`, `android.googleServicesFile` dans la config).
 
+### Build Android (sans passer par le Store)
+
+ProspectLab supporte un mode **interne** propre via EAS (APK installable) :
+
+- `npm run build:android:internal`
+
+Ce build genere un **APK** distribuable via un lien EAS (installation manuelle sur Android).
+
+### Build Android (prod / Play Store)
+
+Pour une release Play Store, le profil production genere un **AAB** :
+
+- `npm run build:android:prod`
+
+### Build + installation locale (USB / ADB)
+
+Pour obtenir un APK **release** localement, puis l’installer en une commande :
+
+- `npm run android:local-release`
+
+Installer uniquement (si l’APK release existe deja) :
+
+- `npm run android:install-release-apk`
+- ou cibler un device : `npm run android:install-release-apk -- <SERIAL>`
+
 ## Depannage : `BUILD SUCCESSFUL` puis echec `adb install`
 
 Le Gradle a reussi ; l’erreur vient de **l’installation sur l’appareil** (souvent message tronque dans le terminal Expo).

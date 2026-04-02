@@ -38,6 +38,26 @@ Pour Android, le fichier **client** `google-services.json` (console Firebase, ap
 L'app attend un token `Bearer` pour appeler l'API publique.
 Tu peux le coller dans l'onglet `Reglages`.
 
+## Build Android (interne / prod)
+
+### Interne (sans Store)
+
+Genere un **APK** installable via un lien EAS :
+
+- `npm run build:android:internal`
+
+### Production (Play Store)
+
+Genere un **AAB** (non installable directement, a soumettre sur Google Play) :
+
+- `npm run build:android:prod`
+
+### Local (release + installation)
+
+Build Gradle en release + installation sur un appareil Android via ADB (USB recommande) :
+
+- `npm run android:local-release`
+
 ## OCR (etat)
 
 Le flux `Scan` est pret et l'extraction est en place.

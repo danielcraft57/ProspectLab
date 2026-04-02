@@ -9,6 +9,11 @@
     "start:tunnel": "node scripts/start-expo-dev.cjs --tunnel",
     "android": "node scripts/run-expo-android.cjs",
     "android:install-apk": "node scripts/install-debug-apk.cjs",
+    "build:android:local:release": "cd android && gradlew.bat assembleRelease",
+    "android:install-release-apk": "node scripts/install-release-apk.cjs",
+    "android:local-release": "npm run build:android:local:release && npm run android:install-release-apk",
+    "build:android:internal": "npx eas-cli build -p android --profile internal",
+    "build:android:prod": "npx eas-cli build -p android --profile production",
     "ios": "expo run:ios",
     "web": "expo start --web"
   },
