@@ -91,7 +91,7 @@ Cette roadmap regroupe les grandes idées de développement orientées prospecti
 
 ### 5. Suivi des modifications de site dans le temps
 
-- **Statut**: 🔴 À faire (planification re‑scan + comparaison avant/après)
+- **Statut**: 🟡 En cours — snapshots `entreprise_metric_snapshots` + API compare (`docs/guides/EVOLUTION_METRIQUES_SNAPSHOTS.md`) ; re‑scan planifié et UI timeline à faire
 
 - Re‑scan programmé (hebdo / mensuel) pour certains prospects :
   - Détecter les changements :

@@ -8,6 +8,7 @@ from flask import Blueprint, request, jsonify, session
 from services.database import Database
 from services.database.entreprises import ENTERPRISE_STATUSES, CRM_PIPELINE_ETAPES, EntrepriseManager
 from services.auth import login_required
+from utils.helpers import clean_json_dict
 import json
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
@@ -925,6 +926,43 @@ def entreprise_touchpoint_patch(entreprise_id, touchpoint_id):
         return jsonify({'success': True, 'item': item})
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/entreprise/<int:entreprise_id>/metric-snapshots', methods=['GET'])
+@login_required
+def entreprise_metric_snapshots(entreprise_id):
+    """
+    Historique des snapshots de métriques (après analyse technique ou SEO).
+
+    Query: limit (défaut 30, max 100), source (optionnel : technical | seo).
+    """
+    try:
+        limit = request.args.get('limit', default=30, type=int)
+        source = request.args.get('source', type=str)
+        items = database.list_entreprise_metric_snapshots(
+            entreprise_id,
+            limit=limit,
+            source=source.strip() if source else None,
+        )
+        return jsonify(clean_json_dict({'success': True, 'items': items}))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/entreprise/<int:entreprise_id>/metric-snapshots/compare', methods=['GET'])
+@login_required
+def entreprise_metric_snapshots_compare(entreprise_id):
+    """
+    Compare les deux derniers snapshots d’une même source : deltas + alertes (v1).
+
+    Query: source (défaut technical ; ex. seo).
+    """
+    try:
+        source = (request.args.get('source') or 'technical').strip() or 'technical'
+        data = database.compare_entreprise_metric_snapshots(entreprise_id, source=source)
+        return jsonify(clean_json_dict(data))
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

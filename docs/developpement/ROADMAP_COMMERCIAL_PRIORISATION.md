@@ -43,8 +43,8 @@ Vue synthétique des trois vagues prévues : **chaîne de vente exploitable**, *
 
 | Thème | Livrable | Statut |
 |--------|-----------|--------|
-| Rescan planifié + avant/après (v1) | Comparaison de snapshots (perf / SEO / sécu) sur entreprises suivies | À faire |
-| Alertes intelligentes (v1) | SSL qui expire, forte baisse perf/SEO, site KO | À faire |
+| Rescan planifié + avant/après (v1) | Table `entreprise_metric_snapshots` + enregistrement auto (analyse technique & SEO) + API liste / compare | **En cours (v1 données + API)** — UI fiche & planification re-scan à faire |
+| Alertes intelligentes (v1) | Règles heuristiques dans `compare` (SSL, chutes de score, CMS) | **Partiel (v1 via API compare)** — pas encore de file globale ni notifications push |
 | Radar concurrence (MVP) | Écran comparatif simple par secteur / ville | À faire |
 
 **Pourquoi maintenant** : matérialiser la valeur dans le temps (suivi, preuves, urgency) au-delà du premier contact.
@@ -56,3 +56,4 @@ Vue synthétique des trois vagues prévues : **chaîne de vente exploitable**, *
 - Rôle du **profil de pondération** (utilisateurs & dev) : `docs/guides/PROFIL_PONDERATION_PRIORITE_COMMERCIALE.md`
 - Pipeline CRM vs statut campagne : `docs/guides/API_PIPELINE_KANBAN.md`
 - Segmentation & segments campagnes : `docs/developpement/SEGMENTATION_AVANCEE_PROSPECTS.md`, API ciblage `/api/ciblage/segments`, prévisualisation `/api/ciblage/segments/<id>/preview`
+- Snapshots métriques & avant/après : `docs/guides/EVOLUTION_METRIQUES_SNAPSHOTS.md`

@@ -2135,6 +2135,221 @@ class EntrepriseManager(DatabaseBase):
         d['poids'] = p
         return d
 
+    def record_metric_snapshot(self, cursor, entreprise_id, source, analysis_id, metrics_dict):
+        """
+        Enregistre un snapshot de métriques (même transaction que l'analyse si cursor fourni).
+        """
+        from utils.helpers import clean_json_dict
+
+        if not entreprise_id or not source:
+            return
+        payload = json.dumps(clean_json_dict(metrics_dict or {}))
+        src = str(source)[:48]
+        aid = analysis_id
+        self.execute_sql(
+            cursor,
+            '''
+            INSERT INTO entreprise_metric_snapshots (entreprise_id, source, analysis_id, metrics_json)
+            VALUES (?, ?, ?, ?)
+            ''',
+            (entreprise_id, src, aid, payload),
+        )
+
+    def list_entreprise_metric_snapshots(self, entreprise_id, limit=30, source=None):
+        """Historique des snapshots pour une entreprise (plus récent en premier)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        lim = max(1, min(int(limit or 30), 100))
+        params: list = [entreprise_id]
+        q = '''
+            SELECT id, entreprise_id, source, analysis_id, captured_at, metrics_json
+            FROM entreprise_metric_snapshots
+            WHERE entreprise_id = ?
+        '''
+        if source:
+            q += ' AND source = ?'
+            params.append(str(source)[:48])
+        q += ' ORDER BY captured_at DESC, id DESC LIMIT ?'
+        params.append(lim)
+        self.execute_sql(cursor, q, tuple(params))
+        rows = cursor.fetchall() or []
+        conn.close()
+        from utils.helpers import clean_json_dict
+
+        out = []
+        for r in rows:
+            d = dict(r)
+            raw = d.pop('metrics_json', None)
+            if raw:
+                try:
+                    d['metrics'] = json.loads(raw) if isinstance(raw, str) else raw
+                except Exception:
+                    d['metrics'] = {}
+            else:
+                d['metrics'] = {}
+            out.append(clean_json_dict(d))
+        return out
+
+    @staticmethod
+    def _parse_snapshot_date(value):
+        if value is None:
+            return None
+        s = str(value).strip()[:10]
+        if len(s) < 10:
+            return None
+        try:
+            from datetime import date
+
+            y, m, d = int(s[0:4]), int(s[5:7]), int(s[8:10])
+            return date(y, m, d)
+        except Exception:
+            return None
+
+    def metric_snapshot_alerts_between(self, previous_metrics: dict, new_metrics: dict, source: str):
+        """
+        Alertes heuristiques entre deux snapshots (v1 : règles simples).
+        """
+        alerts = []
+        prev = previous_metrics or {}
+        new = new_metrics or {}
+
+        def _num(x):
+            if x is None:
+                return None
+            try:
+                return float(x)
+            except (TypeError, ValueError):
+                return None
+
+        def _truthy(x):
+            if x is True or x == 1:
+                return True
+            if x is False or x == 0:
+                return False
+            if isinstance(x, str) and x.lower() in ('true', '1', 'yes', 'oui'):
+                return True
+            return None
+
+        pv, nv = _truthy(prev.get('ssl_valid')), _truthy(new.get('ssl_valid'))
+        if pv is True and nv is False:
+            alerts.append(
+                {
+                    'code': 'ssl_invalid',
+                    'severity': 'high',
+                    'message': 'Le certificat SSL n’est plus considéré comme valide.',
+                }
+            )
+
+        exp = self._parse_snapshot_date(new.get('ssl_expiry_date'))
+        if exp:
+            from datetime import date, timedelta
+
+            today = date.today()
+            if exp <= today:
+                alerts.append(
+                    {
+                        'code': 'ssl_expired',
+                        'severity': 'high',
+                        'message': f'SSL expiré (échéance {exp.isoformat()}).',
+                    }
+                )
+            elif exp <= today + timedelta(days=30):
+                alerts.append(
+                    {
+                        'code': 'ssl_expiring_soon',
+                        'severity': 'medium',
+                        'message': f'SSL expire bientôt (échéance {exp.isoformat()}).',
+                    }
+                )
+
+        drop_thr = 15.0
+        if source == 'technical' or source == 'seo':
+            if source == 'technical':
+                a, b = _num(prev.get('score_securite')), _num(new.get('score_securite'))
+                if a is not None and b is not None and (a - b) >= drop_thr:
+                    alerts.append(
+                        {
+                            'code': 'security_score_drop',
+                            'severity': 'medium',
+                            'message': f'Fort recul du score technique/sécurité ({int(a)} → {int(b)}).',
+                        }
+                    )
+                a, b = _num(prev.get('performance_score')), _num(new.get('performance_score'))
+                if a is not None and b is not None and (a - b) >= drop_thr:
+                    alerts.append(
+                        {
+                            'code': 'performance_score_drop',
+                            'severity': 'medium',
+                            'message': f'Fort recul du score performance ({int(a)} → {int(b)}).',
+                        }
+                    )
+            if source == 'seo':
+                a, b = _num(prev.get('seo_score')), _num(new.get('seo_score'))
+                if a is not None and b is not None and (a - b) >= drop_thr:
+                    alerts.append(
+                        {
+                            'code': 'seo_score_drop',
+                            'severity': 'medium',
+                            'message': f'Fort recul du score SEO ({int(a)} → {int(b)}).',
+                        }
+                    )
+
+        pcms, ncms = prev.get('cms'), new.get('cms')
+        if (
+            isinstance(pcms, str)
+            and pcms.strip()
+            and isinstance(ncms, str)
+            and ncms.strip()
+            and pcms.strip() != ncms.strip()
+        ):
+            alerts.append(
+                {
+                    'code': 'cms_changed',
+                    'severity': 'low',
+                    'message': f'CMS détecté : « {pcms} » → « {ncms} ».',
+                }
+            )
+
+        return alerts
+
+    def compare_entreprise_metric_snapshots(self, entreprise_id, source='technical'):
+        """
+        Compare les deux derniers snapshots d’une même source ; calcule deltas et alertes.
+        """
+        rows = self.list_entreprise_metric_snapshots(entreprise_id, limit=2, source=source)
+        if not rows:
+            return {
+                'success': True,
+                'source': source,
+                'has_pair': False,
+                'current': None,
+                'previous': None,
+                'deltas': {},
+                'alerts': [],
+            }
+        current = rows[0]
+        previous = rows[1] if len(rows) > 1 else None
+        cur_m = current.get('metrics') or {}
+        prev_m = (previous or {}).get('metrics') or {}
+        deltas = {}
+        if previous:
+            for key in set(cur_m.keys()) | set(prev_m.keys()):
+                a, b = prev_m.get(key), cur_m.get(key)
+                if a != b:
+                    deltas[key] = {'from': a, 'to': b}
+        alerts = (
+            self.metric_snapshot_alerts_between(prev_m, cur_m, source) if previous else []
+        )
+        return {
+            'success': True,
+            'source': source,
+            'has_pair': bool(previous),
+            'current': current,
+            'previous': previous,
+            'deltas': deltas,
+            'alerts': alerts,
+        }
+
     def get_entreprises_commercial_top(
         self,
         analyse_id=None,

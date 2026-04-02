@@ -70,7 +70,36 @@ class DatabaseSchema(DatabaseBase):
             conn.commit()
         finally:
             conn.close()
-    
+
+    def ensure_entreprise_metric_snapshots_table(self):
+        """
+        Migration idempotente : snapshots de métriques pour suivi avant/après (Sprint 3).
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS entreprise_metric_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entreprise_id INTEGER NOT NULL,
+                    source TEXT NOT NULL,
+                    analysis_id INTEGER,
+                    captured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    metrics_json TEXT NOT NULL,
+                    FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE
+                )
+                ''',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_metric_snapshots_ent_captured ON entreprise_metric_snapshots (entreprise_id, captured_at DESC)',
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def init_database(self):
         """
         Initialise les tables de la base de données
@@ -521,7 +550,26 @@ class DatabaseSchema(DatabaseBase):
                     )
         except Exception:
             pass
-        
+
+        self.execute_sql(
+            cursor,
+            '''
+            CREATE TABLE IF NOT EXISTS entreprise_metric_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entreprise_id INTEGER NOT NULL,
+                source TEXT NOT NULL,
+                analysis_id INTEGER,
+                captured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                metrics_json TEXT NOT NULL,
+                FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE
+            )
+            ''',
+        )
+        self.execute_sql(
+            cursor,
+            'CREATE INDEX IF NOT EXISTS idx_metric_snapshots_ent_captured ON entreprise_metric_snapshots (entreprise_id, captured_at DESC)',
+        )
+
         # Table des analyses techniques
         self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analyses_techniques (

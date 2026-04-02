@@ -635,6 +635,26 @@ class TechnicalManager(DatabaseBase):
         # Mettre à jour les tags d'obsolescence liés à la refonte potentielle
         if entreprise_id:
             self._update_entreprise_obsolescence_tags(cursor, entreprise_id, indicators, has_refonte_potential)
+
+        if entreprise_id and analysis_id:
+            try:
+                td = tech_data or {}
+                self.record_metric_snapshot(
+                    cursor,
+                    entreprise_id,
+                    'technical',
+                    analysis_id,
+                    {
+                        'score_securite': security_score,
+                        'performance_score': performance_score,
+                        'ssl_valid': td.get('ssl_valid'),
+                        'ssl_expiry_date': td.get('ssl_expiry_date'),
+                        'cms': td.get('cms'),
+                        'framework': td.get('framework'),
+                    },
+                )
+            except Exception as e:
+                logger.warning('Snapshot métriques (analyse technique): %s', e)
         
         conn.commit()
         conn.close()
@@ -1088,6 +1108,26 @@ class TechnicalManager(DatabaseBase):
         if entreprise_id:
             indicators, has_refonte_potential = self._compute_obsolescence_indicators(tech_data, url)
             self._update_entreprise_obsolescence_tags(cursor, entreprise_id, indicators, has_refonte_potential)
+
+        if entreprise_id and analysis_id:
+            try:
+                td = tech_data or {}
+                self.record_metric_snapshot(
+                    cursor,
+                    entreprise_id,
+                    'technical',
+                    analysis_id,
+                    {
+                        'score_securite': security_score,
+                        'performance_score': performance_score,
+                        'ssl_valid': td.get('ssl_valid'),
+                        'ssl_expiry_date': td.get('ssl_expiry_date'),
+                        'cms': td.get('cms'),
+                        'framework': td.get('framework'),
+                    },
+                )
+            except Exception as e:
+                logger.warning('Snapshot métriques (mise à jour analyse technique): %s', e)
         
         conn.commit()
         conn.close()
