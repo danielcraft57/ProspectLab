@@ -201,6 +201,127 @@
             if (!response.ok) throw new Error('Erreur lors du chargement du pipeline d\'audit');
             return await response.json();
         },
+
+        /**
+         * Liste des statuts pipeline supportés (référentiel).
+         * @returns {Promise<string[]>}
+         */
+        async loadStatutsPipeline() {
+            const response = await fetch('/api/entreprise/statuts');
+            if (!response.ok) throw new Error('Erreur lors du chargement des statuts');
+            return await response.json();
+        },
+
+        /**
+         * Met à jour le statut pipeline d'une entreprise.
+         * @param {number} id
+         * @param {string} statut
+         */
+        async updateStatutPipeline(id, statut) {
+            const response = await fetch(`/api/entreprise/${id}/statut`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ statut })
+            });
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || 'Erreur lors de la mise à jour du statut');
+            }
+            return await response.json();
+        },
+
+        /**
+         * Liste les touchpoints d'une entreprise.
+         * @param {number} id
+         * @param {number} [limit]
+         * @param {number} [offset]
+         */
+        async loadTouchpoints(id, limit = 50, offset = 0) {
+            const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+            const response = await fetch(`/api/entreprise/${id}/touchpoints?${params}`);
+            if (!response.ok) throw new Error('Erreur lors du chargement des interactions');
+            return await response.json();
+        },
+
+        /**
+         * Crée un touchpoint.
+         * @param {number} id
+         * @param {{canal: string, sujet: string, note?: string, happened_at?: string|null}} payload
+         */
+        async createTouchpoint(id, payload) {
+            const response = await fetch(`/api/entreprise/${id}/touchpoints`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || 'Erreur lors de la création');
+            }
+            return await response.json();
+        },
+
+        /**
+         * Met à jour un touchpoint (PATCH partiel).
+         */
+        async patchTouchpoint(entrepriseId, touchpointId, payload) {
+            const response = await fetch(`/api/entreprise/${entrepriseId}/touchpoints/${touchpointId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || 'Erreur lors de la mise à jour');
+            }
+            return await response.json();
+        },
+
+        /**
+         * Supprime un touchpoint.
+         */
+        async deleteTouchpoint(entrepriseId, touchpointId) {
+            const response = await fetch(`/api/entreprise/${entrepriseId}/touchpoints/${touchpointId}`, {
+                method: 'DELETE'
+            });
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || 'Erreur lors de la suppression');
+            }
+            return await response.json();
+        },
+
+        /**
+         * Agrégation Kanban (effectifs par statut), mêmes query params que loadAll.
+         * @param {Object} filters
+         * @param {number|null} analyseId
+         */
+        async loadPipelineKanban(filters = {}, analyseId = null) {
+            const params = new URLSearchParams();
+            Object.keys(filters).forEach(key => {
+                const v = filters[key];
+                if (v === undefined || v === null || v === '') return;
+                if (Array.isArray(v)) {
+                    if (!v.length) return;
+                    if (key === 'tags_any' || key === 'tags_all') {
+                        params.set(key, v.join(','));
+                        return;
+                    }
+                }
+                params.set(key, String(v));
+            });
+            if (analyseId !== null && analyseId !== undefined) {
+                const id = Number(analyseId);
+                if (!Number.isNaN(id)) {
+                    params.set('analyse_id', String(id));
+                }
+            }
+            const qs = params.toString();
+            const url = qs ? `/api/entreprise/pipeline/kanban?${qs}` : '/api/entreprise/pipeline/kanban';
+            const response = await fetch(url);
+            if (!response.ok) throw new Error('Erreur lors du chargement du pipeline Kanban');
+            return await response.json();
+        },
         
         /**
          * Lance le scraping

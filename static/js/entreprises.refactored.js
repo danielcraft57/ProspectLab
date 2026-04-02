@@ -900,6 +900,59 @@
         }
     }
 
+    /**
+     * Barre synthèse pipeline (effectifs par statut) alignée sur les filtres liste.
+     */
+    async function refreshKanbanStrip() {
+        const el = document.getElementById('pipeline-kanban-strip');
+        if (!el || !window.EntreprisesAPI) return;
+        try {
+            const filters = getCurrentFilters();
+            const data = await EntreprisesAPI.loadPipelineKanban(filters, initialAnalyseId);
+            if (!data || !data.columns) {
+                el.style.display = 'none';
+                el.innerHTML = '';
+                return;
+            }
+            el.style.display = 'block';
+            const esc = (t) => (Formatters && Formatters.escapeHtml ? Formatters.escapeHtml(String(t ?? '')) : String(t ?? ''));
+            const total = typeof data.total === 'number' ? data.total : '';
+            const sans = typeof data.sans_statut === 'number' && data.sans_statut > 0
+                ? ` · Sans statut : ${data.sans_statut}`
+                : '';
+            const filteredNote = data.filtered ? ' <span class="kanban-strip-filtered">(filtres actifs)</span>' : '';
+            const columnsNonZero = (data.columns || []).filter((col) => Number(col.count) > 0);
+            let cols = columnsNonZero.map((col) => {
+                const raw = col.couleur && String(col.couleur).trim();
+                const bg = raw && /^#[0-9A-Fa-f]{6}$/.test(raw) ? raw : '#94a3b8';
+                return `<div class="kanban-strip-col" title="${esc(col.statut)}">
+                    <span class="kanban-strip-dot" style="background:${bg}"></span>
+                    <span class="kanban-strip-label">${esc(col.statut)}</span>
+                    <span class="kanban-strip-count">${col.count}</span>
+                </div>`;
+            }).join('');
+            let hors = '';
+            const horsNonZero = (data.hors_referentiel || []).filter((h) => Number(h.count) > 0);
+            if (horsNonZero.length) {
+                const parts = horsNonZero.map((h) => `${esc(h.statut)} (${h.count})`);
+                hors = `<div class="kanban-strip-hors">Autres statuts en base : ${parts.join(', ')}</div>`;
+            }
+            const colsHtml = cols ? `<div class="kanban-strip-columns">${cols}</div>` : '';
+            el.innerHTML = `
+                <div class="kanban-strip-inner">
+                    <div class="kanban-strip-meta">
+                        <strong>Pipeline</strong>${filteredNote}
+                        <span class="kanban-strip-total">${total} prospect(s)${sans}</span>
+                    </div>
+                    ${colsHtml}
+                    ${hors}
+                </div>`;
+        } catch (e) {
+            console.warn('[entreprises] Kanban strip:', e);
+            el.style.display = 'none';
+        }
+    }
+
     /** Charge les entreprises avec les filtres courants (côté serveur, pagination). */
     async function loadEntreprises() {
         try {
@@ -920,6 +973,7 @@
                 return loadEntreprises();
             }
             renderEntreprises();
+            refreshKanbanStrip();
         } catch (error) {
             console.error('[entreprises] Erreur loadEntreprises:', error);
             document.getElementById('entreprises-container').innerHTML =
@@ -3187,6 +3241,7 @@
             loadOSINTAnalysis(entrepriseId);
             loadPentestAnalysis(entrepriseId);
             loadAuditPipeline(entrepriseId);
+            loadProspectionTab(entrepriseId);
             refreshOpportunityScore(entrepriseId);
         } catch (error) {
             console.error('Erreur lors du chargement:', error);
@@ -3329,6 +3384,175 @@
     }
 
     /**
+     * Rend la liste HTML des touchpoints (modale prospection).
+     * @param {Array<Object>} items
+     * @returns {string}
+     */
+    function renderTouchpointsListHtml(items) {
+        if (!items || !items.length) {
+            return '<p class="empty-state" style="margin:0;">Aucune interaction enregistrée.</p>';
+        }
+        const esc = (t) => (Formatters && Formatters.escapeHtml ? Formatters.escapeHtml(String(t ?? '')) : String(t ?? ''));
+        return items.map((tp) => {
+            const dateRaw = tp.happened_at || tp.created_at || '';
+            const dateStr = dateRaw ? esc(dateRaw) : '';
+            return `
+                <div class="touchpoint-card">
+                    <div class="touchpoint-card-main">
+                        <div>
+                            <strong>${esc(tp.canal)}</strong>
+                            <span class="touchpoint-sujet"> — ${esc(tp.sujet)}</span>
+                            ${dateStr ? `<div class="touchpoint-date">${dateStr}</div>` : ''}
+                            ${tp.note ? `<div class="touchpoint-note">${esc(tp.note)}</div>` : ''}
+                        </div>
+                        <button type="button" class="btn btn-small btn-outline touchpoint-delete-btn" data-touchpoint-delete="${tp.id}" title="Supprimer"><i class="fas fa-trash"></i></button>
+                    </div>
+                </div>`;
+        }).join('');
+    }
+
+    /**
+     * Charge statut pipeline + touchpoints et branche les actions dans la modale.
+     * @param {number} entrepriseId
+     */
+    async function loadProspectionTab(entrepriseId) {
+        const container = document.getElementById('entreprise-prospection-container');
+        if (!container || !window.EntreprisesAPI) return;
+        container.innerHTML = '<p class="loading">Chargement de la prospection...</p>';
+        try {
+            const [statuts, tpRes] = await Promise.all([
+                EntreprisesAPI.loadStatutsPipeline(),
+                EntreprisesAPI.loadTouchpoints(entrepriseId, 100, 0)
+            ]);
+            const items = (tpRes && tpRes.items) ? tpRes.items : [];
+            const currentStatut = (currentModalEntrepriseData && currentModalEntrepriseData.statut) ? String(currentModalEntrepriseData.statut) : '';
+            const statutOptions = (statuts || []).map((s) => {
+                const sel = s === currentStatut ? ' selected' : '';
+                return `<option value="${Formatters.escapeHtml(s)}"${sel}>${Formatters.escapeHtml(s)}</option>`;
+            }).join('');
+
+            container.innerHTML = `
+                <div class="prospection-panel">
+                    <div class="prospection-statut-block">
+                        <label for="modal-prospection-statut" class="prospection-label">Statut pipeline</label>
+                        <div class="prospection-statut-row">
+                            <select id="modal-prospection-statut" class="form-select">${statutOptions}</select>
+                            <button type="button" class="btn btn-primary btn-small" id="modal-prospection-save-statut">Enregistrer</button>
+                        </div>
+                    </div>
+                    <h4 class="prospection-journal-title"><i class="fas fa-comments"></i> Journal d'interactions</h4>
+                    <div id="touchpoints-list" class="touchpoints-list">${renderTouchpointsListHtml(items)}</div>
+                    <form id="touchpoint-form" class="touchpoint-form">
+                        <div class="touchpoint-form-grid">
+                            <div>
+                                <label class="form-label">Canal</label>
+                                <input type="text" name="canal" class="form-input" placeholder="Email, téléphone, LinkedIn…" required autocomplete="off">
+                            </div>
+                            <div>
+                                <label class="form-label">Sujet</label>
+                                <input type="text" name="sujet" class="form-input" placeholder="Objet court" required autocomplete="off">
+                            </div>
+                        </div>
+                        <div class="touchpoint-form-note">
+                            <label class="form-label">Note (optionnel)</label>
+                            <textarea name="note" class="form-input" rows="2" placeholder="Détails"></textarea>
+                        </div>
+                        <div class="touchpoint-form-date">
+                            <label class="form-label">Date de l'événement (optionnel)</label>
+                            <input type="datetime-local" name="happened_at" class="form-input">
+                        </div>
+                        <button type="submit" class="btn btn-outline touchpoint-submit"><i class="fas fa-plus"></i> Ajouter l'interaction</button>
+                    </form>
+                </div>
+            `;
+
+            const saveBtn = document.getElementById('modal-prospection-save-statut');
+            if (saveBtn) {
+                saveBtn.onclick = async () => {
+                    const sel = document.getElementById('modal-prospection-statut');
+                    if (!sel || !currentModalEntrepriseId) return;
+                    const statut = (sel.value || '').trim();
+                    if (!statut) {
+                        Notifications.show('Choisis un statut', 'warning');
+                        return;
+                    }
+                    try {
+                        await EntreprisesAPI.updateStatutPipeline(currentModalEntrepriseId, statut);
+                        if (currentModalEntrepriseData) currentModalEntrepriseData.statut = statut;
+                        const badgeEl = document.getElementById('info-statut-value');
+                        if (badgeEl && window.Badges) {
+                            badgeEl.innerHTML = Badges.getStatusBadge(statut);
+                        }
+                        const row = allEntreprises.find((e) => e.id === currentModalEntrepriseId);
+                        if (row) row.statut = statut;
+                        Notifications.show('Statut mis à jour', 'success');
+                        scheduleApplyFilters();
+                    } catch (err) {
+                        console.error(err);
+                        Notifications.show(err.message || 'Erreur statut', 'error');
+                    }
+                };
+            }
+
+            const form = document.getElementById('touchpoint-form');
+            if (form) {
+                form.onsubmit = async (ev) => {
+                    ev.preventDefault();
+                    if (!currentModalEntrepriseId) return;
+                    const fd = new FormData(form);
+                    const canal = (fd.get('canal') || '').trim();
+                    const sujet = (fd.get('sujet') || '').trim();
+                    const note = fd.get('note');
+                    const ha = fd.get('happened_at');
+                    const payload = { canal, sujet };
+                    if (note !== null && String(note).trim() !== '') payload.note = String(note);
+                    if (ha) {
+                        try {
+                            const d = new Date(String(ha));
+                            if (!Number.isNaN(d.getTime())) payload.happened_at = d.toISOString();
+                        } catch (_) { /* ignore */ }
+                    }
+                    try {
+                        await EntreprisesAPI.createTouchpoint(currentModalEntrepriseId, payload);
+                        form.reset();
+                        Notifications.show('Interaction enregistrée', 'success');
+                        const refreshed = await EntreprisesAPI.loadTouchpoints(currentModalEntrepriseId, 100, 0);
+                        const list = document.getElementById('touchpoints-list');
+                        if (list) {
+                            const next = (refreshed && refreshed.items) ? refreshed.items : [];
+                            list.innerHTML = renderTouchpointsListHtml(next);
+                            list.querySelectorAll('.touchpoint-delete-btn').forEach((btn) => bindTouchpointDelete(btn));
+                        }
+                    } catch (err) {
+                        console.error(err);
+                        Notifications.show(err.message || 'Erreur à l\'enregistrement', 'error');
+                    }
+                };
+            }
+
+            function bindTouchpointDelete(btn) {
+                btn.onclick = async () => {
+                    const tid = btn.getAttribute('data-touchpoint-delete');
+                    if (!tid || !currentModalEntrepriseId) return;
+                    if (!confirm('Supprimer cette interaction ?')) return;
+                    try {
+                        await EntreprisesAPI.deleteTouchpoint(currentModalEntrepriseId, Number(tid));
+                        Notifications.show('Interaction supprimée', 'success');
+                        await loadProspectionTab(currentModalEntrepriseId);
+                    } catch (err) {
+                        console.error(err);
+                        Notifications.show(err.message || 'Erreur suppression', 'error');
+                    }
+                };
+            }
+            container.querySelectorAll('.touchpoint-delete-btn').forEach((btn) => bindTouchpointDelete(btn));
+        } catch (e) {
+            console.error('Prospection:', e);
+            container.innerHTML = '<p class="error">Impossible de charger la prospection.</p>';
+        }
+    }
+
+    /**
      * Recalcule le score d'opportunité pour une entreprise et met à jour la modale.
      * Utilise l'endpoint /api/entreprise/<id>/recalculate-opportunity.
      */
@@ -3383,6 +3607,7 @@
                     </button>
                     <div class="tabs-header-scroll">
                         <button class="tab-btn active" data-tab="info">Info</button>
+                        <button class="tab-btn" data-tab="prospection">Prospection</button>
                         <button class="tab-btn" data-tab="images">Images (${nbImages})</button>
                         <button class="tab-btn" data-tab="pages">Pages (${nbPages})</button>
                         <button class="tab-btn" data-tab="scraping">Résultats scraping</button>
@@ -3452,7 +3677,10 @@
                             ${createInfoRow('Nom', entreprise.nom)}
                             ${createInfoRow('Site web', entreprise.website, true)}
                             ${createInfoRow('Secteur', entreprise.secteur)}
-                            ${createInfoRow('Statut', entreprise.statut, false, Badges.getStatusBadge(entreprise.statut))}
+                            <div class="info-row" id="info-statut-row">
+                                <span class="info-label">Statut:</span>
+                                <span class="info-value" id="info-statut-value">${Badges.getStatusBadge(entreprise.statut)}</span>
+                            </div>
                             ${typeof entreprise.score_securite !== 'undefined' && entreprise.score_securite !== null ? `
                             <div class="info-row">
                                 <span class="info-label">Score sécurité:</span>
@@ -3491,6 +3719,12 @@
                     <div class="tab-panel" id="tab-pages">
                         <div id="entreprise-pages-container" class="pages-tab-content">
                             <p class="empty-state">Aucune donnée OpenGraph disponible pour le moment. Lancez un scraping pour récupérer les métadonnées des pages.</p>
+                        </div>
+                    </div>
+                    
+                    <div class="tab-panel" id="tab-prospection" style="display:none;">
+                        <div id="entreprise-prospection-container" class="prospection-tab-content">
+                            <p class="empty-state">Chargement de la prospection...</p>
                         </div>
                     </div>
                     

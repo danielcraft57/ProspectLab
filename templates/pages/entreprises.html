@@ -394,6 +394,8 @@
             </div>
         </div>
     </div>
+
+    <div id="pipeline-kanban-strip" class="pipeline-kanban-strip" style="display:none;" aria-label="Répartition par statut pipeline"></div>
     
     <div id="entreprises-container" class="entreprises-grid">
         <p>Chargement des entreprises...</p>
@@ -430,6 +432,6 @@
 <script src="{{ url_for('static', filename='js/modules/analyses/pentest.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/analyses/scraping.js') }}"></script>
 <!-- Script principal (chargement différé) -->
-<script src="{{ url_for('static', filename='js/entreprises.refactored.js') }}?v=6" defer></script>
+<script src="{{ url_for('static', filename='js/entreprises.refactored.js') }}?v=8" defer></script>
 {% endblock %}
 

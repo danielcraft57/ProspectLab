@@ -141,6 +141,26 @@ class DatabaseSchema(DatabaseBase):
         ''')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_entreprise_groupes_entreprise ON entreprise_groupes(entreprise_id)')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_entreprise_groupes_groupe ON entreprise_groupes(groupe_id)')
+
+        # Journal des interactions commerciales (touchpoints) par entreprise
+        self.execute_sql(cursor, '''
+            CREATE TABLE IF NOT EXISTS entreprise_touchpoints (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entreprise_id INTEGER NOT NULL,
+                canal TEXT NOT NULL,
+                sujet TEXT NOT NULL,
+                note TEXT,
+                happened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_by INTEGER,
+                FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE
+            )
+        ''')
+        # Migrations légères (si la table existe déjà sans certains champs)
+        self.safe_execute_sql(cursor, 'ALTER TABLE entreprise_touchpoints ADD COLUMN note TEXT')
+        self.safe_execute_sql(cursor, 'ALTER TABLE entreprise_touchpoints ADD COLUMN created_by INTEGER')
+        self.execute_sql(cursor, 'CREATE INDEX IF NOT EXISTS idx_touchpoints_entreprise_id ON entreprise_touchpoints(entreprise_id)')
+        self.execute_sql(cursor, 'CREATE INDEX IF NOT EXISTS idx_touchpoints_happened_at ON entreprise_touchpoints(happened_at)')
         
         # Table des données OpenGraph (normalisée selon ogp.me)
         self.execute_sql(cursor, '''

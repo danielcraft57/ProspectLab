@@ -240,16 +240,12 @@ Cette roadmap regroupe les grandes idées de développement orientées prospecti
 
 ### 19. Suivi “touchpoints” de prospection
 
-- **Statut**: 🟡 Partiellement couvert (notes + tags)  
-  La fiche entreprise gère déjà tags et notes libres ; un vrai journal structuré des interactions reste à mettre en place.
+- **Statut**: 🟢 En place (API + UI web)  
+  Journal structuré par entreprise (`entreprise_touchpoints`), API REST + onglet **Prospection** sur la modale Entreprises ; barre **Pipeline** sur la liste (effectifs par statut, filtres alignés sur la liste).
 
-- Journal par entreprise :
-  - Emails envoyés.
-  - Appels.
-  - LinkedIn.
-  - Réponses.
-  - Notes de RDV.
-- Raccourcis dans l’UI pour créer un “log” en 2 clics.
+- À affiner plus tard :
+  - Raccourcis métier (préremplissage canal/sujet : email, appel, LinkedIn, etc.).
+  - App mobile (`feat/app-mobile`) branchée sur les mêmes endpoints.
 
 ### 20. Mode “démonstration / sandbox”
 

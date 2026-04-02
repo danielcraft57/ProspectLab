@@ -1533,3 +1533,227 @@ body[data-theme="dark"] #advanced-filters .filters-advanced-section-body .form-c
     background: rgba(148, 163, 184, 0.06);
     border-color: rgba(148, 163, 184, 0.18);
 }
+
+/* Barre synthèse pipeline (Kanban) sous les filtres résultats */
+.pipeline-kanban-strip {
+    margin: 0 0 1rem 0;
+    padding: 0.75rem 1rem;
+    background: rgba(102, 126, 234, 0.06);
+    border: 1px solid rgba(102, 126, 234, 0.15);
+    border-radius: 10px;
+}
+.kanban-strip-inner {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.kanban-strip-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.35rem 0.75rem;
+    font-size: 0.9rem;
+    color: #334155;
+}
+.kanban-strip-filtered {
+    font-weight: 400;
+    color: #64748b;
+    font-size: 0.85rem;
+}
+.kanban-strip-total {
+    color: #64748b;
+    font-size: 0.85rem;
+}
+.kanban-strip-columns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.5rem;
+    align-items: center;
+}
+.kanban-strip-col {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.25rem 0.5rem;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    max-width: 100%;
+}
+.kanban-strip-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.kanban-strip-label {
+    color: #475569;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 140px;
+}
+.kanban-strip-count {
+    font-weight: 700;
+    color: #0f172a;
+}
+.kanban-strip-hors {
+    font-size: 0.78rem;
+    color: #94a3b8;
+}
+
+/* Modale — onglet Prospection */
+.prospection-statut-block {
+    margin-bottom: 1.25rem;
+    padding: 1rem;
+    background: #f8fafc;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+}
+.prospection-label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    color: #334155;
+}
+.prospection-statut-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+}
+.prospection-statut-row .form-select {
+    max-width: 280px;
+}
+.prospection-journal-title {
+    margin: 0 0 0.75rem 0;
+    color: #334155;
+    font-size: 1rem;
+}
+.touchpoints-list {
+    max-height: 280px;
+    overflow-y: auto;
+}
+.touchpoint-card {
+    padding: 0.75rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+    background: #fff;
+}
+.touchpoint-card-main {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.5rem;
+}
+.touchpoint-sujet {
+    color: #64748b;
+}
+.touchpoint-date {
+    font-size: 0.8rem;
+    color: #94a3b8;
+    margin-top: 0.25rem;
+}
+.touchpoint-note {
+    margin-top: 0.35rem;
+    font-size: 0.9rem;
+    color: #475569;
+}
+.touchpoint-form {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: #fff;
+    border: 1px dashed #cbd5e1;
+    border-radius: 8px;
+}
+.touchpoint-form-grid {
+    display: grid;
+    gap: 0.5rem;
+    grid-template-columns: 1fr 1fr;
+}
+@media (max-width: 640px) {
+    .touchpoint-form-grid {
+        grid-template-columns: 1fr;
+    }
+}
+.touchpoint-form-note,
+.touchpoint-form-date {
+    margin-top: 0.5rem;
+}
+.touchpoint-submit {
+    margin-top: 0.75rem;
+}
+
+/* Pipeline + Prospection — dark mode */
+body[data-theme="dark"] .pipeline-kanban-strip {
+    background: rgba(99, 102, 241, 0.08);
+    border-color: rgba(148, 163, 184, 0.2);
+}
+
+body[data-theme="dark"] .kanban-strip-meta {
+    color: #e2e8f0;
+}
+
+body[data-theme="dark"] .kanban-strip-meta strong {
+    color: #f1f5f9;
+}
+
+body[data-theme="dark"] .kanban-strip-filtered,
+body[data-theme="dark"] .kanban-strip-total {
+    color: #94a3b8;
+}
+
+body[data-theme="dark"] .kanban-strip-col {
+    background: rgba(15, 23, 42, 0.85);
+    border-color: rgba(148, 163, 184, 0.18);
+}
+
+body[data-theme="dark"] .kanban-strip-label {
+    color: #cbd5e1;
+}
+
+body[data-theme="dark"] .kanban-strip-count {
+    color: #f8fafc;
+}
+
+body[data-theme="dark"] .kanban-strip-hors {
+    color: #64748b;
+}
+
+body[data-theme="dark"] .prospection-statut-block {
+    background: rgba(15, 23, 42, 0.6);
+    border-color: rgba(148, 163, 184, 0.15);
+}
+
+body[data-theme="dark"] .prospection-label,
+body[data-theme="dark"] .prospection-journal-title {
+    color: #e2e8f0;
+}
+
+body[data-theme="dark"] .touchpoint-card {
+    background: rgba(15, 23, 42, 0.75);
+    border-color: rgba(148, 163, 184, 0.18);
+}
+
+body[data-theme="dark"] .touchpoint-card strong {
+    color: #f1f5f9;
+}
+
+body[data-theme="dark"] .touchpoint-sujet {
+    color: #94a3b8;
+}
+
+body[data-theme="dark"] .touchpoint-date {
+    color: #64748b;
+}
+
+body[data-theme="dark"] .touchpoint-note {
+    color: #cbd5e1;
+}
+
+body[data-theme="dark"] .touchpoint-form {
+    background: rgba(15, 23, 42, 0.5);
+    border-color: rgba(148, 163, 184, 0.25);
+}

@@ -4,8 +4,9 @@ Blueprint pour les routes API principales
 Contient toutes les routes API REST pour les entreprises, analyses, etc.
 """
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, session
 from services.database import Database
+from services.database.entreprises import ENTERPRISE_STATUSES
 from services.auth import login_required
 import json
 
@@ -38,6 +39,57 @@ def _maybe_expand_statut_filter(statut_param):
     if s in ('Gagné', 'Perdu', 'Relance'):
         return _expand_statut_level(s)
     return s
+
+
+def _parse_entreprise_list_query_filters():
+    """
+    Lit les query params comme la route GET /entreprises (filtres + analyse_id).
+    Retourne (analyse_id, filters) avec filters déjà nettoyé par keep_filter.
+    """
+    analyse_id = request.args.get('analyse_id', type=int)
+    filters = {
+        'secteur': request.args.get('secteur'),
+        'statut': _maybe_expand_statut_filter(request.args.get('statut')),
+        'opportunite': request.args.get('opportunite'),
+        'favori': request.args.get('favori') == 'true',
+        'search': request.args.get('search'),
+        'security_min': request.args.get('security_min', type=int),
+        'security_max': request.args.get('security_max', type=int),
+        'pentest_min': request.args.get('pentest_min', type=int),
+        'pentest_max': request.args.get('pentest_max', type=int),
+        'seo_min': request.args.get('seo_min', type=int),
+        'seo_max': request.args.get('seo_max', type=int),
+        'security_null': request.args.get('security_null'),
+        'pentest_null': request.args.get('pentest_null'),
+        'seo_null': request.args.get('seo_null'),
+        'groupe_id': request.args.get('groupe_id', type=int),
+        'no_group': request.args.get('no_group'),
+        'has_email': request.args.get('has_email'),
+        'cms': request.args.get('cms'),
+        'framework': request.args.get('framework'),
+        'has_blog': request.args.get('has_blog'),
+        'has_form': request.args.get('has_form'),
+        'has_tunnel': request.args.get('has_tunnel'),
+        'performance_min': request.args.get('performance_min', type=int),
+        'performance_max': request.args.get('performance_max', type=int),
+        'tags_contains': request.args.get('tags_contains'),
+        'tags_any': request.args.get('tags_any'),
+        'tags_all': request.args.get('tags_all'),
+    }
+
+    def keep_filter(k, v):
+        if v is None:
+            return False
+        if k in ('security_min', 'security_max', 'pentest_min', 'pentest_max', 'seo_min', 'seo_max',
+                 'performance_min', 'performance_max'):
+            return 0 <= v <= 100
+        if k in ('has_email', 'no_group', 'has_blog', 'has_form', 'has_tunnel',
+                 'security_null', 'pentest_null', 'seo_null'):
+            return str(v).lower() in ('1', 'true', 'yes')
+        return v != ''
+
+    filters = {k: v for k, v in filters.items() if keep_filter(k, v)}
+    return analyse_id, filters
 
 
 @api_bp.route('/osint/diagnostic')
@@ -186,51 +238,7 @@ def entreprises():
           }
     """
     try:
-        analyse_id = request.args.get('analyse_id', type=int)
-        filters = {
-            'secteur': request.args.get('secteur'),
-            'statut': _maybe_expand_statut_filter(request.args.get('statut')),
-            'opportunite': request.args.get('opportunite'),
-            'favori': request.args.get('favori') == 'true',
-            'search': request.args.get('search'),
-            'security_min': request.args.get('security_min', type=int),
-            'security_max': request.args.get('security_max', type=int),
-            'pentest_min': request.args.get('pentest_min', type=int),
-            'pentest_max': request.args.get('pentest_max', type=int),
-            'seo_min': request.args.get('seo_min', type=int),
-            'seo_max': request.args.get('seo_max', type=int),
-            # Uniquement entreprises sans score (NULL) pour ce type d'analyse
-            'security_null': request.args.get('security_null'),
-            'pentest_null': request.args.get('pentest_null'),
-            'seo_null': request.args.get('seo_null'),
-            'groupe_id': request.args.get('groupe_id', type=int),
-            'no_group': request.args.get('no_group'),
-            'has_email': request.args.get('has_email'),
-            # Filtres de segmentation avancée
-            'cms': request.args.get('cms'),
-            'framework': request.args.get('framework'),
-            'has_blog': request.args.get('has_blog'),
-            'has_form': request.args.get('has_form'),
-            'has_tunnel': request.args.get('has_tunnel'),
-            'performance_min': request.args.get('performance_min', type=int),
-            'performance_max': request.args.get('performance_max', type=int),
-            'tags_contains': request.args.get('tags_contains'),
-            'tags_any': request.args.get('tags_any'),
-            # tags_all = entreprises qui possèdent TOUS les tags listés (AND logique)
-            'tags_all': request.args.get('tags_all'),
-        }
-        # Ne pas retirer les entiers 0 (valides pour min/max)
-        def keep_filter(k, v):
-            if v is None:
-                return False
-            if k in ('security_min', 'security_max', 'pentest_min', 'pentest_max', 'seo_min', 'seo_max',
-                     'performance_min', 'performance_max'):
-                return 0 <= v <= 100
-            if k in ('has_email', 'no_group', 'has_blog', 'has_form', 'has_tunnel',
-                     'security_null', 'pentest_null', 'seo_null'):
-                return str(v).lower() in ('1', 'true', 'yes')
-            return v != ''
-        filters = {k: v for k, v in filters.items() if keep_filter(k, v)}
+        analyse_id, filters = _parse_entreprise_list_query_filters()
 
         page = request.args.get('page', type=int)
         page_size = request.args.get('page_size', type=int)
@@ -666,8 +674,143 @@ def entreprise_statut(entreprise_id):
         statut = (data.get('statut') or '').strip()
         if not statut:
             return jsonify({'error': 'statut requis'}), 400
-        database.update_entreprise_statut(entreprise_id, statut)
+        ok = database.update_entreprise_statut(entreprise_id, statut)
+        if not ok:
+            return jsonify({'error': 'statut invalide'}), 400
         return jsonify({'success': True, 'statut': statut})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/entreprise/statuts', methods=['GET'])
+@login_required
+def entreprise_statuts():
+    """
+    API: Liste des statuts pipeline supportés côté entreprise.
+    """
+    return jsonify(sorted(ENTERPRISE_STATUSES))
+
+
+@api_bp.route('/entreprise/pipeline/kanban', methods=['GET'])
+@login_required
+def entreprise_pipeline_kanban():
+    """
+    API: Effectifs par statut pour une vue Kanban (optionnellement filtré par analyse).
+
+    Query params:
+      - analyse_id (int, optionnel): limite aux entreprises liées à cette analyse.
+      - Même filtres optionnels que GET /api/entreprises (secteur, statut, search, scores,
+        groupe, tags, segmentation, etc.). Si au moins un filtre est actif, l’agrégation
+        utilise la même sous-requête que count_entreprises (y compris filtres sur scores).
+    """
+    try:
+        analyse_id, filters = _parse_entreprise_list_query_filters()
+        data = database.get_pipeline_kanban_snapshot(
+            analyse_id=analyse_id,
+            filters=filters if filters else None,
+        )
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/entreprise/<int:entreprise_id>/touchpoints', methods=['GET', 'POST'])
+@login_required
+def entreprise_touchpoints(entreprise_id):
+    """
+    API: Journal des interactions d'une entreprise (touchpoints).
+
+    GET:
+      - Query params: limit (defaut 50), offset (defaut 0)
+    POST:
+      - Body JSON: { canal, sujet, note?, happened_at? }
+    """
+    try:
+        if request.method == 'GET':
+            limit = request.args.get('limit', default=50, type=int)
+            offset = request.args.get('offset', default=0, type=int)
+            items = database.list_entreprise_touchpoints(entreprise_id, limit=limit, offset=offset)
+            return jsonify({'success': True, 'items': items, 'count': len(items)})
+
+        data = request.get_json() or {}
+        canal = (data.get('canal') or '').strip()
+        sujet = (data.get('sujet') or '').strip()
+        note = data.get('note')
+        happened_at = data.get('happened_at')
+
+        if not canal:
+            return jsonify({'error': 'canal requis'}), 400
+        if not sujet:
+            return jsonify({'error': 'sujet requis'}), 400
+
+        created_by = session.get('user_id')
+        item = database.create_entreprise_touchpoint(
+            entreprise_id=entreprise_id,
+            canal=canal,
+            sujet=sujet,
+            note=note,
+            happened_at=happened_at,
+            created_by=created_by,
+        )
+        return jsonify({'success': True, 'item': item}), 201
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/entreprise/<int:entreprise_id>/touchpoints/<int:touchpoint_id>', methods=['DELETE'])
+@login_required
+def entreprise_touchpoint_delete(entreprise_id, touchpoint_id):
+    """
+    API: Supprime un touchpoint d'entreprise.
+    """
+    try:
+        deleted = database.delete_entreprise_touchpoint(entreprise_id, touchpoint_id)
+        if not deleted:
+            return jsonify({'error': 'Touchpoint introuvable'}), 404
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/entreprise/<int:entreprise_id>/touchpoints/<int:touchpoint_id>', methods=['PATCH'])
+@login_required
+def entreprise_touchpoint_patch(entreprise_id, touchpoint_id):
+    """
+    API: Met à jour un touchpoint d'entreprise.
+
+    Body JSON (PATCH partiel) :
+      - canal?: str
+      - sujet?: str
+      - note?: str | null
+      - happened_at?: str (ou format accepté par la DB)
+    """
+    try:
+        data = request.get_json() or {}
+
+        # On distingue "champ absent" (=> pas de modif) de "champ présent et null" (=> pour note, ex: vider).
+        kwargs: dict[str, object] = {}
+        if 'canal' in data:
+            kwargs['canal'] = data.get('canal')
+        if 'sujet' in data:
+            kwargs['sujet'] = data.get('sujet')
+        if 'note' in data:
+            kwargs['note'] = data.get('note')
+        if 'happened_at' in data:
+            kwargs['happened_at'] = data.get('happened_at')
+
+        item = database.update_entreprise_touchpoint(
+            entreprise_id=entreprise_id,
+            touchpoint_id=touchpoint_id,
+            **kwargs,
+        )
+        if not item:
+            return jsonify({'error': 'Touchpoint introuvable'}), 404
+
+        return jsonify({'success': True, 'item': item})
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
