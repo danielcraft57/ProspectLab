@@ -111,3 +111,5 @@ templates_local/
 Data/
 scripts/experiments/
 deploy_cluster_worker/
+mobile/
+backups/
