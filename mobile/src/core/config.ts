@@ -1,7 +1,8 @@
 export const Config = {
   prospectLabBaseUrl: (() => {
     const raw = process.env.EXPO_PUBLIC_PROSPECTLAB_BASE_URL?.trim();
-    if (!raw) return 'https://prospectlab.danielcraft.fr';
+    // Défaut orienté dev local ; en prod définir EXPO_PUBLIC_PROSPECTLAB_BASE_URL (HTTPS).
+    if (!raw) return 'http://localhost:5000';
     if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
     return `https://${raw}`;
   })(),

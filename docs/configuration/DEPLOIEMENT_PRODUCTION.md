@@ -78,7 +78,7 @@ sudo systemctl start redis-server
 redis-cli ping  # Doit répondre PONG
 ```
 
-#### Redis sur le LAN uniquement (ex. `pi@node15.lan`, sous-réseau `192.168.1.0/24`)
+#### Redis sur le LAN uniquement (ex. `utilisateur@serveur.lan`, sous-réseau `192.168.1.0/24`)
 
 Pour que le broker soit joignable par les **workers sur d’autres machines** du LAN, sans exposer le port sur Internet :
 

@@ -1,8 +1,6 @@
 import { useLayoutEffect } from 'react';
 import { useNavigation } from '@react-navigation/native';
-import { useRouter } from 'expo-router';
-import { Platform, Pressable, Text } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { Platform } from 'react-native';
 import { useTheme } from './theme';
 
 export type DetailScreenHeaderOptions = {
@@ -15,12 +13,10 @@ export type DetailScreenHeaderOptions = {
 };
 
 /**
- * Configure le header natif : retour explicite + titre dynamique.
- * Aligné sur les habitudes iOS/Android (un seul « retour » en haut, pas de doublon dans le contenu).
+ * Header Stack unique : titre dynamique + retour natif (pas de headerLeft custom = évite le doublon avec l’onglet Tabs).
  */
-export function useDetailScreenHeader({ title, fallbackTitle, listPath }: DetailScreenHeaderOptions) {
+export function useDetailScreenHeader({ title, fallbackTitle, listPath: _listPath }: DetailScreenHeaderOptions) {
   const navigation = useNavigation();
-  const router = useRouter();
   const t = useTheme();
 
   const resolved = (title && title.trim()) || fallbackTitle;
@@ -41,32 +37,6 @@ export function useDetailScreenHeader({ title, fallbackTitle, listPath }: Detail
         fontSize: 17,
       },
       ...(Platform.OS === 'ios' ? { headerBackTitleVisible: false } : {}),
-      headerLeft: () => (
-        <Pressable
-          onPress={() => {
-            if (navigation.canGoBack()) {
-              navigation.goBack();
-            } else {
-              router.replace(listPath);
-            }
-          }}
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            paddingVertical: 8,
-            paddingRight: 12,
-            marginLeft: Platform.OS === 'ios' ? 4 : 0,
-          }}
-          hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel="Retour"
-        >
-          <MaterialCommunityIcons name="chevron-left" size={28} color={t.colors.primary} />
-          {Platform.OS === 'android' ? (
-            <Text style={{ color: t.colors.primary, fontWeight: '700', fontSize: 16 }}>Retour</Text>
-          ) : null}
-        </Pressable>
-      ),
     });
-  }, [navigation, router, resolved, listPath, t.colors.card, t.colors.primary, t.colors.text]);
+  }, [navigation, resolved, t.colors.card, t.colors.primary, t.colors.text]);
 }

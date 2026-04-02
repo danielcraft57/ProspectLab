@@ -1,14 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { ActivityIndicator, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
-import { ProspectLabApi } from '../src/features/prospectlab/prospectLabApi';
-import { extractApiTokenFromOcrText } from '../src/lib/ocr/extractApiToken';
-import { recognizeImageText } from '../src/lib/ocr/recognizeImageText';
-import { useTheme } from '../src/ui/theme';
+import { ProspectLabApi } from '../../src/features/prospectlab/prospectLabApi';
+import { extractApiTokenFromOcrText } from '../../src/lib/ocr/extractApiToken';
+import { recognizeImageText } from '../../src/lib/ocr/recognizeImageText';
+import { useCameraScanAssist } from '../../src/lib/camera/useCameraScanAssist';
+import { ScanTorchFab } from '../../src/lib/camera/ScanTorchFab';
+import { useScanCameraFocused } from '../../src/lib/camera/useScanCameraFocused';
+import { useTheme } from '../../src/ui/theme';
 
 export default function TokenOcrScreen() {
   const t = useTheme();
+  const { height: winH } = useWindowDimensions();
+  const { isFocused, sessionReady, onCameraReady } = useScanCameraFocused();
+  const cameraAssist = useCameraScanAssist();
+  const panelMaxH = Math.min(236, Math.round(winH * 0.34));
   const router = useRouter();
   const cameraRef = useRef<CameraView | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
@@ -17,7 +24,7 @@ export default function TokenOcrScreen() {
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pictureSize, setPictureSize] = useState<string | undefined>(undefined);
-  const [ready, setReady] = useState(false);
+  const [torchOn, setTorchOn] = useState(false);
   const [stableToken, setStableToken] = useState<string | null>(null);
   const stableCountRef = useRef(0);
   const prevExtractedTokenRef = useRef<string | null>(null);
@@ -35,6 +42,25 @@ export default function TokenOcrScreen() {
   const token = useMemo(() => extractApiTokenFromOcrText(recognizedText), [recognizedText]);
 
   tokenRef.current = token;
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        verifySeqRef.current += 1;
+        stableCountRef.current = 0;
+        prevExtractedTokenRef.current = null;
+        apiVerifiedOkRef.current = false;
+        verifyLoadingRef.current = false;
+        tokenRef.current = null;
+        setRecognizedText('');
+        setStableToken(null);
+        setError(null);
+        setVerify(null);
+        setIsBusy(false);
+        setTorchOn(false);
+      };
+    }, []),
+  );
 
   useEffect(() => {
     if (!token) {
@@ -113,6 +139,12 @@ export default function TokenOcrScreen() {
   }, [isBusy, stableToken]);
 
   useEffect(() => {
+    if (!isFocused) {
+      setTorchOn(false);
+    }
+  }, [isFocused]);
+
+  useEffect(() => {
     if (!permission) return;
     if (!permission.granted) {
       requestPermission().catch(() => undefined);
@@ -122,18 +154,18 @@ export default function TokenOcrScreen() {
   }, [permission, requestPermission]);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!sessionReady || !isFocused) return;
     configureCamera().catch(() => undefined);
-  }, [configureCamera, ready]);
+  }, [configureCamera, sessionReady, isFocused]);
 
   useEffect(() => {
-    if (!isScanning || !permission?.granted) return;
+    if (!isFocused || !isScanning || !permission?.granted) return;
     if (stableToken) return;
     const interval = setInterval(() => {
       scanOnce().catch(() => undefined);
     }, 1700);
     return () => clearInterval(interval);
-  }, [isScanning, permission?.granted, scanOnce, stableToken]);
+  }, [isFocused, isScanning, permission?.granted, scanOnce, stableToken]);
 
   useEffect(() => {
     if (!token) {
@@ -177,36 +209,69 @@ export default function TokenOcrScreen() {
 
   return (
     <View style={styles.root}>
-      <CameraView
-        ref={cameraRef}
-        style={StyleSheet.absoluteFill}
-        facing="back"
-        animateShutter={false}
-        // `on` = une mise au point puis verrouillage (mauvais pour texte OCR). `off` = continu.
-        autofocus="off"
-        pictureSize={pictureSize}
-        zoom={0.1}
-        onCameraReady={() => setReady(true)}
-        barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-        onBarcodeScanned={handleBarcodeScanned}
-      />
+      <View style={styles.cameraSlot}>
+        {isFocused ? (
+          <>
+            <CameraView
+              ref={cameraRef}
+              style={StyleSheet.absoluteFill}
+              facing="back"
+              animateShutter={false}
+              active={isFocused}
+              autofocus={cameraAssist.autofocus}
+              pictureSize={pictureSize}
+              zoom={cameraAssist.zoom}
+              flash={torchOn ? 'off' : cameraAssist.flash}
+              enableTorch={isFocused && torchOn}
+              onCameraReady={onCameraReady}
+              barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+              onBarcodeScanned={handleBarcodeScanned}
+            />
 
-      <View style={styles.overlay}>
-        <View style={styles.topShade} />
-        <View style={styles.middleRow}>
-          <View style={styles.sideShade} />
-          <View style={[styles.frame, { borderColor: token ? t.colors.success : t.colors.warning }]}>
-            <Text style={styles.frameHint}>QR code ou texte du token dans le cadre</Text>
-          </View>
-          <View style={styles.sideShade} />
-        </View>
-        <View style={styles.bottomShade} />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Prendre une photo pour analyse OCR"
+              disabled={isBusy || !!stableToken}
+              onPress={() => void scanOnce()}
+              style={[StyleSheet.absoluteFill, styles.cameraTapLayer]}
+            />
+            <View style={styles.overlay} pointerEvents="none">
+              <View style={styles.topShade} />
+              <View style={styles.middleRow}>
+                <View style={styles.sideShade} />
+                <View style={[styles.frame, { borderColor: token ? t.colors.success : t.colors.warning }]}>
+                  <Text style={styles.frameHint}>QR ou texte — tape n’importe où sur la vue</Text>
+                </View>
+                <View style={styles.sideShade} />
+              </View>
+              <View style={styles.bottomShade} />
+            </View>
+            <ScanTorchFab enabled={torchOn} onToggle={() => setTorchOn((v) => !v)} />
+          </>
+        ) : (
+          <View style={[StyleSheet.absoluteFill, styles.cameraPaused]} />
+        )}
       </View>
 
-      <View style={[styles.bottomPanel, { backgroundColor: t.colors.card, borderColor: t.colors.border }]}>
+      <View
+        style={[
+          styles.bottomPanel,
+          {
+            backgroundColor: t.colors.card,
+            borderTopColor: t.colors.border,
+            maxHeight: panelMaxH,
+          },
+        ]}
+      >
+        <View style={styles.panelGrab} />
         <Text style={[styles.panelTitle, { color: t.colors.text }]}>Token détecté</Text>
         <View style={[styles.resultBox, { borderColor: displayToken ? t.colors.success : t.colors.border, backgroundColor: t.colors.bg }]}>
-          <Text style={[styles.resultToken, { color: displayToken ? t.colors.text : t.colors.muted }]} selectable>
+          <Text
+            style={[styles.resultToken, { color: displayToken ? t.colors.text : t.colors.muted }]}
+            selectable
+            numberOfLines={1}
+            ellipsizeMode="middle"
+          >
             {displayToken ?? '—'}
           </Text>
           <View style={styles.verifyRow}>
@@ -218,7 +283,9 @@ export default function TokenOcrScreen() {
               </>
             )}
             {!!token && verify && 'ok' in verify && verify.ok && (
-              <Text style={[styles.verifyLine, { color: t.colors.success }]}>HTTP {verify.status} — token accepté</Text>
+              <Text style={[styles.verifyLine, { color: t.colors.success }]} numberOfLines={1}>
+                HTTP {verify.status} — accepté
+              </Text>
             )}
             {!!token && verify && 'ok' in verify && !verify.ok && (
               <Text
@@ -226,14 +293,19 @@ export default function TokenOcrScreen() {
                   styles.verifyLine,
                   { color: verify.status === 401 ? t.colors.danger : t.colors.warning },
                 ]}
+                numberOfLines={2}
               >
                 HTTP {verify.status}
-                {verify.status === 401 ? ' — refusé (token invalide)' : ` — ${verify.message}`}
+                {verify.status === 401 ? ' — refusé' : ` — ${verify.message}`}
               </Text>
             )}
           </View>
         </View>
-        {!!error && <Text style={[styles.error, { color: t.colors.danger }]}>{error}</Text>}
+        {!!error && (
+          <Text style={[styles.error, { color: t.colors.danger }]} numberOfLines={2}>
+            {error}
+          </Text>
+        )}
         <View style={styles.actions}>
           <Pressable style={[styles.secondaryBtn, { borderColor: t.colors.border, backgroundColor: t.colors.bg }]} onPress={() => router.back()}>
             <Text style={[styles.secondaryLabel, { color: t.colors.text }]}>Annuler</Text>
@@ -256,58 +328,74 @@ export default function TokenOcrScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000' },
+  cameraSlot: { flex: 1, overflow: 'hidden' },
+  cameraPaused: { backgroundColor: '#000' },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20 },
   title: { fontSize: 20, fontWeight: '800' },
   subtitle: { marginTop: 8, textAlign: 'center' },
-  overlay: { ...StyleSheet.absoluteFillObject },
+  cameraTapLayer: { zIndex: 1 },
+  overlay: { ...StyleSheet.absoluteFillObject, zIndex: 2 },
   topShade: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
-  middleRow: { height: 220, flexDirection: 'row' },
+  middleRow: { height: 200, flexDirection: 'row' },
   sideShade: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
   frame: {
-    width: 300,
+    width: 280,
     borderWidth: 3,
-    borderRadius: 18,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'flex-end',
-    paddingBottom: 10,
+    paddingBottom: 8,
     backgroundColor: 'rgba(20,20,20,0.14)',
   },
-  frameHint: { color: '#fff', fontWeight: '700', fontSize: 12 },
+  frameHint: { color: '#fff', fontWeight: '700', fontSize: 11 },
   bottomShade: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
   bottomPanel: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    bottom: 20,
-    borderWidth: 1,
-    borderRadius: 16,
-    padding: 12,
-    gap: 8,
+    flexShrink: 0,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    paddingHorizontal: 14,
+    paddingTop: 6,
+    paddingBottom: 10,
+    gap: 6,
+    elevation: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
   },
-  panelTitle: { fontWeight: '800', fontSize: 14 },
-  resultBox: { borderWidth: 1, borderRadius: 12, padding: 10, gap: 8 },
-  resultToken: { fontFamily: 'monospace', fontSize: 12, fontWeight: '700' },
-  verifyRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', minHeight: 22 },
-  verifyLine: { fontSize: 12, fontWeight: '600' },
-  error: { fontSize: 12 },
-  actions: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  panelGrab: {
+    alignSelf: 'center',
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(128,128,128,0.45)',
+    marginBottom: 2,
+  },
+  panelTitle: { fontWeight: '800', fontSize: 12 },
+  resultBox: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 6, gap: 4 },
+  resultToken: { fontFamily: 'monospace', fontSize: 11, fontWeight: '700' },
+  verifyRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', minHeight: 18 },
+  verifyLine: { fontSize: 11, fontWeight: '600' },
+  error: { fontSize: 11 },
+  actions: { flexDirection: 'row', gap: 8, marginTop: 2 },
   actionBtn: {
     flex: 1,
-    minHeight: 44,
-    borderRadius: 12,
+    minHeight: 40,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
   },
-  actionLabel: { fontWeight: '800' },
+  actionLabel: { fontWeight: '800', fontSize: 13 },
   secondaryBtn: {
     flex: 1,
-    minHeight: 44,
+    minHeight: 40,
     borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
   },
-  secondaryLabel: { fontWeight: '700' },
+  secondaryLabel: { fontWeight: '700', fontSize: 13 },
 });

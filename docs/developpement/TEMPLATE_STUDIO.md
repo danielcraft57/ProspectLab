@@ -58,7 +58,7 @@ Une protection empêche les boucles infinies (profondeur max).
 
 ### Fragments fournis (standardisation)
 - `footer_standard` : footer “familier” (robot + réponse + lien ne plus recevoir d’email)
-- `signature_standard` : signature (Cordialement, **loïc Daniel**, lien `danielcraft.fr`)
+- `signature_standard` : signature type (Cordialement, **Prénom Nom**, lien `https://exemple.fr`)
 - `cta_primary_15min` : CTA principal “Oui, je réserve 15 min” (pill)
 - `cta_secondary_analysis` : CTA secondaire “Voir l’analyse du site” (avec `{#if_website}`)
 - `cta_dual_analysis_and_15min` : double CTA (analyse + réserver 15 min) style bleu/noir

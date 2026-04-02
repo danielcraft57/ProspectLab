@@ -3,11 +3,15 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  InteractionManager,
+  Image,
   Pressable,
   RefreshControl,
   StyleSheet,
   TextInput,
   View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -15,11 +19,13 @@ import {
   ActiveFilterStrip,
   AdvancedListFilters,
   type EntrepriseListFilters,
-} from '../../src/features/entreprises/AdvancedListFilters';
-import { ProspectLabApi } from '../../src/features/prospectlab/prospectLabApi';
-import { useApiToken } from '../../src/features/prospectlab/useToken';
-import { Card, FadeIn, H1, H2, Mono, Muted, MutedText, PrimaryButton, Screen } from '../../src/ui/components';
-import { useTheme } from '../../src/ui/theme';
+} from '../../../src/features/entreprises/AdvancedListFilters';
+import { ProspectLabApi } from '../../../src/features/prospectlab/prospectLabApi';
+import { useApiToken } from '../../../src/features/prospectlab/useToken';
+import { clearProspectLabApiCache } from '../../../src/lib/http/apiMemoryCache';
+import { HttpError } from '../../../src/lib/http/httpClient';
+import { Card, FadeIn, H2, Mono, Muted, MutedText, PrimaryButton, Screen } from '../../../src/ui/components';
+import { useTheme } from '../../../src/ui/theme';
 
 const PAGE_SIZE = 50;
 
@@ -31,9 +37,15 @@ type EntrepriseItem = {
   statut?: string;
   email_principal?: string;
   telephone?: string;
+  image?: string;
 };
 
 function asEntreprise(raw: Record<string, unknown>): EntrepriseItem {
+  const logo = typeof raw.logo === 'string' && raw.logo.trim() ? raw.logo.trim() : undefined;
+  const ogImage = typeof raw.og_image === 'string' && raw.og_image.trim() ? raw.og_image.trim() : undefined;
+  const favicon = typeof raw.favicon === 'string' && raw.favicon.trim() ? raw.favicon.trim() : undefined;
+  const image = logo || ogImage || favicon;
+
   return {
     id: typeof raw.id === 'number' ? raw.id : undefined,
     nom: typeof raw.nom === 'string' ? raw.nom : typeof raw.name === 'string' ? raw.name : undefined,
@@ -42,6 +54,7 @@ function asEntreprise(raw: Record<string, unknown>): EntrepriseItem {
     statut: typeof raw.statut === 'string' ? raw.statut : undefined,
     email_principal: typeof raw.email_principal === 'string' ? raw.email_principal : undefined,
     telephone: typeof raw.telephone === 'string' ? raw.telephone : undefined,
+    image,
   };
 }
 
@@ -73,7 +86,32 @@ export default function EntreprisesScreen() {
   const [opportuniteOptions, setOpportuniteOptions] = useState<string[]>([]);
   const [statutOptions, setStatutOptions] = useState<string[]>([]);
   const [metaLoading, setMetaLoading] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [canDeleteEntreprises, setCanDeleteEntreprises] = useState(false);
   const loadSeq = useRef(0);
+  const scrollLoadLock = useRef(false);
+
+  useEffect(() => {
+    if (!token) {
+      setCanDeleteEntreprises(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await ProspectLabApi.getTokenInfo(token, { skipCache: true });
+        const data = (res as { data?: { permissions?: Record<string, boolean> } })?.data;
+        const perms = data?.permissions;
+        const ok = !!perms?.entreprises_delete;
+        if (!cancelled) setCanDeleteEntreprises(ok);
+      } catch {
+        if (!cancelled) setCanDeleteEntreprises(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   useEffect(() => {
     if (!token) {
@@ -152,19 +190,29 @@ export default function EntreprisesScreen() {
         if (seq === loadSeq.current) setLoading(false);
       }
     },
-    [token, appliedSearch],
+    [token, appliedSearch, listFilters.secteur, listFilters.statut, listFilters.opportunite],
   );
 
+  /** Liste : après le premier rendu / interactions, pour ne pas bloquer l’ouverture de l’onglet. */
   useEffect(() => {
-    if (token) loadFirstPage();
+    if (!token) return;
+    let cancelled = false;
+    InteractionManager.runAfterInteractions(() => {
+      if (!cancelled) void loadFirstPage();
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [token, appliedSearch, loadFirstPage]);
 
   const loadMore = useCallback(async () => {
+    if (scrollLoadLock.current) return;
     if (!token || loading || loadingMore || listExhausted) return;
     const cap = total ?? Number.POSITIVE_INFINITY;
     if (items.length >= cap) return;
     const offset = items.length;
     if (offset === 0) return;
+    scrollLoadLock.current = true;
     setLoadingMore(true);
     setError(null);
     try {
@@ -197,6 +245,7 @@ export default function EntreprisesScreen() {
       setError(e?.message ?? 'Erreur');
     } finally {
       setLoadingMore(false);
+      scrollLoadLock.current = false;
     }
   }, [
     token,
@@ -213,21 +262,85 @@ export default function EntreprisesScreen() {
 
   const onRefresh = useCallback(() => loadFirstPage({ skipCache: true }), [loadFirstPage]);
 
+  const confirmDeleteEntreprise = useCallback(
+    (e: EntrepriseItem) => {
+      if (e.id == null || !token) return;
+      const label = (e.nom?.trim() || e.website || `#${e.id}`).slice(0, 120);
+      Alert.alert(
+        'Supprimer cette entreprise ?',
+        `« ${label} » sera définitivement retirée de la base (données liées incluses).`,
+        [
+          { text: 'Annuler', style: 'cancel' },
+          {
+            text: 'Supprimer',
+            style: 'destructive',
+            onPress: () => {
+              void (async () => {
+                try {
+                  setDeletingId(e.id!);
+                  const res = await ProspectLabApi.deleteEntreprise(token, e.id!);
+                  if (!res.success) {
+                    Alert.alert('Erreur', res.error ?? 'Suppression impossible.');
+                    return;
+                  }
+                  clearProspectLabApiCache();
+                  setItems((prev) => prev.filter((x) => x.id !== e.id));
+                  setTotal((n) => (typeof n === 'number' ? Math.max(0, n - 1) : n));
+                } catch (err: unknown) {
+                  let msg = 'Suppression impossible.';
+                  if (err instanceof HttpError && err.info.bodyText) {
+                    try {
+                      const j = JSON.parse(err.info.bodyText) as { error?: string };
+                      if (j?.error) msg = String(j.error);
+                    } catch {
+                      /* ignore */
+                    }
+                  } else if (err instanceof Error) msg = err.message;
+                  Alert.alert('Erreur', msg);
+                } finally {
+                  setDeletingId(null);
+                }
+              })();
+            },
+          },
+        ],
+      );
+    },
+    [token],
+  );
+
+  const onScrollMaybeLoadMore = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (scrollLoadLock.current) return;
+      if (!token || loading || loadingMore || listExhausted) return;
+      const cap = total ?? Number.POSITIVE_INFINITY;
+      if (items.length >= cap) return;
+      if (items.length === 0) return;
+      const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+      const visibleH = layoutMeasurement.height;
+      const contentH = contentSize.height;
+      const scrollable = contentH - visibleH;
+      if (scrollable <= 8) return;
+      const ratio = contentOffset.y / scrollable;
+      if (ratio >= 0.5) void loadMore();
+    },
+    [token, loading, loadingMore, listExhausted, total, items.length, loadMore],
+  );
+
   const summaryLine = useMemo(() => {
     if (!token) return '';
-    if (loading && items.length === 0) return 'Chargement…';
-    const n = items.length;
-    const t = total;
-    if (t != null && t > 0) {
-      return n < t ? `Affichage de ${n} sur ${t} entreprise(s)` : `${t} entreprise(s) — tout affiché`;
+    if (loading && items.length === 0 && total === null) return 'Chargement…';
+    if (total != null && total >= 0) {
+      const fmt = total.toLocaleString('fr-FR');
+      return total === 0 ? 'Total entreprises : 0' : `Total entreprises : ${fmt}`;
     }
-    if (n === 0) return 'Aucun résultat';
-    return `${n} sur cette page — faites défiler pour charger la suite`;
+    if (items.length === 0 && !loading) return 'Aucun résultat';
+    if (items.length > 0) return `${items.length.toLocaleString('fr-FR')} fiche(s) affichée(s)`;
+    return '';
   }, [token, loading, items.length, total]);
 
   const listHeader = (
     <View style={{ gap: 12, marginBottom: 12 }}>
-      <H1>Entreprises</H1>
       {!tokenLoading && !token && (
         <FadeIn>
           <Card>
@@ -321,8 +434,10 @@ export default function EntreprisesScreen() {
         refreshControl={
           <RefreshControl refreshing={loading && items.length > 0} onRefresh={onRefresh} tintColor={t.colors.primary} />
         }
+        onScroll={onScrollMaybeLoadMore}
+        scrollEventThrottle={120}
         onEndReached={() => void loadMore()}
-        onEndReachedThreshold={0.4}
+        onEndReachedThreshold={0.35}
         ListFooterComponent={
           loadingMore ? (
             <View style={styles.footerLoad}>
@@ -333,82 +448,122 @@ export default function EntreprisesScreen() {
         }
         renderItem={({ item: e, index: idx }) => (
           <FadeIn delayMs={Math.min(40 + idx * 8, 400)}>
-            <Pressable
-              onPress={() => {
-                if (e.id != null) {
-                  router.push({
-                    pathname: '/(tabs)/entreprises/details',
-                    params: { kind: 'id', value: String(e.id) },
-                  });
-                  return;
-                }
-                const website = e.website?.trim();
-                const email = e.email_principal?.trim();
-                const phone = e.telephone?.trim();
-                if (website) {
-                  router.push({
-                    pathname: '/(tabs)/entreprises/details',
-                    params: { kind: 'website', value: encodeURIComponent(website) },
-                  });
-                  return;
-                }
-                if (email) {
-                  router.push({
-                    pathname: '/(tabs)/entreprises/details',
-                    params: { kind: 'email', value: encodeURIComponent(email) },
-                  });
-                  return;
-                }
-                if (phone) {
-                  router.push({
-                    pathname: '/(tabs)/entreprises/details',
-                    params: { kind: 'phone', value: encodeURIComponent(phone) },
-                  });
-                  return;
-                }
-                Alert.alert("Détails indisponibles", "Cette entreprise n'a pas d'id ni de contact utilisable pour charger les détails.");
-              }}
-              style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1, transform: [{ scale: pressed ? 0.99 : 1 }] }]}
+            <Card
+              style={[
+                styles.cardPressable,
+                { borderLeftWidth: 3, borderLeftColor: t.colors.primary, position: 'relative' },
+              ]}
             >
-              <Card style={[styles.cardPressable, { borderLeftWidth: 3, borderLeftColor: t.colors.primary }]}>
-                <View style={styles.header}>
-                  <View style={[styles.iconWrap, { backgroundColor: t.colors.border }]}>
-                    <MaterialCommunityIcons name="office-building-outline" size={18} color={t.colors.primary} />
-                  </View>
-                  <View style={{ flex: 1, gap: 4 }}>
-                    <H2>{e.nom ?? '(sans nom)'}</H2>
-                    {!!e.website && (
-                      <View style={styles.websiteRow}>
-                        <FontAwesome6 name="globe" size={12} color={t.colors.primary} />
-                        <Mono>{e.website}</Mono>
+              {e.id != null && canDeleteEntreprises && (
+                <Pressable
+                  onPress={() => confirmDeleteEntreprise(e)}
+                  disabled={deletingId !== null}
+                  style={[styles.deleteCorner, deletingId === e.id && { opacity: 0.75 }]}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Supprimer l'entreprise"
+                >
+                  {deletingId === e.id ? (
+                    <ActivityIndicator size="small" color={t.colors.danger} />
+                  ) : (
+                    <View
+                      style={[
+                        styles.deleteIconRing,
+                        { borderColor: `${t.colors.danger}66`, backgroundColor: `${t.colors.danger}16` },
+                      ]}
+                    >
+                      <MaterialCommunityIcons name="delete-forever-outline" size={18} color={t.colors.danger} />
+                    </View>
+                  )}
+                </Pressable>
+              )}
+              <Pressable
+                onPress={() => {
+                  if (e.id != null) {
+                    router.push({
+                      pathname: '/(tabs)/entreprises/details',
+                      params: { kind: 'id', value: String(e.id) },
+                    });
+                    return;
+                  }
+                  const website = e.website?.trim();
+                  const email = e.email_principal?.trim();
+                  const phone = e.telephone?.trim();
+                  if (website) {
+                    router.push({
+                      pathname: '/(tabs)/entreprises/details',
+                      params: { kind: 'website', value: encodeURIComponent(website) },
+                    });
+                    return;
+                  }
+                  if (email) {
+                    router.push({
+                      pathname: '/(tabs)/entreprises/details',
+                      params: { kind: 'email', value: encodeURIComponent(email) },
+                    });
+                    return;
+                  }
+                  if (phone) {
+                    router.push({
+                      pathname: '/(tabs)/entreprises/details',
+                      params: { kind: 'phone', value: encodeURIComponent(phone) },
+                    });
+                    return;
+                  }
+                  Alert.alert(
+                    'Détails indisponibles',
+                    "Cette entreprise n'a pas d'id ni de contact utilisable pour charger les détails.",
+                  );
+                }}
+                style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1, transform: [{ scale: pressed ? 0.99 : 1 }] }]}
+              >
+                <View style={{ paddingRight: e.id != null && canDeleteEntreprises ? 44 : 0 }}>
+                  <View style={styles.header}>
+                    {e.image ? (
+                      <Image
+                        source={{ uri: e.image }}
+                        style={[styles.avatar, { borderColor: t.colors.border }]}
+                      />
+                    ) : (
+                      <View style={[styles.iconWrap, { backgroundColor: t.colors.border }]}>
+                        <MaterialCommunityIcons name="office-building-outline" size={18} color={t.colors.primary} />
                       </View>
                     )}
+                    <View style={{ flex: 1, gap: 4 }}>
+                      <H2>{e.nom ?? '(sans nom)'}</H2>
+                      {!!e.website && (
+                        <View style={styles.websiteRow}>
+                          <FontAwesome6 name="globe" size={12} color={t.colors.primary} />
+                          <Mono>{e.website}</Mono>
+                        </View>
+                      )}
+                    </View>
                   </View>
-                </View>
 
-                <View style={styles.chipsRow}>
-                  <View style={[styles.chip, { borderColor: t.colors.border }]}>
-                    <Muted>{e.secteur ?? 'Secteur ?'}</Muted>
+                  <View style={styles.chipsRow}>
+                    <View style={[styles.chip, { borderColor: t.colors.border }]}>
+                      <Muted>{e.secteur ?? 'Secteur ?'}</Muted>
+                    </View>
+                    <View style={[styles.chip, { borderColor: t.colors.border }]}>
+                      <Muted>{e.statut ?? 'Statut ?'}</Muted>
+                    </View>
                   </View>
-                  <View style={[styles.chip, { borderColor: t.colors.border }]}>
-                    <Muted>{e.statut ?? 'Statut ?'}</Muted>
-                  </View>
-                </View>
 
-                {!!e.email_principal && (
-                  <View style={styles.row}>
-                    <FontAwesome6 name="envelope" size={12} color={t.colors.primary} />
-                    <Muted>Email: {e.email_principal}</Muted>
-                  </View>
-                )}
-                {!!e.telephone && (
-                  <View style={styles.row}>
-                    <FontAwesome6 name="phone" size={12} color={t.colors.primary} />
-                    <Muted>Tel: {e.telephone}</Muted>
-                  </View>
-                )}
-              </Card>
-            </Pressable>
+                  {!!e.email_principal && (
+                    <View style={styles.row}>
+                      <FontAwesome6 name="envelope" size={12} color={t.colors.primary} />
+                      <Muted>Email: {e.email_principal}</Muted>
+                    </View>
+                  )}
+                  {!!e.telephone && (
+                    <View style={styles.row}>
+                      <FontAwesome6 name="phone" size={12} color={t.colors.primary} />
+                      <Muted>Tel: {e.telephone}</Muted>
+                    </View>
+                  )}
+                </View>
+              </Pressable>
+            </Card>
           </FadeIn>
         )}
       />
@@ -421,8 +576,27 @@ const styles = StyleSheet.create({
   input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, marginTop: 10 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   cardPressable: { padding: 14, marginBottom: 12 },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  deleteCorner: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    zIndex: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 32,
+    minHeight: 32,
+  },
+  deleteIconRing: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   iconWrap: { width: 34, height: 34, borderRadius: 999, alignItems: 'center', justifyContent: 'center', borderWidth: 0.5 },
+  avatar: { width: 38, height: 38, borderRadius: 12, borderWidth: 0.5, overflow: 'hidden' },
   websiteRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 },
   chipsRow: { flexDirection: 'row', gap: 8, marginTop: 10, flexWrap: 'wrap' },
   chip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, borderWidth: 1, backgroundColor: 'transparent' },

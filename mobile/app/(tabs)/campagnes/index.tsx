@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
-import { ProspectLabApi } from '../../src/features/prospectlab/prospectLabApi';
-import { useApiToken } from '../../src/features/prospectlab/useToken';
-import { Card, FadeIn, H1, H2, Mono, Muted, MutedText, PrimaryButton, Screen } from '../../src/ui/components';
-import { useTheme } from '../../src/ui/theme';
+import { ProspectLabApi } from '../../../src/features/prospectlab/prospectLabApi';
+import { useApiToken } from '../../../src/features/prospectlab/useToken';
+import { Card, FadeIn, H2, Mono, Muted, MutedText, PrimaryButton, Screen } from '../../../src/ui/components';
+import { useTheme } from '../../../src/ui/theme';
 
 type CampagneItem = {
   id?: number;
@@ -65,35 +65,50 @@ export default function CampagnesScreen() {
     if (token) load();
   }, [token]);
 
-  const title = useMemo(() => `Campagnes (${items.length})`, [items.length]);
+  const summaryLine = useMemo(() => {
+    if (!token) return '';
+    if (loading && items.length === 0) return 'Chargement…';
+    if (items.length === 0) return 'Aucun résultat';
+    return `Total campagnes : ${items.length.toLocaleString('fr-FR')}`;
+  }, [token, loading, items.length]);
 
   return (
     <Screen>
       <ScrollView contentContainerStyle={styles.container}>
-        <H1>{title}</H1>
+        <View style={styles.listHeader}>
+          {!tokenLoading && !token && (
+            <FadeIn>
+              <Card>
+                <Muted>Token manquant. Va dans Reglages.</Muted>
+              </Card>
+            </FadeIn>
+          )}
 
-        {!tokenLoading && !token && (
-          <FadeIn>
-            <Card>
-              <Muted>Token manquant. Va dans Reglages.</Muted>
-            </Card>
-          </FadeIn>
-        )}
+          {!!token && (
+            <>
+              <FadeIn>
+                <Card>
+                  <H2>Actions</H2>
+                  <MutedText style={{ marginTop: 6 }}>
+                    Touchez une campagne pour le tableau de bord détaillé (graphiques, tracking, envois).
+                  </MutedText>
+                  <View style={{ marginTop: 10 }}>
+                    <PrimaryButton
+                      title={loading ? 'Chargement...' : 'Rafraichir'}
+                      onPress={() => load({ skipCache: true })}
+                      disabled={loading}
+                    />
+                  </View>
+                  {!!error && <Mono>{error}</Mono>}
+                </Card>
+              </FadeIn>
 
-        {!!token && (
-          <FadeIn>
-            <Card>
-              <H2>Actions</H2>
-              <MutedText style={{ marginTop: 6 }}>
-                Touchez une campagne pour le tableau de bord détaillé (graphiques, tracking, envois).
-              </MutedText>
-              <View style={{ marginTop: 10 }}>
-                <PrimaryButton title={loading ? 'Chargement...' : 'Rafraichir'} onPress={() => load({ skipCache: true })} disabled={loading} />
-              </View>
-              {!!error && <Mono>{error}</Mono>}
-            </Card>
-          </FadeIn>
-        )}
+              <FadeIn delayMs={120}>
+                <MutedText style={{ paddingHorizontal: 2 }}>{summaryLine}</MutedText>
+              </FadeIn>
+            </>
+          )}
+        </View>
 
         {items.map((c, idx) => {
           const st = statutStyle(c.statut, t);
@@ -156,6 +171,7 @@ export default function CampagnesScreen() {
 
 const styles = StyleSheet.create({
   container: { padding: 16, gap: 12 },
+  listHeader: { gap: 12, marginBottom: 12 },
   cardPress: { padding: 14 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   rowTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },

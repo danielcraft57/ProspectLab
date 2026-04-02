@@ -12,6 +12,7 @@ import json
 import re
 from urllib.parse import urlparse
 
+from utils.url_utils import canonical_website_https_url
 from services.public_api_response_cache import public_response_cache
 
 api_public_bp = Blueprint('api_public', __name__, url_prefix='/api/public')
@@ -437,20 +438,10 @@ def _get_allowed_entreprise_statuses() -> list[str]:
         ]
 
 def _normalize_url_for_analysis(raw: str) -> str | None:
-    if not raw:
+    """URL HTTPS canonique (sans www.) — alignée sur la dédup domaine en base."""
+    if raw is None:
         return None
-    s = str(raw).strip()
-    if not s:
-        return None
-    if not s.startswith(('http://', 'https://')):
-        s = f'https://{s}'
-    try:
-        parsed = urlparse(s)
-        if not parsed.scheme or not parsed.netloc:
-            return None
-    except Exception:
-        return None
-    return s
+    return canonical_website_https_url(str(raw).strip() or None)
 
 
 def _get_entreprise_id_for_website(database: Database, website: str) -> int | None:
@@ -725,33 +716,69 @@ def entreprise_callback_public(entreprise_id: int):
     return _update_entreprise_status(entreprise_id, statut='À rappeler', note=payload.get('note'))
 
 
+def _delete_entreprise_public(entreprise_id: int):
+    """
+    Supprime l'entreprise et les lignes liées (CASCADE côté schéma SQLite / FK PostgreSQL).
+    """
+    try:
+        conn = database.get_connection()
+        cursor = conn.cursor()
+        database.execute_sql(cursor, 'SELECT id, nom FROM entreprises WHERE id = ?', (entreprise_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Entreprise introuvable'}), 404
+
+        try:
+            nom = row['nom']
+        except (TypeError, KeyError, IndexError):
+            nom = row[1] if len(row) > 1 else None
+        database.execute_sql(cursor, 'DELETE FROM entreprises WHERE id = ?', (entreprise_id,))
+        conn.commit()
+        conn.close()
+
+        label = (nom or '').strip() or f'#{entreprise_id}'
+        return jsonify({
+            'success': True,
+            'deleted_id': entreprise_id,
+            'message': f'Entreprise « {label} » supprimée',
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@api_public_bp.route('/entreprises/<int:entreprise_id>', methods=['DELETE'])
+@api_token_required
+@require_api_permission('entreprises')
+@require_api_permission('entreprises_delete')
+def delete_entreprise_public(entreprise_id: int):
+    """
+    API publique : suppression définitive d'une fiche entreprise.
+    Nécessite la permission token « suppression entreprises » (can_delete_entreprises), en plus de la lecture entreprises.
+    """
+    return _delete_entreprise_public(entreprise_id)
+
+
 @api_public_bp.route('/entreprises/<int:entreprise_id>', methods=['GET'])
 @api_token_required
 @require_api_permission('entreprises')
 @public_response_cache(35)
 def get_entreprise(entreprise_id):
     """
-    API publique : Détails d'une entreprise
-    
-    Args:
-        entreprise_id (int): ID de l'entreprise
-        
-    Returns:
-        JSON: Détails complets de l'entreprise
+    API publique : Détails d'une entreprise.
     """
     try:
         entreprise = database.get_entreprise(entreprise_id)
-        
+
         if not entreprise:
             return jsonify({
                 'success': False,
                 'error': 'Entreprise introuvable'
             }), 404
-        
-        # Nettoyer les valeurs NaN pour la sérialisation JSON
+
         from utils.helpers import clean_json_dict
         entreprise = clean_json_dict(entreprise)
-        
+
         return jsonify({
             'success': True,
             'data': entreprise
@@ -1171,6 +1198,7 @@ def public_api_token_info():
             'user_id': td.get('user_id'),
             'permissions': {
                 'entreprises': bool(td.get('can_read_entreprises')),
+                'entreprises_delete': bool(td.get('can_read_entreprises')) and bool(td.get('can_delete_entreprises')),
                 'emails': bool(td.get('can_read_emails')),
                 'statistics': bool(td.get('can_read_statistics')),
                 'campagnes': bool(td.get('can_read_campagnes')),
@@ -1266,10 +1294,12 @@ def public_reference_ciblage_counts():
 @api_public_bp.route('/website-analysis', methods=['GET', 'POST'])
 @api_token_required
 @require_api_permission('entreprises')
-@public_response_cache(90)
 def public_website_analysis():
     """
     API publique (token) : Analyse d'un site web (par URL).
+
+    Pas de cache GET (public_response_cache) : le rapport évolue pendant le traitement Celery ;
+    une entrée 200 figée 90 s bloquerait le polling mobile (l’UI web utilise /api/website-analysis).
 
     GET:
         Query params:
@@ -1647,4 +1677,53 @@ def get_campagne_statistics(campagne_id):
             'success': False,
             'error': str(e)
         }), 500
+
+
+@api_public_bp.route('/push/register', methods=['POST', 'DELETE'])
+@api_token_required
+def expo_push_register():
+    """
+    POST: enregistre un jeton Expo Push pour ce token API.
+    DELETE: retire un jeton Expo Push pour ce token API.
+
+    Body JSON:
+        expo_push_token (str): ExponentPushToken[...]
+        platform (str, POST seulement): android | ios (défaut android)
+        installation_id (str, optionnel): identifiant stable d'installation.
+    """
+    try:
+        from services.mobile_expo_push import register_device, unregister_device
+
+        if not request.is_json:
+            return jsonify({'success': False, 'error': 'Content-Type application/json requis'}), 400
+
+        token_row = getattr(request, 'api_token', None) or {}
+        api_token_id = token_row.get('id')
+        if not api_token_id:
+            return jsonify({'success': False, 'error': 'Token API invalide'}), 401
+
+        body = request.get_json(silent=True) or {}
+        expo_push_token = (body.get('expo_push_token') or '').strip()
+
+        if request.method == 'DELETE':
+            ok = unregister_device(int(api_token_id), expo_push_token)
+            return jsonify({'success': True, 'removed': ok})
+
+        platform = (body.get('platform') or 'android').strip()
+        installation_id = body.get('installation_id')
+        if installation_id is not None:
+            installation_id = str(installation_id).strip() or None
+
+        register_device(
+            int(api_token_id),
+            expo_push_token,
+            platform=platform,
+            installation_id=installation_id,
+        )
+
+        return jsonify({'success': True})
+    except ValueError as ve:
+        return jsonify({'success': False, 'error': str(ve)}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 

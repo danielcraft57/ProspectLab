@@ -13,6 +13,8 @@ import json
 import pandas as pd
 from urllib.parse import urlparse
 
+from utils.url_utils import canonical_website_https_url
+
 api_extended_bp = Blueprint('api_extended', __name__, url_prefix='/api')
 
 # Initialiser les services
@@ -20,20 +22,10 @@ database = Database()
 export_manager = ExportManager()
 
 def _normalize_url_for_analysis(raw: str) -> str | None:
-    if not raw:
+    """URL HTTPS canonique (sans www.) — alignée sur la dédup domaine en base."""
+    if raw is None:
         return None
-    s = str(raw).strip()
-    if not s:
-        return None
-    if not s.startswith(('http://', 'https://')):
-        s = f'https://{s}'
-    try:
-        parsed = urlparse(s)
-        if not parsed.scheme or not parsed.netloc:
-            return None
-    except Exception:
-        return None
-    return s
+    return canonical_website_https_url(str(raw).strip() or None)
 
 
 def _get_entreprise_id_for_website(database: Database, website: str) -> int | None:

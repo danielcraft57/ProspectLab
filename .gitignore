@@ -83,8 +83,9 @@ dump.rdb
 htmlcov/
 .tox/
 
-# Documentation temporaire
+# Documentation temporaire / exports Cursor non versionnés
 docs/developpement/cursor_*.md
+docs/cursor_*.md
 cursor_*.md
 docs/configuration/CLUSTER_NODES_DEBIAN_MODELS.md
 

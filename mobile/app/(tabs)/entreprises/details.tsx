@@ -1,14 +1,32 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import {
+  LayoutAnimation,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  UIManager,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import { ProspectLabApi } from '../../../src/features/prospectlab/prospectLabApi';
 import { useApiToken } from '../../../src/features/prospectlab/useToken';
-import { Card, FadeIn, H2, Mono, Muted, MutedText, Screen } from '../../../src/ui/components';
+import { ReportImageGallery } from '../../../src/ui/analysis/ReportImageGallery';
+import { WebsiteAnalysisSection, type AnalysisKind } from '../../../src/ui/analysis/WebsiteAnalysisViews';
+import { Card, FadeIn, H2, Mono, MutedText, Screen } from '../../../src/ui/components';
+import { MaterialAsyncLoader } from '../../../src/ui/MaterialAsyncLoader';
 import { useTheme } from '../../../src/ui/theme';
 import { useDetailScreenHeader } from '../../../src/ui/useDetailScreenHeader';
 
 type DetailKind = 'website' | 'email' | 'phone' | 'id';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 function decodeParam(v: unknown): string | null {
   const s = Array.isArray(v) ? v[0] : v;
@@ -32,16 +50,26 @@ function tryParseJson(v: unknown): unknown {
   }
 }
 
+const IMAGE_PATH_EXT = /\.(png|jpe?g|webp|gif|avif|svg)(\?.*)?$/i;
+
 function isImageUri(s: string) {
-  const v = s.toLowerCase();
-  return (
-    v.startsWith('data:image/') ||
-    v.endsWith('.png') ||
-    v.endsWith('.jpg') ||
-    v.endsWith('.jpeg') ||
-    v.endsWith('.webp') ||
-    v.endsWith('.gif')
-  );
+  const v = s.trim();
+  if (!v) return false;
+  const lower = v.toLowerCase();
+  if (lower.startsWith('data:image/')) return true;
+  if (lower.startsWith('http://') || lower.startsWith('https://')) {
+    try {
+      const path = new URL(v).pathname.toLowerCase();
+      return IMAGE_PATH_EXT.test(path);
+    } catch {
+      return false;
+    }
+  }
+  if (v.startsWith('/')) {
+    const path = v.split('?')[0].toLowerCase();
+    return IMAGE_PATH_EXT.test(path);
+  }
+  return false;
 }
 
 function findImageUris(obj: unknown, limit = 6): string[] {
@@ -72,6 +100,12 @@ function findImageUris(obj: unknown, limit = 6): string[] {
   return out;
 }
 
+function numFromApi(v: unknown): number | undefined {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string' && v.trim() !== '' && !Number.isNaN(Number(v))) return Number(v);
+  return undefined;
+}
+
 function normalizeEntreprise(raw: any) {
   const ent = raw?.entreprise ?? raw;
   return {
@@ -80,6 +114,11 @@ function normalizeEntreprise(raw: any) {
     website: typeof ent?.website === 'string' ? ent.website : typeof ent?.url === 'string' ? ent.url : undefined,
     secteur: typeof ent?.secteur === 'string' ? ent.secteur : undefined,
     statut: typeof ent?.statut === 'string' ? ent.statut : undefined,
+    opportunite: typeof ent?.opportunite === 'string' ? ent.opportunite : undefined,
+    score_seo: numFromApi(ent?.score_seo),
+    score_pentest: numFromApi(ent?.score_pentest),
+    score_securite: numFromApi(ent?.score_securite),
+    performance_score: numFromApi(ent?.performance_score),
     email_principal:
       typeof ent?.email_principal === 'string'
         ? ent.email_principal
@@ -91,12 +130,103 @@ function normalizeEntreprise(raw: any) {
   };
 }
 
+type EntrepriseNorm = ReturnType<typeof normalizeEntreprise>;
+
+function fmtShortDate(d: unknown): string | undefined {
+  if (d == null) return undefined;
+  const s = String(d);
+  return s.length >= 10 ? s.slice(0, 10) : s;
+}
+
+function hintOpportunite(ent: EntrepriseNorm | null): string | undefined {
+  if (!ent?.opportunite) return undefined;
+  return `Opportunité · ${ent.opportunite}`;
+}
+
+function seoSubtitle(report: any, ent: EntrepriseNorm | null): string {
+  const st = report?.seo?.status;
+  const row = report?.seo?.latest;
+  const opp = hintOpportunite(ent);
+  if (st === 'never') {
+    if (ent?.score_seo != null) return `Réf. fiche · score SEO ${ent.score_seo}${opp ? ` · ${opp}` : ''}`;
+    return opp ?? 'Pas encore d’analyse enregistrée sur ce site';
+  }
+  if (st === 'done') {
+    const parts: string[] = [];
+    if (row && typeof row.score === 'number') parts.push(`Dernière analyse · score ${row.score}`);
+    else if (ent?.score_seo != null) parts.push(`Fiche · score SEO ${ent.score_seo}`);
+    const d = fmtShortDate(row?.date_analyse);
+    if (d) parts.push(d);
+    if (opp) parts.push(opp);
+    return parts.join(' · ') || 'Analyse disponible';
+  }
+  return opp ?? '—';
+}
+
+function technicalSubtitle(report: any, ent: EntrepriseNorm | null): string {
+  const st = report?.technical?.status;
+  const row = report?.technical?.latest;
+  const opp = hintOpportunite(ent);
+  if (st === 'never') {
+    if (ent?.score_securite != null) return `Réf. fiche · score sécurité ${ent.score_securite}${opp ? ` · ${opp}` : ''}`;
+    return opp ?? 'Pas d’analyse technique en base';
+  }
+  if (st === 'done') {
+    const parts: string[] = ['Dernière analyse technique'];
+    const d = fmtShortDate(row?.date_analyse);
+    if (d) parts.push(d);
+    if (ent?.score_securite != null) parts.push(`fiche · sécurité ${ent.score_securite}`);
+    if (opp) parts.push(opp);
+    return parts.join(' · ');
+  }
+  return opp ?? '—';
+}
+
+function pentestSubtitle(report: any, ent: EntrepriseNorm | null): string {
+  const st = report?.pentest?.status;
+  const row = report?.pentest?.latest;
+  const opp = hintOpportunite(ent);
+  if (st === 'never') {
+    if (ent?.score_pentest != null) return `Réf. fiche · risque pentest ${ent.score_pentest}${opp ? ` · ${opp}` : ''}`;
+    return opp ?? 'Pas de pentest enregistré';
+  }
+  if (st === 'done') {
+    const parts: string[] = [];
+    if (row && typeof row.risk_score === 'number') parts.push(`Risque ${row.risk_score}/100`);
+    else if (ent?.score_pentest != null) parts.push(`Fiche · risque ${ent.score_pentest}`);
+    const d = fmtShortDate(row?.date_analyse);
+    if (d) parts.push(d);
+    if (opp) parts.push(opp);
+    return parts.join(' · ') || 'Rapport pentest disponible';
+  }
+  return opp ?? '—';
+}
+
+function osintSubtitle(report: any, ent: EntrepriseNorm | null): string {
+  const st = report?.osint?.status;
+  const row = report?.osint?.latest;
+  const opp = hintOpportunite(ent);
+  if (st === 'never') return opp ?? 'Pas d’OSINT en base';
+  if (st === 'done') {
+    const parts: string[] = ['Collecte disponible'];
+    const d = fmtShortDate(row?.date_analyse);
+    if (d) parts.push(d);
+    if (opp) parts.push(opp);
+    return parts.join(' · ');
+  }
+  return opp ?? '—';
+}
+
 export default function EntrepriseDetailsScreen() {
   const t = useTheme();
   const { token, loading: tokenLoading } = useApiToken();
   const params = useLocalSearchParams<{ kind?: string; value?: string }>();
 
-  const [loading, setLoading] = useState(false);
+  const [loadingEntreprise, setLoadingEntreprise] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [contactsLoading, setContactsLoading] = useState(false);
+  const [campagnesLoading, setCampagnesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [raw, setRaw] = useState<any>(null);
   const [report, setReport] = useState<any>(null);
@@ -104,7 +234,9 @@ export default function EntrepriseDetailsScreen() {
   const [phones, setPhones] = useState<any[] | null>(null);
   const [phonesApi, setPhonesApi] = useState<any[] | null>(null);
   const [campagnes, setCampagnes] = useState<any[] | null>(null);
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({ seo: true, technical: false, pentest: false, osint: false, raw: false });
+  const [openAnalysis, setOpenAnalysis] = useState<AnalysisKind | null>(null);
+  const [rawExpanded, setRawExpanded] = useState(false);
+  const { width: windowWidth } = useWindowDimensions();
 
   const kind = useMemo(() => {
     const k = params.kind;
@@ -120,9 +252,23 @@ export default function EntrepriseDetailsScreen() {
       if (!token) return;
       if (!kind || !value) return;
 
-      setLoading(true);
-      setError(null);
-      const c = { skipCache: opts?.skipCache };
+      const skipCache = !!opts?.skipCache;
+      const c = { skipCache };
+
+      if (skipCache) {
+        setRefreshing(true);
+      } else {
+        setLoadingEntreprise(true);
+        setError(null);
+        setRaw(null);
+        setReport(null);
+        setCampagnes(null);
+        setPhonesApi(null);
+        setReportLoading(false);
+        setContactsLoading(false);
+        setCampagnesLoading(false);
+      }
+
       try {
         let res: any;
         if (kind === 'id') {
@@ -148,44 +294,55 @@ export default function EntrepriseDetailsScreen() {
         const entrepriseId = ent.id;
         const website = (ent.website || '').trim();
 
-        const tasks: Array<Promise<void>> = [];
+        setLoadingEntreprise(false);
+
+        const pending: Promise<unknown>[] = [];
 
         if (website) {
-          tasks.push(
+          setReportLoading(true);
+          pending.push(
             ProspectLabApi.getWebsiteAnalysis(token, website, true, c)
               .then((r) => setReport(r?.data ?? r))
-              .catch(() => setReport(null)),
+              .catch(() => setReport(null))
+              .finally(() => setReportLoading(false)),
           );
         } else {
           setReport(null);
         }
 
         if (entrepriseId) {
-          tasks.push(
-            ProspectLabApi.listEntrepriseEmailsAll(token, entrepriseId, true, c)
-              .then((r) => setEmails((r?.data ?? r) as any[]))
-              .catch(() => {}),
+          setContactsLoading(true);
+          pending.push(
+            Promise.all([
+              ProspectLabApi.listEntrepriseEmailsAll(token, entrepriseId, true, c)
+                .then((r) => setEmails((r?.data ?? r) as any[]))
+                .catch(() => {}),
+              ProspectLabApi.listEntreprisePhones(token, entrepriseId, true, c)
+                .then((r) => setPhonesApi((r?.data ?? r) as any[]))
+                .catch(() => setPhonesApi(null)),
+            ]).finally(() => setContactsLoading(false)),
           );
-          tasks.push(
-            ProspectLabApi.listEntreprisePhones(token, entrepriseId, true, c)
-              .then((r) => setPhonesApi((r?.data ?? r) as any[]))
-              .catch(() => setPhonesApi(null)),
-          );
-          tasks.push(
+
+          setCampagnesLoading(true);
+          pending.push(
             ProspectLabApi.listCampagnesByEntreprise(token, entrepriseId, { limit: 50, offset: 0 }, c)
               .then((r) => setCampagnes((r?.data ?? r) as any[]))
-              .catch(() => setCampagnes(null)),
+              .catch(() => setCampagnes(null))
+              .finally(() => setCampagnesLoading(false)),
           );
         } else {
           setCampagnes(null);
           setPhonesApi(null);
         }
 
-        await Promise.all(tasks);
+        if (skipCache && pending.length) {
+          await Promise.all(pending);
+        }
       } catch (e: any) {
         setError(e?.message ?? 'Erreur lors du chargement des details.');
       } finally {
-        setLoading(false);
+        setLoadingEntreprise(false);
+        if (skipCache) setRefreshing(false);
       }
     },
     [token, kind, value],
@@ -197,13 +354,12 @@ export default function EntrepriseDetailsScreen() {
 
   const entreprise = useMemo(() => (raw ? normalizeEntreprise(raw) : null), [raw]);
   const phonesList = useMemo(() => phonesApi ?? phones ?? [], [phonesApi, phones]);
-  const displayTitle = entreprise?.nom ?? entreprise?.website ?? '';
+  const displayTitle = entreprise?.nom ?? '';
   useDetailScreenHeader({
     title: displayTitle,
     fallbackTitle: 'Entreprise',
     listPath: '/(tabs)/entreprises',
   });
-  const images = useMemo(() => findImageUris(report, 6), [report]);
 
   const reportParsed = useMemo(() => {
     if (!report || typeof report !== 'object') return report;
@@ -215,12 +371,30 @@ export default function EntrepriseDetailsScreen() {
     return { ...r, seoLatest, pentestLatest, technicalLatest, osintLatest };
   }, [report]);
 
+  const galleryWidth = Math.max(0, windowWidth - 32);
+  const images = useMemo(() => findImageUris(report, 40), [report]);
+
+  const analysisSubtitles = useMemo(() => {
+    if (!reportParsed) return null;
+    return {
+      seo: seoSubtitle(reportParsed, entreprise),
+      technical: technicalSubtitle(reportParsed, entreprise),
+      pentest: pentestSubtitle(reportParsed, entreprise),
+      osint: osintSubtitle(reportParsed, entreprise),
+    };
+  }, [reportParsed, entreprise]);
+
+  const toggleAnalysis = useCallback((k: AnalysisKind) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setOpenAnalysis((cur) => (cur === k ? null : k));
+  }, []);
+
   return (
     <Screen>
       <ScrollView
         contentContainerStyle={styles.container}
         refreshControl={
-          <RefreshControl refreshing={loading} onRefresh={() => load({ skipCache: true })} tintColor={t.colors.primary} />
+          <RefreshControl refreshing={refreshing} onRefresh={() => load({ skipCache: true })} tintColor={t.colors.primary} />
         }
       >
         {!token && !tokenLoading && (
@@ -235,89 +409,218 @@ export default function EntrepriseDetailsScreen() {
         {!!token && (
           <FadeIn>
             <Card style={{ borderLeftWidth: 3, borderLeftColor: t.colors.primary }}>
-              {loading && (
-                <View style={styles.loading}>
-                  <ActivityIndicator size="large" color={t.colors.primary} />
-                  <MutedText style={{ marginTop: 10 }}>Chargement...</MutedText>
-                </View>
+              {loadingEntreprise && !raw && (
+                <MaterialAsyncLoader
+                  visible
+                  icon="database-sync-outline"
+                  message="Chargement de la fiche entreprise…"
+                />
               )}
 
-              {!loading && !!error && <MutedText style={styles.error}>{error}</MutedText>}
+              {!loadingEntreprise && !!error && <MutedText style={styles.error}>{error}</MutedText>}
 
-              {!loading && !error && (
+              {!error && raw && (
                 <>
-                  <View style={[styles.section, { borderTopColor: t.colors.border }]}>
+                  <View
+                    style={[
+                      styles.subCard,
+                      {
+                        borderColor: t.colors.border,
+                        backgroundColor: `${t.colors.primary}0C`,
+                      },
+                    ]}
+                  >
                     <View style={styles.rowIcon}>
-                      <MaterialCommunityIcons name="office-building-outline" size={18} color={t.colors.primary} />
-                      <H2>Identite</H2>
+                      <View style={[styles.iconBadge, { backgroundColor: `${t.colors.primary}22` }]}>
+                        <MaterialCommunityIcons name="office-building-outline" size={20} color={t.colors.primary} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <H2>Identité</H2>
+                        <MutedText style={{ marginTop: 2 }}>Fiche synthétique</MutedText>
+                      </View>
                     </View>
 
+                    {(entreprise?.score_seo != null ||
+                      entreprise?.performance_score != null ||
+                      entreprise?.score_securite != null ||
+                      entreprise?.score_pentest != null) && (
+                      <View style={styles.chipRow}>
+                        {entreprise?.score_seo != null && (
+                          <View style={[styles.metricChip, { borderColor: t.colors.border }]}>
+                            <MutedText style={styles.metricChipLabel}>SEO</MutedText>
+                            <Text style={[styles.metricChipVal, { color: t.colors.text, fontFamily: 'monospace' }]}>
+                              {entreprise.score_seo}
+                            </Text>
+                          </View>
+                        )}
+                        {entreprise?.performance_score != null && (
+                          <View style={[styles.metricChip, { borderColor: t.colors.border }]}>
+                            <MutedText style={styles.metricChipLabel}>Perf.</MutedText>
+                            <Text style={[styles.metricChipVal, { color: t.colors.text, fontFamily: 'monospace' }]}>
+                              {entreprise.performance_score}
+                            </Text>
+                          </View>
+                        )}
+                        {entreprise?.score_securite != null && (
+                          <View style={[styles.metricChip, { borderColor: t.colors.border }]}>
+                            <MutedText style={styles.metricChipLabel}>Sécu.</MutedText>
+                            <Text style={[styles.metricChipVal, { color: t.colors.text, fontFamily: 'monospace' }]}>
+                              {entreprise.score_securite}
+                            </Text>
+                          </View>
+                        )}
+                        {entreprise?.score_pentest != null && (
+                          <View style={[styles.metricChip, { borderColor: t.colors.border }]}>
+                            <MutedText style={styles.metricChipLabel}>Pentest</MutedText>
+                            <Text style={[styles.metricChipVal, { color: t.colors.text, fontFamily: 'monospace' }]}>
+                              {entreprise.score_pentest}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    )}
+
                     {!!entreprise?.website && (
-                      <View style={styles.row}>
-                        <FontAwesome6 name="globe" size={12} color={t.colors.primary} />
-                        <Mono>{entreprise.website}</Mono>
+                      <View style={[styles.kvBlock, { borderColor: t.colors.border, backgroundColor: t.colors.card }]}>
+                        <View style={styles.row}>
+                          <FontAwesome6 name="globe" size={13} color={t.colors.primary} />
+                          <Text
+                            selectable
+                            style={{ flex: 1, fontSize: 14, fontFamily: 'monospace', color: t.colors.muted }}
+                          >
+                            {entreprise.website}
+                          </Text>
+                        </View>
                       </View>
                     )}
                     {!!entreprise?.secteur && (
-                      <View style={styles.row}>
-                        <FontAwesome6 name="briefcase" size={12} color={t.colors.primary} />
-                        <Muted>Secteur: {entreprise.secteur}</Muted>
+                      <View style={styles.kvLine}>
+                        <MutedText style={styles.kvKey}>Secteur</MutedText>
+                        <MutedText style={styles.kvVal}>{entreprise.secteur}</MutedText>
                       </View>
                     )}
                     {!!entreprise?.statut && (
-                      <View style={styles.row}>
-                        <FontAwesome6 name="gavel" size={12} color={t.colors.primary} />
-                        <Muted>Statut: {entreprise.statut}</Muted>
+                      <View style={styles.kvLine}>
+                        <MutedText style={styles.kvKey}>Statut</MutedText>
+                        <View style={[styles.statusPill, { backgroundColor: `${t.colors.primary}18`, borderColor: t.colors.border }]}>
+                          <Text style={{ fontWeight: '700', color: t.colors.text, fontSize: 13 }}>{entreprise.statut}</Text>
+                        </View>
+                      </View>
+                    )}
+                    {!!entreprise?.opportunite && (
+                      <View style={[styles.oppBanner, { borderColor: t.colors.border, backgroundColor: `${t.colors.warning}14` }]}>
+                        <FontAwesome6 name="lightbulb" size={12} color={t.colors.warning} />
+                        <MutedText style={{ flex: 1 }}>{entreprise.opportunite}</MutedText>
                       </View>
                     )}
                   </View>
 
-                  <View style={[styles.section, { borderTopColor: t.colors.border }]}>
-                    <View style={styles.rowIcon}>
-                      <FontAwesome6 name="users" size={14} color={t.colors.primary} />
-                      <H2>Contacts</H2>
-                    </View>
+                  <View
+                    style={[
+                      styles.subCard,
+                      {
+                        marginTop: 4,
+                        borderColor: t.colors.border,
+                        backgroundColor: `${t.colors.primary}08`,
+                      },
+                    ]}
+                  >
+                    {(!!entreprise?.email_principal || !!entreprise?.telephone) && (
+                      <View style={{ gap: 10 }}>
+                        {!!entreprise?.email_principal && (
+                          <View style={[styles.contactCard, { borderColor: t.colors.border, backgroundColor: t.colors.card }]}>
+                            <View style={styles.row}>
+                              <FontAwesome6 name="envelope" size={14} color={t.colors.primary} />
+                              <MutedText style={styles.contactLabel}>E-mail principal</MutedText>
+                            </View>
+                            <Text
+                              selectable
+                              style={[styles.contactValue, { color: t.colors.muted, fontFamily: 'monospace' }]}
+                            >
+                              {entreprise.email_principal}
+                            </Text>
+                          </View>
+                        )}
+                        {!!entreprise?.telephone && (
+                          <View style={[styles.contactCard, { borderColor: t.colors.border, backgroundColor: t.colors.card }]}>
+                            <View style={styles.row}>
+                              <FontAwesome6 name="phone" size={14} color={t.colors.primary} />
+                              <MutedText style={styles.contactLabel}>Téléphone principal</MutedText>
+                            </View>
+                            <Text
+                              selectable
+                              style={[styles.contactValue, { color: t.colors.muted, fontFamily: 'monospace' }]}
+                            >
+                              {entreprise.telephone}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    )}
 
-                    {!!entreprise?.email_principal && (
-                      <View style={styles.row}>
-                        <FontAwesome6 name="envelope" size={12} color={t.colors.primary} />
-                        <Muted>Email: {entreprise.email_principal}</Muted>
-                      </View>
-                    )}
-                    {!!entreprise?.telephone && (
-                      <View style={styles.row}>
-                        <FontAwesome6 name="phone" size={12} color={t.colors.primary} />
-                        <Muted>Tel: {entreprise.telephone}</Muted>
-                      </View>
-                    )}
+                    <MaterialAsyncLoader
+                      visible={contactsLoading}
+                      compact
+                      icon="account-sync-outline"
+                      message="Synchronisation des emails et téléphones…"
+                    />
 
                     {!!emails?.length && (
-                      <View style={{ marginTop: 10 }}>
-                        <MutedText>Emails connus: {emails.length}</MutedText>
-                        <View style={{ marginTop: 6, gap: 6 }}>
+                      <View style={{ marginTop: 12 }}>
+                        <MutedText style={styles.listHeading}>E-mails connus ({emails.length})</MutedText>
+                        <View style={{ marginTop: 8, gap: 8 }}>
                           {emails.slice(0, 6).map((it, i) => (
-                            <Mono key={i}>{String((it as any)?.email ?? it)}</Mono>
+                            <View
+                              key={i}
+                              style={[styles.listItem, { borderColor: t.colors.border, backgroundColor: t.colors.card }]}
+                            >
+                              <Text
+                                selectable
+                                style={{ fontFamily: 'monospace', fontSize: 13, color: t.colors.muted }}
+                              >
+                                {String((it as any)?.email ?? it)}
+                              </Text>
+                            </View>
                           ))}
-                          {emails.length > 6 && <MutedText>+ {emails.length - 6} autres...</MutedText>}
+                          {emails.length > 6 && <MutedText>+ {emails.length - 6} autres…</MutedText>}
                         </View>
                       </View>
                     )}
 
                     {!!phonesList.length && (
-                      <View style={{ marginTop: 10 }}>
-                        <MutedText>Telephones connus: {phonesList.length}</MutedText>
-                        <View style={{ marginTop: 6, gap: 6 }}>
+                      <View style={{ marginTop: 12 }}>
+                        <MutedText style={styles.listHeading}>Téléphones connus ({phonesList.length})</MutedText>
+                        <View style={{ marginTop: 8, gap: 8 }}>
                           {phonesList.slice(0, 6).map((it, i) => (
-                            <Mono key={i}>
-                              {String((it as any)?.phone ?? (it as any)?.phone_e164 ?? it)}
-                              {(it as any)?.source ? ` (${String((it as any).source)})` : ''}
-                            </Mono>
+                            <View
+                              key={i}
+                              style={[styles.listItem, { borderColor: t.colors.border, backgroundColor: t.colors.card }]}
+                            >
+                              <Text
+                                selectable
+                                style={{ fontFamily: 'monospace', fontSize: 13, color: t.colors.muted }}
+                              >
+                                {String((it as any)?.phone ?? (it as any)?.phone_e164 ?? it)}
+                                {(it as any)?.source ? ` · ${String((it as any).source)}` : ''}
+                              </Text>
+                            </View>
                           ))}
-                          {phonesList.length > 6 && <MutedText>+ {phonesList.length - 6} autres...</MutedText>}
+                          {phonesList.length > 6 && <MutedText>+ {phonesList.length - 6} autres…</MutedText>}
                         </View>
                       </View>
                     )}
                   </View>
+
+                  {!!images.length && !!reportParsed && (
+                    <View style={[styles.section, { borderTopColor: t.colors.border }]}>
+                      <View style={styles.rowIcon}>
+                        <MaterialCommunityIcons name="image-multiple-outline" size={18} color={t.colors.primary} />
+                        <H2>Captures</H2>
+                      </View>
+                      <MutedText style={{ marginBottom: 10 }}>Appuie sur une image pour l’agrandir et zoomer.</MutedText>
+                      <ReportImageGallery uris={images} containerWidth={galleryWidth} />
+                    </View>
+                  )}
 
                   <View style={[styles.section, { borderTopColor: t.colors.border }]}>
                     <View style={styles.rowIcon}>
@@ -325,73 +628,81 @@ export default function EntrepriseDetailsScreen() {
                       <H2>Analyses</H2>
                     </View>
 
-                    {!reportParsed && (
+                    {!!entreprise?.website && reportLoading && !report && (
+                      <MaterialAsyncLoader
+                        visible
+                        icon="chart-box-outline"
+                        message="Chargement du rapport d’analyse (SEO, technique, pentest, OSINT)…"
+                      />
+                    )}
+
+                    {!!entreprise?.website && !reportLoading && !report && (
                       <MutedText>
-                        Aucune analyse complete disponible pour ce website. Tu peux la lancer depuis l'onglet Scan.
+                        Aucune analyse complète disponible pour ce site. Tu peux en lancer une depuis l’onglet Scan.
                       </MutedText>
                     )}
 
-                    {!!reportParsed && (
-                      <>
-                        {!!images.length && (
-                          <View style={{ marginTop: 10, gap: 10 }}>
-                            <MutedText>Images / screenshots</MutedText>
-                            {images.map((uri, idx) => (
-                              <Image
-                                key={idx}
-                                source={{ uri }}
-                                style={{ width: '100%', height: 180, borderRadius: 14, borderWidth: 1, borderColor: t.colors.border }}
-                                resizeMode="cover"
-                              />
-                            ))}
-                          </View>
-                        )}
+                    {!entreprise?.website && (
+                      <MutedText>Pas de site web renseigné — analyses indisponibles.</MutedText>
+                    )}
 
-                        <View style={{ marginTop: 12, gap: 10 }}>
-                          <AnalysisSection
-                            title="SEO"
-                            icon="chart-line"
-                            expanded={!!expanded.seo}
-                            onToggle={() => setExpanded((s) => ({ ...s, seo: !s.seo }))}
-                            summary={reportParsed?.seo?.status}
-                            payload={reportParsed?.seoLatest ?? reportParsed?.seo}
-                          />
-                          <AnalysisSection
-                            title="Technique"
-                            icon="tools"
-                            expanded={!!expanded.technical}
-                            onToggle={() => setExpanded((s) => ({ ...s, technical: !s.technical }))}
-                            summary={reportParsed?.technical?.status}
-                            payload={reportParsed?.technicalLatest ?? reportParsed?.technical}
-                          />
-                          <AnalysisSection
-                            title="Pentest"
-                            icon="shield-halved"
-                            expanded={!!expanded.pentest}
-                            onToggle={() => setExpanded((s) => ({ ...s, pentest: !s.pentest }))}
-                            summary={reportParsed?.pentest?.status}
-                            payload={reportParsed?.pentestLatest ?? reportParsed?.pentest}
-                          />
-                          <AnalysisSection
-                            title="OSINT"
-                            icon="magnifying-glass"
-                            expanded={!!expanded.osint}
-                            onToggle={() => setExpanded((s) => ({ ...s, osint: !s.osint }))}
-                            summary={reportParsed?.osint?.status}
-                            payload={reportParsed?.osintLatest ?? reportParsed?.osint}
-                          />
-                        </View>
-                      </>
+                    {!!reportParsed && (
+                      <View style={{ marginTop: 12, gap: 10 }}>
+                        <WebsiteAnalysisSection
+                          kind="seo"
+                          title="SEO"
+                          icon="chart-line"
+                          expanded={openAnalysis === 'seo'}
+                          onToggle={() => toggleAnalysis('seo')}
+                          subtitle={analysisSubtitles?.seo}
+                          envelope={reportParsed?.seo}
+                          parsed={reportParsed?.seoLatest}
+                        />
+                        <WebsiteAnalysisSection
+                          kind="technical"
+                          title="Technique"
+                          icon="tools"
+                          expanded={openAnalysis === 'technical'}
+                          onToggle={() => toggleAnalysis('technical')}
+                          subtitle={analysisSubtitles?.technical}
+                          envelope={reportParsed?.technical}
+                          parsed={reportParsed?.technicalLatest}
+                        />
+                        <WebsiteAnalysisSection
+                          kind="pentest"
+                          title="Pentest"
+                          icon="shield-halved"
+                          expanded={openAnalysis === 'pentest'}
+                          onToggle={() => toggleAnalysis('pentest')}
+                          subtitle={analysisSubtitles?.pentest}
+                          envelope={reportParsed?.pentest}
+                          parsed={reportParsed?.pentestLatest}
+                        />
+                        <WebsiteAnalysisSection
+                          kind="osint"
+                          title="OSINT"
+                          icon="magnifying-glass"
+                          expanded={openAnalysis === 'osint'}
+                          onToggle={() => toggleAnalysis('osint')}
+                          subtitle={analysisSubtitles?.osint}
+                          envelope={reportParsed?.osint}
+                          parsed={reportParsed?.osintLatest}
+                        />
+                      </View>
                     )}
                   </View>
 
-                  {!!campagnes?.length && (
+                  {!!entreprise?.id && (campagnesLoading || Array.isArray(campagnes)) && (
                     <View style={[styles.section, { borderTopColor: t.colors.border }]}>
                       <View style={styles.rowIcon}>
                         <MaterialCommunityIcons name="email-multiple-outline" size={18} color={t.colors.primary} />
                         <H2>Campagnes</H2>
                       </View>
-                      <MutedText>Campagnes liees: {campagnes.length}</MutedText>
+                      {campagnesLoading ? (
+                        <MaterialAsyncLoader compact icon="email-sync-outline" message="Chargement des campagnes…" visible />
+                      ) : (
+                        <MutedText>Campagnes liees: {campagnes?.length ?? 0}</MutedText>
+                      )}
                     </View>
                   )}
 
@@ -400,10 +711,12 @@ export default function EntrepriseDetailsScreen() {
                       <MaterialCommunityIcons name="code-json" size={18} color={t.colors.primary} />
                       <H2>Tout (raw)</H2>
                     </View>
-                    <Pressable onPress={() => setExpanded((s) => ({ ...s, raw: !s.raw }))} style={{ marginTop: 6 }}>
-                      <MutedText style={{ color: t.colors.primary }}>{expanded.raw ? 'Masquer' : 'Afficher'} les donnees brutes</MutedText>
+                    <Pressable onPress={() => setRawExpanded((v) => !v)} style={{ marginTop: 6 }}>
+                      <MutedText style={{ color: t.colors.primary }}>
+                        {rawExpanded ? 'Masquer' : 'Afficher'} les données brutes
+                      </MutedText>
                     </Pressable>
-                    {expanded.raw && (
+                    {rawExpanded && (
                       <View style={{ marginTop: 10 }}>
                         <Mono>{JSON.stringify({ entreprise: entreprise?.raw, lookup: raw, report }, null, 2)}</Mono>
                       </View>
@@ -419,47 +732,80 @@ export default function EntrepriseDetailsScreen() {
   );
 }
 
-function AnalysisSection({
-  title,
-  icon,
-  expanded,
-  onToggle,
-  summary,
-  payload,
-}: {
-  title: string;
-  icon: any;
-  expanded: boolean;
-  onToggle: () => void;
-  summary?: string;
-  payload: any;
-}) {
-  const t = useTheme();
-  return (
-    <View style={{ borderWidth: 1, borderColor: t.colors.border, borderRadius: 14, overflow: 'hidden' }}>
-      <Pressable onPress={onToggle} style={{ padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-        <FontAwesome6 name={icon} size={14} color={t.colors.primary} />
-        <View style={{ flex: 1 }}>
-          <MutedText style={{ color: t.colors.text, fontWeight: '800' } as any}>{title}</MutedText>
-          <MutedText style={{ marginTop: 2 }}>{summary ? `Statut: ${summary}` : 'Statut: ?'}</MutedText>
-        </View>
-        <FontAwesome6 name={expanded ? 'chevron-up' : 'chevron-down'} size={12} color={t.colors.muted} />
-      </Pressable>
-      {expanded && (
-        <View style={{ padding: 12, paddingTop: 0 }}>
-          <Mono>{payload ? JSON.stringify(payload, null, 2) : 'Aucune donnee'}</Mono>
-        </View>
-      )}
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   container: { padding: 16, gap: 12 },
-  loading: { alignItems: 'center', paddingVertical: 20 },
   error: { marginTop: 6 },
   section: { marginTop: 6, paddingTop: 12, borderTopWidth: 1 },
-  rowIcon: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  rowIcon: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
+  subCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 14,
+  },
+  iconBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  metricChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  metricChipLabel: { fontSize: 11, marginBottom: 0 },
+  metricChipVal: { fontSize: 13, fontWeight: '700' },
+  kvBlock: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12,
+    marginTop: 4,
+  },
+  kvLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    gap: 12,
+  },
+  kvKey: { fontSize: 12, opacity: 0.85 },
+  kvVal: { fontSize: 13, fontWeight: '600', flex: 1, textAlign: 'right' },
+  statusPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  oppBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  contactCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 12,
+    marginTop: 4,
+  },
+  contactLabel: { fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.4, opacity: 0.8 },
+  contactValue: { marginTop: 8, fontSize: 15 },
+  listHeading: { fontSize: 12, fontWeight: '700' },
+  listItem: {
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
 });
 

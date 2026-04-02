@@ -6,19 +6,19 @@ Ce document décrit comment **l’app mobile** appelle ProspectLab. La **référ
 
 ## Base URL et authentification
 
-Base URL
+Base URL (definir via `EXPO_PUBLIC_PROSPECTLAB_BASE_URL`, sans slash final)
 
-- developpement local : `http://localhost:5000` (prefixe `/api/public`)
-- production : `https://prospectlab.danielcraft.fr` (prefixe `/api/public`)
+- developpement local : typiquement `http://localhost:5000` ou IP LAN du poste (ex. `http://192.168.x.x:5000`)
+- production : `https://<votre-domaine>` (HTTPS recommande)
 
-Prefix configurable cote app : `EXPO_PUBLIC_PROSPECTLAB_API_PUBLIC_PREFIX` (defaut `/api/public`).
+Prefix : `EXPO_PUBLIC_PROSPECTLAB_API_PUBLIC_PREFIX` (defaut `/api/public`).
 
 Auth
 
 - **Recommande** : header `Authorization: Bearer <token>`
 - **Evite sur mobile** : `?api_token=<token>` (fuite possible via logs / historique)
 
-Permissions du token (champs en base) : lecture entreprises, emails, statistiques, campagnes. Une route peut exiger une ou plusieurs permissions ; une route peut aussi n'exiger qu'un token valide (ex. metadonnees du token).
+Permissions du token (champs en base) : lecture entreprises, emails, statistiques, campagnes, et éventuellement `entreprises_delete` pour la suppression PERMANENTE. Une route peut exiger une ou plusieurs permissions ; une route peut aussi n'exiger qu'un token valide (ex. metadonnees du token).
 
 ## Cache
 
@@ -57,6 +57,7 @@ Toutes les URLs ci-dessous sont relatives au prefixe `/api/public`.
 |--------|--------|------------|-------------|
 | GET | `/entreprises` | `entreprises` | Liste paginee (`limit`, `offset`, `search`, `secteur`, `statut`). |
 | GET | `/entreprises/<id>` | `entreprises` | Detail d'une entreprise. |
+| DELETE | `/entreprises/<id>` | `entreprises` + `entreprises_delete` | Suppression PERMANENTE d'une entreprise (cascades incluses). |
 | GET | `/entreprises/by-website?website=...` | `entreprises` | Recherche par site. |
 | GET | `/entreprises/by-email?email=...&include_emails=` | `entreprises` + `emails` | Recherche par email. |
 | GET | `/entreprises/by-phone?phone=...&include_phones=` | `entreprises` | Recherche par telephone. |
@@ -80,6 +81,13 @@ Toutes les URLs ci-dessous sont relatives au prefixe `/api/public`.
 | GET | `/website-analysis?website=...&full=` | `entreprises` | Rapport SEO / technique / pentest / OSINT (agrege). |
 | POST | `/website-analysis` | `entreprises` | Lance les taches d'analyse ; reponse typique `202` avec ids de taches. |
 
+### Notifications push (Expo)
+
+| Methode | Chemin | Permission | Description |
+|--------|--------|------------|-------------|
+| POST | `/push/register` | Token valide uniquement | Enregistre un jeton Expo Push (`expo_push_token`, `platform`, `installation_id` optionnel). Requiert que le serveur expose bien cette route (deploy a jour + reverse proxy qui autorise POST sur `/api/public/...`). |
+| DELETE | `/push/register` | Token valide uniquement | Retire le jeton (corps JSON : `expo_push_token`). |
+
 ### Campagnes
 
 | Methode | Chemin | Permission | Description |
@@ -93,13 +101,14 @@ Toutes les URLs ci-dessous sont relatives au prefixe `/api/public`.
 
 Fichier : `mobile/src/features/prospectlab/prospectLabApi.ts`.
 
-Methodes principales alignees sur les endpoints : `getTokenInfo`, `getStatistics`, `getStatisticsOverview`, `getReferenceCiblage`, `getReferenceCiblageCounts`, `getCampagneStatuses`, `listEntreprises`, `getEntreprise`, lookups by website/email/phone, `listEntrepriseEmailsAll`, `listEntreprisePhones`, `listCampagnes`, `listCampagnesByEntreprise`, `getWebsiteAnalysis`, `launchWebsiteAnalysis`, etc. Le dernier argument optionnel `{ skipCache?: boolean }` controle le cache client.
+Methodes principales alignees sur les endpoints : `getTokenInfo`, `getStatistics`, `getStatisticsOverview`, `getReferenceCiblage`, `getReferenceCiblageCounts`, `getCampagneStatuses`, `listEntreprises`, `getEntreprise`, lookups by website/email/phone, `listEntrepriseEmailsAll`, `listEntreprisePhones`, `listCampagnes`, `listCampagnesByEntreprise`, `getWebsiteAnalysis`, `launchWebsiteAnalysis`, `registerExpoPush`, `unregisterExpoPush`, etc. Le dernier argument optionnel `{ skipCache?: boolean }` controle le cache client.
 
 ## Erreurs habituelles
 
 - `401` : token manquant ou invalide.
 - `403` : token valide mais permission manquante pour la route.
 - `404` : ressource absente (entreprise, rapport d'analyse, etc.).
+- `405` sur `POST /push/register` : route absente cote serveur (deploy non a jour) ou reverse proxy qui ne transmet pas POST vers l'app ; verifier nginx / chemins `/api/public`.
 - CORS : uniquement pertinent pour **Expo Web** ; l'app native ne depend pas des en-tetes CORS.
 
 ## Voir aussi

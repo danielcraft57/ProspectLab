@@ -14,7 +14,7 @@ Le token donne acces a des donnees. Sur mobile, on fait simple:
 
 ## Logs
 
-- ne jamais logger le token
+- ne jamais logger le token API ni les jetons Expo Push
 - limiter les logs reseau aux codes HTTP + endpoint (sans query sensible)
 
 ## Permissions

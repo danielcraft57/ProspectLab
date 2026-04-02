@@ -4,11 +4,11 @@ App mobile (Expo + TypeScript) pour consulter le dashboard, les entreprises, les
 
 ## Ecrans (MVP)
 
-- Dashboard: stats globales via `GET /api/public/statistics`
-- Entreprises: liste + recherche simple via `GET /api/public/entreprises`
-- Campagnes: liste via `GET /api/public/campagnes`
-- Scan: extraction (email/tel/website) + lookup via `api/public` (MVP: OCR manuel)
-- Reglages: stockage securise du token
+- Dashboard : stats globales via `GET /api/public/statistics`
+- Entreprises : liste + recherche simple via `GET /api/public/entreprises`
+- Campagnes : liste via `GET /api/public/campagnes`
+- Sites : saisie URL, test de joignabilite, capture / OCR en dessous (token API uniquement dans Reglages)
+- Reglages : stockage securise du token API, synchronisation optionnelle des notifications push (Expo)
 
 ## Demarrer
 
@@ -23,11 +23,15 @@ Si Expo affiche des warnings de versions, fais une reinstall propre:
 
 ## Variables d'environnement (optionnel)
 
-Expo expose les variables `EXPO_PUBLIC_*`.
+Expo expose les variables `EXPO_PUBLIC_*`. Ne pas y mettre de token utilisateur ni de secrets Firebase.
 
-Exemples
-- `EXPO_PUBLIC_PROSPECTLAB_BASE_URL=http://localhost:5000`
+Exemples (adapter l’URL a ton environnement) :
+
+- `EXPO_PUBLIC_PROSPECTLAB_BASE_URL=http://localhost:5000` ou `https://<ton-domaine>`
 - `EXPO_PUBLIC_PROSPECTLAB_API_PUBLIC_PREFIX=/api/public`
+- `EXPO_PUBLIC_EAS_PROJECT_ID=<uuid-projet-expo>` — requis pour `getExpoPushTokenAsync` (voir `eas project:info` / expo.dev)
+
+Pour Android, le fichier **client** `google-services.json` (console Firebase, appli avec le bon `applicationId`) doit etre present localement ; il n’est en general **pas** versionne (voir `mobile/.gitignore`).
 
 ## Token API
 

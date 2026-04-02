@@ -33,6 +33,13 @@ yarn-error.*
 # local env files
 .env*.local
 
+# Firebase : ne jamais commiter un JSON compte de service (type "service_account", clé privée).
+# Fichiers *client* générés par la console Firebase (à garder en local pour les builds natifs).
+*firebase-adminsdk*.json
+*-adminsdk-*.json
+google-services.json
+GoogleService-Info.plist
+
 # typescript
 *.tsbuildinfo
 

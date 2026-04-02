@@ -329,6 +329,7 @@ class DatabaseSchema(DatabaseBase):
                 can_read_emails INTEGER DEFAULT 1,
                 can_read_statistics INTEGER DEFAULT 1,
                 can_read_campagnes INTEGER DEFAULT 1,
+                can_delete_entreprises INTEGER DEFAULT 0,
                 date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_used TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
@@ -343,6 +344,26 @@ class DatabaseSchema(DatabaseBase):
         self.safe_execute_sql(cursor, 'ALTER TABLE api_tokens ADD COLUMN can_read_emails INTEGER DEFAULT 1')
         self.safe_execute_sql(cursor, 'ALTER TABLE api_tokens ADD COLUMN can_read_statistics INTEGER DEFAULT 1')
         self.safe_execute_sql(cursor, 'ALTER TABLE api_tokens ADD COLUMN can_read_campagnes INTEGER DEFAULT 1')
+        self.safe_execute_sql(cursor, 'ALTER TABLE api_tokens ADD COLUMN can_delete_entreprises INTEGER DEFAULT 0')
+
+        # Enregistrements push Expo (app mobile) liés au token API — supprimés en cascade si le token API est effacé.
+        self.execute_sql(cursor, '''
+            CREATE TABLE IF NOT EXISTS mobile_expo_push_registrations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                api_token_id INTEGER NOT NULL,
+                expo_push_token TEXT NOT NULL UNIQUE,
+                platform TEXT NOT NULL DEFAULT 'android',
+                installation_id TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (api_token_id) REFERENCES api_tokens(id) ON DELETE CASCADE
+            )
+        ''')
+
+        self.execute_sql(
+            cursor,
+            'CREATE INDEX IF NOT EXISTS idx_mobile_expo_push_api_token ON mobile_expo_push_registrations(api_token_id)',
+        )
 
         # Table des applications clientes internes (Facturio, MailPilot, VocalGuard, etc.)
         self.execute_sql(cursor, '''

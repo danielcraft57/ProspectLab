@@ -19,6 +19,9 @@ APP_DIR = Path(__file__).parent
 
 # Configuration Flask
 SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+# Débogueur Werkzeug / pages d'erreur détaillées : désactivé par défaut (production).
+# Mettre FLASK_DEBUG=1 uniquement en développement local — jamais sur Internet.
+FLASK_DEBUG = os.environ.get('FLASK_DEBUG', '0').lower() in ('1', 'true', 'yes', 'on')
 UPLOAD_FOLDER = Path(os.environ.get('UPLOAD_FOLDER', str(APP_DIR / 'uploads')))
 EXPORT_FOLDER = Path(os.environ.get('EXPORT_FOLDER', str(APP_DIR / 'exports')))
 MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size

@@ -16,7 +16,7 @@ Documentation de référence pour le préfixe **`/api/public`**. Pour l’app mo
 
 ## Vue d’ensemble
 
-L’API publique permet d’accéder aux données d’entreprises, emails, campagnes et statistiques depuis des applications externes. L’authentification se fait par **token API** (généré côté admin).
+L’API publique permet d’accéder aux données d’entreprises, emails, campagnes et statistiques depuis des applications externes, et d’**enregistrer des jetons de notification push** pour les clients mobiles. L’authentification se fait par **token API** (généré côté admin).
 
 ---
 
@@ -68,6 +68,7 @@ Chaque token possède des flags en base (`api_tokens`) :
 | Permission API | Champ | Rôle |
 |----------------|-------|------|
 | Entreprises | `can_read_entreprises` | Listes, détails, recherche, analyse site, téléphones, références ciblage |
+| Suppression entreprises | `can_delete_entreprises` | Permet la suppression PERMANENTE d’entreprises (côté API publique) |
 | Emails | `can_read_emails` | Emails (y compris routes combinées avec entreprises) |
 | Statistiques | `can_read_statistics` | `/statistics`, `/statistics/overview` |
 | Campagnes | `can_read_campagnes` | Campagnes, emails / stats de campagne, statuts campagne |
@@ -95,10 +96,10 @@ Les clients doivent accepter un léger délai de cohérence ou prévoir un **raf
 https://<votre-domaine>/api/public
 ```
 
-Exemples :
+Exemples (adapter le domaine) :
 
 - Développement local : `http://localhost:5000/api/public`  
-- Production : `https://prospectlab.danielcraft.fr/api/public`  
+- Production : `https://<votre-domaine>/api/public`  
 
 Tous les chemins ci‑dessous sont **relatifs** à `/api/public`.
 
@@ -117,6 +118,7 @@ Tous les chemins ci‑dessous sont **relatifs** à `/api/public`.
 | **GET** | `/campagnes/statuses` | Campagnes | `draft`, `scheduled`, `running`, `completed`, `failed` |
 | **GET** | `/entreprises` | Entreprises | Liste paginée (`limit`, `offset`, `secteur`, `statut`, `search`) |
 | **GET** | `/entreprises/<id>` | Entreprises | Détail entreprise |
+| **DELETE** | `/entreprises/<id>` | Entreprises + `entreprises_delete` | Suppression PERMANENTE (cascades de données liées incluses) |
 | **GET** | `/entreprises/by-website` | Entreprises | Recherche par site (`website`) |
 | **GET** | `/entreprises/by-email` | Entreprises + emails | Recherche par email (`include_emails`) |
 | **GET** | `/entreprises/by-phone` | Entreprises | Recherche par téléphone (`include_phones`) |
@@ -139,6 +141,8 @@ Tous les chemins ci‑dessous sont **relatifs** à `/api/public`.
 | **GET** | `/campagnes/<id>/statistics` | Campagnes | Tracking (ouvertures, clics) |
 | **GET** | `/website-analysis` | Entreprises | Rapport agrégé (`website`, `full`) |
 | **POST** | `/website-analysis` | Entreprises | Lance les analyses asynchrones (réponse typique **202**) |
+| **POST** | `/push/register` | Token valide | Enregistre un jeton Expo Push (corps JSON, voir ci‑dessous) |
+| **DELETE** | `/push/register` | Token valide | Retire un jeton Expo Push enregistré |
 
 ---
 
@@ -161,6 +165,7 @@ Réponse type :
     "user_id": null,
     "permissions": {
       "entreprises": true,
+      "entreprises_delete": true,
       "emails": true,
       "statistics": true,
       "campagnes": true
@@ -231,6 +236,22 @@ Pour `statut` : si la valeur est `Gagné`, `Perdu` ou `Relance`, le filtre inclu
 **GET** `/website-analysis?website=&full=`** — rapport SEO / technique / OSINT / pentest (agrégation existante en base). Réponse **404** si aucune entreprise associée au site.
 
 **POST** `/website-analysis` — corps JSON : `website`, `force`, `full`, options de profondeur / workers / Lighthouse / Nmap, etc. Déclenche des tâches Celery ; réponse typique **202** avec identifiants de tâches. Puis interroger le **GET** pour récupérer le rapport.
+
+---
+
+### Notifications push (clients Expo / React Native)
+
+Réservé aux applications qui utilisent **Expo Notifications**. N’exige pas les permissions « entreprises / emails / … » au‑delà d’un **token API valide**.
+
+**POST** `/push/register` — `Content-Type: application/json` :
+
+- `expo_push_token` (string, requis) — valeur du type `ExponentPushToken[...]`
+- `platform` (string, défaut `android`) — `android` ou `ios`
+- `installation_id` (string, optionnel) — identifiant stable d’installation côté app
+
+**DELETE** `/push/register` — corps JSON : `{ "expo_push_token": "..." }`
+
+**Déploiement** : le reverse proxy (nginx, etc.) doit **transmettre les requêtes POST** vers l’application pour ce chemin ; une erreur **405 Method Not Allowed** indique souvent un blocage ou une règle statique devant Flask.
 
 ---
 

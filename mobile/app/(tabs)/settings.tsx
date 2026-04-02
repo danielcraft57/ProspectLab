@@ -5,7 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Config } from '../../src/core/config';
 import { ProspectLabApi } from '../../src/features/prospectlab/prospectLabApi';
 import { useApiToken } from '../../src/features/prospectlab/useToken';
-import { Card, DangerButton, FadeIn, H1, H2, Mono, MutedText, PrimaryButton, Screen } from '../../src/ui/components';
+import { Card, DangerButton, FadeIn, H2, Mono, MutedText, PrimaryButton, Screen } from '../../src/ui/components';
 import { useTheme } from '../../src/ui/theme';
 
 export default function SettingsScreen() {
@@ -70,8 +70,6 @@ export default function SettingsScreen() {
   return (
     <Screen>
       <ScrollView contentContainerStyle={styles.container}>
-        <H1>Reglages</H1>
-
         <FadeIn>
           <Card>
             <View style={styles.rowIcon}>
@@ -109,14 +107,14 @@ export default function SettingsScreen() {
               </View>
             )}
 
-            <MutedText style={{ marginTop: 12 }}>Scanner le token (OCR en direct)</MutedText>
+            <MutedText style={{ marginTop: 12 }}>Photographier la clé (OCR en direct)</MutedText>
             <MutedText style={{ marginTop: 4 }}>
-              Ouvre le scanner plein écran, place le token dans le cadre, puis valide le résultat détecté en bas.
+              Vue plein écran : cadre le texte ou le QR, puis confirme le jeton détecté en bas de l’écran.
             </MutedText>
             <View style={[styles.row, { marginTop: 8 }]}>
               <View style={{ flex: 1 }}>
                 <PrimaryButton
-                  title={ocrBusy ? 'Ouverture...' : 'Scanner en direct'}
+                  title={ocrBusy ? 'Ouverture…' : 'Ouvrir la caméra'}
                   onPress={openLiveOcrScanner}
                   disabled={ocrBusy}
                 />

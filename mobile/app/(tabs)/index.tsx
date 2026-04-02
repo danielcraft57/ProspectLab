@@ -63,8 +63,6 @@ export default function DashboardScreen() {
           <RefreshControl refreshing={loading} onRefresh={() => load({ skipCache: true })} tintColor={t.colors.primary} />
         }
       >
-        <H1>Dashboard</H1>
-
         {!tokenLoading && !token && (
           <FadeIn>
             <Card>

@@ -2,8 +2,14 @@
   "expo": {
     "name": "ProspectLab",
     "slug": "prospectlab",
+    "owner": "danielcraft-org",
     "scheme": "prospectlab",
-    "version": "1.0.0",
+    "extra": {
+      "eas": {
+        "projectId": "dd080f89-9f4a-4c3f-a8cb-86bba1415abb"
+      }
+    },
+    "version": "1.3.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -25,9 +31,11 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.POST_NOTIFICATIONS"
       ],
-      "package": "com.anonymous.mobile"
+      "package": "com.danielcraft.prospectlab",
+      "googleServicesFile": "./google-services.json"
     },
     "plugins": [
       "expo-router",
@@ -36,6 +44,13 @@
         {
           "photosPermission": "ProspectLab a besoin d'accéder à tes photos pour lire une capture d'écran du token API.",
           "cameraPermission": "ProspectLab a besoin de la caméra pour photographier l'écran affichant le token API."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#0B1021"
         }
       ]
     ],

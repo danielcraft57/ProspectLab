@@ -79,7 +79,7 @@ const API_DOC_FAMILIES = [
             {
                 id: 'entreprises',
                 name: 'Entreprises',
-                categoryDesc: 'Liste, détail et recherches (site, email, téléphone) ; emails et téléphones d’une fiche ; campagnes liées.',
+                categoryDesc: 'Liste, détail et recherches (site, email, téléphone) ; emails et téléphones d’une fiche ; campagnes liées. Suppression : DELETE sur la même URL que le détail — sans cache serveur ; données liées en cascade selon le schéma.',
                 endpoints: [
                     {
                         method: 'GET',
@@ -99,6 +99,12 @@ const API_DOC_FAMILIES = [
                         path: '/entreprises/<id>',
                         desc: 'Détail d’une entreprise.',
                         permission: 'Entreprises'
+                    },
+                    {
+                        method: 'DELETE',
+                        path: '/entreprises/<id>',
+                        desc: 'Supprime définitivement la fiche et les enregistrements associés (CASCADE). Réponse 200 : { success, deleted_id, message } ; 404 si id inconnu. Pas de body. Exige le droit token « suppression entreprises » (can_delete_entreprises) en plus de la lecture entreprises — sinon 403.',
+                        permission: 'Entreprises + suppression entreprises'
                     },
                     {
                         method: 'GET',

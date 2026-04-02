@@ -29,6 +29,7 @@ from config import (
     MAX_CONTENT_LENGTH,
     SECRET_KEY,
     RESTRICT_TO_LOCAL_NETWORK,
+    FLASK_DEBUG,
 )
 from celery_app import make_celery
 
@@ -59,6 +60,8 @@ app.config['UPLOAD_FOLDER'] = str(UPLOAD_FOLDER)
 app.config['EXPORT_FOLDER'] = str(EXPORT_FOLDER)
 app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 app.secret_key = SECRET_KEY
+app.config['DEBUG'] = FLASK_DEBUG
+app.config['TESTING'] = False
 
 # Configurer les logs de l'application Flask (après création de l'app)
 setup_root_logger(app)
@@ -301,12 +304,14 @@ if __name__ == '__main__':
         """Lance SocketIO dans un thread séparé"""
         try:
             socketio.run(
-                app, 
-                debug=True, 
-                host='0.0.0.0', 
-                port=5000, 
-                use_reloader=False, 
-                allow_unsafe_werkzeug=True
+                app,
+                debug=bool(app.config.get('DEBUG')),
+                host=os.environ.get('FLASK_RUN_HOST', '0.0.0.0'),
+                port=int(os.environ.get('FLASK_RUN_PORT', '5000')),
+                # Reloader désactivé (stable sous Windows + thread SocketIO) ; activer via FLASK_USE_RELOADER=1 si besoin.
+                use_reloader=bool(app.config.get('DEBUG'))
+                and os.environ.get('FLASK_USE_RELOADER', '0').lower() in ('1', 'true', 'yes', 'on'),
+                allow_unsafe_werkzeug=True,
             )
         except Exception as e:
             print(f'Erreur SocketIO: {e}')
@@ -316,7 +321,10 @@ if __name__ == '__main__':
     if sys.platform == 'win32':
         signal.signal(signal.SIGTERM, signal_handler)
     
-    print('Démarrage de l\'application Flask sur http://0.0.0.0:5000')
+    _port = int(os.environ.get('FLASK_RUN_PORT', '5000'))
+    _host = os.environ.get('FLASK_RUN_HOST', '0.0.0.0')
+    _mode = 'DEBUG' if app.config.get('DEBUG') else 'production (pas de débogueur)'
+    print(f"Démarrage Flask mode {_mode} sur http://{_host}:{_port}")
     print('Appuyez sur Ctrl+C pour arrêter l\'application\n')
     
     # Lancer SocketIO dans un thread séparé (non-daemon pour qu'il reste actif)

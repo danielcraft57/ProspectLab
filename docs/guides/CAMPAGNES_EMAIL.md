@@ -23,7 +23,7 @@ Le système de campagnes email permet d'envoyer des emails en masse à des entre
 - **Templates HTML** : Support de templates HTML professionnels avec :
   - Données dynamiques (nom, entreprise, données techniques, OSINT, pentest, scraping)
   - Blocs conditionnels (`{#if_xxx}`)
-  - Tracking automatique des liens vers `danielcraft.fr`
+  - Tracking automatique des liens vers le domaine principal configuré (ex. `BASE_URL` / site vitrine)
   - Design responsive et compatible clients email
 
 - **Sélection des destinataires** : 
@@ -72,7 +72,7 @@ Le système de campagnes email permet d'envoyer des emails en masse à des entre
 
 #### Caractéristiques
 - **Pas de prix** : Les templates mettent en avant les performances et bénéfices
-- **Lien vers danielcraft.fr** : Bouton "Découvrir mes services et tarifs" (tracké automatiquement)
+- **Lien vers le site principal** : bouton "Découvrir mes services et tarifs" (tracké automatiquement)
 - **Données dynamiques** : Injection automatique des données d'entreprise (technique, OSINT, pentest, scraping)
 - **Icônes centrées** : Utilisation de `text-align: center` et `line-height` pour compatibilité email
 
@@ -275,7 +275,7 @@ Spécification cible :
   - Pour un email donné : moyenne des `read_time` enregistrés pour `email_id` et `event_type = 'read_time'`.
   - Pour une campagne : moyenne de tous les `read_time` des emails de la campagne (champ `avg_read_time` renvoyé par l'API).
 - **Collecte côté frontend** (à implémenter dans un second temps) :
-  - Sur les pages de destination (site `danielcraft.fr` ou autre) liées depuis l'email :
+  - Sur les pages de destination (landing du domaine configuré ou autre) liées depuis l'email :
     - Récupérer un identifiant de tracking (par exemple `tracking_token` ou `email_id`) dans l'URL.
     - Mesurer le temps passé sur la page (timer JS démarré au `DOMContentLoaded`, interrompu au `beforeunload`).
     - Envoyer une requête HTTP (par ex. `POST /track/read_time/<tracking_token>?seconds=42`) qui créera un événement `read_time`.

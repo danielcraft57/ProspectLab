@@ -18,7 +18,7 @@ import { FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import { ProspectLabApi } from '../../../src/features/prospectlab/prospectLabApi';
 import { useApiToken } from '../../../src/features/prospectlab/useToken';
 import { DonutChart, SegmentedBar, Sparkline } from '../../../src/ui/charts';
-import { Card, FadeIn, H1, H2, Mono, Muted, MutedText, PrimaryButton, Screen } from '../../../src/ui/components';
+import { Card, FadeIn, H2, Mono, Muted, MutedText, PrimaryButton, Screen } from '../../../src/ui/components';
 import type { AppTheme } from '../../../src/ui/theme';
 import { useTheme } from '../../../src/ui/theme';
 import { useDetailScreenHeader } from '../../../src/ui/useDetailScreenHeader';
@@ -326,7 +326,7 @@ export default function CampagneDetailsScreen() {
                   <Mono>#{campagneId}</Mono>
                 </View>
                 <View style={{ marginTop: 12 }}>
-                  <H1>{nom}</H1>
+                  <H2>{nom}</H2>
                 </View>
                 {!!sujet && (
                   <MutedText style={{ marginTop: 8, lineHeight: 20 }}>

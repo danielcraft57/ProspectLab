@@ -9,7 +9,7 @@ L’application mobile (**Expo / React Native**) consomme l’**[API publique](.
 | Document | Rôle |
 |----------|------|
 | [**Guide API publique (serveur)**](../guides/API_PUBLIQUE.md) | Référence officielle : endpoints, permissions, cache HTTP, cURL |
-| [**Intégration API**](API_INTEGRATION.md) | Base URL, tableau des routes côté mobile, cache client, erreurs |
+| [**Intégration API**](API_INTEGRATION.md) | Base URL, tableau des routes côté mobile, notifications push Expo, cache client, erreurs |
 | [**Architecture**](ARCHITECTURE_MOBILE.md) | Dossiers, flux, couche `ProspectLabApi` |
 | [**Modèles d’ingénierie**](MODELES_INGENIERIE.md) | Patterns, domaine |
 | [**Sécurité**](SECURITE.md) | Token, stockage |

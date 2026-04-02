@@ -244,6 +244,20 @@
         gap: 8px;
         margin-top: 10px;
     }
+    .permissions-badges .badge--perm {
+        cursor: pointer;
+        user-select: none;
+        transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.2s;
+    }
+    .permissions-badges .badge--perm:hover:not(.is-busy) {
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    }
+    .permissions-badges .badge--perm.is-busy {
+        opacity: 0.65;
+        pointer-events: none;
+        cursor: wait;
+    }
     
     .badge {
         padding: 5px 12px;
@@ -429,6 +443,9 @@
     body[data-theme="dark"] .badge-danger {
         background: #450a0a;
         color: #fecaca;
+    }
+    body[data-theme="dark"] .permissions-badges .badge--perm:hover:not(.is-busy) {
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
     }
     body[data-theme="dark"] .btn-open-api-doc {
         background: #4338ca;
@@ -691,7 +708,7 @@
 <div class="tokens-container">
     <div class="page-header">
         <h1><i class="fas fa-key"></i> Gestion des Tokens API</h1>
-        <p>Créez et gérez les tokens API pour permettre à d'autres applications d'accéder aux données ProspectLab</p>
+        <p>Créez et gérez les tokens API pour permettre à d'autres applications d'accéder aux données ProspectLab. Sur les tokens <strong>actifs</strong>, cliquez sur les <strong>tags de permissions</strong> pour les activer ou désactiver (notification de confirmation).</p>
     </div>
     
     <div class="create-token-section">
@@ -711,6 +728,10 @@
                         <input type="checkbox" id="permEntreprises" name="can_read_entreprises" checked>
                         <span class="permission-label">Lire les entreprises</span>
                     </label>
+                    <label class="permission-item" for="permDeleteEntreprises" title="Nécessite « Lire les entreprises »">
+                        <input type="checkbox" id="permDeleteEntreprises" name="can_delete_entreprises">
+                        <span class="permission-label">Supprimer des entreprises (API)</span>
+                    </label>
                     <label class="permission-item" for="permEmails">
                         <input type="checkbox" id="permEmails" name="can_read_emails" checked>
                         <span class="permission-label">Lire les emails</span>
@@ -724,6 +745,7 @@
                         <span class="permission-label">Lire les campagnes email</span>
                     </label>
                 </div>
+                <small style="display:block;margin-top:10px;color:#666;">La suppression concerne <code>DELETE /api/public/entreprises/&lt;id&gt;</code> (irréversible). Sans la case « Supprimer », le token reste en <strong>lecture seule</strong> pour les fiches. La case suppression est ignorée si « Lire les entreprises » est décochée.</small>
             </div>
             
             <button type="submit" class="btn-create">

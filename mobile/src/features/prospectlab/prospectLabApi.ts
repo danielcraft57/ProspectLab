@@ -84,6 +84,32 @@ export class ProspectLabApi {
     }
   }
 
+  /** Enregistre un jeton Expo Push pour ce token API (notifications serveur → appareil). */
+  static async registerExpoPush(
+    token: string,
+    payload: { expoPushToken: string; platform?: string; installationId?: string },
+  ) {
+    const url = publicUrl('/push/register');
+    return fetchJson<{ success: boolean; error?: string }>(url, {
+      method: 'POST',
+      headers: bearerHeaders(token),
+      body: {
+        expo_push_token: payload.expoPushToken,
+        platform: payload.platform ?? 'android',
+        installation_id: payload.installationId,
+      },
+    });
+  }
+
+  static async unregisterExpoPush(token: string, expoPushToken: string) {
+    const url = publicUrl('/push/register');
+    return fetchJson<{ success: boolean; removed?: boolean }>(url, {
+      method: 'DELETE',
+      headers: bearerHeaders(token),
+      body: { expo_push_token: expoPushToken },
+    });
+  }
+
   static async getTokenInfo(token: string, cache?: CacheRequestOptions) {
     const url = publicUrl('/token/info');
     return fetchJsonCached(
@@ -313,6 +339,15 @@ export class ProspectLabApi {
         }),
       cache,
     );
+  }
+
+  /** Suppression définitive côté serveur (cascade sur données liées). */
+  static async deleteEntreprise(token: string, entrepriseId: number) {
+    const url = publicUrl(`/entreprises/${entrepriseId}`);
+    return fetchJson<{ success: boolean; message?: string; deleted_id?: number; error?: string }>(url, {
+      method: 'DELETE',
+      headers: bearerHeaders(token),
+    });
   }
 
   static async listCampagnesByEntreprise(
