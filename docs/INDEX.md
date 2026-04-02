@@ -28,6 +28,7 @@ Bienvenue dans la documentation de ProspectLab. Cette documentation est organis�
 - [Authentification](guides/AUTHENTIFICATION.md) - Guide du système d'authentification et de sécurité
 - [API Publique](guides/API_PUBLIQUE.md) - Guide de l'API publique pour intégration avec d'autres logiciels
 - [Campagnes Email](guides/CAMPAGNES_EMAIL.md) - Guide complet du système de campagnes email avec tracking
+- [Profil de pondération (priorité commerciale)](guides/PROFIL_PONDERATION_PRIORITE_COMMERCIALE.md) - À quoi sert le profil de pondération et la vue Top commercial
 - [Critères de recherche Google Maps](guides/CRITERES_RECHERCHE_GOOGLE_MAPS.md) - Guide pour les recherches Google Maps
 - [Recommandations AJAX](guides/RECOMMANDATIONS_AJAX.md) - Bonnes pratiques pour l'utilisation d'AJAX
 

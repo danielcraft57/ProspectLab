@@ -296,7 +296,7 @@
          * @param {Object} filters
          * @param {number|null} analyseId
          */
-        async loadPipelineKanban(filters = {}, analyseId = null) {
+        _pipelineKanbanQueryString(filters = {}, analyseId = null) {
             const params = new URLSearchParams();
             Object.keys(filters).forEach(key => {
                 const v = filters[key];
@@ -316,10 +316,92 @@
                     params.set('analyse_id', String(id));
                 }
             }
-            const qs = params.toString();
+            return params.toString();
+        },
+
+        /**
+         * Agrégation Kanban (effectifs par statut campagne), mêmes query params que loadAll.
+         */
+        async loadPipelineKanban(filters = {}, analyseId = null) {
+            const qs = this._pipelineKanbanQueryString(filters, analyseId);
             const url = qs ? `/api/entreprise/pipeline/kanban?${qs}` : '/api/entreprise/pipeline/kanban';
             const response = await fetch(url);
             if (!response.ok) throw new Error('Erreur lors du chargement du pipeline Kanban');
+            return await response.json();
+        },
+
+        /**
+         * Kanban prospection CRM (étape_prospection), mêmes filtres que loadPipelineKanban.
+         */
+        async loadPipelineKanbanCrm(filters = {}, analyseId = null) {
+            const qs = this._pipelineKanbanQueryString(filters, analyseId);
+            const url = qs ? `/api/entreprise/pipeline/kanban-crm?${qs}` : '/api/entreprise/pipeline/kanban-crm';
+            const response = await fetch(url);
+            if (!response.ok) throw new Error('Erreur lors du chargement du Kanban prospection');
+            return await response.json();
+        },
+
+        /**
+         * Étapes CRM ordonnées (référentiel Kanban).
+         * @returns {Promise<string[]>}
+         */
+        async loadCrmEtapes() {
+            const response = await fetch('/api/entreprise/crm/etapes');
+            if (!response.ok) throw new Error('Erreur lors du chargement des étapes CRM');
+            return await response.json();
+        },
+
+        /**
+         * Met à jour l'étape de prospection (Kanban CRM).
+         * @param {number} id
+         * @param {string} etape
+         */
+        async updateEtapeProspection(id, etape) {
+            const response = await fetch(`/api/entreprise/${id}/etape-prospection`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ etape })
+            });
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || 'Erreur lors de la mise à jour de l\'étape');
+            }
+            return await response.json();
+        },
+
+        /**
+         * Profils de pondération (priorité commerciale).
+         * @returns {Promise<{success: boolean, items: Array}>}
+         */
+        async loadCommercialPriorityProfiles() {
+            const response = await fetch('/api/commercial/priority-profiles');
+            if (!response.ok) throw new Error('Erreur lors du chargement des profils');
+            return await response.json();
+        },
+
+        /**
+         * Top entreprises par score pondéré + ancienneté du dernier touchpoint.
+         * @param {Object} filters - mêmes clés que loadAll
+         * @param {number|null} analyseId
+         * @param {{ limit?: number, profile_id?: number, priority_min?: number, w_seo?: number, w_secu?: number, w_perf?: number, w_opp?: number }} [opts]
+         */
+        async loadCommercialTop(filters = {}, analyseId = null, opts = {}) {
+            const params = this._pipelineKanbanQueryString(filters, analyseId);
+            const sp = new URLSearchParams(params);
+            const lim = opts.limit != null ? Number(opts.limit) : 50;
+            if (!Number.isNaN(lim)) sp.set('limit', String(Math.min(200, Math.max(1, lim))));
+            if (opts.profile_id != null) sp.set('profile_id', String(opts.profile_id));
+            if (opts.priority_min != null) sp.set('priority_min', String(opts.priority_min));
+            ['w_seo', 'w_secu', 'w_perf', 'w_opp'].forEach((k) => {
+                if (opts[k] != null && !Number.isNaN(Number(opts[k]))) sp.set(k, String(opts[k]));
+            });
+            const qs = sp.toString();
+            const url = qs ? `/api/entreprises/commercial/top?${qs}` : '/api/entreprises/commercial/top';
+            const response = await fetch(url);
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || 'Erreur vue commerciale');
+            }
             return await response.json();
         },
         

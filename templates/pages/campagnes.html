@@ -130,10 +130,49 @@
                                 <label for="ciblage-score-max">Score sécurité max</label>
                                 <input type="number" id="ciblage-score-max" placeholder="Ex: 50" min="0" max="100">
                             </div>
+                            <div class="form-group ciblage-field">
+                                <label for="ciblage-etape-prospection">Étape prospection (CRM)</label>
+                                <select id="ciblage-etape-prospection">
+                                    <option value="">Toutes</option>
+                                    <option value="À prospecter">À prospecter</option>
+                                    <option value="Contacté">Contacté</option>
+                                    <option value="RDV">RDV</option>
+                                    <option value="Proposition">Proposition</option>
+                                    <option value="Gagné">Gagné</option>
+                                    <option value="Perdu">Perdu</option>
+                                </select>
+                            </div>
+                            <div class="form-group ciblage-field ciblage-checkbox">
+                                <label><input type="checkbox" id="ciblage-sort-commercial"> Trier par priorité commerciale</label>
+                            </div>
+                            <div class="form-group ciblage-field">
+                                <label for="ciblage-priority-min">Score priorité min (avec tri)</label>
+                                <input type="number" id="ciblage-priority-min" placeholder="Ex: 40" step="any">
+                            </div>
+                            <div class="form-group ciblage-field">
+                                <label for="ciblage-commercial-profile">Profil de pondération</label>
+                                <select id="ciblage-commercial-profile">
+                                    <option value="">Défaut</option>
+                                </select>
+                            </div>
+                            <div class="form-group ciblage-field">
+                                <label for="ciblage-commercial-limit">Limite après tri (Top N)</label>
+                                <input type="number" id="ciblage-commercial-limit" placeholder="Ex: 50" min="1">
+                            </div>
                             <div class="form-group ciblage-field ciblage-checkbox">
                                 <label><input type="checkbox" id="ciblage-exclude-contactes"> Exclure déjà contactés</label>
                             </div>
                             <p class="ciblage-auto-hint">Les résultats se mettent à jour automatiquement.</p>
+                            <div class="ciblage-save-segment-row">
+                                <div class="form-group ciblage-field">
+                                    <label for="ciblage-save-segment-nom">Enregistrer ce ciblage comme segment</label>
+                                    <div class="ciblage-save-segment-inputs">
+                                        <input type="text" id="ciblage-save-segment-nom" placeholder="Nom du segment" autocomplete="off">
+                                        <input type="text" id="ciblage-save-segment-desc" placeholder="Description (optionnel)" autocomplete="off">
+                                        <button type="button" class="btn btn-secondary" id="ciblage-save-segment-btn">Enregistrer</button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         <div id="ciblage-groupes-block" class="ciblage-block" style="display: none;">
                             <div class="form-group">
@@ -156,6 +195,8 @@
                                     <option value="">Choisir un segment...</option>
                                 </select>
                             </div>
+                            <p id="ciblage-segment-summary" class="ciblage-segment-summary" hidden></p>
+                            <p id="ciblage-segment-preview-total" class="ciblage-segment-meta" aria-live="polite"></p>
                         </div>
                     </div>
                     <div class="form-section">

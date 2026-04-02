@@ -34,7 +34,7 @@ Cette roadmap regroupe les grandes idées de développement orientées prospecti
     - Normaliser les noms de paramètres API (`cms`, `tech_front`, `tech_back`, `seo_min`, `perf_min`, `has_blog`, `has_form`, `has_tunnel`…) et les documenter.
   - Consolider la gestion des segments dans `CampagneManager` :
     - Valider/typer le JSON de `criteres_json` (schéma de critères supportés).
-    - Ajouter un endpoint de *prévisualisation* d’un segment (`/api/ciblage/segments/<id>/preview`) qui renvoie un échantillon d’entreprises + total.
+    - ✅ Endpoint de *prévisualisation* : `GET /api/ciblage/segments/<id>/preview?limit=` (total + échantillon ; optimisation `COUNT` SQL encore à faire sur très gros jeux).
     - Prévoir la duplication/mise à jour de segments (v2) pour itérer facilement sur un ciblage.
   - Optimisation perf :
     - Index dédiés sur les colonnes les plus filtrées (secteur, opportunité, statut, scores, cms, framework).
@@ -65,10 +65,10 @@ Cette roadmap regroupe les grandes idées de développement orientées prospecti
 
 ### 3. Workflows de prospection intégrés (Kanban)
 
-- **Statut**: 🔴 À faire (UI Kanban + persistance par entreprise)
+- **Statut**: 🟢 v1 livré (étapes CRM `etape_prospection`, touchpoints, barre prospection + filtres)
 
 - Kanban par étapes :
-  - “À prospecter → Contacté → RDV pris → Proposition envoyée → Gagné / Perdu”.
+  - “À prospecter → Contacté → RDV → Proposition → Gagné / Perdu”.
 - Lier chaque carte à :
   - Une entreprise.
   - Le rapport d’audit généré (lien rapide vers le rapport HTML/PDF).

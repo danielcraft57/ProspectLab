@@ -578,6 +578,40 @@ body[data-theme="dark"] .campagnes-search-input i {
     color: #666;
     margin: 6px 0 10px 0;
 }
+.ciblage-segment-summary {
+    font-size: 0.88rem;
+    color: #475569;
+    line-height: 1.45;
+    margin: 8px 0 4px 0;
+    padding: 8px 10px;
+    background: rgba(99, 102, 241, 0.06);
+    border-radius: 6px;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+}
+.ciblage-segment-meta {
+    font-size: 0.85rem;
+    color: #64748b;
+    margin: 0 0 4px 0;
+}
+.ciblage-save-segment-row {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px dashed #cbd5e1;
+}
+.ciblage-save-segment-inputs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+.ciblage-save-segment-inputs input[type="text"] {
+    flex: 1 1 140px;
+    min-width: 120px;
+    max-width: 240px;
+    padding: 8px 10px;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+}
 .ciblage-block .form-inline label,
 .ciblage-block .ciblage-field label {
     min-width: 180px;
@@ -888,6 +922,12 @@ body[data-theme="dark"] .campagnes-search-input i {
     font-size: 14px;
 }
 .entreprise-email-count { font-size: 0.8em; color: #6c757d; margin-top: 2px; }
+.entreprise-priority-score {
+    font-size: 0.78em;
+    font-weight: 600;
+    color: #4f46e5;
+    margin-top: 4px;
+}
 .modal-footer-steps {
     display: flex;
     justify-content: space-between;
@@ -2437,6 +2477,26 @@ body[data-theme="dark"] .ciblage-block {
     border-color: #1e293b;
 }
 
+body[data-theme="dark"] .ciblage-segment-summary {
+    color: #cbd5e1;
+    background: rgba(99, 102, 241, 0.12);
+    border-color: rgba(148, 163, 184, 0.25);
+}
+
+body[data-theme="dark"] .ciblage-segment-meta {
+    color: #94a3b8;
+}
+
+body[data-theme="dark"] .ciblage-save-segment-row {
+    border-top-color: #334155;
+}
+
+body[data-theme="dark"] .ciblage-save-segment-inputs input[type="text"] {
+    background: #0f172a;
+    border-color: #475569;
+    color: #e2e8f0;
+}
+
 /* Cadre "Filtrage des emails" en dark (plus de cadre blanc) */
 body[data-theme="dark"] .form-section-email-filters {
     background: #1e293b;
@@ -2629,6 +2689,10 @@ body[data-theme="dark"] .modal .entreprise-secteur {
 
 body[data-theme="dark"] .modal .entreprise-email-count {
     color: #94a3b8;
+}
+
+body[data-theme="dark"] .entreprise-priority-score {
+    color: #a5b4fc;
 }
 
 body[data-theme="dark"] .modal .entreprise-item:hover {

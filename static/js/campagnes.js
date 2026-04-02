@@ -37,8 +37,10 @@ document.addEventListener('DOMContentLoaded', function() {
     loadSegmentsCiblage();
     loadGroupesCiblage();
     loadCiblageSuggestionsWithCounts();
+    loadCommercialPriorityProfilesCiblage();
     initCiblageModeSwitch();
     initCiblageAutoLoad();
+    initCiblageSaveSegment();
     initEmailFiltersToggle();
     initEmailFiltersListeners();
     initScheduleFields();
@@ -650,12 +652,178 @@ function fillDatalistWithCounts(id, items) {
     });
 }
 
+async function loadCommercialPriorityProfilesCiblage() {
+    var sel = document.getElementById('ciblage-commercial-profile');
+    if (!sel) return;
+    var keep = sel.value;
+    try {
+        var response = await fetch('/api/commercial/priority-profiles');
+        var data = await response.json();
+        var items = (data && data.items) || [];
+        sel.innerHTML = '<option value="">Défaut</option>';
+        items.forEach(function(p) {
+            var o = document.createElement('option');
+            o.value = String(p.id);
+            o.textContent = p.nom || ('#' + p.id);
+            sel.appendChild(o);
+        });
+        if (keep && Array.prototype.some.call(sel.options, function(o) { return o.value === keep; })) {
+            sel.value = keep;
+        }
+    } catch (e) {}
+}
+
+function clearCiblageSegmentMeta() {
+    var sumEl = document.getElementById('ciblage-segment-summary');
+    var metaEl = document.getElementById('ciblage-segment-preview-total');
+    if (sumEl) {
+        sumEl.textContent = '';
+        sumEl.hidden = true;
+    }
+    if (metaEl) metaEl.textContent = '';
+}
+
+/** Texte lisible des critères (segment ou formulaire) pour l’UI. */
+function formatCriteresSummary(criteres) {
+    if (!criteres || typeof criteres !== 'object') return '';
+    var parts = [];
+    if (criteres.secteur_contains) parts.push('Secteur contient « ' + criteres.secteur_contains + ' »');
+    if (criteres.secteur) parts.push('Secteur = ' + criteres.secteur);
+    if (criteres.opportunite) {
+        var opp = Array.isArray(criteres.opportunite) ? criteres.opportunite.join(', ') : String(criteres.opportunite);
+        if (opp) parts.push('Opportunité : ' + opp);
+    }
+    if (criteres.statut) parts.push('Statut : ' + criteres.statut);
+    if (criteres.tags_contains) parts.push('Tags contiennent « ' + criteres.tags_contains + ' »');
+    if (criteres.score_securite_max != null && criteres.score_securite_max !== '') {
+        parts.push('Score sécurité max ' + criteres.score_securite_max);
+    }
+    if (criteres.exclude_already_contacted) parts.push('Exclure déjà contactés');
+    if (criteres.etape_prospection) parts.push('Étape CRM : ' + criteres.etape_prospection);
+    if (criteres.sort_commercial) parts.push('Tri par priorité commerciale');
+    if (criteres.priority_min != null && criteres.priority_min !== '') {
+        parts.push('Score priorité min ≥ ' + criteres.priority_min);
+    }
+    if (criteres.commercial_profile_id != null && criteres.commercial_profile_id !== '') {
+        parts.push('Profil de pondération #' + criteres.commercial_profile_id);
+    }
+    if (criteres.commercial_limit != null && criteres.commercial_limit !== '') {
+        parts.push('Limite Top ' + criteres.commercial_limit);
+    }
+    if (criteres.cms) parts.push('CMS : ' + (Array.isArray(criteres.cms) ? criteres.cms.join(', ') : criteres.cms));
+    if (criteres.framework) parts.push('Framework : ' + criteres.framework);
+    if (criteres.has_blog) parts.push('Avec blog');
+    if (criteres.has_form) parts.push('Avec formulaire');
+    if (criteres.has_tunnel) parts.push('Avec tunnel e-commerce');
+    if (criteres.performance_max != null) parts.push('Perf. max ' + criteres.performance_max);
+    if (criteres.groupe_ids && criteres.groupe_ids.length) {
+        parts.push('Groupes #' + criteres.groupe_ids.join(', #'));
+    }
+    return parts.join(' · ');
+}
+
+function collectCiblageCriteresFromForm() {
+    var filters = {};
+    var secteurEl = document.getElementById('ciblage-secteur');
+    var secteur = secteurEl ? stripCountSuffix(secteurEl.value.trim()) : '';
+    if (secteur) filters.secteur_contains = secteur;
+    var oppEl = document.getElementById('ciblage-opportunite');
+    var oppRaw = oppEl ? oppEl.value.trim() : '';
+    var opp = oppRaw.split(',').map(function(s) { return stripCountSuffix(s.trim()); }).filter(Boolean);
+    if (opp.length) filters.opportunite = opp;
+    var statutEl = document.getElementById('ciblage-statut');
+    var statut = statutEl ? stripCountSuffix(statutEl.value.trim()) : '';
+    if (statut) filters.statut = statut;
+    var tagsEl = document.getElementById('ciblage-tags');
+    var tags = tagsEl ? stripCountSuffix(tagsEl.value.trim()) : '';
+    if (tags) filters.tags_contains = tags;
+    var scoreMaxEl = document.getElementById('ciblage-score-max');
+    if (scoreMaxEl && scoreMaxEl.value) {
+        var sm = parseInt(scoreMaxEl.value, 10);
+        if (!isNaN(sm)) filters.score_securite_max = sm;
+    }
+    var excl = document.getElementById('ciblage-exclude-contactes');
+    if (excl && excl.checked) filters.exclude_already_contacted = true;
+    var etapeEl = document.getElementById('ciblage-etape-prospection');
+    if (etapeEl && etapeEl.value) filters.etape_prospection = etapeEl.value;
+    var sortC = document.getElementById('ciblage-sort-commercial');
+    if (sortC && sortC.checked) filters.sort_commercial = true;
+    var pminEl = document.getElementById('ciblage-priority-min');
+    if (pminEl && pminEl.value !== '') {
+        var pm = parseFloat(pminEl.value);
+        if (!isNaN(pm)) filters.priority_min = pm;
+    }
+    var profEl = document.getElementById('ciblage-commercial-profile');
+    if (profEl && profEl.value) {
+        var pid = parseInt(profEl.value, 10);
+        if (!isNaN(pid)) filters.commercial_profile_id = pid;
+    }
+    var limEl = document.getElementById('ciblage-commercial-limit');
+    if (limEl && limEl.value !== '') {
+        var lm = parseInt(limEl.value, 10);
+        if (!isNaN(lm)) filters.commercial_limit = lm;
+    }
+    return filters;
+}
+
+function initCiblageSaveSegment() {
+    var btn = document.getElementById('ciblage-save-segment-btn');
+    if (!btn) return;
+    btn.addEventListener('click', async function() {
+        var nomEl = document.getElementById('ciblage-save-segment-nom');
+        var descEl = document.getElementById('ciblage-save-segment-desc');
+        var nom = nomEl ? nomEl.value.trim() : '';
+        if (!nom) {
+            window.alert('Indiquez un nom pour le segment.');
+            return;
+        }
+        var criteres = collectCiblageCriteresFromForm();
+        try {
+            var response = await fetch('/api/ciblage/segments', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: JSON.stringify({
+                    nom: nom,
+                    description: (descEl && descEl.value.trim()) || null,
+                    criteres: criteres
+                })
+            });
+            var data = await response.json().catch(function() { return {}; });
+            if (!response.ok) {
+                window.alert(data.error || 'Enregistrement impossible.');
+                return;
+            }
+            if (nomEl) nomEl.value = '';
+            if (descEl) descEl.value = '';
+            await loadSegmentsCiblage();
+            var sel = document.getElementById('ciblage-segment');
+            var newId = data.id != null ? String(data.id) : '';
+            if (sel && newId) {
+                sel.value = newId;
+                var modeSeg = document.querySelector('input[name="ciblage_mode"][value="segment"]');
+                if (modeSeg) {
+                    modeSeg.checked = true;
+                    modeSeg.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                await loadBySegment();
+            }
+        } catch (e) {
+            window.alert('Erreur réseau lors de l’enregistrement.');
+        }
+    });
+}
+
 // Chargement automatique : objectif/groupes/segment au change, critères en debounce
 function initCiblageAutoLoad() {
     var objSel = document.getElementById('ciblage-objectif');
     var segSel = document.getElementById('ciblage-segment');
     if (objSel) objSel.addEventListener('change', function() { if (objSel.value) loadByObjectif(); });
-    if (segSel) segSel.addEventListener('change', function() { if (segSel.value) loadBySegment(); });
+    if (segSel) {
+        segSel.addEventListener('change', function() {
+            if (segSel.value) loadBySegment();
+            else clearCiblageSegmentMeta();
+        });
+    }
     var debounceMs = 500;
     function scheduleCriteres() {
         if (ciblageDebounceTimer) clearTimeout(ciblageDebounceTimer);
@@ -665,12 +833,22 @@ function initCiblageAutoLoad() {
             if (mode && mode.value === 'criteres') loadByCriteres();
         }, debounceMs);
     }
-    ['ciblage-secteur', 'ciblage-opportunite', 'ciblage-statut', 'ciblage-tags', 'ciblage-score-max'].forEach(function(id) {
+    [
+        'ciblage-secteur', 'ciblage-opportunite', 'ciblage-statut', 'ciblage-tags', 'ciblage-score-max',
+        'ciblage-priority-min', 'ciblage-commercial-limit'
+    ].forEach(function(id) {
         var el = document.getElementById(id);
         if (el) el.addEventListener('input', scheduleCriteres);
     });
+    var critSelectIds = ['ciblage-etape-prospection', 'ciblage-commercial-profile'];
+    critSelectIds.forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.addEventListener('change', scheduleCriteres);
+    });
     var excludeCb = document.getElementById('ciblage-exclude-contactes');
     if (excludeCb) excludeCb.addEventListener('change', scheduleCriteres);
+    var sortCb = document.getElementById('ciblage-sort-commercial');
+    if (sortCb) sortCb.addEventListener('change', scheduleCriteres);
 }
 
 // Listeners sur les filtres emails (partie 2) : réafficher la liste
@@ -872,6 +1050,13 @@ function initCiblageModeSwitch() {
         }
         if (v === 'groupes') {
             loadByGroupes();
+        }
+        if (v === 'criteres') {
+            loadByCriteres();
+        }
+        if (v === 'segment') {
+            var ss = document.getElementById('ciblage-segment');
+            if (ss && ss.value) loadBySegment();
         }
     }
     radios.forEach(function(r) { r.addEventListener('change', updateBlocks); });
@@ -1089,20 +1274,7 @@ async function loadByObjectif() {
 
 // Charger les prospects selon les critères saisis
 async function loadByCriteres() {
-    const filters = {};
-    const secteur = stripCountSuffix(document.getElementById('ciblage-secteur').value.trim());
-    if (secteur) filters.secteur_contains = secteur;
-    const oppRaw = document.getElementById('ciblage-opportunite').value.trim();
-    const opp = oppRaw.split(',').map(function(s) { return stripCountSuffix(s.trim()); }).filter(Boolean);
-    if (opp.length) filters.opportunite = opp;
-    const statut = stripCountSuffix(document.getElementById('ciblage-statut').value.trim());
-    if (statut) filters.statut = statut;
-    const tags = stripCountSuffix(document.getElementById('ciblage-tags').value.trim());
-    if (tags) filters.tags_contains = tags;
-    const scoreMax = document.getElementById('ciblage-score-max').value;
-    if (scoreMax) filters.score_securite_max = parseInt(scoreMax, 10);
-    if (document.getElementById('ciblage-exclude-contactes').checked) filters.exclude_already_contacted = true;
-    await loadEntreprisesWithFilters(filters);
+    await loadEntreprisesWithFilters(collectCiblageCriteresFromForm());
 }
 
 // Charger les prospects selon les groupes sélectionnés
@@ -1119,12 +1291,36 @@ async function loadByGroupes() {
 
 // Charger les prospects selon le segment sauvegardé
 async function loadBySegment() {
-    const select = document.getElementById('ciblage-segment');
-    const segId = select.value;
-    if (!segId) return;
-    const opt = select.querySelector('option:checked');
-    const criteres = opt && opt.dataset.criteres ? JSON.parse(opt.dataset.criteres) : {};
+    var select = document.getElementById('ciblage-segment');
+    if (!select) return;
+    var segId = select.value;
+    if (!segId) {
+        clearCiblageSegmentMeta();
+        return;
+    }
+    var opt = select.options[select.selectedIndex];
+    var criteres = {};
+    if (opt && opt.dataset.criteres) {
+        try {
+            criteres = JSON.parse(opt.dataset.criteres) || {};
+        } catch (e) {
+            criteres = {};
+        }
+    }
+    var sumEl = document.getElementById('ciblage-segment-summary');
+    var summaryText = formatCriteresSummary(criteres);
+    if (sumEl) {
+        sumEl.textContent = summaryText;
+        sumEl.hidden = !summaryText;
+    }
     await loadEntreprisesWithFilters(criteres);
+    var metaEl = document.getElementById('ciblage-segment-preview-total');
+    if (metaEl) {
+        var n = (entreprisesData || []).length;
+        metaEl.textContent = n
+            ? n + ' entreprise(s) avec au moins un email pour ce segment.'
+            : 'Aucune entreprise ne correspond à ce segment.';
+    }
 }
 
 // Conteneur étape 1 : priorité entreprises-selector (3 steps), sinon recipients-selector (ancienne structure)
@@ -1149,6 +1345,17 @@ function loadEntreprisesWithFilters(filters) {
     if (filters.exclude_already_contacted) params.set('exclude_already_contacted', '1');
     if (filters.groupe_ids && Array.isArray(filters.groupe_ids) && filters.groupe_ids.length > 0) {
         params.set('groupe_ids', filters.groupe_ids.join(','));
+    }
+    if (filters.etape_prospection) params.set('etape_prospection', filters.etape_prospection);
+    if (filters.sort_commercial) params.set('sort_commercial', '1');
+    if (filters.priority_min != null && String(filters.priority_min) !== '') {
+        params.set('priority_min', String(filters.priority_min));
+    }
+    if (filters.commercial_profile_id != null && String(filters.commercial_profile_id) !== '') {
+        params.set('commercial_profile_id', String(filters.commercial_profile_id));
+    }
+    if (filters.commercial_limit != null && String(filters.commercial_limit) !== '') {
+        params.set('commercial_limit', String(filters.commercial_limit));
     }
     const url = '/api/ciblage/entreprises?' + params.toString();
     return fetch(url)
@@ -1213,10 +1420,14 @@ function displayEntreprisesStep1() {
     container.innerHTML = list.map(function(ent) {
         var nb = (ent.emails && ent.emails.length) || 0;
         if (nb === 0) return '';
+        var prioHtml = (ent.priority_score != null && !isNaN(Number(ent.priority_score)))
+            ? '<div class="entreprise-priority-score">Priorité ' + Math.round(Number(ent.priority_score)) + '</div>'
+            : '';
         return '<div class="entreprise-item step1-ent-item step1-card-clickable" data-entreprise-id="' + ent.id + '" onclick="toggleEntrepriseStep1ByCard(event, ' + ent.id + ')">' +
             '<div class="entreprise-header">' +
             '<div><div class="entreprise-name">' + escapeHtml(ent.nom) + '</div>' +
             (ent.secteur ? '<div class="entreprise-secteur">' + escapeHtml(ent.secteur) + '</div>' : '') +
+            prioHtml +
             '<div class="entreprise-email-count">' + nb + ' email(s)</div>' +
             '</div>' +
             '<div class="checkbox-wrapper">' +

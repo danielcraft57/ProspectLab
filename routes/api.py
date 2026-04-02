@@ -6,7 +6,7 @@ Contient toutes les routes API REST pour les entreprises, analyses, etc.
 
 from flask import Blueprint, request, jsonify, session
 from services.database import Database
-from services.database.entreprises import ENTERPRISE_STATUSES
+from services.database.entreprises import ENTERPRISE_STATUSES, CRM_PIPELINE_ETAPES, EntrepriseManager
 from services.auth import login_required
 import json
 
@@ -75,6 +75,7 @@ def _parse_entreprise_list_query_filters():
         'tags_contains': request.args.get('tags_contains'),
         'tags_any': request.args.get('tags_any'),
         'tags_all': request.args.get('tags_all'),
+        'etape_prospection': request.args.get('etape_prospection'),
     }
 
     def keep_filter(k, v):
@@ -86,6 +87,8 @@ def _parse_entreprise_list_query_filters():
         if k in ('has_email', 'no_group', 'has_blog', 'has_form', 'has_tunnel',
                  'security_null', 'pentest_null', 'seo_null'):
             return str(v).lower() in ('1', 'true', 'yes')
+        if k == 'etape_prospection':
+            return bool(v and str(v).strip())
         return v != ''
 
     filters = {k: v for k, v in filters.items() if keep_filter(k, v)}
@@ -710,6 +713,117 @@ def entreprise_pipeline_kanban():
             filters=filters if filters else None,
         )
         return jsonify(data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/entreprise/pipeline/kanban-crm', methods=['GET'])
+@login_required
+def entreprise_pipeline_kanban_crm():
+    """
+    API: Effectifs par étape de prospection CRM (Kanban dédié, champ etape_prospection).
+
+    Mêmes query params que /entreprise/pipeline/kanban (analyse_id + filtres liste entreprises).
+    """
+    try:
+        analyse_id, filters = _parse_entreprise_list_query_filters()
+        data = database.get_crm_kanban_snapshot(
+            analyse_id=analyse_id,
+            filters=filters if filters else None,
+        )
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/entreprise/crm/etapes', methods=['GET'])
+@login_required
+def entreprise_crm_etapes():
+    """API: Ordre des étapes du pipeline CRM prospection (Kanban)."""
+    return jsonify(list(CRM_PIPELINE_ETAPES))
+
+
+@api_bp.route('/entreprise/<int:entreprise_id>/etape-prospection', methods=['PATCH', 'PUT'])
+@login_required
+def entreprise_etape_prospection(entreprise_id):
+    """
+    API: Met à jour l'étape CRM (À prospecter, Contacté, RDV, Proposition, Gagné, Perdu).
+    Body: { "etape": "Contacté" }
+    """
+    try:
+        data = request.get_json() or {}
+        etape = (data.get('etape') or '').strip()
+        if not etape:
+            return jsonify({'error': 'etape requis'}), 400
+        if etape not in CRM_PIPELINE_ETAPES:
+            return jsonify({'error': 'etape invalide'}), 400
+        row = database.update_entreprise_etape_prospection(entreprise_id, etape)
+        if not row:
+            return jsonify({'error': 'entreprise introuvable'}), 404
+        return jsonify({'success': True, 'entreprise': row})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/commercial/priority-profiles', methods=['GET'])
+@login_required
+def commercial_priority_profiles():
+    """API: Profils de pondération (SEO / sécu / perf / opportunité) pour la priorité commerciale."""
+    try:
+        items = database.list_commercial_priority_profiles()
+        return jsonify({'success': True, 'items': items})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/entreprises/commercial/top', methods=['GET'])
+@login_required
+def entreprises_commercial_top():
+    """
+    API: Top entreprises par score pondéré + ancienneté du dernier touchpoint.
+
+    Mêmes filtres que GET /api/entreprises (y compris etape_prospection).
+
+    Query params:
+        profile_id (int, optionnel): charge les poids depuis la table commercial_priority_profiles.
+        w_seo, w_secu, w_perf, w_opp (float, optionnels): poids manuels si pas de profile_id.
+        priority_min (float, optionnel): seuil minimal sur priority_score.
+        limit (int, défaut 50, max 200).
+    """
+    try:
+        analyse_id, filters = _parse_entreprise_list_query_filters()
+        profile_id = request.args.get('profile_id', type=int)
+        weights = None
+        if profile_id:
+            prof = database.get_commercial_priority_profile(profile_id)
+            if not prof:
+                return jsonify({'error': 'Profil introuvable'}), 404
+            weights = prof.get('poids')
+        else:
+            weights = {
+                'w_seo': request.args.get('w_seo', type=float),
+                'w_secu': request.args.get('w_secu', type=float),
+                'w_perf': request.args.get('w_perf', type=float),
+                'w_opp': request.args.get('w_opp', type=float),
+            }
+        priority_min = request.args.get('priority_min', type=float)
+        limit = request.args.get('limit', default=50, type=int)
+        items = database.get_entreprises_commercial_top(
+            analyse_id=analyse_id,
+            filters=filters if filters else None,
+            weights=weights,
+            priority_min=priority_min,
+            limit=limit if limit else 50,
+        )
+        nw = EntrepriseManager._normalize_commercial_weights(weights)
+        from utils.helpers import clean_json_dict
+        return jsonify(clean_json_dict({
+            'success': True,
+            'items': items,
+            'weights': nw,
+            'profile_id': profile_id,
+            'limit': max(1, min(int(limit or 50), 200)),
+        }))
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

@@ -68,6 +68,22 @@
     margin-bottom: 1.25rem;
 }
 
+.filters-header-actions {
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+}
+
+.pagination-commercial-hint {
+    font-size: 0.85rem;
+    color: #64748b;
+    margin: 0.5rem 0 0;
+}
+
+body[data-theme="dark"] .pagination-commercial-hint {
+    color: #94a3b8;
+}
+
 .filters-title h3 {
     margin: 0;
 }

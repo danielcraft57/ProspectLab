@@ -211,6 +211,8 @@
     let tagsSuggestions = [];
     let activeTagFilters = [];
     let initialAnalyseId = null;
+    /** Vue « Top N commercial » (score pondéré + dernier touchpoint), sans pagination classique. */
+    let commercialTopMode = false;
     
     const ENTREPRISES_FILTERS_MEMENTO_KEY = 'entreprises_last_filters';
     const ENTREPRISES_FILTERS_STORAGE_KEY = 'entreprises_last_filters_v1';
@@ -275,6 +277,8 @@
             groupe: getElValue('filter-groupe'), // '' | 'none' | <id>
             opportunite: getElValue('filter-opportunite'),
             statut: getElValue('filter-statut'),
+            etape_prospection: getElValue('filter-etape-prospection'),
+            commercial_profile: getElValue('filter-commercial-profile'),
             security_min: getElValue('filter-security-min'),
             security_max: getElValue('filter-security-max'),
             seo_min: getElValue('filter-seo-min'),
@@ -337,6 +341,14 @@
                 const v = p.getAttribute('data-value') || '';
                 p.classList.toggle('active', v === statut);
             });
+
+            const filterEtape = document.getElementById('filter-etape-prospection');
+            if (filterEtape && typeof s.etape_prospection === 'string') filterEtape.value = s.etape_prospection;
+
+            const filterCommercialProfile = document.getElementById('filter-commercial-profile');
+            if (filterCommercialProfile && typeof s.commercial_profile === 'string') {
+                filterCommercialProfile.value = s.commercial_profile;
+            }
             
             const setSlider = (id, value) => {
                 const el = document.getElementById(id);
@@ -749,6 +761,8 @@
         }
         if (statut) filters.statut = statut;
         if (opportunite) filters.opportunite = opportunite;
+        const etapeProspection = get('filter-etape-prospection') || '';
+        if (etapeProspection) filters.etape_prospection = etapeProspection;
         const hasEmailCheckbox = document.getElementById('filter-has-email');
         if (hasEmailCheckbox && hasEmailCheckbox.checked) {
             filters.has_email = 'true';
@@ -901,14 +915,14 @@
     }
 
     /**
-     * Barre synthèse pipeline (effectifs par statut) alignée sur les filtres liste.
+     * Barre synthèse prospection CRM (effectifs par étape Kanban) alignée sur les filtres liste.
      */
     async function refreshKanbanStrip() {
         const el = document.getElementById('pipeline-kanban-strip');
         if (!el || !window.EntreprisesAPI) return;
         try {
             const filters = getCurrentFilters();
-            const data = await EntreprisesAPI.loadPipelineKanban(filters, initialAnalyseId);
+            const data = await EntreprisesAPI.loadPipelineKanbanCrm(filters, initialAnalyseId);
             if (!data || !data.columns) {
                 el.style.display = 'none';
                 el.innerHTML = '';
@@ -917,32 +931,30 @@
             el.style.display = 'block';
             const esc = (t) => (Formatters && Formatters.escapeHtml ? Formatters.escapeHtml(String(t ?? '')) : String(t ?? ''));
             const total = typeof data.total === 'number' ? data.total : '';
-            const sans = typeof data.sans_statut === 'number' && data.sans_statut > 0
-                ? ` · Sans statut : ${data.sans_statut}`
-                : '';
             const filteredNote = data.filtered ? ' <span class="kanban-strip-filtered">(filtres actifs)</span>' : '';
             const columnsNonZero = (data.columns || []).filter((col) => Number(col.count) > 0);
             let cols = columnsNonZero.map((col) => {
                 const raw = col.couleur && String(col.couleur).trim();
                 const bg = raw && /^#[0-9A-Fa-f]{6}$/.test(raw) ? raw : '#94a3b8';
-                return `<div class="kanban-strip-col" title="${esc(col.statut)}">
+                const label = col.etape != null ? col.etape : '';
+                return `<div class="kanban-strip-col" title="${esc(label)}">
                     <span class="kanban-strip-dot" style="background:${bg}"></span>
-                    <span class="kanban-strip-label">${esc(col.statut)}</span>
+                    <span class="kanban-strip-label">${esc(label)}</span>
                     <span class="kanban-strip-count">${col.count}</span>
                 </div>`;
             }).join('');
             let hors = '';
             const horsNonZero = (data.hors_referentiel || []).filter((h) => Number(h.count) > 0);
             if (horsNonZero.length) {
-                const parts = horsNonZero.map((h) => `${esc(h.statut)} (${h.count})`);
-                hors = `<div class="kanban-strip-hors">Autres statuts en base : ${parts.join(', ')}</div>`;
+                const parts = horsNonZero.map((h) => `${esc(h.etape)} (${h.count})`);
+                hors = `<div class="kanban-strip-hors">Autres étapes en base : ${parts.join(', ')}</div>`;
             }
             const colsHtml = cols ? `<div class="kanban-strip-columns">${cols}</div>` : '';
             el.innerHTML = `
                 <div class="kanban-strip-inner">
                     <div class="kanban-strip-meta">
-                        <strong>Pipeline</strong>${filteredNote}
-                        <span class="kanban-strip-total">${total} prospect(s)${sans}</span>
+                        <strong>Prospection CRM</strong>${filteredNote}
+                        <span class="kanban-strip-total">${total} prospect(s)</span>
                     </div>
                     ${colsHtml}
                     ${hors}
@@ -953,10 +965,111 @@
         }
     }
 
+    function updateCommercialProfileWeightsVisual() {
+        const sel = document.getElementById('filter-commercial-profile');
+        const host = document.getElementById('commercial-profile-weights-visual');
+        if (!host) return;
+        let w = { w_seo: 0.25, w_secu: 0.25, w_perf: 0.25, w_opp: 0.25 };
+        const opt = sel && sel.options[sel.selectedIndex];
+        if (sel && opt && opt.dataset && opt.dataset.poids) {
+            try {
+                const p = JSON.parse(opt.dataset.poids);
+                if (p && typeof p === 'object') {
+                    const a = Number(p.w_seo) || 0;
+                    const b = Number(p.w_secu) || 0;
+                    const c = Number(p.w_perf) || 0;
+                    const d = Number(p.w_opp) || 0;
+                    const sum = a + b + c + d;
+                    if (sum > 0) {
+                        w = { w_seo: a / sum, w_secu: b / sum, w_perf: c / sum, w_opp: d / sum };
+                    }
+                }
+            } catch (e) {
+                /* garder le défaut */
+            }
+        }
+        const rows = [
+            { cls: 'commercial-weight-bar--seo', label: 'SEO', pct: w.w_seo },
+            { cls: 'commercial-weight-bar--secu', label: 'Sécurité', pct: w.w_secu },
+            { cls: 'commercial-weight-bar--perf', label: 'Performance', pct: w.w_perf },
+            { cls: 'commercial-weight-bar--opp', label: 'Opportunité', pct: w.w_opp },
+        ];
+        host.innerHTML = rows
+            .map(
+                (r) =>
+                    `<div class="commercial-weight-row"><span class="commercial-weight-label">${r.label}</span>` +
+                    `<div class="commercial-weight-bar-wrap"><div class="commercial-weight-bar ${r.cls}" style="width:${Math.round(r.pct * 100)}%"></div></div>` +
+                    `<span class="commercial-weight-pct">${Math.round(r.pct * 100)}%</span></div>`,
+            )
+            .join('');
+    }
+
+    async function populateCommercialProfileSelect() {
+        const sel = document.getElementById('filter-commercial-profile');
+        if (!sel || !window.EntreprisesAPI) return;
+        const previous = sel.value;
+        try {
+            const data = await EntreprisesAPI.loadCommercialPriorityProfiles();
+            const items = (data && data.items) ? data.items : [];
+            const first = sel.querySelector('option[value=""]');
+            sel.innerHTML = '';
+            if (first) {
+                sel.appendChild(first);
+            } else {
+                const def = document.createElement('option');
+                def.value = '';
+                def.textContent = 'Défaut (équilibré)';
+                sel.appendChild(def);
+            }
+            items.forEach((p) => {
+                const o = document.createElement('option');
+                o.value = String(p.id);
+                o.textContent = p.nom || ('Profil ' + p.id);
+                const po = p && p.poids && typeof p.poids === 'object' ? p.poids : {};
+                o.dataset.poids = JSON.stringify(po);
+                sel.appendChild(o);
+            });
+            if (previous && Array.from(sel.options).some((o) => o.value === previous)) {
+                sel.value = previous;
+            }
+            updateCommercialProfileWeightsVisual();
+        } catch (e) {
+            console.warn('[entreprises] Profils priorité:', e);
+        }
+    }
+
+    function setCommercialTopUi(on) {
+        const btnTop = document.getElementById('btn-commercial-top');
+        const btnOff = document.getElementById('btn-commercial-top-off');
+        if (btnTop) btnTop.style.display = on ? 'none' : '';
+        if (btnOff) btnOff.style.display = on ? 'inline-flex' : 'none';
+    }
+
     /** Charge les entreprises avec les filtres courants (côté serveur, pagination). */
     async function loadEntreprises() {
         try {
             const filters = getCurrentFilters();
+            if (commercialTopMode && window.EntreprisesAPI && typeof EntreprisesAPI.loadCommercialTop === 'function') {
+                let profileId;
+                const profileSel = document.getElementById('filter-commercial-profile');
+                if (profileSel && profileSel.value) {
+                    const pid = parseInt(profileSel.value, 10);
+                    if (!Number.isNaN(pid)) profileId = pid;
+                }
+                const data = await EntreprisesAPI.loadCommercialTop(filters, initialAnalyseId, {
+                    limit: 50,
+                    profile_id: profileId,
+                });
+                const items = data && data.items ? data.items : [];
+                allEntreprises = items;
+                filteredEntreprises = [...items];
+                totalEntreprises = items.length;
+                setCommercialTopUi(true);
+                renderEntreprises();
+                refreshKanbanStrip();
+                return;
+            }
+            setCommercialTopUi(false);
             const data = await EntreprisesAPI.loadAll(filters, currentPage, itemsPerPage, false, initialAnalyseId);
             const items = data && data.items ? data.items : [];
             allEntreprises = items;
@@ -1033,8 +1146,12 @@
         const container = document.getElementById('entreprises-container');
         const pageEntreprises = filteredEntreprises;
         
-        document.getElementById('results-count').textContent = 
-            `${totalEntreprises} entreprise${totalEntreprises > 1 ? 's' : ''} trouvée${totalEntreprises > 1 ? 's' : ''}`;
+        const rc = document.getElementById('results-count');
+        if (rc) {
+            rc.textContent = commercialTopMode
+                ? `${totalEntreprises} prospect(s) — vue « Top commercial » (priorité + dernier contact)`
+                : `${totalEntreprises} entreprise${totalEntreprises > 1 ? 's' : ''} trouvée${totalEntreprises > 1 ? 's' : ''}`;
+        }
         
         if (pageEntreprises.length === 0) {
             container.innerHTML = '<p class="no-results">Aucune entreprise ne correspond aux critères</p>';
@@ -1516,6 +1633,13 @@
                         </div>
                     </div>
                 </div>
+                ${commercialTopMode && entreprise.priority_score != null ? `
+                <div class="card-commercial-priority">
+                    <span class="badge badge-secondary" title="Score pondéré + dernier contact">Priorité ${Math.round(Number(entreprise.priority_score))}</span>
+                    ${entreprise.last_touchpoint_at
+                        ? ` · Dernier contact ${Formatters.escapeHtml(String(entreprise.last_touchpoint_at).slice(0, 16))}`
+                        : ' · Aucun contact enregistré'}
+                </div>` : ''}
                 <div class="card-body">
                     ${resumePreview ? `<p class="resume-preview" style="color: #666; font-size: 0.9rem; margin-bottom: 0.75rem; font-style: italic;">${Formatters.escapeHtml(resumePreview)}</p>` : ''}
                     ${entreprise.website ? `<p><strong>Site:</strong> <a href="${entreprise.website}" target="_blank">${Formatters.escapeHtml(getDisplayDomain(entreprise.website))}</a></p>` : ''}
@@ -1760,6 +1884,11 @@
                     <div class="row-meta">
                         ${entreprise.secteur ? `<span class="row-chip row-chip-sector" title="Secteur"><i class="fas fa-industry" aria-hidden="true"></i> ${Formatters.escapeHtml(entreprise.secteur)}</span>` : ''}
                         ${langChipLabel ? `<span class="row-chip row-chip-lang" title="Langue principale"><i class="fas fa-language" aria-hidden="true"></i> ${Formatters.escapeHtml(langChipLabel)}</span>` : ''}
+                        ${commercialTopMode && entreprise.priority_score != null ? `
+                        <span class="row-chip row-chip-priority" title="Priorité commerciale">
+                            <i class="fas fa-sort-amount-down" aria-hidden="true"></i> ${Math.round(Number(entreprise.priority_score))}
+                            ${entreprise.last_touchpoint_at ? ` · ${Formatters.escapeHtml(String(entreprise.last_touchpoint_at).slice(0, 16))}` : ' · —'}
+                        </span>` : ''}
                         ${entreprise.statut ? (() => {
                             const statut = String(entreprise.statut || '').trim();
                             const cls = (Badges && typeof Badges.getStatusClass === 'function') ? Badges.getStatusClass(statut) : 'secondary';
@@ -1793,9 +1922,13 @@
     }
     
     function renderPagination() {
-        const totalPages = Math.ceil(totalEntreprises / itemsPerPage);
         const pagination = document.getElementById('pagination');
         if (!pagination) return;
+        if (commercialTopMode) {
+            pagination.innerHTML = '<p class="pagination-commercial-hint">Tri : score pondéré (SEO, sécu, perf, opportunité) puis entreprises sans contact récent en priorité.</p>';
+            return;
+        }
+        const totalPages = Math.ceil(totalEntreprises / itemsPerPage);
         
         if (totalPages <= 1) {
             pagination.innerHTML = '';
@@ -2553,6 +2686,8 @@
             'filter-groupe',
             'filter-opportunite',
             'filter-statut',
+            'filter-etape-prospection',
+            'filter-commercial-profile',
             'filter-security-min',
             'filter-security-max',
             'filter-seo-min',
@@ -2575,6 +2710,9 @@
             const el = document.getElementById(id);
             if (el) {
                 el.addEventListener('change', () => {
+                    if (id === 'filter-commercial-profile') {
+                        updateCommercialProfileWeightsVisual();
+                    }
                     if (id.endsWith('-null')) {
                         syncScoreNullSlidersDisabled();
                     }
@@ -2616,6 +2754,30 @@
             });
         }
 
+        const btnCommercialTop = document.getElementById('btn-commercial-top');
+        const btnCommercialOff = document.getElementById('btn-commercial-top-off');
+        if (btnCommercialTop) {
+            btnCommercialTop.addEventListener('click', async () => {
+                commercialTopMode = true;
+                currentPage = 1;
+                try {
+                    if (window.localStorage) {
+                        window.localStorage.setItem(ENTREPRISES_CURRENT_PAGE_STORAGE_KEY, String(currentPage));
+                    }
+                } catch (e) {}
+                await loadEntreprises();
+                if (window.Notifications && typeof Notifications.show === 'function') {
+                    Notifications.show('Vue « Top 50 commercial » (pondération + dernier contact)', 'info');
+                }
+            });
+        }
+        if (btnCommercialOff) {
+            btnCommercialOff.addEventListener('click', async () => {
+                commercialTopMode = false;
+                await loadEntreprises();
+            });
+        }
+
         // Mise à jour des labels des jauges
         const securitySliderMin = document.getElementById('filter-security-min');
         const securitySliderMax = document.getElementById('filter-security-max');
@@ -2635,6 +2797,7 @@
             securitySliderMin.addEventListener('input', () => {
                 securityLabelMin.textContent = formatScoreMinLabel(securitySliderMin.value);
                 updateAdvancedFiltersBadge();
+                debouncedApplyFilters();
             });
         }
 
@@ -2643,6 +2806,7 @@
             securitySliderMax.addEventListener('input', () => {
                 securityLabelMax.textContent = formatScoreMaxLabel(securitySliderMax.value);
                 updateAdvancedFiltersBadge();
+                debouncedApplyFilters();
             });
         }
 
@@ -2651,6 +2815,7 @@
             seoSliderMin.addEventListener('input', () => {
                 seoLabelMin.textContent = formatScoreMinLabel(seoSliderMin.value);
                 updateAdvancedFiltersBadge();
+                debouncedApplyFilters();
             });
         }
 
@@ -2659,6 +2824,7 @@
             seoSliderMax.addEventListener('input', () => {
                 seoLabelMax.textContent = formatScoreMaxLabel(seoSliderMax.value);
                 updateAdvancedFiltersBadge();
+                debouncedApplyFilters();
             });
         }
 
@@ -2667,6 +2833,7 @@
             pentestSliderMin.addEventListener('input', () => {
                 pentestLabelMin.textContent = formatScoreMinLabel(pentestSliderMin.value);
                 updateAdvancedFiltersBadge();
+                debouncedApplyFilters();
             });
         }
 
@@ -2675,6 +2842,7 @@
             pentestSliderMax.addEventListener('input', () => {
                 pentestLabelMax.textContent = formatScoreMaxLabel(pentestSliderMax.value);
                 updateAdvancedFiltersBadge();
+                debouncedApplyFilters();
             });
         }
 
@@ -3144,6 +3312,7 @@
         const groupe = document.getElementById('filter-groupe')?.value;
         const opportunite = document.getElementById('filter-opportunite')?.value;
         const statut = document.getElementById('filter-statut')?.value;
+        const etapeProspection = document.getElementById('filter-etape-prospection')?.value;
         const tagsInputValue = (document.getElementById('filter-tags')?.value || '').trim();
         const securityMin = document.getElementById('filter-security-min')?.value;
         const securityMax = document.getElementById('filter-security-max')?.value;
@@ -3164,8 +3333,11 @@
             (groupe ? 1 : 0) +
             (opportunite ? 1 : 0) +
             (statut ? 1 : 0) +
+            (etapeProspection ? 1 : 0) +
             (hasEmail ? 1 : 0);
+        const commercialProfile = document.getElementById('filter-commercial-profile')?.value;
         const scoresCount =
+            (commercialProfile ? 1 : 0) +
             ((securityMin && parseInt(securityMin, 10) > 0) ? 1 : 0) +
             ((securityMax && parseInt(securityMax, 10) < 100) ? 1 : 0) +
             ((seoMin && parseInt(seoMin, 10) > 0) ? 1 : 0) +
@@ -3420,8 +3592,9 @@
         if (!container || !window.EntreprisesAPI) return;
         container.innerHTML = '<p class="loading">Chargement de la prospection...</p>';
         try {
-            const [statuts, tpRes] = await Promise.all([
+            const [statuts, crmEtapes, tpRes] = await Promise.all([
                 EntreprisesAPI.loadStatutsPipeline(),
+                EntreprisesAPI.loadCrmEtapes(),
                 EntreprisesAPI.loadTouchpoints(entrepriseId, 100, 0)
             ]);
             const items = (tpRes && tpRes.items) ? tpRes.items : [];
@@ -3430,11 +3603,26 @@
                 const sel = s === currentStatut ? ' selected' : '';
                 return `<option value="${Formatters.escapeHtml(s)}"${sel}>${Formatters.escapeHtml(s)}</option>`;
             }).join('');
+            const rawEtape = (currentModalEntrepriseData && currentModalEntrepriseData.etape_prospection)
+                ? String(currentModalEntrepriseData.etape_prospection).trim() : '';
+            const currentEtape = rawEtape || 'À prospecter';
+            const etapeList = Array.isArray(crmEtapes) && crmEtapes.length ? crmEtapes : ['À prospecter', 'Contacté', 'RDV', 'Proposition', 'Gagné', 'Perdu'];
+            const etapeOptions = etapeList.map((s) => {
+                const sel = s === currentEtape ? ' selected' : '';
+                return `<option value="${Formatters.escapeHtml(s)}"${sel}>${Formatters.escapeHtml(s)}</option>`;
+            }).join('');
 
             container.innerHTML = `
                 <div class="prospection-panel">
                     <div class="prospection-statut-block">
-                        <label for="modal-prospection-statut" class="prospection-label">Statut pipeline</label>
+                        <label for="modal-prospection-etape" class="prospection-label">Étape prospection (Kanban)</label>
+                        <div class="prospection-statut-row">
+                            <select id="modal-prospection-etape" class="form-select">${etapeOptions}</select>
+                            <button type="button" class="btn btn-primary btn-small" id="modal-prospection-save-etape">Enregistrer</button>
+                        </div>
+                    </div>
+                    <div class="prospection-statut-block">
+                        <label for="modal-prospection-statut" class="prospection-label">Statut (campagnes / email)</label>
                         <div class="prospection-statut-row">
                             <select id="modal-prospection-statut" class="form-select">${statutOptions}</select>
                             <button type="button" class="btn btn-primary btn-small" id="modal-prospection-save-statut">Enregistrer</button>
@@ -3443,6 +3631,13 @@
                     <h4 class="prospection-journal-title"><i class="fas fa-comments"></i> Journal d'interactions</h4>
                     <div id="touchpoints-list" class="touchpoints-list">${renderTouchpointsListHtml(items)}</div>
                     <form id="touchpoint-form" class="touchpoint-form">
+                        <div class="touchpoint-quick-actions" role="group" aria-label="Raccourcis canal">
+                            <span class="touchpoint-quick-label">Ajouter un touchpoint :</span>
+                            <button type="button" class="btn btn-small btn-outline touchpoint-preset" data-canal="Email">Email</button>
+                            <button type="button" class="btn btn-small btn-outline touchpoint-preset" data-canal="Appel">Appel</button>
+                            <button type="button" class="btn btn-small btn-outline touchpoint-preset" data-canal="RDV">RDV</button>
+                            <button type="button" class="btn btn-small btn-outline touchpoint-preset" data-canal="Note">Note</button>
+                        </div>
                         <div class="touchpoint-form-grid">
                             <div>
                                 <label class="form-label">Canal</label>
@@ -3465,6 +3660,31 @@
                     </form>
                 </div>
             `;
+
+            const saveEtapeBtn = document.getElementById('modal-prospection-save-etape');
+            if (saveEtapeBtn) {
+                saveEtapeBtn.onclick = async () => {
+                    const sel = document.getElementById('modal-prospection-etape');
+                    if (!sel || !currentModalEntrepriseId) return;
+                    const etape = (sel.value || '').trim();
+                    if (!etape) {
+                        Notifications.show('Choisis une étape', 'warning');
+                        return;
+                    }
+                    try {
+                        await EntreprisesAPI.updateEtapeProspection(currentModalEntrepriseId, etape);
+                        if (currentModalEntrepriseData) currentModalEntrepriseData.etape_prospection = etape;
+                        const row = allEntreprises.find((e) => e.id === currentModalEntrepriseId);
+                        if (row) row.etape_prospection = etape;
+                        Notifications.show('Étape prospection mise à jour', 'success');
+                        refreshKanbanStrip();
+                        scheduleApplyFilters();
+                    } catch (err) {
+                        console.error(err);
+                        Notifications.show(err.message || 'Erreur étape', 'error');
+                    }
+                };
+            }
 
             const saveBtn = document.getElementById('modal-prospection-save-statut');
             if (saveBtn) {
@@ -3493,6 +3713,18 @@
                     }
                 };
             }
+
+            container.querySelectorAll('.touchpoint-preset').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    const canal = btn.getAttribute('data-canal') || '';
+                    const tf = document.getElementById('touchpoint-form');
+                    if (!tf) return;
+                    const canalInput = tf.querySelector('[name="canal"]');
+                    const sujetInput = tf.querySelector('[name="sujet"]');
+                    if (canalInput) canalInput.value = canal;
+                    if (sujetInput) sujetInput.focus();
+                });
+            });
 
             const form = document.getElementById('touchpoint-form');
             if (form) {
@@ -4942,6 +5174,11 @@
         } catch (e) {
             console.error('[entreprises] Erreur init groupes filtre:', e);
         }
+        try {
+            await populateCommercialProfileSelect();
+        } catch (e) {
+            console.warn('[entreprises] init profils priorité:', e);
+        }
         // Restaurer la recherche + filtres avancés depuis le memento (si disponible),
         // avant d'appliquer les filtres éventuellement présents dans l'URL.
         try {
@@ -4949,8 +5186,18 @@
         } catch (e) {
             // ignore
         }
+        try {
+            updateCommercialProfileWeightsVisual();
+        } catch (e) {
+            /* ignore */
+        }
         // Lire les filtres depuis l'URL (secteur, statut, tags_any, analyse_id...)
         applyInitialFiltersFromUrl();
+        try {
+            updateCommercialProfileWeightsVisual();
+        } catch (e) {
+            /* ignore */
+        }
         try {
             await loadEntreprises();
         } catch (e) {

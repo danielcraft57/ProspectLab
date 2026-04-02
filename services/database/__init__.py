@@ -81,6 +81,13 @@ class Database(
         # Cela résout automatiquement le MRO
         super().__init__(db_path)
 
+        try:
+            self.ensure_commercial_priority_profiles_table()
+        except Exception:
+            logging.getLogger(__name__).warning(
+                'Migration commercial_priority_profiles non appliquée', exc_info=True
+            )
+
         # Initialiser la base de données (créer les tables) une seule fois par process.
         # Permet un contournement explicite via env pour debug/migration forcée.
         force_each_instance = str(os.environ.get('DB_INIT_EACH_INSTANCE', '')).strip().lower() in (
