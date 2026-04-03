@@ -3,6 +3,8 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import type { PropsWithChildren } from 'react';
+import { AppCacheMaintenance } from '../src/features/cache/AppCacheMaintenance';
+import { GlobalNetworkToast } from '../src/features/network/GlobalNetworkToast';
 import { WebsiteQueueProcessor } from '../src/features/scan/WebsiteQueueProcessor';
 import { ApiTokenProvider } from '../src/features/prospectlab/apiTokenContext';
 import { useExpoPushRegistration } from '../src/features/prospectlab/useExpoPushRegistration';
@@ -17,6 +19,8 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ApiTokenProvider>
+        <AppCacheMaintenance />
+        <GlobalNetworkToast />
         <WebsiteQueueProcessor />
         <ExpoPushBridge>
           <NotificationDeepLink />

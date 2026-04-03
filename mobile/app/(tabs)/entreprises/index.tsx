@@ -24,6 +24,14 @@ import { ProspectLabApi } from '../../../src/features/prospectlab/prospectLabApi
 import { useApiToken } from '../../../src/features/prospectlab/useToken';
 import { clearProspectLabApiCache } from '../../../src/lib/http/apiMemoryCache';
 import { HttpError } from '../../../src/lib/http/httpClient';
+import {
+  buildEntreprisesListCacheKey,
+  entreprisesListCacheIsStale,
+  readEntreprisesListCache,
+  writeEntreprisesListCache,
+} from '../../../src/lib/cache/repositories';
+import { emitNetworkRefreshIntent } from '../../../src/features/network/networkToastBus';
+import { useAppNetwork } from '../../../src/lib/net/useAppNetwork';
 import { useOnBecameOnline } from '../../../src/lib/net/useOnBecameOnline';
 import { Card, FadeIn, H2, Mono, Muted, MutedText, PrimaryButton, Screen } from '../../../src/ui/components';
 import { useTheme } from '../../../src/ui/theme';
@@ -72,6 +80,7 @@ export default function EntreprisesScreen() {
   const t = useTheme();
   const router = useRouter();
   const { token, loading: tokenLoading } = useApiToken();
+  const { usableForApi } = useAppNetwork();
   const [items, setItems] = useState<EntrepriseItem[]>([]);
   const [total, setTotal] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -159,9 +168,44 @@ export default function EntreprisesScreen() {
     async (opts?: { skipCache?: boolean }) => {
       if (!token) return;
       const seq = ++loadSeq.current;
-      setLoading(true);
+      const cacheKey = buildEntreprisesListCacheKey(appliedSearch, {
+        secteur: listFilters.secteur,
+        statut: listFilters.statut,
+        opportunite: listFilters.opportunite,
+      });
+      let sqlList: Awaited<ReturnType<typeof readEntreprisesListCache>> = null;
+      if (!opts?.skipCache) {
+        sqlList = await readEntreprisesListCache(cacheKey);
+        if (sqlList) {
+          setItems(sqlList.items as EntrepriseItem[]);
+          setTotal(sqlList.total);
+        }
+      }
+
+      if (!usableForApi) {
+        if (seq !== loadSeq.current) return;
+        setLoadingMore(false);
+        setListExhausted(false);
+        setLoading(false);
+        if (!sqlList) {
+          setError('Hors ligne — pas de liste en cache pour ces filtres.');
+          setItems([]);
+          setTotal(null);
+        } else setError(null);
+        return;
+      }
+
       setLoadingMore(false);
       setListExhausted(false);
+      const blocking = !!opts?.skipCache || !sqlList || entreprisesListCacheIsStale(sqlList.updatedAt);
+      if (!blocking) {
+        if (seq === loadSeq.current) {
+          setError(null);
+          setLoading(false);
+        }
+        return;
+      }
+      setLoading(true);
       setError(null);
       try {
         const res = await ProspectLabApi.listEntreprises(
@@ -174,7 +218,7 @@ export default function EntreprisesScreen() {
             statut: listFilters.statut,
             opportunite: listFilters.opportunite,
           },
-          { skipCache: opts?.skipCache },
+          { skipCache: true },
         );
         if (seq !== loadSeq.current) return;
         const mapped = (res.data || []).map((r) => asEntreprise(r));
@@ -182,16 +226,19 @@ export default function EntreprisesScreen() {
         if (typeof res.total === 'number') setTotal(res.total);
         else setTotal(null);
         if (mapped.length < PAGE_SIZE) setListExhausted(true);
+        await writeEntreprisesListCache(cacheKey, mapped, typeof res.total === 'number' ? res.total : null);
       } catch (e: any) {
         if (seq !== loadSeq.current) return;
         setError(e?.message ?? 'Erreur');
-        setItems([]);
-        setTotal(null);
+        if (!sqlList) {
+          setItems([]);
+          setTotal(null);
+        }
       } finally {
         if (seq === loadSeq.current) setLoading(false);
       }
     },
-    [token, appliedSearch, listFilters.secteur, listFilters.statut, listFilters.opportunite],
+    [token, appliedSearch, listFilters.secteur, listFilters.statut, listFilters.opportunite, usableForApi],
   );
 
   /** Liste : après le premier rendu / interactions, pour ne pas bloquer l’ouverture de l’onglet. */
@@ -261,7 +308,10 @@ export default function EntreprisesScreen() {
     listFilters.opportunite,
   ]);
 
-  const onRefresh = useCallback(() => loadFirstPage({ skipCache: true }), [loadFirstPage]);
+  const onRefresh = useCallback(() => {
+    emitNetworkRefreshIntent();
+    void loadFirstPage({ skipCache: true });
+  }, [loadFirstPage]);
 
   useOnBecameOnline(
     useCallback(() => {

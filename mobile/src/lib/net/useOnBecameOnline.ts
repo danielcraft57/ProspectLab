@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { subscribeAppNetwork, type AppNetworkSnapshot } from './appNetworkState';
+import { fetchAppNetworkSnapshot, subscribeAppNetwork, type AppNetworkSnapshot } from './appNetworkState';
 
 /**
  * Exécute `effect` quand le réseau passe d’inutilisable à utilisable pour l’API
@@ -10,21 +10,38 @@ export function useOnBecameOnline(effect: () => void, enabled: boolean = true): 
   const cbRef = useRef(effect);
   cbRef.current = effect;
   const prevUsableRef = useRef<boolean | null>(null);
+  const initializedRef = useRef(false);
+  const seenOfflineRef = useRef(false);
 
   useEffect(() => {
     if (!enabled) {
       prevUsableRef.current = null;
+      initializedRef.current = false;
+      seenOfflineRef.current = false;
       return;
     }
 
-    const sub = subscribeAppNetwork((snap: AppNetworkSnapshot) => {
+    const consume = (snap: AppNetworkSnapshot) => {
       const usable = snap.usableForApi;
       const prev = prevUsableRef.current;
+      if (!initializedRef.current) {
+        initializedRef.current = true;
+        seenOfflineRef.current = !usable;
+        prevUsableRef.current = usable;
+        return;
+      }
+      if (!usable) {
+        seenOfflineRef.current = true;
+      }
       prevUsableRef.current = usable;
-      if (prev === false && usable) {
+      if (usable && seenOfflineRef.current && prev !== true) {
+        seenOfflineRef.current = false;
         cbRef.current();
       }
-    });
+    };
+
+    void fetchAppNetworkSnapshot().then(consume).catch(() => undefined);
+    const sub = subscribeAppNetwork(consume);
 
     return () => {
       sub();

@@ -93,6 +93,14 @@ Réseau
 UI
 - le bouton principal du scan caméra passe de **Analyser** (en ligne) à **Enregistrer** (hors ligne), pour éviter de bloquer l'utilisateur sur des tests de joignabilité impossibles.
 - le dashboard / listes **entreprises** / **campagnes** se rafraîchissent automatiquement dès que l'app repasse en ligne.
+- un toast réseau global (bas de l'app) informe les états **connexion perdue / retrouvée** et se réaffiche sur un refresh manuel hors-ligne.
+- les écrans dashboard/campagnes/entreprises utilisent le **pull-to-refresh** comme action principale de rafraîchissement.
+
+Cache de lecture (SQLite)
+- base dédiée `prospectlab_app_cache.db` (table `cache_entry` : `scope`, `cache_key`, `payload`, `updated_at`, `last_accessed_at`).
+- pattern **stale-while-revalidate** : affichage immédiat depuis SQLite si présent ; appel réseau seulement si *pull-to-refresh*, cache absent ou **TTL** dépassé (voir `mobile/src/lib/cache/cachePolicy.ts`).
+- quotas : LRU sur les écrans **détail** (entreprise / campagne) + budget doux en octets ; purge des listes/dashboard > 7 jours au démarrage (`AppCacheMaintenance`).
+- code : `mobile/src/lib/cache/*`, intégration dans `app/(tabs)/index`, `entreprises`, `campagnes` (+ écrans détail).
 
 Resilience
 - si une API externe tombe, on degrade sans casser le flux principal

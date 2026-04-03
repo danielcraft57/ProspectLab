@@ -17,6 +17,13 @@ import { useLocalSearchParams } from 'expo-router';
 import { FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import { ProspectLabApi } from '../../../src/features/prospectlab/prospectLabApi';
 import { useApiToken } from '../../../src/features/prospectlab/useToken';
+import {
+  campagneDetailCacheIsStale,
+  readCampagneDetailCache,
+  writeCampagneDetailCache,
+} from '../../../src/lib/cache/repositories';
+import { emitNetworkRefreshIntent } from '../../../src/features/network/networkToastBus';
+import { useAppNetwork } from '../../../src/lib/net/useAppNetwork';
 import { DonutChart, SegmentedBar, Sparkline } from '../../../src/ui/charts';
 import { Card, FadeIn, H2, Mono, Muted, MutedText, PrimaryButton, Screen } from '../../../src/ui/components';
 import type { AppTheme } from '../../../src/ui/theme';
@@ -145,6 +152,7 @@ function Kpi({
 export default function CampagneDetailsScreen() {
   const t = useTheme();
   const { token, loading: tokenLoading } = useApiToken();
+  const { usableForApi } = useAppNetwork();
   const params = useLocalSearchParams<{ id?: string }>();
 
   const campagneId = useMemo(() => {
@@ -163,9 +171,35 @@ export default function CampagneDetailsScreen() {
   const load = useCallback(
     async (opts?: { skipCache?: boolean }) => {
       if (!token || campagneId == null) return;
+      const force = !!opts?.skipCache;
+      let sqlRow: Awaited<ReturnType<typeof readCampagneDetailCache>> = null;
+      if (!force) {
+        sqlRow = await readCampagneDetailCache(campagneId);
+        if (sqlRow) {
+          setCampagne(sqlRow.campagne);
+          setStats(sqlRow.stats);
+        }
+      }
+
+      if (!usableForApi) {
+        setLoading(false);
+        if (!sqlRow) {
+          setError('Hors ligne — pas de campagne en cache.');
+          setCampagne(null);
+          setStats(null);
+        } else setError(null);
+        return;
+      }
+
+      const blocking = force || !sqlRow || campagneDetailCacheIsStale(sqlRow.updatedAt);
+      if (!blocking) {
+        setError(null);
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       setError(null);
-      const c = { skipCache: opts?.skipCache };
+      const c = { skipCache: true };
       try {
         const settled = await Promise.allSettled([
           ProspectLabApi.getCampagne(token, campagneId, c),
@@ -176,36 +210,46 @@ export default function CampagneDetailsScreen() {
 
         if (settled[0].status === 'rejected') {
           const reason = settled[0].reason as Error | undefined;
-          setError(reason?.message ?? 'Campagne introuvable');
-          setCampagne(null);
-          setStats(null);
+          if (!sqlRow) {
+            setError(reason?.message ?? 'Campagne introuvable');
+            setCampagne(null);
+            setStats(null);
+          }
           return;
         }
 
         const cgBody = cg as { success?: boolean; data?: Record<string, unknown>; error?: string } | null;
         if (cgBody && cgBody.success === false && !cgBody.data) {
-          setError(cgBody.error ?? 'Campagne introuvable');
-          setCampagne(null);
-          setStats(null);
+          if (!sqlRow) {
+            setError(cgBody.error ?? 'Campagne introuvable');
+            setCampagne(null);
+            setStats(null);
+          }
           return;
         }
-        setCampagne((cgBody?.data ?? null) as Record<string, unknown> | null);
+        const cgData = (cgBody?.data ?? null) as Record<string, unknown> | null;
+        setCampagne(cgData);
 
+        let statsData: Record<string, unknown> | null = null;
         if (settled[1].status === 'rejected') {
           setStats(null);
         } else {
           const stBody = st as { data?: Record<string, unknown> } | null;
-          setStats((stBody?.data ?? null) as Record<string, unknown> | null);
+          statsData = (stBody?.data ?? null) as Record<string, unknown> | null;
+          setStats(statsData);
         }
+        await writeCampagneDetailCache(campagneId, cgData, statsData);
       } catch (e: any) {
-        setError(e?.message ?? 'Erreur chargement');
-        setCampagne(null);
-        setStats(null);
+        if (!sqlRow) {
+          setError(e?.message ?? 'Erreur chargement');
+          setCampagne(null);
+          setStats(null);
+        }
       } finally {
         setLoading(false);
       }
     },
-    [token, campagneId],
+    [token, campagneId, usableForApi],
   );
 
   useEffect(() => {
@@ -272,7 +316,14 @@ export default function CampagneDetailsScreen() {
       <ScrollView
         contentContainerStyle={styles.container}
         refreshControl={
-          <RefreshControl refreshing={loading} onRefresh={() => load({ skipCache: true })} tintColor={t.colors.primary} />
+          <RefreshControl
+            refreshing={loading}
+            onRefresh={() => {
+              emitNetworkRefreshIntent();
+              void load({ skipCache: true });
+            }}
+            tintColor={t.colors.primary}
+          />
         }
       >
         {!tokenLoading && !token && (
@@ -301,7 +352,14 @@ export default function CampagneDetailsScreen() {
             <Card>
               <Mono>{error}</Mono>
               <View style={{ marginTop: 12 }}>
-                <PrimaryButton title="Réessayer" onPress={() => load({ skipCache: true })} disabled={loading} />
+                <PrimaryButton
+                  title="Réessayer"
+                  onPress={() => {
+                    emitNetworkRefreshIntent();
+                    void load({ skipCache: true });
+                  }}
+                  disabled={loading}
+                />
               </View>
             </Card>
           </FadeIn>

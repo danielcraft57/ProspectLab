@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import { ProspectLabApi } from '../../../src/features/prospectlab/prospectLabApi';
 import { useApiToken } from '../../../src/features/prospectlab/useToken';
+import {
+  campagnesListCacheIsStale,
+  readCampagnesListCache,
+  writeCampagnesListCache,
+} from '../../../src/lib/cache/repositories';
+import { emitNetworkRefreshIntent } from '../../../src/features/network/networkToastBus';
+import { useAppNetwork } from '../../../src/lib/net/useAppNetwork';
 import { useOnBecameOnline } from '../../../src/lib/net/useOnBecameOnline';
-import { Card, FadeIn, H2, Mono, Muted, MutedText, PrimaryButton, Screen } from '../../../src/ui/components';
+import { Card, FadeIn, H2, Mono, Muted, MutedText, Screen } from '../../../src/ui/components';
 import { useTheme } from '../../../src/ui/theme';
 
 type CampagneItem = {
@@ -44,6 +51,7 @@ export default function CampagnesScreen() {
   const t = useTheme();
   const router = useRouter();
   const { token, loading: tokenLoading } = useApiToken();
+  const { usableForApi } = useAppNetwork();
   const [items, setItems] = useState<CampagneItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -51,18 +59,43 @@ export default function CampagnesScreen() {
   const load = useCallback(
     async (opts?: { skipCache?: boolean }) => {
       if (!token) return;
+      const force = !!opts?.skipCache;
+      let sqlList: Awaited<ReturnType<typeof readCampagnesListCache>> = null;
+      if (!force) {
+        sqlList = await readCampagnesListCache();
+        if (sqlList) setItems(sqlList.items as CampagneItem[]);
+      }
+
+      if (!usableForApi) {
+        setLoading(false);
+        if (!sqlList) {
+          setError('Hors ligne — pas de campagnes en cache.');
+          setItems([]);
+        } else setError(null);
+        return;
+      }
+
+      const blocking = force || !sqlList || campagnesListCacheIsStale(sqlList.updatedAt);
+      if (!blocking) {
+        setError(null);
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       setError(null);
       try {
-        const res = await ProspectLabApi.listCampagnes(token, { limit: 50, offset: 0 }, { skipCache: opts?.skipCache });
-        setItems((res.data || []).map((r) => asCampagne(r)));
+        const res = await ProspectLabApi.listCampagnes(token, { limit: 50, offset: 0 }, { skipCache: true });
+        const mapped = (res.data || []).map((r) => asCampagne(r));
+        setItems(mapped);
+        await writeCampagnesListCache(mapped);
       } catch (e: any) {
         setError(e?.message ?? 'Erreur');
+        if (!sqlList) setItems([]);
       } finally {
         setLoading(false);
       }
     },
-    [token],
+    [token, usableForApi],
   );
 
   useEffect(() => {
@@ -85,7 +118,19 @@ export default function CampagnesScreen() {
 
   return (
     <Screen>
-      <ScrollView contentContainerStyle={styles.container}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        refreshControl={
+          <RefreshControl
+            refreshing={loading}
+            onRefresh={() => {
+              emitNetworkRefreshIntent();
+              void load({ skipCache: true });
+            }}
+            tintColor={t.colors.primary}
+          />
+        }
+      >
         <View style={styles.listHeader}>
           {!tokenLoading && !token && (
             <FadeIn>
@@ -103,13 +148,6 @@ export default function CampagnesScreen() {
                   <MutedText style={{ marginTop: 6 }}>
                     Touchez une campagne pour le tableau de bord détaillé (graphiques, tracking, envois).
                   </MutedText>
-                  <View style={{ marginTop: 10 }}>
-                    <PrimaryButton
-                      title={loading ? 'Chargement...' : 'Rafraichir'}
-                      onPress={() => load({ skipCache: true })}
-                      disabled={loading}
-                    />
-                  </View>
                   {!!error && <Mono>{error}</Mono>}
                 </Card>
               </FadeIn>

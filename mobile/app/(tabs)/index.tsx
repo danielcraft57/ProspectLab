@@ -3,8 +3,15 @@ import { RefreshControl, ScrollView, StyleSheet, View, useWindowDimensions } fro
 import { FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import { ProspectLabApi, type StatisticsOverviewData } from '../../src/features/prospectlab/prospectLabApi';
 import { useApiToken } from '../../src/features/prospectlab/useToken';
+import {
+  dashboardCacheIsStale,
+  readDashboardOverviewCache,
+  writeDashboardOverviewCache,
+} from '../../src/lib/cache/repositories';
+import { emitNetworkRefreshIntent } from '../../src/features/network/networkToastBus';
+import { useAppNetwork } from '../../src/lib/net/useAppNetwork';
 import { useOnBecameOnline } from '../../src/lib/net/useOnBecameOnline';
-import { Card, FadeIn, H1, H2, MiniBarChart, Mono, Muted, MutedText, PrimaryButton, Screen } from '../../src/ui/components';
+import { Card, FadeIn, H1, H2, MiniBarChart, Mono, Muted, MutedText, Screen } from '../../src/ui/components';
 import { DonutChart, SegmentedBar, Sparkline } from '../../src/ui/charts';
 import { useTheme } from '../../src/ui/theme';
 
@@ -13,6 +20,7 @@ export default function DashboardScreen() {
   const { width } = useWindowDimensions();
   const isCompact = width < 430;
   const { token, loading: tokenLoading } = useApiToken();
+  const { usableForApi } = useAppNetwork();
   const [stats, setStats] = useState<StatisticsOverviewData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -20,18 +28,39 @@ export default function DashboardScreen() {
   const load = useCallback(
     async (opts?: { skipCache?: boolean }) => {
       if (!token) return;
+      const force = !!opts?.skipCache;
+      let localCache: { stats: StatisticsOverviewData | null; updatedAt: number } | null = null;
+      if (!force) {
+        localCache = await readDashboardOverviewCache();
+        if (localCache) setStats(localCache.stats);
+      }
+
+      if (!usableForApi) {
+        if (!localCache) setError('Hors ligne — pas de stats en cache.');
+        setLoading(false);
+        return;
+      }
+
+      const blocking = force || !localCache || dashboardCacheIsStale(localCache.updatedAt);
+      if (!blocking) {
+        setError(null);
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       setError(null);
       try {
-        const res = await ProspectLabApi.getStatisticsOverview(token, { days: 7 }, { skipCache: opts?.skipCache });
-        setStats(res?.data ?? null);
+        const res = await ProspectLabApi.getStatisticsOverview(token, { days: 7 }, { skipCache: true });
+        const data = res?.data ?? null;
+        setStats(data);
+        await writeDashboardOverviewCache(data);
       } catch (e: any) {
-        setError(e?.message ?? 'Erreur');
+        if (!localCache) setError(e?.message ?? 'Erreur');
       } finally {
         setLoading(false);
       }
     },
-    [token],
+    [token, usableForApi],
   );
 
   useEffect(() => {
@@ -71,7 +100,14 @@ export default function DashboardScreen() {
       <ScrollView
         contentContainerStyle={styles.container}
         refreshControl={
-          <RefreshControl refreshing={loading} onRefresh={() => load({ skipCache: true })} tintColor={t.colors.primary} />
+          <RefreshControl
+            refreshing={loading}
+            onRefresh={() => {
+              emitNetworkRefreshIntent();
+              void load({ skipCache: true });
+            }}
+            tintColor={t.colors.primary}
+          />
         }
       >
         {!tokenLoading && !token && (
@@ -176,9 +212,6 @@ export default function DashboardScreen() {
                   </View>
                 </View>
 
-                <View style={{ marginTop: 14 }}>
-                  <PrimaryButton title={loading ? 'Chargement...' : 'Rafraichir les stats'} onPress={() => load({ skipCache: true })} disabled={loading} />
-                </View>
                 {!!error && <Mono>{error}</Mono>}
               </Card>
             </FadeIn>

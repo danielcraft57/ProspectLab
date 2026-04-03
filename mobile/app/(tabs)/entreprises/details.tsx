@@ -15,6 +15,14 @@ import { useLocalSearchParams } from 'expo-router';
 import { FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import { ProspectLabApi } from '../../../src/features/prospectlab/prospectLabApi';
 import { useApiToken } from '../../../src/features/prospectlab/useToken';
+import {
+  buildEntrepriseDetailCacheKey,
+  entrepriseDetailCacheIsStale,
+  readEntrepriseDetailCache,
+  writeEntrepriseDetailCache,
+} from '../../../src/lib/cache/repositories';
+import { emitNetworkRefreshIntent } from '../../../src/features/network/networkToastBus';
+import { useAppNetwork } from '../../../src/lib/net/useAppNetwork';
 import { ReportImageGallery } from '../../../src/ui/analysis/ReportImageGallery';
 import { WebsiteAnalysisSection, type AnalysisKind } from '../../../src/ui/analysis/WebsiteAnalysisViews';
 import { Card, FadeIn, H2, Mono, MutedText, Screen } from '../../../src/ui/components';
@@ -220,6 +228,7 @@ function osintSubtitle(report: any, ent: EntrepriseNorm | null): string {
 export default function EntrepriseDetailsScreen() {
   const t = useTheme();
   const { token, loading: tokenLoading } = useApiToken();
+  const { usableForApi } = useAppNetwork();
   const params = useLocalSearchParams<{ kind?: string; value?: string }>();
 
   const [loadingEntreprise, setLoadingEntreprise] = useState(false);
@@ -247,6 +256,7 @@ export default function EntrepriseDetailsScreen() {
 
   const value = useMemo(() => decodeParam(params.value), [params.value]);
 
+
   const load = useCallback(
     async (opts?: { skipCache?: boolean }) => {
       if (!token) return;
@@ -254,19 +264,51 @@ export default function EntrepriseDetailsScreen() {
 
       const skipCache = !!opts?.skipCache;
       const c = { skipCache };
+      const detailKey = buildEntrepriseDetailCacheKey(kind, value);
+      let hydratedSql = false;
 
-      if (skipCache) {
-        setRefreshing(true);
+      if (!skipCache) {
+        const snap = await readEntrepriseDetailCache(detailKey);
+        if (snap) {
+          hydratedSql = true;
+          setError(null);
+          setRaw(snap.raw);
+          setReport(snap.report);
+          setEmails((snap.emails as any[]) ?? null);
+          setPhones((snap.phones as any[]) ?? null);
+          setPhonesApi((snap.phonesApi as any[]) ?? null);
+          setCampagnes((snap.campagnes as any[]) ?? null);
+          setLoadingEntreprise(false);
+        } else {
+          setLoadingEntreprise(true);
+          setError(null);
+          setRaw(null);
+          setReport(null);
+          setCampagnes(null);
+          setPhonesApi(null);
+          setReportLoading(false);
+          setContactsLoading(false);
+          setCampagnesLoading(false);
+        }
       } else {
-        setLoadingEntreprise(true);
-        setError(null);
-        setRaw(null);
-        setReport(null);
-        setCampagnes(null);
-        setPhonesApi(null);
-        setReportLoading(false);
-        setContactsLoading(false);
-        setCampagnesLoading(false);
+        setRefreshing(true);
+      }
+
+      if (!usableForApi) {
+        setLoadingEntreprise(false);
+        if (skipCache) setRefreshing(false);
+        if (!hydratedSql && !skipCache) {
+          setError('Hors ligne — aucune fiche en cache pour cet accès.');
+        }
+        return;
+      }
+
+      if (!skipCache && hydratedSql) {
+        const snap = await readEntrepriseDetailCache(detailKey);
+        if (snap && !entrepriseDetailCacheIsStale(snap.updatedAt)) {
+          setLoadingEntreprise(false);
+          return;
+        }
       }
 
       try {
@@ -339,18 +381,38 @@ export default function EntrepriseDetailsScreen() {
           await Promise.all(pending);
         }
       } catch (e: any) {
-        setError(e?.message ?? 'Erreur lors du chargement des details.');
+        if (!hydratedSql && !skipCache) {
+          setError(e?.message ?? 'Erreur lors du chargement des details.');
+        }
       } finally {
         setLoadingEntreprise(false);
         if (skipCache) setRefreshing(false);
       }
     },
-    [token, kind, value],
+    [token, kind, value, usableForApi],
   );
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!token || !kind || !value) return;
+    if (raw == null) return;
+    const key = buildEntrepriseDetailCacheKey(kind, value);
+    const tmr = setTimeout(() => {
+      void writeEntrepriseDetailCache(key, {
+        v: 1,
+        raw,
+        report: report ?? null,
+        emails,
+        phones,
+        phonesApi,
+        campagnes,
+      });
+    }, 900);
+    return () => clearTimeout(tmr);
+  }, [token, kind, value, raw, report, emails, phones, phonesApi, campagnes]);
 
   const entreprise = useMemo(() => (raw ? normalizeEntreprise(raw) : null), [raw]);
   const phonesList = useMemo(() => phonesApi ?? phones ?? [], [phonesApi, phones]);
@@ -394,7 +456,14 @@ export default function EntrepriseDetailsScreen() {
       <ScrollView
         contentContainerStyle={styles.container}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => load({ skipCache: true })} tintColor={t.colors.primary} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              emitNetworkRefreshIntent();
+              void load({ skipCache: true });
+            }}
+            tintColor={t.colors.primary}
+          />
         }
       >
         {!token && !tokenLoading && (

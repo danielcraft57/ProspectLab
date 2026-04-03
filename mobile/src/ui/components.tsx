@@ -1,5 +1,6 @@
 import { PropsWithChildren, useEffect, useMemo, useRef } from 'react';
 import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from './theme';
 
 export function Screen({ children }: PropsWithChildren) {
@@ -141,6 +142,70 @@ export function MiniBarChart({ values }: { values: number[] }) {
   );
 }
 
+export function FloatingAlert({
+  visible,
+  message,
+  onClose,
+  placement = 'top',
+  tone = 'warning',
+}: {
+  visible: boolean;
+  message: string;
+  onClose: () => void;
+  placement?: 'top' | 'bottom';
+  tone?: 'warning' | 'success';
+}) {
+  const t = useTheme();
+  const insets = useSafeAreaInsets();
+  const anim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(anim, {
+      toValue: visible ? 1 : 0,
+      duration: 220,
+      useNativeDriver: Platform.OS !== 'web',
+    }).start();
+  }, [anim, visible]);
+
+  if (!visible) return null;
+  return (
+    <Animated.View
+      pointerEvents="box-none"
+      style={[
+        placement === 'bottom'
+          ? [styles.floatingWrapBottom, { bottom: insets.bottom + 62 }]
+          : styles.floatingWrapTop,
+        {
+          opacity: anim,
+          transform: [
+            {
+              translateY: anim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [placement === 'bottom' ? 12 : -12, 0],
+              }),
+            },
+          ],
+        },
+      ]}
+    >
+      <View
+        style={[
+          styles.floatingAlert,
+          {
+            backgroundColor: t.colors.card,
+            borderColor: (tone === 'success' ? t.colors.success : t.colors.warning) + 'CC',
+          },
+        ]}
+      >
+        <Text style={[styles.floatingText, { color: t.colors.text }]}>{message}</Text>
+        <Pressable onPress={onClose} style={styles.floatingCloseBtn}>
+          <Text style={[styles.floatingCloseText, { color: t.colors.muted }]}>Fermer</Text>
+        </Pressable>
+      </View>
+    </Animated.View>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   card: { borderWidth: 1, padding: 14 },
@@ -153,5 +218,42 @@ const styles = StyleSheet.create({
   chartRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, marginTop: 10 },
   chartBarWrap: { flex: 1, height: 26, justifyContent: 'flex-end' },
   chartBar: { borderRadius: 6 },
+  floatingWrapTop: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    top: 10,
+    zIndex: 30,
+    elevation: 30,
+  },
+  floatingWrapBottom: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 62,
+    zIndex: 30,
+    elevation: 30,
+  },
+  floatingAlert: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  floatingText: { flex: 1, fontSize: 13, fontWeight: '600' },
+  floatingCloseBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  floatingCloseText: { fontSize: 12, fontWeight: '700' },
 });
 
