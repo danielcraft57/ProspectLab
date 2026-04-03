@@ -118,3 +118,4 @@ deploy_cluster_worker/
 backups/
 scan_report.json
 mobile/scripts/.patch-tmp/
+ml_face/

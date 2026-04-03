@@ -3,6 +3,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 import { ProspectLabApi } from '../prospectlab/prospectLabApi';
 import { useApiToken } from '../prospectlab/useToken';
 import { watchWebsiteAnalysisReport } from '../../lib/analysis/websiteAnalysisWatch';
+import { useOnBecameOnline } from '../../lib/net/useOnBecameOnline';
 import { loadWebsiteQueue, saveWebsiteQueue } from '../../lib/offline/websiteAnalysisQueue';
 import { presentLocalNotification } from '../../lib/notifications/localNotify';
 
@@ -66,6 +67,13 @@ export function WebsiteQueueProcessor() {
   useEffect(() => {
     void run();
   }, [run]);
+
+  useOnBecameOnline(
+    useCallback(() => {
+      void run();
+    }, [run]),
+    !!token && !loading,
+  );
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (s: AppStateStatus) => {

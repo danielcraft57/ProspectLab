@@ -27,6 +27,7 @@ import { useApiToken } from '../../src/features/prospectlab/useToken';
 import { useCameraScanAssist } from '../../src/lib/camera/useCameraScanAssist';
 import { ScanTorchFab } from '../../src/lib/camera/ScanTorchFab';
 import { useScanCameraFocused } from '../../src/lib/camera/useScanCameraFocused';
+import { formatNetworkTransportLabel, useAppNetwork } from '../../src/lib/net/useAppNetwork';
 import { useTheme } from '../../src/ui/theme';
 
 type CheckState =
@@ -65,6 +66,7 @@ export default function WebsiteScanScreen() {
   const cameraAssist = useCameraScanAssist();
   const router = useRouter();
   const { token: apiToken } = useApiToken();
+  const { usableForApi, transport } = useAppNetwork();
   const cameraRef = useRef<CameraView | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [recognizedText, setRecognizedText] = useState('');
@@ -199,6 +201,27 @@ export default function WebsiteScanScreen() {
       }
       return n;
     });
+
+    if (!usableForApi) {
+      setCheckByUrl(() => {
+        const next: Record<string, CheckState> = {};
+        for (const u of urls) {
+          next[u] = {
+            phase: 'done',
+            ok: true,
+            detail: 'Hors ligne — enregistrement sans test',
+          };
+        }
+        return next;
+      });
+      setSelected((prev) => {
+        const n = new Set(prev);
+        for (const u of urls) n.add(u);
+        return n;
+      });
+      return;
+    }
+
     setCheckByUrl(() => {
       const next: Record<string, CheckState> = {};
       for (const u of urls) {
@@ -226,7 +249,7 @@ export default function WebsiteScanScreen() {
         }
       }
     })().catch(() => undefined);
-  }, [debouncedCandidates.join('|')]);
+  }, [debouncedCandidates.join('|'), usableForApi]);
 
   const rows = useMemo(
     () =>
@@ -239,6 +262,11 @@ export default function WebsiteScanScreen() {
   );
 
   const reachableCount = rows.filter((r) => r.state.phase === 'done' && r.state.ok).length;
+  const primaryActionLabel = (() => {
+    if (sending) return 'Envoi…';
+    if (!usableForApi) return `Enregistrer (${selected.size})`;
+    return `Analyser (${selected.size})`;
+  })();
 
   const onToggle = useCallback((url: string) => {
     setSelected((prev) => {
@@ -255,25 +283,25 @@ export default function WebsiteScanScreen() {
       return;
     }
     const urls = [...selected].filter((u) => {
+      if (!usableForApi) {
+        return debouncedCandidates.includes(u);
+      }
       const c = checkByUrl[u];
       return c?.phase === 'done' && c.ok === true;
     });
     if (!urls.length) {
-      Alert.alert('Aucune URL valide', 'Sélectionne au moins un site joignable (coche verte).');
+      Alert.alert(
+        'Aucune sélection',
+        usableForApi
+          ? 'Sélectionne au moins un site joignable (coche verte).'
+          : 'Coche au moins une URL à enregistrer.',
+      );
       return;
     }
 
     setSending(true);
     try {
-      let online = false;
-      try {
-        await ProspectLabApi.getTokenInfo(apiToken, { skipCache: true });
-        online = true;
-      } catch {
-        online = false;
-      }
-
-      if (!online) {
+      if (!usableForApi) {
         for (const website of urls) {
           await enqueueWebsiteAnalysis({
             id: newQueueId(),
@@ -283,8 +311,34 @@ export default function WebsiteScanScreen() {
           });
         }
         await presentLocalNotification(
-          'Hors ligne',
-          `${urls.length} analyse(s) mise(s) en file. Envoi automatique à la reconnexion.`,
+          'Enregistré hors ligne',
+          `${urls.length} site(s) en file — analyses lancées automatiquement à la reconnexion.`,
+          { type: 'website_queue_offline', count: urls.length },
+        );
+        router.back();
+        return;
+      }
+
+      let serverOk = false;
+      try {
+        await ProspectLabApi.getTokenInfo(apiToken, { skipCache: true });
+        serverOk = true;
+      } catch {
+        serverOk = false;
+      }
+
+      if (!serverOk) {
+        for (const website of urls) {
+          await enqueueWebsiteAnalysis({
+            id: newQueueId(),
+            website,
+            label: shortHost(website),
+            createdAt: Date.now(),
+          });
+        }
+        await presentLocalNotification(
+          'Enregistré — serveur indisponible',
+          `${urls.length} site(s) en file — nouvel essai à la reconnexion.`,
           { type: 'website_queue_offline', count: urls.length },
         );
         router.back();
@@ -310,7 +364,7 @@ export default function WebsiteScanScreen() {
     } finally {
       setSending(false);
     }
-  }, [apiToken, checkByUrl, router, selected]);
+  }, [apiToken, checkByUrl, debouncedCandidates, router, selected, usableForApi]);
 
   if (Platform.OS === 'web') {
     return (
@@ -382,8 +436,21 @@ export default function WebsiteScanScreen() {
               <View style={styles.topShade} />
               <View style={styles.middleRow}>
                 <View style={styles.sideShade} />
-                <View style={[styles.frame, { borderColor: reachableCount > 0 ? t.colors.success : t.colors.warning }]}>
-                  <Text style={styles.frameHint}>Texte ou QR — tape n’importe où sur la vue</Text>
+                <View
+                  style={[
+                    styles.frame,
+                    {
+                      borderColor: !usableForApi
+                        ? t.colors.warning
+                        : reachableCount > 0
+                          ? t.colors.success
+                          : t.colors.warning,
+                    },
+                  ]}
+                >
+                  <Text style={styles.frameHint}>
+                    {!usableForApi ? 'Hors ligne — enregistrement sans test' : 'Texte ou QR — tape n’importe où sur la vue'}
+                  </Text>
                 </View>
                 <View style={styles.sideShade} />
               </View>
@@ -408,9 +475,12 @@ export default function WebsiteScanScreen() {
       >
         <View style={styles.panelGrab} />
         <Text style={[styles.panelTitle, { color: t.colors.text }]}>Liens repérés</Text>
-        <Text style={[styles.hint, { color: t.colors.muted }]} numberOfLines={rows.length > 0 ? 2 : 3}>
+        <Text style={[styles.netLine, { color: t.colors.muted }]}>{formatNetworkTransportLabel(transport, usableForApi)}</Text>
+        <Text style={[styles.hint, { color: t.colors.muted }]} numberOfLines={rows.length > 0 ? 3 : 3}>
           {rows.length > 0
-            ? 'Coche les sites joignables puis lance l’analyse.'
+            ? usableForApi
+              ? 'Coche les sites joignables puis lance l’analyse.'
+              : 'Sans réseau utilisable : les liens sont enregistrés en local et les analyses partiront à la reconnexion.'
             : 'Vise un QR ou une URL dans le cadre. Chaque capture peut ajouter des liens.'}
         </Text>
 
@@ -480,7 +550,7 @@ export default function WebsiteScanScreen() {
             onPress={() => void onSend()}
           >
             <Text style={[styles.actionLabel, { color: selected.size && apiToken ? t.colors.primaryText : t.colors.muted }]}>
-              {sending ? 'Envoi…' : `Analyser (${selected.size})`}
+              {primaryActionLabel}
             </Text>
           </Pressable>
         </View>
@@ -536,6 +606,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   panelTitle: { fontWeight: '800', fontSize: 13 },
+  netLine: { fontSize: 10, fontWeight: '600', marginTop: 2 },
   hint: { fontSize: 11, lineHeight: 14 },
   empty: { fontSize: 12, paddingVertical: 6 },
   list: { flexGrow: 0, maxHeight: 128 },

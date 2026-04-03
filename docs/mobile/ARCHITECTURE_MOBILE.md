@@ -81,8 +81,18 @@ L'app mobile a une navigation en onglets:
 ## Offline et resilience
 
 Offline
-- l'app garde l'historique des scans localement (texte OCR, extraction, image reference)
-- quand le reseau revient, l'utilisateur peut relancer un lookup
+- l'app reste fonctionnelle sans réseau : OCR / extraction / sélection des URLs.
+- les analyses de sites (onglet **Sites**) peuvent être **enregistrées** hors ligne, puis envoyées automatiquement dès que la connexion revient.
+- persistance : file locale `website_analysis_queue` via SQLite (voir `mobile/src/lib/offline/websiteAnalysisQueue.ts`).
+  - migration automatique au premier démarrage depuis l'ancien fichier JSON `website_analysis_queue_v1.json` (si présent).
+
+Réseau
+- un module réseau (`mobile/src/lib/net/`) expose le transport (Wi‑Fi / données mobiles / etc.) et un indicateur `usableForApi`.
+- un hook `useOnBecameOnline` permet de déclencher des actions à la reconnexion (flush de file, refresh des écrans).
+
+UI
+- le bouton principal du scan caméra passe de **Analyser** (en ligne) à **Enregistrer** (hors ligne), pour éviter de bloquer l'utilisateur sur des tests de joignabilité impossibles.
+- le dashboard / listes **entreprises** / **campagnes** se rafraîchissent automatiquement dès que l'app repasse en ligne.
 
 Resilience
 - si une API externe tombe, on degrade sans casser le flux principal

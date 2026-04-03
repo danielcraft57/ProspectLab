@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import { ProspectLabApi, type StatisticsOverviewData } from '../../src/features/prospectlab/prospectLabApi';
 import { useApiToken } from '../../src/features/prospectlab/useToken';
+import { useOnBecameOnline } from '../../src/lib/net/useOnBecameOnline';
 import { Card, FadeIn, H1, H2, MiniBarChart, Mono, Muted, MutedText, PrimaryButton, Screen } from '../../src/ui/components';
 import { DonutChart, SegmentedBar, Sparkline } from '../../src/ui/charts';
 import { useTheme } from '../../src/ui/theme';
@@ -16,23 +17,33 @@ export default function DashboardScreen() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  async function load(opts?: { skipCache?: boolean }) {
-    if (!token) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await ProspectLabApi.getStatisticsOverview(token, { days: 7 }, { skipCache: opts?.skipCache });
-      setStats(res?.data ?? null);
-    } catch (e: any) {
-      setError(e?.message ?? 'Erreur');
-    } finally {
-      setLoading(false);
-    }
-  }
+  const load = useCallback(
+    async (opts?: { skipCache?: boolean }) => {
+      if (!token) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await ProspectLabApi.getStatisticsOverview(token, { days: 7 }, { skipCache: opts?.skipCache });
+        setStats(res?.data ?? null);
+      } catch (e: any) {
+        setError(e?.message ?? 'Erreur');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [token],
+  );
 
   useEffect(() => {
-    if (token) load();
-  }, [token]);
+    void load();
+  }, [load]);
+
+  useOnBecameOnline(
+    useCallback(() => {
+      void load({ skipCache: true });
+    }, [load]),
+    !!token,
+  );
 
   const quick = stats ?? {};
   const totals = quick.total_entreprises;

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -20,6 +20,7 @@ import {
 } from '../../src/lib/offline/websiteAnalysisQueue';
 import { presentLocalNotification } from '../../src/lib/notifications/localNotify';
 import { normalizeWebsiteDomainForAnalysis } from '../../src/lib/parsing/extractWebsiteCandidates';
+import { formatNetworkTransportLabel, useAppNetwork } from '../../src/lib/net/useAppNetwork';
 import { ProspectLabApi } from '../../src/features/prospectlab/prospectLabApi';
 import { useApiToken } from '../../src/features/prospectlab/useToken';
 import { Card, FadeIn, H2, MutedText, PrimaryButton, Screen } from '../../src/ui/components';
@@ -57,6 +58,7 @@ export default function WebsiteScreen() {
   const t = useTheme();
   const router = useRouter();
   const { token } = useApiToken();
+  const { usableForApi, transport } = useAppNetwork();
   const [urlInput, setUrlInput] = useState('');
   const [reach, setReach] = useState<ReachState>({ phase: 'idle' });
   const [analyzeBusy, setAnalyzeBusy] = useState(false);
@@ -79,17 +81,21 @@ export default function WebsiteScreen() {
     }, [refreshQueue]),
   );
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (!normalizedWebsite) {
       setReach({ phase: 'idle' });
       return;
     }
-    setReach({ phase: 'checking' });
-  }, [normalizedWebsite]);
-
-  useEffect(() => {
-    if (!normalizedWebsite) return;
     const seq = ++checkSeqRef.current;
+    if (!usableForApi) {
+      setReach({
+        phase: 'done',
+        ok: true,
+        detail: 'Réseau indisponible — enregistrement sans test de joignabilité',
+      });
+      return;
+    }
+    setReach({ phase: 'checking' });
     void checkUrlReachable(normalizedWebsite).then((r) => {
       if (seq !== checkSeqRef.current) return;
       setReach({
@@ -98,10 +104,14 @@ export default function WebsiteScreen() {
         detail: r.ok ? `Réponse ${r.status ?? '—'}` : r.error ?? 'Site injoignable',
       });
     });
-  }, [normalizedWebsite]);
+  }, [normalizedWebsite, usableForApi]);
 
   const canLaunchFromUrl =
-    !!token && reach.phase === 'done' && reach.ok === true && !!normalizedWebsite && !analyzeBusy;
+    !!token &&
+    !!normalizedWebsite &&
+    !analyzeBusy &&
+    reach.phase === 'done' &&
+    (usableForApi ? reach.ok === true : true);
 
   const launchWebsiteAnalysisFlow = useCallback(
     async (website: string) => {
@@ -111,17 +121,9 @@ export default function WebsiteScreen() {
       }
       setAnalyzeBusy(true);
       try {
-        let online = false;
-        try {
-          await ProspectLabApi.getTokenInfo(token, { skipCache: true });
-          online = true;
-        } catch {
-          online = false;
-        }
-
         const label = shortHost(website);
 
-        if (!online) {
+        if (!usableForApi) {
           await enqueueWebsiteAnalysis({
             id: newQueueId(),
             website,
@@ -129,8 +131,34 @@ export default function WebsiteScreen() {
             createdAt: Date.now(),
           });
           await presentLocalNotification(
-            'Hors ligne',
-            `${label} est en file : envoi automatique dès que le réseau revient.`,
+            'Enregistré hors ligne',
+            `${label} sera analysé dès que la connexion revient.`,
+            { type: 'website_queue_offline', count: 1 },
+          );
+          refreshQueue();
+          setUrlInput('');
+          setReach({ phase: 'idle' });
+          return;
+        }
+
+        let serverOk = false;
+        try {
+          await ProspectLabApi.getTokenInfo(token, { skipCache: true });
+          serverOk = true;
+        } catch {
+          serverOk = false;
+        }
+
+        if (!serverOk) {
+          await enqueueWebsiteAnalysis({
+            id: newQueueId(),
+            website,
+            label,
+            createdAt: Date.now(),
+          });
+          await presentLocalNotification(
+            'Enregistré — serveur indisponible',
+            `${label} est en file : nouvel essai automatique à la reconnexion.`,
             { type: 'website_queue_offline', count: 1 },
           );
           refreshQueue();
@@ -155,7 +183,7 @@ export default function WebsiteScreen() {
         setAnalyzeBusy(false);
       }
     },
-    [refreshQueue, token],
+    [refreshQueue, token, usableForApi],
   );
 
   const reachLabel = (() => {
@@ -168,6 +196,12 @@ export default function WebsiteScreen() {
     }
     if (reach.phase === 'checking') {
       return { tone: 'muted' as const, text: 'On teste si le site répond…' };
+    }
+    if (reach.phase === 'done' && reach.ok && !usableForApi) {
+      return {
+        tone: 'ok' as const,
+        text: `${reach.detail} Tu peux enregistrer pour lancer l’analyse à la reconnexion.`,
+      };
     }
     if (reach.phase === 'done' && reach.ok) {
       return { tone: 'ok' as const, text: `Tout bon — ${reach.detail}. Tu peux lancer l’analyse.` };
@@ -188,8 +222,12 @@ export default function WebsiteScreen() {
               <H2>Taper une adresse</H2>
             </View>
             <MutedText style={{ marginTop: 8 }}>
-              Colle une URL ou un domaine (ex. exemple.fr). Après une courte pause, on ping le site pour confirmer
-              qu’il répond.
+              {usableForApi
+                ? 'Colle une URL ou un domaine (ex. exemple.fr). Après une courte pause, on ping le site pour confirmer qu’il répond.'
+                : 'Sans réseau utilisable : tu peux quand même enregistrer l’URL ; l’analyse partira à la reconnexion.'}
+            </MutedText>
+            <MutedText style={{ marginTop: 6, fontSize: 12, opacity: 0.9 }}>
+              Réseau : {formatNetworkTransportLabel(transport, usableForApi)}
             </MutedText>
             {queuePending > 0 && (
               <MutedText style={{ marginTop: 8, fontWeight: '700', color: t.colors.warning }}>
@@ -236,7 +274,13 @@ export default function WebsiteScreen() {
             </View>
             <View style={{ marginTop: 10 }}>
               <PrimaryButton
-                title={analyzeBusy ? 'Envoi…' : 'Lancer l’analyse pour ce site'}
+                title={
+                  analyzeBusy
+                    ? 'Envoi…'
+                    : usableForApi
+                      ? 'Lancer l’analyse pour ce site'
+                      : 'Enregistrer pour analyse ultérieure'
+                }
                 onPress={() => {
                   if (normalizedWebsite) void launchWebsiteAnalysisFlow(normalizedWebsite);
                 }}
@@ -258,8 +302,8 @@ export default function WebsiteScreen() {
               <H2>Par la caméra</H2>
             </View>
             <MutedText style={{ marginTop: 8 }}>
-              Vise un QR code, une URL sur une carte ou un écran : on extrait le lien, on teste la joignabilité, tu
-              choisis quoi envoyer — comme pour la saisie manuelle.
+              Vise un QR code, une URL sur une carte ou un écran : on extrait le lien. En ligne, on teste la
+              joignabilité ; hors ligne, tu enregistres pour analyser à la reconnexion.
             </MutedText>
             <View style={{ marginTop: 12 }}>
               <PrimaryButton

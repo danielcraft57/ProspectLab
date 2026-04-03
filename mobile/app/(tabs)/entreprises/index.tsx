@@ -24,6 +24,7 @@ import { ProspectLabApi } from '../../../src/features/prospectlab/prospectLabApi
 import { useApiToken } from '../../../src/features/prospectlab/useToken';
 import { clearProspectLabApiCache } from '../../../src/lib/http/apiMemoryCache';
 import { HttpError } from '../../../src/lib/http/httpClient';
+import { useOnBecameOnline } from '../../../src/lib/net/useOnBecameOnline';
 import { Card, FadeIn, H2, Mono, Muted, MutedText, PrimaryButton, Screen } from '../../../src/ui/components';
 import { useTheme } from '../../../src/ui/theme';
 
@@ -261,6 +262,34 @@ export default function EntreprisesScreen() {
   ]);
 
   const onRefresh = useCallback(() => loadFirstPage({ skipCache: true }), [loadFirstPage]);
+
+  useOnBecameOnline(
+    useCallback(() => {
+      if (!token) return;
+      void loadFirstPage({ skipCache: true });
+      void (async () => {
+        setMetaLoading(true);
+        try {
+          const [ref, st] = await Promise.all([
+            ProspectLabApi.getReferenceCiblage(token, { skipCache: true }),
+            ProspectLabApi.getEntrepriseStatuses(token, { skipCache: true }),
+          ]);
+          const raw = (ref as any)?.data ?? ref;
+          setSecteurOptions(Array.isArray(raw?.secteurs) ? raw.secteurs : []);
+          setOpportuniteOptions(Array.isArray(raw?.opportunites) ? raw.opportunites : []);
+          const statusList = (st as any)?.data ?? st;
+          setStatutOptions(Array.isArray(statusList) ? statusList : []);
+        } catch {
+          setSecteurOptions([]);
+          setOpportuniteOptions([]);
+          setStatutOptions([]);
+        } finally {
+          setMetaLoading(false);
+        }
+      })();
+    }, [token, loadFirstPage]),
+    !!token,
+  );
 
   const confirmDeleteEntreprise = useCallback(
     (e: EntrepriseItem) => {

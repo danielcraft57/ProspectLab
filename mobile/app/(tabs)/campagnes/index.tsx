@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import { ProspectLabApi } from '../../../src/features/prospectlab/prospectLabApi';
 import { useApiToken } from '../../../src/features/prospectlab/useToken';
+import { useOnBecameOnline } from '../../../src/lib/net/useOnBecameOnline';
 import { Card, FadeIn, H2, Mono, Muted, MutedText, PrimaryButton, Screen } from '../../../src/ui/components';
 import { useTheme } from '../../../src/ui/theme';
 
@@ -47,23 +48,33 @@ export default function CampagnesScreen() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  async function load(opts?: { skipCache?: boolean }) {
-    if (!token) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await ProspectLabApi.listCampagnes(token, { limit: 50, offset: 0 }, { skipCache: opts?.skipCache });
-      setItems((res.data || []).map((r) => asCampagne(r)));
-    } catch (e: any) {
-      setError(e?.message ?? 'Erreur');
-    } finally {
-      setLoading(false);
-    }
-  }
+  const load = useCallback(
+    async (opts?: { skipCache?: boolean }) => {
+      if (!token) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await ProspectLabApi.listCampagnes(token, { limit: 50, offset: 0 }, { skipCache: opts?.skipCache });
+        setItems((res.data || []).map((r) => asCampagne(r)));
+      } catch (e: any) {
+        setError(e?.message ?? 'Erreur');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [token],
+  );
 
   useEffect(() => {
-    if (token) load();
-  }, [token]);
+    void load();
+  }, [load]);
+
+  useOnBecameOnline(
+    useCallback(() => {
+      void load({ skipCache: true });
+    }, [load]),
+    !!token,
+  );
 
   const summaryLine = useMemo(() => {
     if (!token) return '';

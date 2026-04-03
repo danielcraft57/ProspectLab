@@ -26,6 +26,16 @@ Ensuite on fait une extraction tolerant aux erreurs:
 - telephone: conserver les chiffres, normaliser formats FR (+33 / 0...)
 - website: detecter domaines et URLs, normaliser `https://` si besoin
 
+## Cas d'usage : scan d'URL / QR (Sites)
+
+Sur l'onglet **Sites**, le scan caméra détecte des URLs / domaines dans:
+- le texte OCR (photo)
+- les QR codes
+
+Comportement réseau:
+- **en ligne** : on teste la joignabilité (HTTP) avant d'autoriser le lancement de l'analyse
+- **hors ligne** : on propose **Enregistrer** (file locale) pour lancer automatiquement l'analyse à la reconnexion
+
 ## Moteur OCR (choix)
 
 On vise une interface `OcrEngine` avec 2 implementations:

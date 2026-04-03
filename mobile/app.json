@@ -38,6 +38,7 @@
       "googleServicesFile": "./google-services.json"
     },
     "plugins": [
+      "expo-sqlite",
       "expo-router",
       [
         "expo-image-picker",

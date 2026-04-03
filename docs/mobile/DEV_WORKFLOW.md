@@ -28,10 +28,19 @@ Fichiers sensibles locaux (non commites, voir `mobile/.gitignore`) : `google-ser
 ## Lancer
 
 - `npm run start`
+- Si la commande `expo` n'est pas disponible dans le PATH Windows, utiliser les scripts npm du projet (recommandé) ou `npx expo ...`.
 
 ## Build natif / EAS
 
 Pour un APK avec FCM, prevvoir un build dev client ou EAS selon la doc Expo (`google-services.json`, `android.googleServicesFile` dans la config).
+
+### Modules natifs (Dev Client)
+
+Certaines features (ex: OCR natif, SQLite, notifications…) nécessitent un **build natif** (Dev Client / `expo run:*` / EAS), pas uniquement Expo Go.
+
+Après ajout d'un module natif via `expo install` (ex: `expo-sqlite`), vérifier la config Expo :
+- `app.json` doit contenir le plugin `"expo-sqlite"` dans `expo.plugins`
+- puis relancer un build natif (`npm run android` / EAS) pour que le module soit intégré.
 
 ### Build Android (sans passer par le Store)
 
