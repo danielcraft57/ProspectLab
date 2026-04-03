@@ -119,3 +119,4 @@ backups/
 scan_report.json
 mobile/scripts/.patch-tmp/
 ml_face/
+.cursorrules

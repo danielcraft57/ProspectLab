@@ -142,7 +142,7 @@ $excludePatterns = @(
     'deploy',
     'logs',
     'logs_server',
-    '.cursorrules'
+    # (pas de fichiers de config editor/IA)
 )
 
 # Exclure par nom de dossier pour deploy/logs (éviter de matcher le chemin .../deploy/...)
