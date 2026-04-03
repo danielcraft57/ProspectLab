@@ -3414,6 +3414,7 @@
             loadPentestAnalysis(entrepriseId);
             loadAuditPipeline(entrepriseId);
             loadProspectionTab(entrepriseId);
+            loadMetricEvolutionTab(entrepriseId);
             refreshOpportunityScore(entrepriseId);
         } catch (error) {
             console.error('Erreur lors du chargement:', error);
@@ -3844,6 +3845,7 @@
                         <button class="tab-btn" data-tab="pages">Pages (${nbPages})</button>
                         <button class="tab-btn" data-tab="scraping">Résultats scraping</button>
                         <button class="tab-btn" data-tab="pipeline">Pipeline d'audit</button>
+                        <button class="tab-btn" data-tab="evolution-metrics">Évolution</button>
                         <button class="tab-btn" data-tab="technique">Analyse technique</button>
                         <button class="tab-btn" data-tab="seo">Analyse SEO</button>
                         <button class="tab-btn" data-tab="osint">Analyse OSINT</button>
@@ -4012,6 +4014,12 @@
                             <p class="empty-state">Chargement du pipeline d'audit...</p>
                         </div>
                     </div>
+
+                    <div class="tab-panel" id="tab-evolution-metrics">
+                        <div id="metric-evolution-root" class="metric-evolution-root">
+                            <p class="empty-state">Chargement de l'évolution des métriques…</p>
+                        </div>
+                    </div>
                     
                     <div class="tab-panel" id="tab-technique">
                         <div class="analysis-tab-toolbar" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:0.5rem;">
@@ -4102,6 +4110,7 @@
             Notifications.show(nom + ' — Analyse technique terminée', 'success', 'fa-check-circle');
             if (data.entreprise_id === currentModalEntrepriseId) {
                 setTimeout(() => loadTechnicalAnalysis(currentModalEntrepriseId, { skipClear: true }), 400);
+                setTimeout(() => loadMetricEvolutionTab(currentModalEntrepriseId), 650);
             }
         });
         s.on('technical_analysis_error', function(data) {
@@ -4125,6 +4134,7 @@
             Notifications.show(nom + ' — Analyse SEO terminée', 'success', 'fa-check-circle');
             if (data.entreprise_id === currentModalEntrepriseId) {
                 setTimeout(() => loadSEOAnalysis(currentModalEntrepriseId, { skipClear: true }), 400);
+                setTimeout(() => loadMetricEvolutionTab(currentModalEntrepriseId), 650);
             }
         });
         s.on('seo_analysis_error', function(data) {
@@ -4252,6 +4262,35 @@
                     closeEntrepriseModal();
                 }
             };
+
+            if (!window._modalMetricRescanDelegation) {
+                window._modalMetricRescanDelegation = true;
+                modal.addEventListener('click', async (e) => {
+                    const btn = e.target && e.target.closest && e.target.closest('#btn-metric-evolution-rescan');
+                    if (!btn || btn.disabled) return;
+                    const eid = currentModalEntrepriseId;
+                    if (!eid || !window.EntreprisesAPI || !EntreprisesAPI.requestMetricRescan) return;
+                    const statusEl = document.getElementById('metric-evolution-rescan-status');
+                    btn.disabled = true;
+                    if (statusEl) statusEl.textContent = 'Lancement…';
+                    try {
+                        const res = await EntreprisesAPI.requestMetricRescan(eid, {});
+                        const parts = [];
+                        if (res.tasks && res.tasks.technical_task_id) parts.push('technique en file');
+                        if (res.tasks && res.tasks.seo_task_id) parts.push('SEO en file');
+                        if (statusEl) {
+                            statusEl.textContent = parts.length ? parts.join(' · ') : 'Demandé.';
+                        }
+                        Notifications.show('Re-scan lancé. Les métriques se mettront à jour à la fin des analyses.', 'success');
+                    } catch (err) {
+                        console.warn('[entreprises] metric rescan:', err);
+                        if (statusEl) statusEl.textContent = '';
+                        Notifications.show(err && err.message ? err.message : 'Impossible de lancer le re-scan', 'error');
+                    } finally {
+                        btn.disabled = false;
+                    }
+                });
+            }
         }
         
         document.addEventListener('keydown', (e) => {
@@ -4658,7 +4697,186 @@
                 }
             });
         }
+
+        const evolutionTab = document.querySelector('.tab-btn[data-tab="evolution-metrics"]');
+        if (evolutionTab) {
+            evolutionTab.addEventListener('click', () => {
+                if (currentModalEntrepriseId) {
+                    loadMetricEvolutionTab(currentModalEntrepriseId);
+                }
+            });
+        }
     }
+
+    function formatMetricSnapshotDate(iso) {
+        if (!iso) return '—';
+        try {
+            const d = new Date(iso);
+            if (Number.isNaN(d.getTime())) return Formatters.escapeHtml(String(iso));
+            return Formatters.escapeHtml(
+                d.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }),
+            );
+        } catch (e) {
+            return Formatters.escapeHtml(String(iso));
+        }
+    }
+
+    function renderMetricDiffRow(label, fromVal, toVal) {
+        const a = fromVal != null && fromVal !== '' ? String(fromVal) : '—';
+        const b = toVal != null && toVal !== '' ? String(toVal) : '—';
+        return (
+            '<tr><td>' +
+            Formatters.escapeHtml(label) +
+            '</td><td>' +
+            Formatters.escapeHtml(a) +
+            '</td><td>' +
+            Formatters.escapeHtml(b) +
+            '</td></tr>'
+        );
+    }
+
+    function buildMetricCompareBlock(title, data, sourceKey) {
+        if (!data || data.success === false) {
+            return (
+                '<div class="metric-evolution-block"><h4 class="metric-evolution-block-title">' +
+                Formatters.escapeHtml(title) +
+                '</h4><p class="empty-state subtle">Données indisponibles.</p></div>'
+            );
+        }
+        let html =
+            '<div class="metric-evolution-block"><h4 class="metric-evolution-block-title">' +
+            Formatters.escapeHtml(title) +
+            '</h4>';
+        if (!data.current) {
+            html += '<p class="empty-state subtle">Aucun snapshot pour cette source.</p></div>';
+            return html;
+        }
+        const alerts = data.alerts || [];
+        if (alerts.length) {
+            html += '<ul class="metric-evolution-alerts" role="list">';
+            alerts.forEach(function (a) {
+                const raw = (a.severity || 'medium').toLowerCase();
+                const sev = ['high', 'medium', 'low'].indexOf(raw) >= 0 ? raw : 'medium';
+                html +=
+                    '<li class="metric-alert metric-alert--' +
+                    sev +
+                    '"><span class="metric-alert-msg">' +
+                    Formatters.escapeHtml(a.message || a.code || '') +
+                    '</span></li>';
+            });
+            html += '</ul>';
+        }
+        if (!data.has_pair) {
+            html +=
+                '<p class="metric-evolution-hint">Un seul enregistrement : la comparaison détaillée apparaîtra après une nouvelle analyse.</p>';
+        } else {
+            const prev = data.previous && data.previous.metrics;
+            const cur = data.current && data.current.metrics;
+            html +=
+                '<table class="metric-evolution-table"><thead><tr><th>Indicateur</th><th>Avant</th><th>Après</th></tr></thead><tbody>';
+            const keys =
+                sourceKey === 'seo'
+                    ? ['seo_score', 'domain']
+                    : ['score_securite', 'performance_score', 'ssl_valid', 'ssl_expiry_date', 'cms', 'framework'];
+            const keyLabels = {
+                score_securite: 'Score sécurité',
+                performance_score: 'Score performance',
+                ssl_valid: 'SSL valide',
+                ssl_expiry_date: 'Expiration SSL',
+                cms: 'CMS',
+                framework: 'Framework',
+                seo_score: 'Score SEO',
+                domain: 'Domaine',
+            };
+            keys.forEach(function (k) {
+                const pv = prev ? prev[k] : undefined;
+                const cv = cur ? cur[k] : undefined;
+                if (pv !== undefined || cv !== undefined) {
+                    html += renderMetricDiffRow(keyLabels[k] || k, pv, cv);
+                }
+            });
+            html += '</tbody></table>';
+            html +=
+                '<p class="metric-evolution-meta">Dernier enregistrement : ' +
+                formatMetricSnapshotDate(data.current.captured_at) +
+                '</p>';
+        }
+        html += '</div>';
+        return html;
+    }
+
+    function buildMetricTimelineBlock(title, items) {
+        if (!items || !items.length) {
+            return (
+                '<div class="metric-evolution-block"><h4 class="metric-evolution-block-title">' +
+                Formatters.escapeHtml(title) +
+                '</h4><p class="empty-state subtle">Aucune entrée.</p></div>'
+            );
+        }
+        let html =
+            '<div class="metric-evolution-block"><h4 class="metric-evolution-block-title">' +
+            Formatters.escapeHtml(title) +
+            '</h4><ul class="metric-snapshot-timeline" role="list">';
+        items.forEach(function (it) {
+            const m = it.metrics || {};
+            const bits = [];
+            if (m.score_securite != null) bits.push('Sécu ' + m.score_securite);
+            if (m.performance_score != null) bits.push('Perf ' + m.performance_score);
+            if (m.seo_score != null) bits.push('SEO ' + m.seo_score);
+            const sub = bits.length ? bits.join(' · ') : '—';
+            html +=
+                '<li class="metric-snapshot-timeline-item"><span class="timeline-time">' +
+                formatMetricSnapshotDate(it.captured_at) +
+                '</span><span class="timeline-detail">' +
+                Formatters.escapeHtml(sub) +
+                '</span></li>';
+        });
+        html += '</ul></div>';
+        return html;
+    }
+
+    async function loadMetricEvolutionTab(entrepriseId) {
+        const root = document.getElementById('metric-evolution-root');
+        if (!root || !window.EntreprisesAPI) return;
+        root.innerHTML = '<p class="empty-state">Chargement de l\'évolution des métriques…</p>';
+        try {
+            const [cmpTech, cmpSeo, listTech, listSeo] = await Promise.all([
+                EntreprisesAPI.loadMetricSnapshotsCompare(entrepriseId, 'technical'),
+                EntreprisesAPI.loadMetricSnapshotsCompare(entrepriseId, 'seo'),
+                EntreprisesAPI.loadMetricSnapshots(entrepriseId, { limit: 8, source: 'technical' }).catch(function () {
+                    return { items: [] };
+                }),
+                EntreprisesAPI.loadMetricSnapshots(entrepriseId, { limit: 8, source: 'seo' }).catch(function () {
+                    return { items: [] };
+                }),
+            ]);
+            const techItems = listTech && listTech.items ? listTech.items : [];
+            const seoItems = listSeo && listSeo.items ? listSeo.items : [];
+            root.innerHTML =
+                '<div class="metric-evolution-toolbar">' +
+                '<button type="button" class="btn btn-outline btn-small" id="btn-metric-evolution-rescan" title="Relancer les analyses pour mettre à jour les métriques">' +
+                '<i class="fas fa-sync-alt" aria-hidden="true"></i> Re-scan technique + SEO</button>' +
+                '<span id="metric-evolution-rescan-status" class="metric-evolution-rescan-status" aria-live="polite"></span>' +
+                '</div>' +
+                '<div class="metric-evolution-intro">' +
+                '<p>Historique enregistré à chaque analyse <strong>technique</strong> ou <strong>SEO</strong>. ' +
+                'Les alertes comparent le dernier passage au précédent (même source).</p>' +
+                '</div>' +
+                '<div class="metric-evolution-grid">' +
+                buildMetricCompareBlock('Comparaison — analyse technique', cmpTech, 'technical') +
+                buildMetricCompareBlock('Comparaison — analyse SEO', cmpSeo, 'seo') +
+                '</div>' +
+                '<div class="metric-evolution-grid metric-evolution-grid--timeline">' +
+                buildMetricTimelineBlock('Derniers snapshots techniques', techItems) +
+                buildMetricTimelineBlock('Derniers snapshots SEO', seoItems) +
+                '</div>';
+        } catch (e) {
+            console.warn('[entreprises] metric evolution:', e);
+            root.innerHTML =
+                '<p class="empty-state error">Impossible de charger l\'évolution des métriques.</p>';
+        }
+    }
+
     async function loadTechnicalAnalysis(entrepriseId, opts) {
         const resultsContent = document.getElementById('technique-results-content');
         if (!resultsContent) return;

@@ -967,6 +967,64 @@ def entreprise_metric_snapshots_compare(entreprise_id):
         return jsonify({'error': str(e)}), 500
 
 
+@api_bp.route('/entreprise/<int:entreprise_id>/metric-snapshots/rescan', methods=['POST'])
+@login_required
+def entreprise_metric_snapshots_rescan(entreprise_id):
+    """
+    Enfile un re-scan technique et/ou SEO pour alimenter de nouveaux snapshots.
+
+    JSON optionnel : run_technical (défaut true), run_seo (défaut true),
+    enable_nmap (défaut false), use_lighthouse (défaut config SEO).
+    """
+    try:
+        from tasks.metric_rescan_tasks import enqueue_metric_rescan_for_entreprise
+
+        data = request.get_json(silent=True) or {}
+
+        def _bool(val, default):
+            if val is None:
+                return default
+            if isinstance(val, bool):
+                return val
+            if isinstance(val, (int, float)):
+                return bool(val)
+            s = str(val).strip().lower()
+            if s in ('0', 'false', 'no', 'off'):
+                return False
+            if s in ('1', 'true', 'yes', 'on'):
+                return True
+            return default
+
+        run_technical = _bool(data.get('run_technical'), True)
+        run_seo = _bool(data.get('run_seo'), True)
+        enable_nmap = _bool(data.get('enable_nmap'), False)
+        use_lighthouse = data.get('use_lighthouse')
+        if use_lighthouse is not None:
+            use_lighthouse = _bool(use_lighthouse, True)
+
+        if not run_technical and not run_seo:
+            return jsonify({'success': False, 'error': 'run_technical_and_run_seo_false'}), 400
+
+        result = enqueue_metric_rescan_for_entreprise(
+            entreprise_id,
+            run_technical=run_technical,
+            run_seo=run_seo,
+            enable_nmap=enable_nmap,
+            use_lighthouse=use_lighthouse,
+        )
+        if not result.get('success'):
+            err = result.get('error') or 'unknown'
+            if err == 'entreprise_not_found':
+                return jsonify(clean_json_dict(result)), 404
+            if err == 'no_website':
+                return jsonify(clean_json_dict(result)), 400
+            return jsonify(clean_json_dict(result)), 500
+
+        return jsonify(clean_json_dict(result)), 202
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @api_bp.route('/secteurs')
 @login_required
 def secteurs():

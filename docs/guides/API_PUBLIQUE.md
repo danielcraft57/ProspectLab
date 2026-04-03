@@ -473,7 +473,7 @@ curl -H "Authorization: Bearer votre_token" \
 
 ### Créer un token
 
-**POST** `/api/tokens`
+**POST** `/api/tokens`  
 
 **Headers** :
 - `Authorization: Bearer <token_admin>` (session admin)
@@ -503,7 +503,7 @@ curl -H "Authorization: Bearer votre_token" \
 
 ### Lister les tokens
 
-**GET** `/api/tokens`
+**GET** `/api/tokens`  
 
 **Query params** :
 - `user_id` (int, optionnel) : Filtrer par utilisateur

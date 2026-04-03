@@ -380,6 +380,59 @@
         },
 
         /**
+         * Historique des snapshots de métriques (analyse technique / SEO).
+         * @param {number} id
+         * @param {{ limit?: number, source?: string }} [opts]
+         */
+        async loadMetricSnapshots(id, opts) {
+            const o = opts || {};
+            const params = new URLSearchParams();
+            if (o.limit != null) params.set('limit', String(o.limit));
+            if (o.source) params.set('source', String(o.source));
+            const qs = params.toString();
+            const url = qs
+                ? `/api/entreprise/${id}/metric-snapshots?${qs}`
+                : `/api/entreprise/${id}/metric-snapshots`;
+            const response = await fetch(url);
+            if (!response.ok) throw new Error('Erreur lors du chargement des snapshots');
+            return await response.json();
+        },
+
+        /**
+         * Compare les deux derniers snapshots d'une source.
+         * @param {number} id
+         * @param {string} [source] technical | seo
+         */
+        async loadMetricSnapshotsCompare(id, source) {
+            const s = source || 'technical';
+            const response = await fetch(
+                `/api/entreprise/${id}/metric-snapshots/compare?source=${encodeURIComponent(s)}`
+            );
+            if (!response.ok) throw new Error('Erreur lors de la comparaison des snapshots');
+            return await response.json();
+        },
+
+        /**
+         * Enfile un re-scan technique / SEO (nouveaux snapshots métriques).
+         * @param {number} id
+         * @param {{ run_technical?: boolean, run_seo?: boolean, enable_nmap?: boolean, use_lighthouse?: boolean }} [opts]
+         */
+        async requestMetricRescan(id, opts) {
+            const body = opts && typeof opts === 'object' ? opts : {};
+            const response = await fetch(`/api/entreprise/${id}/metric-snapshots/rescan`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                const msg = data.error || data.message || 'Erreur lors du lancement du re-scan';
+                throw new Error(msg);
+            }
+            return data;
+        },
+
+        /**
          * Top entreprises par score pondéré + ancienneté du dernier touchpoint.
          * @param {Object} filters - mêmes clés que loadAll
          * @param {number|null} analyseId
