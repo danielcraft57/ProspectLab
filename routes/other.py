@@ -983,7 +983,8 @@ def api_ciblage_entreprises():
     API: Entreprises avec emails pour campagne, avec filtres de ciblage.
     Query params: secteur, secteur_contains, opportunite (virgule), statut, tags_contains,
     favori (1/0), search, score_securite_max, exclude_already_contacted (1/true),
-    groupe_ids (virgule) : liste d'IDs de groupes d'entreprises.
+    groupe_ids (virgule), etape_prospection, sort_commercial (1), priority_min, commercial_profile_id,
+    commercial_limit (avec tri commercial).
     """
     from services.database.entreprises import EntrepriseManager
     from utils.helpers import clean_json_dict
@@ -1031,6 +1032,25 @@ def api_ciblage_entreprises():
             filters['performance_max'] = int(request.args.get('performance_max'))
         except ValueError:
             pass
+    if request.args.get('etape_prospection'):
+        filters['etape_prospection'] = request.args.get('etape_prospection').strip()
+    if request.args.get('sort_commercial') in ('1', 'true', 'True'):
+        filters['sort_commercial'] = True
+    if request.args.get('priority_min') not in (None, ''):
+        try:
+            filters['priority_min'] = float(request.args.get('priority_min'))
+        except ValueError:
+            pass
+    if request.args.get('commercial_profile_id') not in (None, ''):
+        try:
+            filters['commercial_profile_id'] = int(request.args.get('commercial_profile_id'))
+        except ValueError:
+            pass
+    if request.args.get('commercial_limit') not in (None, ''):
+        try:
+            filters['commercial_limit'] = int(request.args.get('commercial_limit'))
+        except ValueError:
+            pass
     entreprise_manager = EntrepriseManager()
     entreprises = entreprise_manager.get_entreprises_for_campagne(filters)
     return jsonify(clean_json_dict(entreprises))
@@ -1058,6 +1078,55 @@ def api_ciblage_segments():
         criteres=data.get('criteres') or {}
     )
     return jsonify({'id': segment_id, 'nom': nom}), 201
+
+
+@other_bp.route('/api/ciblage/segments/<int:segment_id>/preview', methods=['GET'])
+@login_required
+def api_ciblage_segment_preview(segment_id):
+    """
+    Aperçu d'un segment : total + échantillon d'entreprises (mêmes filtres que le ciblage campagne).
+
+    Query: limit (défaut 50, max 200).
+    """
+    from services.database.campagnes import CampagneManager
+    from services.database.entreprises import EntrepriseManager
+    from utils.helpers import clean_json_dict
+
+    try:
+        lim = int(request.args.get('limit', 50))
+    except ValueError:
+        lim = 50
+    lim = max(1, min(lim, 200))
+
+    db = CampagneManager()
+    seg = db.get_segment(segment_id)
+    if not seg:
+        return jsonify({'error': 'Segment introuvable'}), 404
+
+    filters = seg.get('criteres') or {}
+    if not isinstance(filters, dict):
+        filters = {}
+
+    entreprise_manager = EntrepriseManager()
+    entreprises = entreprise_manager.get_entreprises_for_campagne(filters)
+    total = len(entreprises)
+    items = entreprises[:lim]
+
+    return jsonify(
+        clean_json_dict(
+            {
+                'success': True,
+                'total': total,
+                'limit': lim,
+                'items': items,
+                'segment': {
+                    'id': seg.get('id'),
+                    'nom': seg.get('nom'),
+                    'description': seg.get('description'),
+                },
+            }
+        )
+    )
 
 
 @other_bp.route('/api/ciblage/segments/<int:segment_id>', methods=['DELETE'])

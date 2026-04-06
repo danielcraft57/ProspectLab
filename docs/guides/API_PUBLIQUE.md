@@ -307,7 +307,11 @@ Hors préfixe `/api/public` : routes réservées à la session admin (voir inter
 ### Créer un token
 
 **POST** `/api/tokens`  
-Header : session admin (cookie / session Flask selon votre déploiement).
+
+**Headers** :
+- `Authorization: Bearer <token_admin>` (session admin)
+
+Authentification admin par session/cookie ou header Bearer selon votre déploiement.
 
 **Body (JSON)** :
 

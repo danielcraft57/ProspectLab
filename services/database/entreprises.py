@@ -33,6 +33,66 @@ ENTERPRISE_STATUSES: set[str] = {
     'À rappeler',
 }
 
+# Ordre d'affichage suggéré pour un Kanban pipeline (colonnes référentiel).
+PIPELINE_KANBAN_ORDER: list[str] = [
+    'Nouveau',
+    'À qualifier',
+    'Relance',
+    'À rappeler',
+    'Gagné',
+    'Perdu',
+    'Réponse positive',
+    'Réponse négative',
+    'Bounce',
+    'Désabonné',
+    'Plainte spam',
+    'Ne pas contacter',
+]
+
+# Couleurs (hex) pour badges colonnes Kanban (UI web / mobile plus tard).
+STATUT_KANBAN_COULEURS: dict[str, str] = {
+    'Nouveau': '#64748b',
+    'À qualifier': '#2563eb',
+    'Relance': '#d97706',
+    'À rappeler': '#f59e0b',
+    'Gagné': '#16a34a',
+    'Perdu': '#dc2626',
+    'Réponse positive': '#15803d',
+    'Réponse négative': '#b91c1c',
+    'Bounce': '#9333ea',
+    'Désabonné': '#6b7280',
+    'Plainte spam': '#991b1b',
+    'Ne pas contacter': '#111827',
+}
+
+# Pipeline CRM prospection (Sprint 1) — colonnes Kanban dédiées (champ entreprises.etape_prospection)
+CRM_PIPELINE_ETAPES: tuple[str] = (
+    'À prospecter',
+    'Contacté',
+    'RDV',
+    'Proposition',
+    'Gagné',
+    'Perdu',
+)
+CRM_PIPELINE_ETAPES_SET: set[str] = set(CRM_PIPELINE_ETAPES)
+CRM_ETAPES_COULEURS: dict[str, str] = {
+    'À prospecter': '#64748b',
+    'Contacté': '#2563eb',
+    'RDV': '#9333ea',
+    'Proposition': '#ea580c',
+    'Gagné': '#16a34a',
+    'Perdu': '#dc2626',
+}
+
+# Expression SQL : opportunité texte → score 0–100 (aligné sur OpportunityCalculator)
+OPPORTUNITE_SCORE_CASE_SQL = """CASE sub.opportunite
+    WHEN 'Très élevée' THEN 100
+    WHEN 'Élevée' THEN 80
+    WHEN 'Moyenne' THEN 60
+    WHEN 'Faible' THEN 40
+    WHEN 'Très faible' THEN 20
+    ELSE 50 END"""
+
 # Importer le calculateur d'opportunité
 try:
     from services.opportunity_calculator import OpportunityCalculator
@@ -252,12 +312,19 @@ class EntrepriseManager(DatabaseBase):
             if logo and not logo.startswith(('http://', 'https://')):
                 logo = urljoin(website, logo)
         
+        etape_prospection = entreprise_data.get('etape_prospection')
+        if etape_prospection is None or (isinstance(etape_prospection, str) and etape_prospection.strip() == ''):
+            etape_prospection = 'À prospecter'
+        elif isinstance(etape_prospection, str) and etape_prospection.strip() not in CRM_PIPELINE_ETAPES_SET:
+            etape_prospection = 'À prospecter'
+
         params = (
             analyse_id,
             nom,
             website,
             secteur,
             (entreprise_data.get('statut') or 'Nouveau'),
+            etape_prospection,
             entreprise_data.get('site_opportunity'),
             entreprise_data.get('email_principal'),
             entreprise_data.get('responsable'),
@@ -285,12 +352,12 @@ class EntrepriseManager(DatabaseBase):
         if self.is_postgresql():
             insert_sql = '''
                 INSERT INTO entreprises (
-                    analyse_id, nom, website, secteur, statut, opportunite,
+                    analyse_id, nom, website, secteur, statut, etape_prospection, opportunite,
                     email_principal, responsable, taille_estimee, hosting_provider,
                     framework, score_securite, telephone, pays, address_1, address_2,
                     longitude, latitude, note_google, nb_avis_google, resume, og_image, favicon, logo
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s, %s, %s
@@ -311,11 +378,11 @@ class EntrepriseManager(DatabaseBase):
             # Mode SQLite (ou autre) : on garde execute_sql + lastrowid
             self.execute_sql(cursor, '''
                 INSERT INTO entreprises (
-                    analyse_id, nom, website, secteur, statut, opportunite,
+                    analyse_id, nom, website, secteur, statut, etape_prospection, opportunite,
                     email_principal, responsable, taille_estimee, hosting_provider,
                     framework, score_securite, telephone, pays, address_1, address_2,
                     longitude, latitude, note_google, nb_avis_google, resume, og_image, favicon, logo
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', params)
             entreprise_id = cursor.lastrowid
         
@@ -687,6 +754,9 @@ class EntrepriseManager(DatabaseBase):
             if filters.get('opportunite'):
                 inner_query += ' AND e.opportunite = ?'
                 params.append(filters['opportunite'])
+            if filters.get('etape_prospection'):
+                inner_query += ' AND e.etape_prospection = ?'
+                params.append(filters['etape_prospection'])
             if filters.get('favori'):
                 inner_query += ' AND e.favori = 1'
             # Filtrer par appartenance à un groupe spécifique
@@ -941,14 +1011,11 @@ class EntrepriseManager(DatabaseBase):
         
         return entreprises
 
-    def count_entreprises(self, analyse_id=None, filters=None):
+    def _build_filtered_entreprises_subquery_from(self, analyse_id=None, filters=None):
         """
-        Compte le nombre total d'entreprises correspondant aux filtres.
-        Utilise la même logique de filtres que get_entreprises, mais sans charger les données OG.
+        Même sous-requête que count_entreprises : (SELECT e.* …) sub WHERE 1=1 + filtres scores.
+        Retourne la partie SQL utilisable après FROM pour COUNT ou GROUP BY statut.
         """
-        conn = self.get_connection()
-        cursor = conn.cursor()
-
         has_security_filters = filters and (
             any(filters.get(k) is not None for k in ('security_min', 'security_max'))
             or EntrepriseManager._truthy_filter(filters, 'security_null')
@@ -961,7 +1028,6 @@ class EntrepriseManager(DatabaseBase):
             any(filters.get(k) is not None for k in ('seo_min', 'seo_max'))
             or EntrepriseManager._truthy_filter(filters, 'seo_null')
         )
-        wrap_subquery = has_security_filters or has_pentest_filters or has_seo_filters
 
         inner_query = '''
             SELECT e.*,
@@ -978,7 +1044,7 @@ class EntrepriseManager(DatabaseBase):
             FROM entreprises e
             WHERE 1=1
         '''
-        params = []
+        params: list[object] = []
 
         if analyse_id:
             inner_query += ' AND e.analyse_id = ?'
@@ -1002,18 +1068,17 @@ class EntrepriseManager(DatabaseBase):
             if filters.get('opportunite'):
                 inner_query += ' AND e.opportunite = ?'
                 params.append(filters['opportunite'])
+            if filters.get('etape_prospection'):
+                inner_query += ' AND e.etape_prospection = ?'
+                params.append(filters['etape_prospection'])
             if filters.get('favori'):
                 inner_query += ' AND e.favori = 1'
-            # Filtrer par appartenance à un groupe spécifique
             if filters.get('groupe_id') is not None:
                 inner_query += ' AND e.id IN (SELECT entreprise_id FROM entreprise_groupes WHERE groupe_id = ?)'
                 params.append(filters['groupe_id'])
-            # Filtrer les entreprises qui n'appartiennent à aucun groupe
             if str(filters.get('no_group', '')).lower() in ('1', 'true', 'yes'):
                 inner_query += ' AND e.id NOT IN (SELECT entreprise_id FROM entreprise_groupes)'
             if str(filters.get('has_email', '')).lower() in ('1', 'true', 'yes'):
-                # Même logique que dans get_entreprises:
-                # email principal + scraping + personnes + OSINT.
                 inner_query += """
                     AND (
                         (e.email_principal IS NOT NULL AND TRIM(e.email_principal) <> '')
@@ -1048,7 +1113,6 @@ class EntrepriseManager(DatabaseBase):
                         )
                     )
                 """
-            # Nouveaux filtres de segmentation (même logique que get_entreprises)
             if filters.get('cms'):
                 cms_val = filters['cms']
                 if isinstance(cms_val, (list, tuple, set)):
@@ -1080,13 +1144,10 @@ class EntrepriseManager(DatabaseBase):
                 inner_query += ' AND e.performance_score IS NOT NULL AND e.performance_score <= ?'
                 params.append(int(filters['performance_max']))
             if filters.get('search'):
-                # Même logique de recherche que dans get_entreprises :
-                # multi-mots, insensible à la casse, plusieurs champs.
                 raw_search = str(filters['search']).strip()
                 tokens = [t.lower() for t in re.split(r'\s+', raw_search) if t.strip()]
                 for token in tokens:
                     like = f"%{token}%"
-                    # Doit être strictement aligné sur get_entreprises (même champs, même ordre des ?)
                     inner_query += '''
                         AND (
                             LOWER(e.nom) LIKE ?
@@ -1108,7 +1169,6 @@ class EntrepriseManager(DatabaseBase):
                     '''
                     params.extend([like] * 9)
 
-            # Filtres sur les tags (même logique que get_entreprises)
             if filters.get('tags_contains'):
                 inner_query += ' AND e.tags LIKE ?'
                 params.append('%' + str(filters['tags_contains']) + '%')
@@ -1130,10 +1190,7 @@ class EntrepriseManager(DatabaseBase):
                     inner_query += ' AND e.tags LIKE ?'
                     params.append('%' + str(v) + '%')
 
-        # Pour éviter toute divergence avec get_entreprises, on compte
-        # toujours à partir de la même sous-requête (inner_query) qui
-        # applique déjà TOUS les filtres, y compris la recherche multi-mots.
-        query = 'SELECT COUNT(*) as count FROM (' + inner_query + ') sub WHERE 1=1'
+        query = '(' + inner_query + ') sub WHERE 1=1'
         if has_security_filters:
             if EntrepriseManager._truthy_filter(filters, 'security_null'):
                 query += ' AND sub.score_securite IS NULL'
@@ -1164,6 +1221,19 @@ class EntrepriseManager(DatabaseBase):
                 if filters.get('seo_max') is not None:
                     query += ' AND (COALESCE(sub.score_seo, 0) <= ?)'
                     params.append(filters['seo_max'])
+
+        return query, params
+
+    def count_entreprises(self, analyse_id=None, filters=None):
+        """
+        Compte le nombre total d'entreprises correspondant aux filtres.
+        Utilise la même logique de filtres que get_entreprises, mais sans charger les données OG.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        from_sql, params = self._build_filtered_entreprises_subquery_from(analyse_id, filters)
+        query = 'SELECT COUNT(*) as count FROM ' + from_sql
 
         self.execute_sql(cursor, query, params)
         row = cursor.fetchone()
@@ -1539,6 +1609,824 @@ class EntrepriseManager(DatabaseBase):
         conn.commit()
         conn.close()
         return True
+
+    def list_entreprise_touchpoints(self, entreprise_id, limit=50, offset=0):
+        """
+        Liste les interactions (touchpoints) d'une entreprise, triées du plus récent au plus ancien.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        limit = max(1, min(int(limit or 50), 500))
+        offset = max(0, int(offset or 0))
+        self.execute_sql(
+            cursor,
+            '''
+            SELECT id, entreprise_id, canal, sujet, note, happened_at, created_at, created_by
+            FROM entreprise_touchpoints
+            WHERE entreprise_id = ?
+            ORDER BY happened_at DESC, id DESC
+            LIMIT ? OFFSET ?
+            ''',
+            (entreprise_id, limit, offset),
+        )
+        rows = cursor.fetchall() or []
+        conn.close()
+        return [dict(r) for r in rows]
+
+    def create_entreprise_touchpoint(self, entreprise_id, canal, sujet, note=None, happened_at=None, created_by=None):
+        """
+        Crée un touchpoint pour une entreprise.
+        """
+        canal_s = (canal or '').strip()
+        sujet_s = (sujet or '').strip()
+        if not canal_s:
+            raise ValueError("canal requis")
+        if not sujet_s:
+            raise ValueError("sujet requis")
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        if self.is_postgresql():
+            if happened_at:
+                self.execute_sql(
+                    cursor,
+                    '''
+                    INSERT INTO entreprise_touchpoints (entreprise_id, canal, sujet, note, happened_at, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    RETURNING id
+                    ''',
+                    (entreprise_id, canal_s, sujet_s, note, happened_at, created_by),
+                )
+            else:
+                self.execute_sql(
+                    cursor,
+                    '''
+                    INSERT INTO entreprise_touchpoints (entreprise_id, canal, sujet, note, created_by)
+                    VALUES (?, ?, ?, ?, ?)
+                    RETURNING id
+                    ''',
+                    (entreprise_id, canal_s, sujet_s, note, created_by),
+                )
+            inserted = cursor.fetchone()
+            touchpoint_id = inserted['id'] if isinstance(inserted, dict) else inserted[0]
+        else:
+            if happened_at:
+                self.execute_sql(
+                    cursor,
+                    '''
+                    INSERT INTO entreprise_touchpoints (entreprise_id, canal, sujet, note, happened_at, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ''',
+                    (entreprise_id, canal_s, sujet_s, note, happened_at, created_by),
+                )
+            else:
+                self.execute_sql(
+                    cursor,
+                    '''
+                    INSERT INTO entreprise_touchpoints (entreprise_id, canal, sujet, note, created_by)
+                    VALUES (?, ?, ?, ?, ?)
+                    ''',
+                    (entreprise_id, canal_s, sujet_s, note, created_by),
+                )
+            touchpoint_id = cursor.lastrowid
+        conn.commit()
+
+        self.execute_sql(
+            cursor,
+            '''
+            SELECT id, entreprise_id, canal, sujet, note, happened_at, created_at, created_by
+            FROM entreprise_touchpoints
+            WHERE id = ?
+            ''',
+            (touchpoint_id,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def delete_entreprise_touchpoint(self, entreprise_id, touchpoint_id):
+        """
+        Supprime un touchpoint d'une entreprise.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self.execute_sql(
+            cursor,
+            'DELETE FROM entreprise_touchpoints WHERE id = ? AND entreprise_id = ?',
+            (touchpoint_id, entreprise_id),
+        )
+        deleted = int(getattr(cursor, 'rowcount', 0) or 0) > 0
+        conn.commit()
+        conn.close()
+        return deleted
+
+    def update_entreprise_touchpoint(
+        self,
+        entreprise_id,
+        touchpoint_id,
+        canal=None,
+        sujet=None,
+        note=None,
+        happened_at=None,
+    ):
+        """
+        Met à jour un touchpoint d'une entreprise (PATCH partiel).
+
+        Args:
+            entreprise_id (int): ID de l'entreprise.
+            touchpoint_id (int): ID du touchpoint à modifier.
+            canal (str | None): Nouveau canal (optionnel).
+            sujet (str | None): Nouveau sujet (optionnel).
+            note (str | None): Nouvelle note (optionnel).
+            happened_at (str | None): Nouvelle date de l'événement (optionnel).
+
+        Returns:
+            dict | None: Le touchpoint mis à jour, ou None si introuvable.
+
+        Raises:
+            ValueError: si aucun champ n'est fourni, ou si `canal`/`sujet` sont fournis mais vides.
+        """
+        fields: list[str] = []
+        params: list[object] = []
+
+        if canal is not None:
+            canal_s = (canal or '').strip()
+            if not canal_s:
+                raise ValueError("canal ne peut pas être vide")
+            fields.append('canal = ?')
+            params.append(canal_s)
+
+        if sujet is not None:
+            sujet_s = (sujet or '').strip()
+            if not sujet_s:
+                raise ValueError("sujet ne peut pas être vide")
+            fields.append('sujet = ?')
+            params.append(sujet_s)
+
+        # note peut être explicitement None (pour vider la note)
+        if note is not None:
+            fields.append('note = ?')
+            params.append(note)
+
+        if happened_at is not None:
+            fields.append('happened_at = ?')
+            params.append(happened_at)
+
+        if not fields:
+            raise ValueError("au moins un champ doit être fourni pour la mise à jour")
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        set_clause = ', '.join(fields)
+        params_where = [touchpoint_id, entreprise_id]
+        self.execute_sql(
+            cursor,
+            f'UPDATE entreprise_touchpoints SET {set_clause} WHERE id = ? AND entreprise_id = ?',
+            tuple(params + params_where),
+        )
+        conn.commit()
+
+        self.execute_sql(
+            cursor,
+            '''
+            SELECT id, entreprise_id, canal, sujet, note, happened_at, created_at, created_by
+            FROM entreprise_touchpoints
+            WHERE id = ? AND entreprise_id = ?
+            ''',
+            (touchpoint_id, entreprise_id),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def get_pipeline_kanban_snapshot(self, analyse_id=None, filters=None):
+        """
+        Agrège les effectifs par statut pour une vue Kanban pipeline.
+
+        Args:
+            analyse_id (int | None): Si fourni, limite aux entreprises de cette analyse.
+            filters (dict | None): Même famille de filtres que get_entreprises / count_entreprises.
+                Si non vide, agrégation sur la même sous-requête filtrée (scores sécu / pentest / SEO inclus).
+
+        Returns:
+            dict: total, sans_statut, counts par statut référentiel, colonnes ordonnées,
+                  statuts hors référentiel, et indicateur filtered.
+        """
+        if filters:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            from_sql, params = self._build_filtered_entreprises_subquery_from(analyse_id, filters)
+            total = self.count_entreprises(analyse_id, filters)
+            query = 'SELECT sub.statut, COUNT(*) as count FROM ' + from_sql + ' GROUP BY sub.statut'
+            self.execute_sql(cursor, query, params)
+            rows = cursor.fetchall() or []
+            conn.close()
+        else:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            where_base = '1=1'
+            params: list[object] = []
+            if analyse_id is not None:
+                where_base += ' AND analyse_id = ?'
+                params.append(analyse_id)
+
+            self.execute_sql(
+                cursor,
+                f'SELECT COUNT(*) as count FROM entreprises WHERE {where_base}',
+                params,
+            )
+            row_total = cursor.fetchone()
+            total = int(row_total['count'] if isinstance(row_total, dict) else row_total[0])
+
+            self.execute_sql(
+                cursor,
+                f'''
+                SELECT statut, COUNT(*) as count
+                FROM entreprises
+                WHERE {where_base}
+                GROUP BY statut
+                ''',
+                params,
+            )
+            rows = cursor.fetchall() or []
+            conn.close()
+
+        counts_ref = {s: 0 for s in ENTERPRISE_STATUSES}
+        hors: list[dict[str, object]] = []
+        sans_statut = 0
+
+        for r in rows:
+            d = dict(r)
+            st = d.get('statut')
+            cnt = int(d.get('count') or 0)
+            if st is None or (isinstance(st, str) and st.strip() == ''):
+                sans_statut += cnt
+                continue
+            st_s = str(st).strip()
+            if st_s in ENTERPRISE_STATUSES:
+                counts_ref[st_s] = cnt
+            else:
+                hors.append({'statut': st_s, 'count': cnt})
+
+        hors.sort(key=lambda x: (-int(x['count']), str(x['statut']).lower()))
+
+        ordre = list(PIPELINE_KANBAN_ORDER)
+        for s in sorted(ENTERPRISE_STATUSES):
+            if s not in ordre:
+                ordre.append(s)
+
+        columns = [
+            {
+                'statut': s,
+                'count': counts_ref[s],
+                'couleur': STATUT_KANBAN_COULEURS.get(s),
+            }
+            for s in ordre
+        ]
+
+        out = {
+            'success': True,
+            'analyse_id': analyse_id,
+            'total': total,
+            'sans_statut': sans_statut,
+            'counts': counts_ref,
+            'columns': columns,
+            'hors_referentiel': hors,
+            'filtered': bool(filters),
+        }
+        if filters:
+            out['filters'] = filters
+        return out
+
+    def _crm_etape_sql_expr(self, alias: str = None) -> str:
+        """Expression SQL normalisée pour l'étape CRM (défaut À prospecter)."""
+        col = f'{alias}.etape_prospection' if alias else 'etape_prospection'
+        return (
+            f"COALESCE(NULLIF(TRIM(COALESCE({col}, '')), ''), 'À prospecter')"
+        )
+
+    def get_crm_kanban_snapshot(self, analyse_id=None, filters=None):
+        """
+        Agrège les effectifs par étape de prospection CRM (Kanban dédié).
+
+        Même filtres que get_pipeline_kanban_snapshot ; colonnes = CRM_PIPELINE_ETAPES.
+        """
+        etape_expr_sub = self._crm_etape_sql_expr('sub')
+        etape_expr_plain = self._crm_etape_sql_expr()
+
+        if filters:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            from_sql, params = self._build_filtered_entreprises_subquery_from(analyse_id, filters)
+            total = self.count_entreprises(analyse_id, filters)
+            query = (
+                f'SELECT {etape_expr_sub} AS etape_crm, COUNT(*) as count FROM '
+                + from_sql
+                + f' GROUP BY {etape_expr_sub}'
+            )
+            self.execute_sql(cursor, query, params)
+            rows = cursor.fetchall() or []
+            conn.close()
+        else:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            where_base = '1=1'
+            params: list[object] = []
+            if analyse_id is not None:
+                where_base += ' AND analyse_id = ?'
+                params.append(analyse_id)
+
+            self.execute_sql(
+                cursor,
+                f'SELECT COUNT(*) as count FROM entreprises WHERE {where_base}',
+                params,
+            )
+            row_total = cursor.fetchone()
+            total = int(row_total['count'] if isinstance(row_total, dict) else row_total[0])
+
+            self.execute_sql(
+                cursor,
+                f'''
+                SELECT {etape_expr_plain} AS etape_crm, COUNT(*) as count
+                FROM entreprises
+                WHERE {where_base}
+                GROUP BY {etape_expr_plain}
+                ''',
+                params,
+            )
+            rows = cursor.fetchall() or []
+            conn.close()
+
+        counts_ref = {s: 0 for s in CRM_PIPELINE_ETAPES}
+        hors: list[dict[str, object]] = []
+
+        for r in rows:
+            d = dict(r)
+            st = d.get('etape_crm')
+            cnt = int(d.get('count') or 0)
+            if st is None or (isinstance(st, str) and st.strip() == ''):
+                st = 'À prospecter'
+            st_s = str(st).strip()
+            if st_s in CRM_PIPELINE_ETAPES_SET:
+                counts_ref[st_s] = cnt
+            else:
+                hors.append({'etape': st_s, 'count': cnt})
+
+        hors.sort(key=lambda x: (-int(x['count']), str(x['etape']).lower()))
+
+        columns = [
+            {
+                'etape': s,
+                'count': counts_ref[s],
+                'couleur': CRM_ETAPES_COULEURS.get(s),
+            }
+            for s in CRM_PIPELINE_ETAPES
+        ]
+
+        out = {
+            'success': True,
+            'analyse_id': analyse_id,
+            'total': total,
+            'counts': counts_ref,
+            'columns': columns,
+            'hors_referentiel': hors,
+            'filtered': bool(filters),
+        }
+        if filters:
+            out['filters'] = filters
+        return out
+
+    def update_entreprise_etape_prospection(self, entreprise_id, etape: str) -> dict | None:
+        """
+        Met à jour l'étape CRM. Retourne la ligne entreprise mise à jour ou None si invalide / introuvable.
+        """
+        if not etape or str(etape).strip() not in CRM_PIPELINE_ETAPES_SET:
+            return None
+        etape_clean = str(etape).strip()
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self.execute_sql(
+            cursor,
+            'UPDATE entreprises SET etape_prospection = ? WHERE id = ?',
+            (etape_clean, entreprise_id),
+        )
+        if cursor.rowcount == 0:
+            conn.close()
+            return None
+        conn.commit()
+        self.execute_sql(
+            cursor,
+            'SELECT id, nom, etape_prospection, statut FROM entreprises WHERE id = ?',
+            (entreprise_id,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def _commercial_priority_scores_for_entreprise_ids(
+        self, ids: list[int], weights: dict | None
+    ) -> dict[int, float]:
+        """Calcule priority_score (0–100) pour une liste d'IDs entreprise."""
+        clean_ids = [int(i) for i in ids if i is not None]
+        if not clean_ids:
+            return {}
+        w = EntrepriseManager._normalize_commercial_weights(weights)
+        opp_sql = OPPORTUNITE_SCORE_CASE_SQL.replace('sub.', 'e.')
+        out: dict[int, float] = {}
+        chunk = 400
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            for i in range(0, len(clean_ids), chunk):
+                part = clean_ids[i : i + chunk]
+                ph = ','.join(['?' for _ in part])
+                sql = f'''
+                    SELECT e.id,
+                        (
+                            ? * COALESCE((
+                                SELECT score FROM analyses_seo
+                                WHERE entreprise_id = e.id
+                                ORDER BY date_analyse DESC
+                                LIMIT 1
+                            ), 0) +
+                            ? * COALESCE(e.score_securite, 0) +
+                            ? * COALESCE(e.performance_score, 0) +
+                            ? * ({opp_sql})
+                        ) AS priority_score
+                    FROM entreprises e
+                    WHERE e.id IN ({ph})
+                '''
+                params: list[object] = [
+                    w['w_seo'],
+                    w['w_secu'],
+                    w['w_perf'],
+                    w['w_opp'],
+                ] + part
+                self.execute_sql(cursor, sql, params)
+                for row in cursor.fetchall() or []:
+                    d = dict(row)
+                    out[int(d['id'])] = float(d.get('priority_score') or 0)
+        finally:
+            conn.close()
+        return out
+
+    @staticmethod
+    def _normalize_commercial_weights(weights: dict | None) -> dict[str, float]:
+        """Normalise les poids SEO / sécu / perf / opportunité (somme = 1)."""
+        if not weights:
+            return {'w_seo': 0.25, 'w_secu': 0.25, 'w_perf': 0.25, 'w_opp': 0.25}
+        w: dict[str, float] = {}
+        for k in ('w_seo', 'w_secu', 'w_perf', 'w_opp'):
+            v = weights.get(k)
+            try:
+                w[k] = float(v) if v is not None else 0.25
+            except (TypeError, ValueError):
+                w[k] = 0.25
+        s = sum(w.values())
+        if s <= 0:
+            return {'w_seo': 0.25, 'w_secu': 0.25, 'w_perf': 0.25, 'w_opp': 0.25}
+        return {k: v / s for k, v in w.items()}
+
+    def list_commercial_priority_profiles(self):
+        """Profils de pondération pour la vue priorité commerciale."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self.execute_sql(
+            cursor,
+            'SELECT id, nom, poids_json, date_creation FROM commercial_priority_profiles ORDER BY nom',
+        )
+        rows = cursor.fetchall() or []
+        conn.close()
+        out = []
+        for r in rows:
+            d = dict(r)
+            p: dict = {}
+            raw = d.pop('poids_json', None)
+            if raw:
+                try:
+                    p = json.loads(raw) if isinstance(raw, str) else raw
+                except Exception:
+                    p = {}
+            d['poids'] = p
+            out.append(d)
+        return out
+
+    def get_commercial_priority_profile(self, profile_id: int):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self.execute_sql(
+            cursor,
+            'SELECT id, nom, poids_json, date_creation FROM commercial_priority_profiles WHERE id = ?',
+            (profile_id,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        d = dict(row)
+        raw = d.pop('poids_json', None)
+        p: dict = {}
+        if raw:
+            try:
+                p = json.loads(raw) if isinstance(raw, str) else raw
+            except Exception:
+                p = {}
+        d['poids'] = p
+        return d
+
+    def record_metric_snapshot(self, cursor, entreprise_id, source, analysis_id, metrics_dict):
+        """
+        Enregistre un snapshot de métriques (même transaction que l'analyse si cursor fourni).
+        """
+        from utils.helpers import clean_json_dict
+
+        if not entreprise_id or not source:
+            return
+        payload = json.dumps(clean_json_dict(metrics_dict or {}))
+        src = str(source)[:48]
+        aid = analysis_id
+        self.execute_sql(
+            cursor,
+            '''
+            INSERT INTO entreprise_metric_snapshots (entreprise_id, source, analysis_id, metrics_json)
+            VALUES (?, ?, ?, ?)
+            ''',
+            (entreprise_id, src, aid, payload),
+        )
+
+    def list_entreprise_metric_snapshots(self, entreprise_id, limit=30, source=None):
+        """Historique des snapshots pour une entreprise (plus récent en premier)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        lim = max(1, min(int(limit or 30), 100))
+        params: list = [entreprise_id]
+        q = '''
+            SELECT id, entreprise_id, source, analysis_id, captured_at, metrics_json
+            FROM entreprise_metric_snapshots
+            WHERE entreprise_id = ?
+        '''
+        if source:
+            q += ' AND source = ?'
+            params.append(str(source)[:48])
+        q += ' ORDER BY captured_at DESC, id DESC LIMIT ?'
+        params.append(lim)
+        self.execute_sql(cursor, q, tuple(params))
+        rows = cursor.fetchall() or []
+        conn.close()
+        from utils.helpers import clean_json_dict
+
+        out = []
+        for r in rows:
+            d = dict(r)
+            raw = d.pop('metrics_json', None)
+            if raw:
+                try:
+                    d['metrics'] = json.loads(raw) if isinstance(raw, str) else raw
+                except Exception:
+                    d['metrics'] = {}
+            else:
+                d['metrics'] = {}
+            out.append(clean_json_dict(d))
+        return out
+
+    @staticmethod
+    def _parse_snapshot_date(value):
+        if value is None:
+            return None
+        s = str(value).strip()[:10]
+        if len(s) < 10:
+            return None
+        try:
+            from datetime import date
+
+            y, m, d = int(s[0:4]), int(s[5:7]), int(s[8:10])
+            return date(y, m, d)
+        except Exception:
+            return None
+
+    def metric_snapshot_alerts_between(self, previous_metrics: dict, new_metrics: dict, source: str):
+        """
+        Alertes heuristiques entre deux snapshots (v1 : règles simples).
+        """
+        alerts = []
+        prev = previous_metrics or {}
+        new = new_metrics or {}
+
+        def _num(x):
+            if x is None:
+                return None
+            try:
+                return float(x)
+            except (TypeError, ValueError):
+                return None
+
+        def _truthy(x):
+            if x is True or x == 1:
+                return True
+            if x is False or x == 0:
+                return False
+            if isinstance(x, str) and x.lower() in ('true', '1', 'yes', 'oui'):
+                return True
+            return None
+
+        pv, nv = _truthy(prev.get('ssl_valid')), _truthy(new.get('ssl_valid'))
+        if pv is True and nv is False:
+            alerts.append(
+                {
+                    'code': 'ssl_invalid',
+                    'severity': 'high',
+                    'message': 'Le certificat SSL n’est plus considéré comme valide.',
+                }
+            )
+
+        exp = self._parse_snapshot_date(new.get('ssl_expiry_date'))
+        if exp:
+            from datetime import date, timedelta
+
+            today = date.today()
+            if exp <= today:
+                alerts.append(
+                    {
+                        'code': 'ssl_expired',
+                        'severity': 'high',
+                        'message': f'SSL expiré (échéance {exp.isoformat()}).',
+                    }
+                )
+            elif exp <= today + timedelta(days=30):
+                alerts.append(
+                    {
+                        'code': 'ssl_expiring_soon',
+                        'severity': 'medium',
+                        'message': f'SSL expire bientôt (échéance {exp.isoformat()}).',
+                    }
+                )
+
+        drop_thr = 15.0
+        if source == 'technical' or source == 'seo':
+            if source == 'technical':
+                a, b = _num(prev.get('score_securite')), _num(new.get('score_securite'))
+                if a is not None and b is not None and (a - b) >= drop_thr:
+                    alerts.append(
+                        {
+                            'code': 'security_score_drop',
+                            'severity': 'medium',
+                            'message': f'Fort recul du score technique/sécurité ({int(a)} → {int(b)}).',
+                        }
+                    )
+                a, b = _num(prev.get('performance_score')), _num(new.get('performance_score'))
+                if a is not None and b is not None and (a - b) >= drop_thr:
+                    alerts.append(
+                        {
+                            'code': 'performance_score_drop',
+                            'severity': 'medium',
+                            'message': f'Fort recul du score performance ({int(a)} → {int(b)}).',
+                        }
+                    )
+            if source == 'seo':
+                a, b = _num(prev.get('seo_score')), _num(new.get('seo_score'))
+                if a is not None and b is not None and (a - b) >= drop_thr:
+                    alerts.append(
+                        {
+                            'code': 'seo_score_drop',
+                            'severity': 'medium',
+                            'message': f'Fort recul du score SEO ({int(a)} → {int(b)}).',
+                        }
+                    )
+
+        pcms, ncms = prev.get('cms'), new.get('cms')
+        if (
+            isinstance(pcms, str)
+            and pcms.strip()
+            and isinstance(ncms, str)
+            and ncms.strip()
+            and pcms.strip() != ncms.strip()
+        ):
+            alerts.append(
+                {
+                    'code': 'cms_changed',
+                    'severity': 'low',
+                    'message': f'CMS détecté : « {pcms} » → « {ncms} ».',
+                }
+            )
+
+        return alerts
+
+    def compare_entreprise_metric_snapshots(self, entreprise_id, source='technical'):
+        """
+        Compare les deux derniers snapshots d’une même source ; calcule deltas et alertes.
+        """
+        rows = self.list_entreprise_metric_snapshots(entreprise_id, limit=2, source=source)
+        if not rows:
+            return {
+                'success': True,
+                'source': source,
+                'has_pair': False,
+                'current': None,
+                'previous': None,
+                'deltas': {},
+                'alerts': [],
+            }
+        current = rows[0]
+        previous = rows[1] if len(rows) > 1 else None
+        cur_m = current.get('metrics') or {}
+        prev_m = (previous or {}).get('metrics') or {}
+        deltas = {}
+        if previous:
+            for key in set(cur_m.keys()) | set(prev_m.keys()):
+                a, b = prev_m.get(key), cur_m.get(key)
+                if a != b:
+                    deltas[key] = {'from': a, 'to': b}
+        alerts = (
+            self.metric_snapshot_alerts_between(prev_m, cur_m, source) if previous else []
+        )
+        return {
+            'success': True,
+            'source': source,
+            'has_pair': bool(previous),
+            'current': current,
+            'previous': previous,
+            'deltas': deltas,
+            'alerts': alerts,
+        }
+
+    def get_entreprises_commercial_top(
+        self,
+        analyse_id=None,
+        filters=None,
+        weights=None,
+        priority_min=None,
+        limit=50,
+    ):
+        """
+        Top entreprises par score pondéré (SEO, sécu, perf, opportunité), puis par
+        ancienneté du dernier touchpoint (sans interaction en premier).
+        """
+        from_sql, base_params = self._build_filtered_entreprises_subquery_from(analyse_id, filters)
+        w = EntrepriseManager._normalize_commercial_weights(weights)
+        lim = max(1, min(int(limit or 50), 200))
+
+        def _build_commercial_top_sql(with_touchpoints: bool) -> tuple[str, list[object]]:
+            touch_expr = (
+                '(SELECT MAX(happened_at) FROM entreprise_touchpoints tp WHERE tp.entreprise_id = sub.id) AS last_touchpoint_at'
+                if with_touchpoints
+                else 'NULL AS last_touchpoint_at'
+            )
+            inner_select = f'''
+                SELECT sub.*,
+                    {touch_expr},
+                    (
+                        ? * COALESCE(sub.score_seo, 0) +
+                        ? * COALESCE(sub.score_securite, 0) +
+                        ? * COALESCE(sub.performance_score, 0) +
+                        ? * ({OPPORTUNITE_SCORE_CASE_SQL})
+                    ) AS priority_score
+                FROM {from_sql}
+            '''
+            q = f'SELECT * FROM ({inner_select}) ranked WHERE 1=1'
+            p: list[object] = [w['w_seo'], w['w_secu'], w['w_perf'], w['w_opp']] + list(base_params)
+            if priority_min is not None:
+                try:
+                    pm = float(priority_min)
+                except (TypeError, ValueError):
+                    pm = None
+                if pm is not None:
+                    q += ' AND ranked.priority_score >= ?'
+                    p.append(pm)
+            q += ' ORDER BY ranked.priority_score DESC, ranked.last_touchpoint_at ASC'
+            q += ' LIMIT ?'
+            p.append(lim)
+            return q, p
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            sql, params = _build_commercial_top_sql(True)
+            self.execute_sql(cursor, sql, params)
+        except Exception as e:
+            err = str(e).lower()
+            if 'entreprise_touchpoints' in err and ('no such table' in err or 'does not exist' in err):
+                sql, params = _build_commercial_top_sql(False)
+                self.execute_sql(cursor, sql, params)
+            else:
+                conn.close()
+                raise
+        rows = cursor.fetchall() or []
+        conn.close()
+
+        from utils.helpers import clean_json_dict
+        entreprises = []
+        for row in rows:
+            ent = self.clean_row_dict(dict(row))
+            if ent.get('tags'):
+                try:
+                    ent['tags'] = json.loads(ent['tags']) if isinstance(ent['tags'], str) else ent['tags']
+                except Exception:
+                    ent['tags'] = []
+            else:
+                ent['tags'] = []
+            entreprises.append(clean_json_dict(ent))
+        return entreprises
 
     def toggle_favori(self, entreprise_id):
         """
@@ -2527,9 +3415,15 @@ class EntrepriseManager(DatabaseBase):
                 - score_securite_max: score sécurité <= cette valeur
                 - exclude_already_contacted: True pour exclure les entreprises déjà contactées
                 - groupe_ids: liste d'IDs de groupes d'entreprises (filtre par appartenance à au moins un groupe)
+                - etape_prospection: filtre étape CRM Kanban
+                - sort_commercial: True pour trier par score de priorité pondéré décroissant
+                - priority_min: seuil minimal sur priority_score (affiche le champ sur chaque ligne)
+                - commercial_profile_id: ID profil `commercial_priority_profiles` pour les poids
+                - commercial_limit: tronque la liste après tri (ex. 50)
         
         Returns:
-            list[dict]: Même format que get_entreprises_with_emails (id, nom, secteur, emails)
+            list[dict]: Même format que get_entreprises_with_emails (id, nom, secteur, emails) ;
+                avec tri/filtre commercial : clef optionnelle `priority_score`.
         """
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -2650,6 +3544,9 @@ class EntrepriseManager(DatabaseBase):
                 params.append(int(filters['score_securite_max']))
             if filters.get('exclude_already_contacted'):
                 base_sql += ' AND e.id NOT IN (SELECT entreprise_id FROM emails_envoyes WHERE entreprise_id IS NOT NULL)'
+            if filters.get('etape_prospection'):
+                base_sql += ' AND e.etape_prospection = ?'
+                params.append(filters['etape_prospection'])
         
         base_sql += ' ORDER BY e.nom, COALESCE(se.is_person, 0) DESC, se.date_found DESC, se.id'
         
@@ -2685,6 +3582,48 @@ class EntrepriseManager(DatabaseBase):
                 })
         
         result = list(entreprises_dict.values())
+
+        if filters and (
+            filters.get('sort_commercial')
+            or filters.get('priority_min') is not None
+        ):
+            weights = None
+            cpid = filters.get('commercial_profile_id')
+            if cpid is not None:
+                try:
+                    prof = self.get_commercial_priority_profile(int(cpid))
+                    if prof:
+                        weights = prof.get('poids')
+                except (TypeError, ValueError):
+                    pass
+            scores = self._commercial_priority_scores_for_entreprise_ids(
+                [e['id'] for e in result],
+                weights,
+            )
+            for e in result:
+                e['priority_score'] = round(scores.get(e['id'], 0.0), 2)
+            if filters.get('priority_min') is not None:
+                try:
+                    pm = float(filters['priority_min'])
+                    result = [
+                        x for x in result if float(x.get('priority_score') or 0) >= pm
+                    ]
+                except (TypeError, ValueError):
+                    pass
+            if filters.get('sort_commercial'):
+                result.sort(
+                    key=lambda x: (
+                        -float(x.get('priority_score') or 0),
+                        (x.get('nom') or '').lower(),
+                    )
+                )
+                lim = filters.get('commercial_limit')
+                if lim is not None:
+                    try:
+                        result = result[: max(1, int(lim))]
+                    except (TypeError, ValueError):
+                        pass
+
         from utils.helpers import clean_json_dict
         result = clean_json_dict(result)
         return result

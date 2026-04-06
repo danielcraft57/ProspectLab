@@ -70,6 +70,7 @@ Routes API REST pour les données :
 - `/api/entreprise/<id>/notes` - Gestion des notes
 - `/api/entreprise/<id>/favori` - Basculer le statut favori
 - `/api/secteurs` - Liste des secteurs
+- Session web : statuts pipeline, agrégation Kanban, touchpoints — voir `docs/guides/API_PIPELINE_KANBAN.md` (`/api/entreprise/statuts`, `/api/entreprise/pipeline/kanban`, `/api/entreprise/<id>/statut`, `/api/entreprise/<id>/touchpoints`).
 
 #### routes/upload.py
 Routes pour l'upload et la prévisualisation de fichiers :

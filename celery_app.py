@@ -84,6 +84,8 @@ celery.conf.update(
         # Pack site unique : même file que les analyses techniques par défaut (voir CELERY_FULL_ANALYSIS_QUEUE).
         # La queue « website_full » reste disponible pour un worker dédié (isolation / charge).
         'tasks.full_website_analysis.*': {'queue': 'technical'},
+        # Orchestrateur léger : enqueue technique + SEO (snapshots métriques)
+        'tasks.metric_rescan_tasks.*': {'queue': 'celery'},
     },
     task_create_missing_queues=True,
     worker_prefetch_multiplier=CELERY_WORKER_PREFETCH_MULTIPLIER,
@@ -101,6 +103,7 @@ celery.conf.update(
         'tasks.seo_tasks',
         'tasks.email_tasks',
         'tasks.cleanup_tasks',
+        'tasks.metric_rescan_tasks',
     ),
     # Configuration pour Windows : utiliser solo au lieu de prefork
     # Le mode prefork n'est pas supporté sur Windows
