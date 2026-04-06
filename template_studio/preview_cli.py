@@ -182,6 +182,11 @@ def main() -> int:
             "hosting_provider": "OVHcloud",
             "performance_score": 82,
             "security_score": 90,
+            # Pentest (mock) pour visualiser les blocs du template "score zero"
+            "has_security_headers_missing_top": True,
+            "security_headers_missing_top": _normalize_li_list(
+                "Strict-Transport-Security, Content-Security-Policy, Permissions-Policy"
+            ),
             "total_emails": 120,
             "total_people": 60,
             "total_social_count": 4,

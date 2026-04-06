@@ -60,8 +60,28 @@ Une protection empêche les boucles infinies (profondeur max).
 - `footer_standard` : footer “familier” (robot + réponse + lien ne plus recevoir d’email)
 - `signature_standard` : signature type (Cordialement, **Prénom Nom**, lien `https://exemple.fr`)
 - `cta_primary_15min` : CTA principal “Oui, je réserve 15 min” (pill)
-- `cta_secondary_analysis` : CTA secondaire “Voir l’analyse du site” (avec `{#if_website}`)
+- `cta_secondary_analysis` : CTA secondaire “Voir mon rapport d'analyse” (avec `{#if_website}`)
 - `cta_dual_analysis_and_15min` : double CTA (analyse + réserver 15 min) style bleu/noir
+
+## Variables utiles (pentest / sécurité)
+
+Selon les données disponibles en base (analyses technique + pentest), `TemplateManager.render_template()` peut injecter:
+
+- **`analysis_url`**: lien vers `https://danielcraft.fr/analyse?website=...&full=1` (basé sur le vrai `website` de l'entreprise).
+- **Pentest (si présent)**:
+  - `vulnerabilities_count`
+  - `vulnerabilities_top` (HTML `<li>...</li>` top 3)
+  - `has_vulnerabilities_top` (bool)
+  - `security_headers_missing_top` (HTML `<li>...</li>` top 3)
+  - `has_security_headers_missing_top` (bool)
+- **Fallback sécurité (analyse technique)**:
+  - `security_issues_top` (HTML `<li>...</li>` top 3)
+  - `show_security_issues_fallback` (bool)
+
+### Note importante (preview UI vs envoi réel)
+Dans la page "modèles d'email", les templates HTML peuvent être affichés sans rendu des variables.
+Dans ce cas, certains liens sont rendus "cliquables" avec des valeurs de démo.
+Pour les campagnes envoyées, c'est `render_template()` qui reconstruit les URLs à partir des données réelles (ex: `website` de l'entreprise).
 
 ## Commandes (workflow)
 

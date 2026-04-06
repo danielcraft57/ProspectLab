@@ -75,6 +75,11 @@ Le système de campagnes email permet d'envoyer des emails en masse à des entre
 - **Lien vers le site principal** : bouton "Découvrir mes services et tarifs" (tracké automatiquement)
 - **Données dynamiques** : Injection automatique des données d'entreprise (technique, OSINT, pentest, scraping)
 - **Icônes centrées** : Utilisation de `text-align: center` et `line-height` pour compatibilité email
+- **CTA robustes** : Pour la compatibilité clients mail, les CTA sont idéalement mis en forme via des tables (`<table role="presentation">`) et des styles inline.
+
+#### Variables et liens d'analyse
+- **`analysis_url`** est construit au rendu à partir du `website` de l'entreprise (`/analyse?website=...&full=1`).
+- Si un ancien template stocké en BDD contient encore un lien de démo (`exemple.com`), le rendu remplace ce lien par l'URL calculée pour l'entreprise au moment de l'envoi.
 
 ## Architecture technique
 

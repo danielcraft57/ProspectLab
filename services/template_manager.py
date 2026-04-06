@@ -231,8 +231,10 @@ class TemplateManager:
             if template.get('id') == template_id:
                 d = template.copy()
                 if d.get('is_html') and isinstance(d.get('content'), str):
+                    # Pour l'envoi réel d'emails, on applique seulement les includes ici.
+                    # Les liens "cliquables" de preview (exemple.com) sont réservés à list_templates()
+                    # pour l'UI, pas pour les campagnes.
                     d['content'] = self._apply_includes(d['content'])
-                    d['content'] = self._make_ui_preview_links_clickable(d['content'])
                 return d
         return None
 
@@ -656,6 +658,8 @@ class TemplateManager:
 
                 if security_issues_list:
                     data['security_issues'] = "\n".join(f"<li>{issue}</li>" for issue in security_issues_list)
+                    # Variante "top 3" pour les templates emails (plus compact).
+                    data['security_issues_top'] = "\n".join(f"<li>{issue}</li>" for issue in security_issues_list[:3])
             
             # Analyse OSINT
             osint_analysis = osint_manager.get_osint_analysis_by_entreprise(entreprise_id)
@@ -670,12 +674,90 @@ class TemplateManager:
             if pentest_analysis:
                 # Utiliser risk_score comme security_score pour Pentest
                 risk_score = pentest_analysis.get('risk_score')
+                data['has_pentest'] = True
                 if risk_score is not None:
-                    # Convertir risk_score (0-100) en security_score (inversé : 100-risk_score)
-                    data['security_score'] = max(0, 100 - risk_score) if risk_score else data.get('security_score')
+                    # Convertir risk_score (0-100) en security_score (inversé : 100-risk_score).
+                    # Attention: risk_score peut valoir 0, on ne doit pas le traiter comme "falsy".
+                    try:
+                        rs = float(risk_score)
+                        data['security_score'] = max(0, 100 - rs)
+                    except Exception:
+                        # Ne pas écraser un score existant si conversion impossible.
+                        pass
+                # Vulnérabilités
                 vulnerabilities = pentest_analysis.get('vulnerabilities', [])
+                if not isinstance(vulnerabilities, list):
+                    vulnerabilities = []
+                data['vulnerabilities_count'] = len(vulnerabilities)
+
+                # Fallback score: si risk_score est absent mais qu'on a des vulnérabilités,
+                # on estime un risk_score simple via les sévérités, puis on en déduit security_score.
+                if risk_score is None and vulnerabilities:
+                    sev_weights = {'critical': 4.0, 'high': 3.0, 'medium': 2.0, 'low': 1.0}
+                    weighted_total = 0.0
+                    for v in vulnerabilities:
+                        sev = ''
+                        if isinstance(v, dict):
+                            sev = str(v.get('severity') or v.get('level') or '').strip().lower()
+                        weighted_total += sev_weights.get(sev, 2.0)
+
+                    # Normalisation 0-100 (max théorique par vuln = 4.0).
+                    max_total = max(1.0, len(vulnerabilities) * 4.0)
+                    est_risk = min(100.0, max(0.0, (weighted_total / max_total) * 100.0))
+                    data['security_score'] = max(0.0, 100.0 - est_risk)
+
+                # Exposer une liste courte (HTML) pour les templates (top 3).
+                # But: rendre l'email concret, même si le prospect voit "beaucoup" de résultats.
                 if vulnerabilities:
-                    data['vulnerabilities_count'] = len(vulnerabilities) if isinstance(vulnerabilities, list) else 0
+                    top = []
+                    for v in vulnerabilities[:3]:
+                        if isinstance(v, dict):
+                            name = (v.get('name') or v.get('title') or v.get('type') or '').strip()
+                            sev = (v.get('severity') or v.get('level') or '').strip()
+                        else:
+                            name = str(v).strip()
+                            sev = ''
+                        if not name:
+                            continue
+                        if sev:
+                            top.append(f"<li><strong>{sev}</strong> - {name}</li>")
+                        else:
+                            top.append(f"<li>{name}</li>")
+                    if top:
+                        data['vulnerabilities_top'] = "\n".join(top)
+                        data['has_vulnerabilities_top'] = True
+
+                # Headers de sécurité (souvent ce que l'UI appelle "vulnérabilités")
+                security_headers = pentest_analysis.get('security_headers') or {}
+                missing_headers = []
+                if isinstance(security_headers, dict):
+                    for header_name, header_data in security_headers.items():
+                        status = None
+                        if isinstance(header_data, dict):
+                            status = header_data.get('status')
+                        elif isinstance(header_data, str):
+                            status = header_data
+                        if str(status).lower() == 'missing':
+                            missing_headers.append(str(header_name))
+
+                if missing_headers:
+                    data['security_headers_missing_count'] = len(missing_headers)
+                    top_missing = missing_headers[:3]
+                    data['security_headers_missing_top'] = "\n".join(f"<li>{h}</li>" for h in top_missing)
+                    data['has_security_headers_missing_top'] = True
+                    # Si aucune vulnérabilité "classique" n'est remontée,
+                    # utiliser le nombre de headers manquants comme compteur lisible.
+                    if not data.get('vulnerabilities_count'):
+                        data['vulnerabilities_count'] = len(missing_headers)
+
+            # Fallback : si la partie pentest ne remonte aucun résumé exploitable,
+            # on affiche les "points sécurité" calculés côté analyse technique.
+            if (
+                data.get('security_issues_top')
+                and not data.get('has_vulnerabilities_top')
+                and not data.get('has_security_headers_missing_top')
+            ):
+                data['show_security_issues_fallback'] = True
             
             # Données de scraping (prendre le scraper le plus récent)
             scrapers = scraper_manager.get_scrapers_by_entreprise(entreprise_id)
@@ -861,9 +943,27 @@ class TemplateManager:
         # Formater le nom : contact > responsable entreprise > Monsieur/Madame
         from utils.name_formatter import format_name
         formatted_nom = format_name(nom) if nom else None
+        hide_name_in_greeting = False
         if not formatted_nom or str(formatted_nom).strip() in ('', 'N/A'):
             formatted_nom = (extended_data.get('responsable') or '').strip() or None
-        if not formatted_nom:
+
+        # Nettoyage des noms génériques (ex: "info", "contact", "infos@", ...)
+        # Dans ce cas on préfère un "Bonjour," neutre plutôt qu'un faux prénom.
+        generic_name_tokens = {
+            'info', 'infos', 'contact', 'contacts', 'hello', 'bonjour', 'support',
+            'sav', 'admin', 'administration', 'commercial', 'sales', 'service',
+            'secretariat', 'secrétariat', 'accueil', 'office', 'team', 'equipe', 'équipe',
+        }
+        if formatted_nom and isinstance(formatted_nom, str):
+            normalized_nom = formatted_nom.strip().lower()
+            normalized_nom = re.sub(r'[^a-z0-9@._+\- ]+', ' ', normalized_nom)
+            normalized_nom = re.sub(r'\s+', ' ', normalized_nom).strip()
+            local_part = normalized_nom.split('@')[0] if '@' in normalized_nom else normalized_nom
+            if local_part in generic_name_tokens:
+                formatted_nom = ''
+                hide_name_in_greeting = True
+
+        if not formatted_nom and not hide_name_in_greeting:
             formatted_nom = 'Monsieur/Madame'
         
         # Base URL pour les images (hero.webp, etc.) et liens
@@ -916,6 +1016,10 @@ class TemplateManager:
             'dc_contact_url': dc_contact_url,
             **extended_flat
         }
+        # Aliases booléens pour les conditionnels {#if_security} / {#if_performance}
+        # qui sont ensuite traités par le moteur générique {#if_<xxx>}.
+        variables['security'] = variables.get('security_score') is not None
+        variables['performance'] = variables.get('performance_score') is not None
         
         # Remplacer les conditions {#if_xxx} ... {#endif}
         # Compat: certains templates utilisent {{var}} et {{#if_x}} ... {{#endif}}.
@@ -1002,6 +1106,27 @@ class TemplateManager:
         # Nettoyer les marqueurs de condition restants
         content = re.sub(r'\{#if_\w+\}', '', content)
         content = re.sub(r'\{#endif\}', '', content)
+
+        # Correction legacy: certains anciens contenus HTML en BDD contiennent déjà
+        # une URL d'exemple vers /analyse?website=https://exemple.com...
+        # On la remplace dynamiquement par l'analysis_url calculée pour l'entreprise.
+        try:
+            if isinstance(content, str) and analysis_url:
+                # Version non-encodée
+                content = content.replace(
+                    "https://danielcraft.fr/analyse?website=https://exemple.com&full=1",
+                    analysis_url,
+                )
+                # Version encodée dans une query de tracking éventuelle
+                legacy_encoded = quote("https://exemple.com", safe='')
+                if legacy_encoded in content:
+                    content = content.replace(
+                        f"https://danielcraft.fr/analyse?website={legacy_encoded}&full=1",
+                        analysis_url,
+                    )
+        except Exception:
+            # Ne jamais casser le rendu pour un simple remplacement.
+            pass
         
         # Remplacer toutes les variables avec gestion des valeurs manquantes
         try:
@@ -1026,6 +1151,16 @@ class TemplateManager:
                 content = content.format(**{k: str(v) if v is not None else '' for k, v in variables.items()})
             except:
                 pass
+
+        # Nettoyage post-rendu: si {nom} est vide/générique dans certains templates,
+        # éviter "Bonjour <strong></strong>," / "Bonjour ,".
+        try:
+            if isinstance(content, str):
+                content = re.sub(r'Bonjour\s*<strong>\s*</strong>\s*,', 'Bonjour,', content, flags=re.IGNORECASE)
+                content = re.sub(r'Bonjour\s+,', 'Bonjour,', content, flags=re.IGNORECASE)
+                content = re.sub(r'Bonjour\s+<strong>\s*</strong>', 'Bonjour', content, flags=re.IGNORECASE)
+        except Exception:
+            pass
 
         # Liens danielcraft.fr : corriger /contact (404 SPA) + email= avant #fragment
         try:
