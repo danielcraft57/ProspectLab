@@ -17,6 +17,7 @@ L’application mobile (**Expo / React Native**) consomme l’**[API publique](.
 | [**UX / UI**](UX_UI.md) | Graphiques, thème |
 | [**Navigation & headers**](NAVIGATION_ET_HEADERS.md) | Retour, titres dynamiques, tab bar, deep links (HIG / Material) |
 | [**Workflow dev**](DEV_WORKFLOW.md) | Prérequis, commandes Expo |
+| [**Release 1.4.3**](RELEASE_1.4.3.md) | Synthèse carte OSM, fiche enrichie, correctifs Android |
 
 Retour : [Index général de la documentation](../INDEX.md).
 

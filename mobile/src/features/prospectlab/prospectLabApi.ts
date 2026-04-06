@@ -29,6 +29,18 @@ export type ProspectLabCampagnesResponse = {
   error?: string;
 };
 
+export type ProspectLabNearbyEntreprisesResponse = {
+  success: boolean;
+  count: number;
+  latitude: number;
+  longitude: number;
+  rayon_km: number;
+  limit: number;
+  secteur?: string | null;
+  data: Array<Record<string, unknown>>;
+  error?: string;
+};
+
 export type { CacheRequestOptions };
 
 const TTL = {
@@ -166,6 +178,37 @@ export class ProspectLabApi {
     );
   }
 
+  /** Villes (presets Grand Est) + effectif BDD dans un rayon — tri par importance (count). */
+  static async getReferenceCarteVilles(
+    token: string,
+    params?: { rayonKm?: number },
+    cache?: CacheRequestOptions,
+  ) {
+    const q = new URLSearchParams();
+    if (params?.rayonKm != null) q.set('rayon_km', String(params.rayonKm));
+    const qs = q.toString();
+    const url = publicUrl(`/reference/carte-villes${qs ? `?${qs}` : ''}`);
+    return fetchJsonCached(
+      prospectLabCacheKey(token, url),
+      TTL.reference,
+      () =>
+        fetchJson<{
+          success?: boolean;
+          rayon_km?: number;
+          count?: number;
+          data?: Array<{
+            label: string;
+            latitude: number;
+            longitude: number;
+            count?: number;
+            region?: string;
+            department?: string;
+          }>;
+        }>(url, { headers: bearerHeaders(token) }),
+      cache,
+    );
+  }
+
   static async getCampagneStatuses(token: string, cache?: CacheRequestOptions) {
     const url = publicUrl('/campagnes/statuses');
     return fetchJsonCached(
@@ -212,6 +255,29 @@ export class ProspectLabApi {
       TTL.list,
       () =>
         fetchJson<ProspectLabEntreprisesResponse>(url, {
+          headers: bearerHeaders(token),
+        }),
+      cache,
+    );
+  }
+
+  static async listNearbyEntreprises(
+    token: string,
+    params: { latitude: number; longitude: number; rayonKm?: number; limit?: number; secteur?: string },
+    cache?: CacheRequestOptions,
+  ) {
+    const q = new URLSearchParams();
+    q.set('latitude', String(params.latitude));
+    q.set('longitude', String(params.longitude));
+    q.set('rayon_km', String(params.rayonKm ?? 10));
+    q.set('limit', String(params.limit ?? 120));
+    if (params.secteur) q.set('secteur', params.secteur);
+    const url = publicUrl(`/entreprises/proches?${q.toString()}`);
+    return fetchJsonCached(
+      prospectLabCacheKey(token, url),
+      TTL.lookup,
+      () =>
+        fetchJson<ProspectLabNearbyEntreprisesResponse>(url, {
           headers: bearerHeaders(token),
         }),
       cache,
@@ -335,6 +401,20 @@ export class ProspectLabApi {
       TTL.lookup,
       () =>
         fetchJson<any>(url, {
+          headers: bearerHeaders(token),
+        }),
+      cache,
+    );
+  }
+
+  /** Images scrapées + OpenGraph (+ champs og_image/logo côté agrégation DB). */
+  static async getEntrepriseGallery(token: string, entrepriseId: number, cache?: CacheRequestOptions) {
+    const url = publicUrl(`/entreprises/${entrepriseId}/gallery`);
+    return fetchJsonCached(
+      prospectLabCacheKey(token, url),
+      TTL.list,
+      () =>
+        fetchJson<{ success?: boolean; data?: { images?: Array<Record<string, unknown>>; count?: number } }>(url, {
           headers: bearerHeaders(token),
         }),
       cache,

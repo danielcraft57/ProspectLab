@@ -579,6 +579,62 @@ def get_entreprises():
         }), 500
 
 
+@api_public_bp.route('/entreprises/proches', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+@public_response_cache(15)
+def get_entreprises_proches():
+    """
+    API publique : entreprises proches d'un point GPS (données ProspectLab, pas OSM).
+
+    Query params:
+        latitude (float, requis)
+        longitude (float, requis)
+        rayon_km | radius_km (float, optionnel, défaut 10, max 100)
+        limit (int, optionnel, défaut 80, max 250)
+        secteur (str, optionnel)
+    """
+    try:
+        latitude_raw = request.args.get('latitude')
+        longitude_raw = request.args.get('longitude')
+        if latitude_raw in (None, '') or longitude_raw in (None, ''):
+            return jsonify({'success': False, 'error': 'Paramètres "latitude" et "longitude" requis.'}), 400
+
+        latitude = float(latitude_raw)
+        longitude = float(longitude_raw)
+        radius_raw = request.args.get('rayon_km', request.args.get('radius_km', '10'))
+        limit_raw = request.args.get('limit', '80')
+        secteur = (request.args.get('secteur') or '').strip() or None
+
+        rayon_km = max(0.2, min(float(radius_raw), 100.0))
+        limit = max(1, min(int(limit_raw), 250))
+
+        entreprises = database.get_nearby_entreprises(
+            latitude=latitude,
+            longitude=longitude,
+            radius_km=rayon_km,
+            secteur=secteur,
+            limit=limit,
+        ) or []
+
+        from utils.helpers import clean_json_dict
+        entreprises = clean_json_dict(entreprises)
+        return jsonify({
+            'success': True,
+            'count': len(entreprises),
+            'latitude': latitude,
+            'longitude': longitude,
+            'rayon_km': rayon_km,
+            'limit': limit,
+            'secteur': secteur,
+            'data': entreprises,
+        })
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Coordonnées invalides.'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @api_public_bp.route('/entreprises/statuses', methods=['GET'])
 @api_token_required
 @require_api_permission('entreprises')
@@ -788,6 +844,58 @@ def get_entreprise(entreprise_id):
             'success': False,
             'error': str(e)
         }), 500
+
+
+@api_public_bp.route('/entreprises/<int:entreprise_id>/gallery', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+@public_response_cache(45)
+def get_entreprise_gallery_public(entreprise_id: int):
+    """
+    API publique : images liées à la fiche (scraping + OpenGraph + champs og_image/logo).
+
+    Utile pour la galerie mobile (carte, fiche légère) sans charger tout le rapport website-analysis.
+    """
+    try:
+        entreprise = database.get_entreprise(entreprise_id)
+        if not entreprise:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable'}), 404
+
+        raw = database.get_images_by_entreprise(entreprise_id) or []
+        seen: set[str] = set()
+        items: list[dict] = []
+
+        def push(url: str | None, alt_text: str | None = None, source: str | None = None, page_url: str | None = None):
+            if not url or not isinstance(url, str):
+                return
+            u = url.strip()
+            if not u or u in seen:
+                return
+            seen.add(u)
+            items.append({
+                'url': u,
+                'alt_text': alt_text,
+                'source': source,
+                'page_url': page_url,
+            })
+
+        for img in raw[:80]:
+            if not isinstance(img, dict):
+                continue
+            push(
+                img.get('url') or img.get('secure_url'),
+                img.get('alt_text'),
+                img.get('source'),
+                img.get('page_url'),
+            )
+
+        from utils.helpers import clean_json_dict
+        return jsonify({
+            'success': True,
+            'data': clean_json_dict({'images': items, 'count': len(items)}),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @api_public_bp.route('/entreprises/by-email', methods=['GET'])
@@ -1287,6 +1395,58 @@ def public_reference_ciblage_counts():
         data = database.get_ciblage_suggestions_with_counts()
         from utils.helpers import clean_json_dict
         return jsonify({'success': True, 'data': clean_json_dict(data)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@api_public_bp.route('/reference/carte-villes', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+@public_response_cache(120)
+def public_reference_carte_villes():
+    """
+    API publique : villes (presets Grand Est / scripts) avec nombre d'entreprises géolocalisées dans un rayon.
+
+    Query params:
+        rayon_km (float, optionnel) : rayon autour du centre-ville pour compter les fiches (defaut 25, max 80).
+    """
+    try:
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+        path = root / 'scripts' / 'google_maps_tools' / 'presets_grand_est.json'
+        with open(path, encoding='utf-8') as f:
+            raw = json.load(f)
+        presets = raw.get('presets') or []
+        try:
+            radius = float(request.args.get('rayon_km', '25'))
+        except ValueError:
+            radius = 25.0
+        radius = max(5.0, min(radius, 80.0))
+
+        out: list[dict] = []
+        for p in presets:
+            if not isinstance(p, dict):
+                continue
+            city = (p.get('city') or '').strip()
+            if not city:
+                continue
+            try:
+                lat = float(p['lat'])
+                lng = float(p['lng'])
+            except (TypeError, ValueError, KeyError):
+                continue
+            n = database.count_nearby_entreprises(lat, lng, radius_km=radius)
+            out.append({
+                'label': city,
+                'region': p.get('region'),
+                'department': p.get('department'),
+                'latitude': lat,
+                'longitude': lng,
+                'count': n,
+            })
+
+        out.sort(key=lambda x: (-int(x.get('count') or 0), str(x.get('label') or '').lower()))
+        return jsonify({'success': True, 'rayon_km': radius, 'count': len(out), 'data': out})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 

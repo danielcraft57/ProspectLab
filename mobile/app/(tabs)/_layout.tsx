@@ -74,6 +74,13 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="carte"
+        options={{
+          title: 'Carte',
+          tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name="map-marker-radius-outline" size={size} color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="token-ocr"
         options={{
           href: null,
@@ -90,6 +97,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="settings"
         options={{
+          href: null,
           title: 'Reglages',
           tabBarIcon: ({ color, size }) => <FontAwesome6 name="gear" size={size} color={color} />,
         }}

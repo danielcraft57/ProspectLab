@@ -7,6 +7,7 @@ import type {
   DashboardCachePayload,
   EntrepriseDetailCachePayload,
   EntreprisesListCachePayload,
+  MapNearbyCachePayload,
 } from './cacheTypes';
 import { readCacheEntry, writeCacheEntry } from './appCacheStore';
 
@@ -151,4 +152,45 @@ export async function writeCampagneDetailCache(
 
 export function campagneDetailCacheIsStale(updatedAt: number): boolean {
   return isStale(updatedAt, CacheScope.CAMPAGNE_DETAIL);
+}
+
+/** Carte : entreprises proches (JSON dans cache_entry, scope MAP_NEARBY). */
+export function buildMapNearbyCacheKey(params: {
+  latitude: number;
+  longitude: number;
+  radiusKm: number;
+  secteur?: string;
+}): string {
+  const latCell = Number(params.latitude.toFixed(2));
+  const lngCell = Number(params.longitude.toFixed(2));
+  return JSON.stringify({
+    v: 2,
+    lat: latCell,
+    lng: lngCell,
+    r: Number(params.radiusKm.toFixed(1)),
+    s: params.secteur ?? '',
+  });
+}
+
+export async function readMapNearbyCache(
+  cacheKey: string,
+): Promise<{ items: unknown[]; updatedAt: number } | null> {
+  const row = await readCacheEntry(CacheScope.MAP_NEARBY, cacheKey);
+  if (!row) return null;
+  try {
+    const body = JSON.parse(row.payload) as MapNearbyCachePayload;
+    if (body?.v !== 2) return null;
+    return { items: body.items ?? [], updatedAt: row.updatedAt };
+  } catch {
+    return null;
+  }
+}
+
+export async function writeMapNearbyCache(cacheKey: string, items: unknown[]): Promise<void> {
+  const body: MapNearbyCachePayload = { v: 2, items };
+  await writeCacheEntry(CacheScope.MAP_NEARBY, cacheKey, JSON.stringify(body));
+}
+
+export function mapNearbyCacheIsStale(updatedAt: number): boolean {
+  return isStale(updatedAt, CacheScope.MAP_NEARBY);
 }

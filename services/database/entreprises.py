@@ -1629,7 +1629,38 @@ class EntrepriseManager(DatabaseBase):
             entreprises.append(entreprise)
         
         return entreprises
-    
+
+    def count_nearby_entreprises(self, latitude, longitude, radius_km=10, secteur=None):
+        """Nombre d'entreprises avec coordonnées dans un rayon (Haversine), sans limite autre que le rayon."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        haversine_where = '''
+            longitude IS NOT NULL
+            AND latitude IS NOT NULL
+            AND (
+                6371 * acos(
+                    cos(radians(?)) * cos(radians(latitude)) *
+                    cos(radians(longitude) - radians(?)) +
+                    sin(radians(?)) * sin(radians(latitude))
+                )
+            ) <= ?
+        '''
+        params: list = [latitude, longitude, latitude, radius_km]
+        if secteur:
+            q = f'SELECT COUNT(*) AS n FROM entreprises WHERE {haversine_where} AND secteur = ?'
+            params.append(secteur)
+        else:
+            q = f'SELECT COUNT(*) AS n FROM entreprises WHERE {haversine_where}'
+        self.execute_sql(cursor, q, tuple(params))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return 0
+        try:
+            return int(row['n'] if isinstance(row, dict) else row[0])
+        except (TypeError, ValueError, KeyError, IndexError):
+            return 0
+
     def get_entreprises_by_secteur_nearby(self, secteur, latitude, longitude, radius_km=10, limit=50):
         """
         Trouve les entreprises d'un secteur spécifique proches d'un point

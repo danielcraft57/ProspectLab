@@ -1,4 +1,4 @@
-import { DETAIL_LRU_MAX, MAX_CACHE_BYTES_SOFT } from './cachePolicy';
+import { MAX_CACHE_BYTES_SOFT, SCOPE_LRU_MAX } from './cachePolicy';
 import { CacheScope, type CacheScopeValue } from './cacheScopes';
 import { getAppCacheDb } from './appCacheDb';
 
@@ -9,6 +9,8 @@ export type CacheRowMeta = {
 };
 
 const DETAIL_SCOPES: CacheScopeValue[] = [CacheScope.ENTREPRISE_DETAIL, CacheScope.CAMPAGNE_DETAIL];
+
+const MAP_NEARBY_PRUNE_MS = 5 * 24 * 60 * 60 * 1000;
 
 export async function readCacheEntry(scope: CacheScopeValue, cacheKey: string): Promise<CacheRowMeta | null> {
   const db = await getAppCacheDb();
@@ -43,9 +45,9 @@ export async function writeCacheEntry(scope: CacheScopeValue, cacheKey: string, 
      VALUES (?, ?, ?, ?, ?, ?)`,
     [scope, cacheKey, payload, now, now, byteLength],
   );
-  const lruCap = DETAIL_LRU_MAX[scope];
+  const lruCap = SCOPE_LRU_MAX[scope];
   if (typeof lruCap === 'number') {
-    await trimDetailScopeLru(scope, lruCap);
+    await trimScopeLru(scope, lruCap);
   }
   await trimSoftBudget();
 }
@@ -55,7 +57,7 @@ export async function deleteCacheEntry(scope: CacheScopeValue, cacheKey: string)
   await db.runAsync(`DELETE FROM cache_entry WHERE scope = ? AND cache_key = ?`, [scope, cacheKey]);
 }
 
-async function trimDetailScopeLru(scope: CacheScopeValue, maxKeep: number): Promise<void> {
+async function trimScopeLru(scope: CacheScopeValue, maxKeep: number): Promise<void> {
   const db = await getAppCacheDb();
   const rows = await db.getAllAsync<{ cache_key: string }>(
     `SELECT cache_key FROM cache_entry WHERE scope = ? ORDER BY last_accessed_at DESC`,
@@ -106,7 +108,16 @@ export async function pruneExpiredLooseEntries(ttlMs: number): Promise<void> {
   );
 }
 
+export async function pruneExpiredMapNearbyEntries(): Promise<void> {
+  const db = await getAppCacheDb();
+  const cutoff = Date.now() - MAP_NEARBY_PRUNE_MS;
+  await db.runAsync(`DELETE FROM cache_entry WHERE scope = ? AND updated_at < ?`, [CacheScope.MAP_NEARBY, cutoff]);
+}
+
 export async function runAppCacheMaintenance(): Promise<void> {
   await pruneExpiredLooseEntries(7 * 24 * 60 * 60 * 1000);
+  await pruneExpiredMapNearbyEntries();
+  const { runOsmTileCacheMaintenance } = await import('../map/osmTileFileCache');
+  await runOsmTileCacheMaintenance();
   await trimSoftBudget();
 }

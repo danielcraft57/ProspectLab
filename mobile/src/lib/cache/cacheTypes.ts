@@ -37,3 +37,12 @@ export type DashboardCachePayload = {
   v: 1;
   stats: StatisticsOverviewData | null;
 };
+
+/** Cache SWR des entreprises « proches » (API /entreprises/proches). */
+export type MapNearbyCachePayload = {
+  v: 2;
+  items: unknown[];
+  /** Centre utilisé pour l’appel (après quantification de clé). */
+  queryCenter?: { lat: number; lng: number };
+  radiusKm?: number;
+};
