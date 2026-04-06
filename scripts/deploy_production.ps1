@@ -15,11 +15,32 @@ param(
     [string]$ProxyServer = '',
     
     [Parameter(Mandatory=$false)]
-    [string]$ProxyUser = 'deploy'
+    [string]$ProxyUser = 'deploy',
+
+    [Parameter(Mandatory=$false)]
+    [switch]$SkipNfsClient
 )
 # Usage: .\deploy_production.ps1 -Server serveur-app.lan -User deploy -ProxyServer serveur-proxy.lan -ProxyUser deploy
 
 $ErrorActionPreference = 'Stop'
+
+function Get-DotEnvValue {
+    param(
+        [Parameter(Mandatory = $true)] [string] $FilePath,
+        [Parameter(Mandatory = $true)] [string] $Key
+    )
+    if (-not (Test-Path -LiteralPath $FilePath)) { return '' }
+    $prefix = $Key + '='
+    foreach ($raw in Get-Content -LiteralPath $FilePath) {
+        $line = $raw.Trim()
+        if ($line.StartsWith('#')) { continue }
+        if ($line -eq '') { continue }
+        if ($line.StartsWith($prefix)) {
+            return $line.Substring($prefix.Length).Trim()
+        }
+    }
+    return ''
+}
 
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "Déploiement ProspectLab en production" -ForegroundColor Cyan
@@ -121,7 +142,7 @@ $excludePatterns = @(
     'deploy',
     'logs',
     'logs_server',
-    '.cursorrules'
+    # (pas de fichiers de config editor/IA)
 )
 
 # Exclure par nom de dossier pour deploy/logs (éviter de matcher le chemin .../deploy/...)
@@ -239,6 +260,72 @@ foreach ($dir in $dirsToSync) {
 Write-Host "✅ Dossiers synchronisés (routes, services, tasks, templates, static, utils, scripts)" -ForegroundColor Green
 Write-Host ""
 
+# Montage NFS (uploads + exports partagés) si NFS_SERVER est dans .env.prod — voir docs/configuration/DEPLOIEMENT_PRODUCTION.md
+# Sur la même machine que le stockage : UPLOAD_FOLDER=/srv/nfs/prospectlab/uploads + NFS_SKIP_CLIENT_MOUNT=true
+if (-not $SkipNfsClient) {
+    $envProdForNfs = Join-Path $PROJECT_DIR '.env.prod'
+    $nfsSkipMountRaw = Get-DotEnvValue -FilePath $envProdForNfs -Key 'NFS_SKIP_CLIENT_MOUNT'
+    $nfsSkipClientMount = $false
+    if (-not [string]::IsNullOrWhiteSpace($nfsSkipMountRaw)) {
+        $tskip = $nfsSkipMountRaw.Trim().ToLowerInvariant()
+        $nfsSkipClientMount = @('1', 'true', 'yes', 'on') -contains $tskip
+    }
+    if ($nfsSkipClientMount) {
+        Write-Host "[5b/9] Montage NFS client ignoré (NFS_SKIP_CLIENT_MOUNT dans .env.prod)." -ForegroundColor DarkYellow
+        Write-Host "   Utilise des chemins directs vers l'export (ex. /srv/nfs/prospectlab/uploads) sur ce nœud." -ForegroundColor Gray
+        Write-Host ""
+    }
+    $nfsServerDeploy = Get-DotEnvValue -FilePath $envProdForNfs -Key 'NFS_SERVER'
+    $nfsExportRootDeploy = Get-DotEnvValue -FilePath $envProdForNfs -Key 'NFS_EXPORT_ROOT'
+    if ([string]::IsNullOrWhiteSpace($nfsExportRootDeploy)) {
+        $nfsExportRootDeploy = '/srv/nfs/prospectlab'
+    }
+    if (-not $nfsSkipClientMount -and -not [string]::IsNullOrWhiteSpace($nfsServerDeploy)) {
+        $nfsAutoStashRaw = Get-DotEnvValue -FilePath $envProdForNfs -Key 'NFS_AUTO_STASH'
+        if ([string]::IsNullOrWhiteSpace($nfsAutoStashRaw)) {
+            $nfsAutoStashVal = '1'
+        } else {
+            $nfsAutoStashNorm = $nfsAutoStashRaw.Trim().ToLowerInvariant()
+            if (@('0', 'false', 'no', 'off') -contains $nfsAutoStashNorm) {
+                $nfsAutoStashVal = '0'
+            } else {
+                $nfsAutoStashVal = '1'
+            }
+        }
+        Write-Host "[5b/9] Montage NFS client (serveur $nfsServerDeploy, NFS_AUTO_STASH=$nfsAutoStashVal)..." -ForegroundColor Yellow
+        $nfsClientScript = "$RemotePath/scripts/linux/setup_nfs_client_prospectlab.sh"
+        $nfsClientOut = ssh "$User@$Server" "sudo env REMOTE_PATH=$RemotePath NFS_SERVER=$nfsServerDeploy NFS_EXPORT_ROOT=$nfsExportRootDeploy NFS_AUTO_STASH=$nfsAutoStashVal bash $nfsClientScript" 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Échec montage NFS client sur le serveur app" -ForegroundColor Red
+            Write-Host $nfsClientOut -ForegroundColor Gray
+            exit 1
+        }
+        Write-Host "Montage NFS OK (${RemotePath}/uploads et exports)" -ForegroundColor Green
+        Write-Host ""
+    }
+}
+
+# Déployer .env.prod local → .env sur le serveur
+Write-Host "[5.5/9] Envoi de .env.prod vers le serveur (copie en .env)..." -ForegroundColor Yellow
+$envProdLocal = Join-Path $PROJECT_DIR '.env.prod'
+if (Test-Path -LiteralPath $envProdLocal -PathType Leaf) {
+    scp $envProdLocal "$User@$Server`:$RemotePath/.env.prod" 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "❌ Erreur lors de l'envoi de .env.prod" -ForegroundColor Red
+        exit 1
+    }
+    ssh "$User@$Server" "cd $RemotePath && cp -f .env.prod .env && chmod 600 .env .env.prod" 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "❌ Erreur lors de la copie .env.prod → .env sur le serveur" -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "✅ .env mis à jour sur $RemotePath (depuis .env.prod)" -ForegroundColor Green
+} else {
+    Write-Host "⚠️  Fichier .env.prod introuvable à la racine du projet : $envProdLocal" -ForegroundColor Yellow
+    Write-Host "   Le .env existant sur le serveur n'a pas été modifié." -ForegroundColor Gray
+}
+Write-Host ""
+
 # Créer ou mettre à jour l'environnement Conda sur le serveur (prefix = env)
 Write-Host "[6/9] Configuration de l'environnement Conda..." -ForegroundColor Yellow
 $condaOutput = ssh "$User@$Server" "set -e; source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/anaconda3/etc/profile.d/conda.sh; cd $RemotePath; if [ ! -d env ]; then conda create --prefix $RemotePath/env python=3.11 -y --override-channels -c conda-forge; fi; $RemotePath/env/bin/pip install --upgrade pip setuptools wheel; $RemotePath/env/bin/pip install -r requirements.txt" 2>&1
@@ -270,8 +357,8 @@ if ($LASTEXITCODE -eq 0) { Write-Host "✅ Services systemd mis à jour" -Foregr
 Write-Host ""
 
 # Nettoyage du cache et redémarrage des services
-Write-Host "[8/9] Nettoyage du cache et redémarrage des services..." -ForegroundColor Yellow
-ssh "$User@$Server" "cd $RemotePath && if [ -x scripts/clear-cache.sh ]; then ./scripts/clear-cache.sh; fi" | Out-Null
+Write-Host "[8/9] Nettoyage Redis/Logs et redémarrage des services..." -ForegroundColor Yellow
+ssh "$User@$Server" "cd $RemotePath && if [ -x scripts/linux/clear-redis.sh ]; then ./scripts/linux/clear-redis.sh; fi && if [ -x scripts/linux/clear-logs.sh ]; then ./scripts/linux/clear-logs.sh; fi" | Out-Null
 ssh "$User@$Server" "sudo systemctl restart prospectlab prospectlab-celery prospectlab-celerybeat" | Out-Null
 Write-Host "✅ Cache vidé et services redémarrés" -ForegroundColor Green
 Write-Host ""
@@ -307,12 +394,10 @@ if ($ProxyServer) {
 Write-Host "[9/9] Déploiement terminé !" -ForegroundColor Green
 Write-Host ""
 Write-Host "Prochaines étapes:" -ForegroundColor Cyan
-Write-Host "1. Connectez-vous au serveur de production" -ForegroundColor Yellow
-Write-Host "2. Allez dans le répertoire de déploiement" -ForegroundColor Yellow
-Write-Host "3. Configurez le fichier .env avec vos paramètres de production" -ForegroundColor Yellow
-Write-Host "4. Environnement Conda: $RemotePath/env" -ForegroundColor Yellow
-Write-Host "5. Initialisez la base de données si nécessaire" -ForegroundColor Yellow
-Write-Host "6. Démarrez l'application (Gunicorn) ou vérifiez les services systemd" -ForegroundColor Yellow
+Write-Host "1. Si .env.prod était présent localement, .env a été mis à jour sur le serveur (sinon éditez $RemotePath/.env à la main)." -ForegroundColor Yellow
+Write-Host "2. Environnement Conda: $RemotePath/env" -ForegroundColor Yellow
+Write-Host "3. Initialisez la base de données si nécessaire" -ForegroundColor Yellow
+Write-Host "4. Les services systemd ont été redémarrés en fin de script" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "Pour plus d'informations, consultez:" -ForegroundColor Cyan
 Write-Host "  docs/configuration/DEPLOIEMENT_PRODUCTION.md" -ForegroundColor Gray

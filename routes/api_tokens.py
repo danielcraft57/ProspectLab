@@ -54,7 +54,8 @@ def create_token():
         can_read_entreprises (bool): Permission de lire les entreprises (défaut: true)
         can_read_emails (bool): Permission de lire les emails (défaut: true)
         can_read_statistics (bool): Permission de lire les statistiques (défaut: true)
-        
+        can_delete_entreprises (bool): Permission de supprimer des fiches via DELETE /api/public/entreprises/<id> (défaut: false ; ignoré si can_read_entreprises est false)
+
     Returns:
         JSON: Token créé avec son token complet (à sauvegarder immédiatement)
     """
@@ -102,7 +103,8 @@ def create_token():
         can_read_emails = data.get('can_read_emails', True)
         can_read_statistics = data.get('can_read_statistics', True)
         can_read_campagnes = data.get('can_read_campagnes', True)
-        
+        can_delete_entreprises = bool(data.get('can_delete_entreprises')) and bool(can_read_entreprises)
+
         token_manager = APITokenManager()
         token_data = token_manager.create_token(
             name=name,
@@ -111,7 +113,8 @@ def create_token():
             can_read_entreprises=can_read_entreprises,
             can_read_emails=can_read_emails,
             can_read_statistics=can_read_statistics,
-            can_read_campagnes=can_read_campagnes
+            can_read_campagnes=can_read_campagnes,
+            can_delete_entreprises=can_delete_entreprises,
         )
         
         return jsonify({
@@ -129,6 +132,48 @@ def create_token():
             'error': str(e),
             'trace': error_trace if app.debug else None
         }), 500
+
+
+@api_tokens_bp.route('/<int:token_id>', methods=['PATCH'])
+@login_required
+@admin_required
+def patch_token_permissions(token_id: int):
+    """
+    Met à jour les permissions d'un token existant (admin).
+
+    Body JSON : champs optionnels parmi
+    can_read_entreprises, can_read_emails, can_read_statistics,
+    can_read_campagnes, can_delete_entreprises (bool).
+    Si can_read_entreprises passe à false, la suppression entreprise est désactivée.
+    """
+    try:
+        if not request.is_json:
+            return jsonify({'success': False, 'error': 'Content-Type doit être application/json'}), 400
+
+        data = request.get_json() or {}
+        allowed = (
+            'can_read_entreprises',
+            'can_read_emails',
+            'can_read_statistics',
+            'can_read_campagnes',
+            'can_delete_entreprises',
+        )
+        updates = {k: data[k] for k in allowed if k in data}
+        if not updates:
+            return jsonify({'success': False, 'error': 'Aucune permission reconnue dans le corps JSON.'}), 400
+
+        token_manager = APITokenManager()
+        updated = token_manager.update_token_permissions(token_id, updates)
+        if not updated:
+            return jsonify({'success': False, 'error': 'Token introuvable'}), 404
+
+        return jsonify({
+            'success': True,
+            'message': 'Permissions mises à jour.',
+            'data': updated,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @api_tokens_bp.route('/<int:token_id>', methods=['DELETE'])
@@ -197,4 +242,58 @@ def delete_token(token_id):
             'success': False,
             'error': str(e)
         }), 500
+
+
+@api_tokens_bp.route('/<int:token_id>/reveal', methods=['GET'])
+@login_required
+@admin_required
+def reveal_token(token_id: int):
+    """
+    Retourne le token complet pour un token existant (admin uniquement).
+
+    Objectif UX: permettre l'affichage dans une modale "Voir token" sans exposer
+    tous les secrets dans la liste par défaut.
+    """
+    try:
+        token_manager = APITokenManager()
+        tokens = token_manager.list_tokens(user_id=None)
+        target = next((t for t in tokens if t.get('id') == token_id), None)
+        if not target:
+            return jsonify({'success': False, 'error': 'Token introuvable'}), 404
+
+        # Recharger depuis la DB sans masquage
+        conn = token_manager.db.get_connection()
+        cursor = conn.cursor()
+        token_manager.db.execute_sql(
+            cursor,
+            '''
+            SELECT id, token, name, app_url, user_id, is_active,
+                   can_read_entreprises, can_read_emails, can_read_statistics, can_read_campagnes,
+                   can_delete_entreprises,
+                   date_creation, last_used
+            FROM api_tokens
+            WHERE id = ?
+            ''',
+            (token_id,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return jsonify({'success': False, 'error': 'Token introuvable'}), 404
+
+        d = dict(row)
+        return jsonify(
+            {
+                'success': True,
+                'data': {
+                    'id': d.get('id'),
+                    'token': d.get('token'),
+                    'app_url': d.get('app_url'),
+                    'name': d.get('name'),
+                    'is_active': bool(d.get('is_active', 0)),
+                },
+            }
+        )
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 

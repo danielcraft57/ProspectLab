@@ -1,18 +1,18 @@
 param(
     [Parameter(Mandatory=$false)]
-    [string]$Server = 'node13.lan',
+    [string]$Server = 'worker1.lan',
 
     [Parameter(Mandatory=$false)]
-    [string]$User = 'pi',
+    [string]$User = 'deploy',
 
     [Parameter(Mandatory=$false)]
     [string]$RemotePath = '/opt/prospectlab',
 
     [Parameter(Mandatory=$false)]
-    [string]$MasterServer = 'node15.lan',
+    [string]$MasterServer = 'master.lan',
 
     [Parameter(Mandatory=$false)]
-    [string]$MasterUser = 'pi',
+    [string]$MasterUser = 'deploy',
 
     [Parameter(Mandatory=$false)]
     [string]$MasterRemotePath = '/opt/prospectlab'

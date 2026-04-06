@@ -7,6 +7,7 @@ Supporte SQLite (dev) et PostgreSQL (prod)
 import sqlite3
 import os
 import math
+import time
 from pathlib import Path
 from typing import Optional, Union, Any
 from urllib.parse import urlparse
@@ -84,10 +85,16 @@ class DatabaseBase:
         Returns:
             Connexion SQLite avec row_factory configuré
         """
-        conn = sqlite3.connect(str(self.db_path))
+        # Timeout explicite pour laisser le temps aux écritures concurrentes
+        # (Flask + workers Celery en dev SQLite).
+        conn = sqlite3.connect(str(self.db_path), timeout=30.0)
         conn.row_factory = sqlite3.Row
         # Activer les foreign keys pour que CASCADE fonctionne
         conn.execute('PRAGMA foreign_keys = ON')
+        # Réduire drastiquement les "database is locked" en multi-connexions.
+        conn.execute('PRAGMA busy_timeout = 30000')
+        conn.execute('PRAGMA journal_mode = WAL')
+        conn.execute('PRAGMA synchronous = NORMAL')
         return conn
     
     def _get_postgres_connection(self):
@@ -105,11 +112,26 @@ class DatabaseBase:
                 "psycopg2-binary n'est pas installé. "
                 "Installez-le avec: pip install psycopg2-binary"
             )
-        
-        conn = psycopg2.connect(self.database_url)
-        # Utiliser RealDictCursor pour avoir un comportement similaire à sqlite3.Row
-        conn.cursor_factory = RealDictCursor
-        return conn
+
+        # Réessais courts pour les pannes DNS/transitoires réseau du cluster
+        # (ex: "Temporary failure in name resolution" sur node15.lan).
+        retries = max(1, int(os.environ.get('DATABASE_CONNECT_RETRIES', '3')))
+        retry_delay = max(0.1, float(os.environ.get('DATABASE_CONNECT_RETRY_DELAY_SEC', '0.75')))
+        last_exc = None
+
+        for attempt in range(1, retries + 1):
+            try:
+                conn = psycopg2.connect(self.database_url)
+                # Utiliser RealDictCursor pour avoir un comportement similaire à sqlite3.Row
+                conn.cursor_factory = RealDictCursor
+                return conn
+            except Exception as exc:
+                last_exc = exc
+                if attempt >= retries:
+                    break
+                time.sleep(retry_delay)
+
+        raise last_exc
     
     def is_postgresql(self) -> bool:
         """
@@ -318,10 +340,22 @@ class DatabaseBase:
                         # Fallback générique
                         adapted_sql = re.sub(r'(\s*VALUES\s*\([^)]+\))', r'\1 ON CONFLICT DO UPDATE SET status = EXCLUDED.status', adapted_sql, flags=re.IGNORECASE)
         
-        if params:
-            cursor.execute(adapted_sql, params)
-        else:
-            cursor.execute(adapted_sql)
+        # Retry global sur SQLite quand la base est verrouillée.
+        # Centralisé ici pour éviter de dupliquer la logique dans chaque manager/task.
+        max_attempts = 4 if self.db_type == 'sqlite' else 1
+        for attempt in range(max_attempts):
+            try:
+                if params:
+                    cursor.execute(adapted_sql, params)
+                else:
+                    cursor.execute(adapted_sql)
+                return
+            except sqlite3.OperationalError as e:
+                err = str(e).lower()
+                if self.db_type == 'sqlite' and 'database is locked' in err and attempt < (max_attempts - 1):
+                    time.sleep(0.18 * (attempt + 1))
+                    continue
+                raise
     
     def execute(self, cursor, sql: str, params=None):
         """

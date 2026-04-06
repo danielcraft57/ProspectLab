@@ -148,11 +148,11 @@ def get_company_by_phone():
             """
             SELECT entreprise_id
             FROM scraper_phones
-            WHERE phone = ?
+            WHERE phone = ? OR phone_e164 = ?
             ORDER BY date_found DESC
             LIMIT 1
             """,
-            (phone,),
+            (phone, phone),
         )
         row = cursor.fetchone()
 

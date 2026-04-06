@@ -53,6 +53,21 @@ sudo sed -i '1i host    prospectlab    prospectlab    127.0.0.1/32    md5' /etc/
 sudo systemctl restart postgresql
 ```
 
+Si **PostgreSQL** tourne sur le même hôte que l’app mais que des **workers Celery** sur d’autres machines du LAN se connectent à la base (même `DATABASE_URL` pointant vers `node15.lan`), autorisez le sous-réseau dans `pg_hba.conf` (adaptez la version PostgreSQL et le chemin) :
+
+```bash
+echo 'host    prospectlab    prospectlab    192.168.1.0/24    scram-sha-256' | sudo tee -a /etc/postgresql/17/main/pg_hba.conf
+sudo systemctl reload postgresql
+```
+
+**`max_connections`** : chaque worker Celery en `--pool=threads` avec concurrence `N` peut ouvrir plusieurs connexions selon les tâches ; l’app Gunicorn en fait autant. Ordre de grandeur : `(workers_gunicorn × 2 à 5) + (nombre_de_processus_celery × CELERY_WORKERS × 1 à 3) + marge 10`. Si la somme approche la valeur par défaut (**100**), augmentez dans `postgresql.conf` :
+
+```conf
+max_connections = 150
+```
+
+Puis `sudo systemctl restart postgresql`. Sur matériel modeste (RPi), privilégiez moins de concurrence par worker et quelques nœuds supplémentaires plutôt qu’un seul worker à très forte concurrence.
+
 ### 1.3. Configuration Redis
 
 Vérifier que Redis est actif :
@@ -62,6 +77,66 @@ sudo systemctl enable redis-server
 sudo systemctl start redis-server
 redis-cli ping  # Doit répondre PONG
 ```
+
+#### Redis sur le LAN uniquement (ex. `utilisateur@serveur.lan`, sous-réseau `192.168.1.0/24`)
+
+Pour que le broker soit joignable par les **workers sur d’autres machines** du LAN, sans exposer le port sur Internet :
+
+1. Sur le serveur qui héberge Redis (ex. node15), exécuter le script (détection automatique de l’IP `192.168.1.x` ou `REDIS_BIND_IP` explicite) :
+
+```bash
+cd /opt/prospectlab
+sudo REDIS_LAN_CIDR=192.168.1.0/24 bash scripts/linux/configure_redis_lan_only.sh
+```
+
+Le script configure `bind 127.0.0.1 <IP_LAN>`, `protected-mode no` (le filtrage repose sur le **pare-feu**), et des règles **iptables** : acceptation de `127.0.0.1` et du CIDR sur le port 6379, puis refus du reste. Installez `iptables-persistent` / `netfilter-persistent` si vous voulez conserver les règles après reboot. Alternative : `UFW_MODE=1` avec `ufw` déjà configuré.
+
+2. Sur **tous** les clients (app + workers), aligner les URLs :
+
+```bash
+CELERY_BROKER_URL=redis://node15.lan:6379/1
+CELERY_RESULT_BACKEND=redis://node15.lan:6379/1
+```
+
+3. **Charge** : plus de workers Celery = plus de connexions simultanées à Redis et plus de mémoire broker. Sur Raspberry Pi, gardez `maxmemory` dans `redis.conf` (ex. 512 Mo) et surveillez `INFO memory`. Ajustez `CELERY_WORKERS` (concurrence par processus worker) plutôt que multiplier des dizaines de processus identiques sur le même nœud faible CPU.
+
+### 1.3.1. Stockage NFS partagé (uploads et exports)
+
+Quand l’application Gunicorn et les workers Celery sont sur des machines différentes, les dossiers pointés par `UPLOAD_FOLDER` et `EXPORT_FOLDER` doivent être **le même système de fichiers** (sinon un worker reçoit un chemin que seul le serveur app voit). Ici le stockage est sur **node15.lan** ; les clients montent deux sous-dossiers sous la racine application (ex. `/opt/prospectlab/uploads` et `/opt/prospectlab/exports`).
+
+**1) Une fois sur le serveur NFS (node15)** — adaptez le CIDR LAN :
+
+```bash
+cd /opt/prospectlab
+sudo LAN_CIDR=192.168.1.0/24 bash scripts/linux/setup_nfs_server_prospectlab.sh
+```
+
+Cela crée typiquement `/srv/nfs/prospectlab/uploads` et `.../exports` et les exporte.
+
+**2) Variables dans `.env.prod` et `.env.cluster` (ou `.env` sur chaque nœud)** — en plus de :
+
+```bash
+UPLOAD_FOLDER=/opt/prospectlab/uploads
+EXPORT_FOLDER=/opt/prospectlab/exports
+```
+
+ajoutez :
+
+```bash
+NFS_SERVER=node15.lan
+NFS_EXPORT_ROOT=/srv/nfs/prospectlab
+# Défaut lors du déploiement : migre automatiquement un ancien uploads/exports local vers le partage.
+# Mets false pour échouer si les dossiers ne sont pas vides (comportement strict).
+# NFS_AUTO_STASH=true
+```
+
+**3) Déploiement** : `scripts/deploy_production.ps1` / `deploy_production.sh` et `scripts/deploy_cluster.ps1` détectent `NFS_SERVER` et exécutent `scripts/linux/setup_nfs_client_prospectlab.sh` sur chaque cible (installation de `nfs-common`, entrées `fstab`, `mount`). Avec **`NFS_AUTO_STASH` absent ou true** (défaut), si `uploads/` ou `exports/` contiennent déjà des fichiers, le script les déplace sous `.nfs_local_backup_<date>/`, monte le NFS, puis **recopie** le contenu sur le partage. Pour ne pas toucher au montage : PowerShell `-SkipNfsClient`, ou `SKIP_NFS_CLIENT=1 ./scripts/deploy_production.sh ...`.
+
+**4) Réseau local uniquement** : comme pour Redis, limitez l’export NFS au LAN (pare-feu + CIDR dans `/etc/exports`). Évite `NFS_ALLOW_NONEMPTY=1` sauf cas exceptionnel : le montage masquerait les fichiers déjà présents dans le dossier sans les migrer.
+
+**5) Poste Windows de développement** : si l’UI tourne sous Windows et envoie les tâches au cluster, le mécanisme par défaut reste la copie SSH vers les workers. Si le fichier est déjà visible sur les workers au chemin Linux (partage monté côté PC), vous pouvez mettre `CLUSTER_SKIP_WORKER_SCP=true` dans l’environnement local (voir `env.cluster.example`).
+
+**6) App et stockage sur le même hôte (ex. Gunicorn sur node15, fichiers sous `/srv/nfs/prospectlab`)** : ne définis **pas** `NFS_SERVER` dans `.env.prod`, et pointe directement `UPLOAD_FOLDER` / `EXPORT_FOLDER` vers `/srv/nfs/prospectlab/uploads` et `.../exports`. Sinon le déploiement tente un montage NFS vers la même machine alors que le démon NFS n’écoute pas encore : erreur « Connection refused ». Les **workers** sur d’autres machines gardent `NFS_SERVER` + chemins `/opt/prospectlab/uploads` montés. Alternative : `NFS_SKIP_CLIENT_MOUNT=true` pour forcer l’ignorer tout en gardant d’autres variables.
 
 ### 1.4. Déploiement de l'application
 
@@ -154,7 +229,7 @@ WantedBy=multi-user.target
 
 Créer le script `/opt/prospectlab/scripts/linux/start_celery_worker.sh` :
 
-Le script `scripts/linux/start_celery_worker.sh` lance le worker avec **`-Q celery,heavy`** (surchargeable via `CELERY_WORKER_QUEUES` dans `.env`). Sans la file `heavy`, les tâches SEO / technique / pentest ne s’exécutent jamais.
+Le script `scripts/linux/start_celery_worker.sh` lance le worker avec **`-Q`** listant par défaut `celery`, `scraping`, `scraping_interactive`, `technical`, `seo`, `osint`, `pentest`, `heavy`, `website_full` (surchargeable via `CELERY_WORKER_QUEUES` ; preset optionnel `CELERY_WORKER_QUEUE_PRESET=scraping_only` ou `non_scraping`). Sans les files spécialisées (`technical`, `scraping`, `scraping_interactive`, etc.), les analyses lourdes restent en **PENDING** (« Tâche en file… »). Le pack **Analyse site complet** utilise par défaut la file **`technical`** (`CELERY_FULL_ANALYSIS_QUEUE`) ; une valeur `website_full` n’est utile que si vous dédiez un worker à cette file uniquement.
 
 Rendre exécutable :
 

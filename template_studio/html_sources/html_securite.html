@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sécurité de votre site - {entreprise}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f9fafb;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        Audit sécurité gratuit : SSL, mises à jour, bonnes pratiques — réponse rapide.
+    </div>
+    <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f9fafb;">
+        <tr>
+            <td style="padding: 32px 16px;">
+                <table role="presentation" style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.07);">
+                    <tr>
+                        <td style="padding: 28px 32px; background: linear-gradient(135deg, #2f78a6, #184c70);">
+                            <h1 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 600;">Sécurité et conformité</h1>
+                            <p style="margin: 8px 0 0; color: rgba(255,255,255,0.9); font-size: 14px;">{entreprise}{#if_website} · {website}{#endif}</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 36px 32px;">
+                            <p style="margin: 0 0 20px 0; color: #1f2937; font-size: 16px; line-height: 1.65;">Bonjour {nom},</p>
+                            <p style="margin: 0 0 16px 0; color: #1f2937; font-size: 16px; line-height: 1.65;">
+                                La sécurité du site de <strong style="color: #4da9d6;">{entreprise}</strong>{#if_website} ({website}){#endif} est un enjeu majeur pour protéger vos données et celles de vos clients.
+                            </p>
+                            {#if_website}
+                            <p style="margin:0 0 12px 0;color:#4b5563;font-size:14px;line-height:1.6;">
+                                Je vous ai préparé une analyse rapide (sécurité + points sensibles).
+                            </p>
+                            <p style="margin:0 0 18px 0;text-align:center;font-size:13px;">
+                                <a href="{analysis_url}" style="display:inline-block;background:#f3f4f6;color:#4da9d6;text-decoration:none;font-size:13px;font-weight:600;padding:10px 16px;border-radius:999px;line-height:1.2;">Voir l'analyse du site</a>
+                            </p>
+                            {#endif}
+                            {#if_security}
+                            <div style="background-color: #dff8f8; padding: 20px; border-radius: 8px; margin: 24px 0; border-left: 4px solid #2f78a6;">
+                                <p style="margin: 0 0 8px 0; color: #2f78a6; font-size: 14px; font-weight: 600;">Score de sécurité actuel</p>
+                                <p style="margin: 0; color: #1f2937; font-size: 15px;">Votre site obtient un score de <strong>{security_score}/100</strong>. Des améliorations sont possibles.</p>
+                            </div>
+                            {#endif}
+                            <p style="margin: 0 0 24px 0; color: #1f2937; font-size: 16px; line-height: 1.65;">
+                                Question simple : aujourd’hui, vous préférez <strong>réduire le risque</strong> (failles, spam, réputation) ou <strong>renforcer la confiance</strong> (badges, parcours, paiements) ?
+                                <br><br>
+                                Je peux faire un audit sécurité rapide : SSL, headers, mises à jour, bonnes pratiques, et une liste de corrections par priorité.
+                            </p>
+                            <table role="presentation" style="width:100%; margin: 24px 0;">
+                                <tr>
+                                    <td style="text-align:center;">
+                                        <a href="{dc_contact_url}" style="display:inline-block;background:#2f78a6;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:14px 24px;border-radius:10px;line-height:1;">Demander l'audit sécurité (gratuit)</a>
+                                    </td>
+                                </tr>
+                            </table>
+                            {#include:signature_standard}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:18px 32px 24px;background:#f9fafb;text-align:center;border-top:1px solid #eef2f7;">
+                            {#include:footer_standard}
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

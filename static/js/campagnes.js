@@ -21,6 +21,8 @@ let selectedEntrepriseIds = [];
 let step1SearchTerm = '';
 /** Debounce timer pour chargement auto critères. */
 let ciblageDebounceTimer = null;
+/** Token interne pour ignorer les réponses métriques obsolètes. */
+let campagneMetricsRequestToken = 0;
 
 // Étape courante du formulaire nouvelle campagne (1, 2 ou 3)
 let campagneModalStep = 1;
@@ -35,8 +37,10 @@ document.addEventListener('DOMContentLoaded', function() {
     loadSegmentsCiblage();
     loadGroupesCiblage();
     loadCiblageSuggestionsWithCounts();
+    loadCommercialPriorityProfilesCiblage();
     initCiblageModeSwitch();
     initCiblageAutoLoad();
+    initCiblageSaveSegment();
     initEmailFiltersToggle();
     initEmailFiltersListeners();
     initScheduleFields();
@@ -188,15 +192,28 @@ function displayCampagnes(campagnes) {
         return;
     }
 
-    grid.innerHTML = campagnes.map(campagne => `
+    grid.innerHTML = campagnes.map(campagne => {
+        const effectiveStatus = getEffectiveCampaignStatus(campagne);
+        const failedCount = Math.max(0, Number(campagne.total_envoyes || 0) - Number(campagne.total_reussis || 0));
+        const bouncedCount = Number(campagne.total_bounced || 0);
+        return `
         <div class="campagne-card" data-campagne-id="${campagne.id}">
             <div class="campagne-header">
                 <h3 class="campagne-title">${escapeHtml(campagne.nom)}</h3>
-                <span class="campagne-statut statut-${campagne.statut}">${campagne.statut}</span>
+                <span class="campagne-statut statut-${effectiveStatus}">${getCampaignStatusLabel(effectiveStatus)}</span>
             </div>
             <div class="campagne-meta">
-                <div>Créée le ${formatDate(campagne.date_creation)}</div>
-                ${campagne.sujet ? `<div>Sujet: ${escapeHtml(campagne.sujet)}</div>` : ''}
+                <div class="campagne-meta-main">
+                    <span class="campagne-meta-dot"></span>
+                    <span>${formatRelativeDate(campagne.date_creation)}</span>
+                </div>
+                <div class="campagne-meta-timeline">
+                    <span class="meta-pill ${effectiveStatus === 'scheduled' ? 'is-active' : ''}">Créée</span>
+                    <span class="meta-pill ${(campagne.total_envoyes || 0) > 0 ? 'is-active' : ''}">Envoyés</span>
+                    <span class="meta-pill ${(campagne.total_reussis || 0) > 0 ? 'is-active' : ''}">Réussis</span>
+                    <span class="meta-pill ${failedCount > 0 ? 'is-active' : ''}">Échecs</span>
+                    <span class="meta-pill ${bouncedCount > 0 ? 'is-active' : ''}">Bounces</span>
+                </div>
             </div>
             <div class="campagne-stats">
                 <div class="stat-item">
@@ -212,15 +229,43 @@ function displayCampagnes(campagnes) {
                     <div class="stat-label">Réussis</div>
                 </div>
             </div>
+            <div class="campagne-kpi-grid">
+                <div class="kpi-line">
+                    <div class="kpi-label-row">
+                    <span>Envoi</span>
+                    <strong>${formatPercent(safeRate((campagne.total_delivered_strict != null ? campagne.total_delivered_strict : (campagne.total_delivered != null ? campagne.total_delivered : campagne.total_envoyes)), campagne.total_destinataires))}</strong>
+                    </div>
+                <div class="kpi-bar"><span style="width:${clampPercent(safeRate((campagne.total_delivered_strict != null ? campagne.total_delivered_strict : (campagne.total_delivered != null ? campagne.total_delivered : campagne.total_envoyes)), campagne.total_destinataires))}%"></span></div>
+                </div>
+                <div class="kpi-line">
+                    <div class="kpi-label-row">
+                        <span>Ouverture</span>
+                    <strong data-metric="open-rate">${typeof campagne.open_rate === 'number' ? formatPercent(campagne.open_rate) : '-'}</strong>
+                    </div>
+                <div class="kpi-bar kpi-open"><span data-metric-bar="open-rate" style="width:${clampPercent(typeof campagne.open_rate === 'number' ? campagne.open_rate : 0)}%"></span></div>
+                </div>
+                <div class="kpi-line">
+                    <div class="kpi-label-row">
+                        <span>Clic</span>
+                    <strong data-metric="click-rate">${typeof campagne.click_rate === 'number' ? formatPercent(campagne.click_rate) : '-'}</strong>
+                    </div>
+                <div class="kpi-bar kpi-click"><span data-metric-bar="click-rate" style="width:${clampPercent(typeof campagne.click_rate === 'number' ? campagne.click_rate : 0)}%"></span></div>
+                </div>
+            </div>
             <div class="campagne-actions">
                 <button class="btn-action btn-view" onclick="viewCampagne(${campagne.id})">
                     Voir détails
                 </button>
+                ${shouldShowRelaunchButton(campagne) ? `
+                <button class="btn-action btn-relaunch" onclick="relaunchCampagne(${campagne.id})" title="Relancer si envoi très faible ou campagne en échec">
+                    Relancer
+                </button>
+                ` : ''}
                 <button class="btn-action btn-delete" onclick="deleteCampagne(${campagne.id})">
                     Supprimer
                 </button>
             </div>
-            ${campagne.statut === 'running' ? `
+            ${effectiveStatus === 'running' ? `
                 <div class="progress-bar-container">
                     <div class="progress-bar">
                         <div class="progress-fill" style="width: ${Math.round((campagne.total_envoyes / Math.max(campagne.total_destinataires, 1)) * 100)}%">                                                                                           
@@ -231,7 +276,7 @@ function displayCampagnes(campagnes) {
                 </div>
             ` : ''}
         </div>
-    `).join('');
+    `;}).join('');
 
     if (countEl) {
         const total = Array.isArray(campagnesData) ? campagnesData.length : campagnes.length;
@@ -243,6 +288,57 @@ function displayCampagnes(campagnes) {
             countEl.classList.remove('is-filtered');
         }
     }
+
+    // Si l'API /api/campagnes fournit déjà open_rate/click_rate, on évite de refaire 1 fetch par carte.
+    const missingMetrics = (campagnes || []).filter(function(c) {
+        return !(c && typeof c.open_rate === 'number' && typeof c.click_rate === 'number');
+    });
+    if (missingMetrics.length > 0) {
+        hydrateCampagneCardsMetrics(missingMetrics);
+    }
+}
+
+async function hydrateCampagneCardsMetrics(campagnes) {
+    if (!Array.isArray(campagnes) || campagnes.length === 0) return;
+
+    const token = Date.now();
+    campagneMetricsRequestToken = token;
+
+    const completed = campagnes.filter(function(campagne) {
+        const s = (campagne && campagne.statut != null ? String(campagne.statut) : '').trim().toLowerCase();
+        // Même si une campagne est "failed", on veut afficher open/click
+        // (et surtout éviter des cartes à "-" partout).
+        return ['completed', 'completed_with_errors', 'running', 'scheduled', 'failed'].indexOf(s) !== -1;
+    });
+
+    await Promise.allSettled(completed.map(async function(campagne) {
+        try {
+            const response = await fetch('/api/tracking/campagne/' + campagne.id);
+            if (!response.ok) return;
+            const stats = await response.json();
+            if (campagneMetricsRequestToken !== token) return;
+            updateCampagneCardMetrics(campagne.id, stats);
+        } catch (error) {
+            // Silence: métriques facultatives sur la carte
+        }
+    }));
+}
+
+function updateCampagneCardMetrics(campagneId, stats) {
+    const card = document.querySelector('[data-campagne-id="' + campagneId + '"]');
+    if (!card || !stats) return;
+
+    const openRate = typeof stats.open_rate === 'number' ? stats.open_rate : 0;
+    const clickRate = typeof stats.click_rate === 'number' ? stats.click_rate : 0;
+    const openRateEl = card.querySelector('[data-metric="open-rate"]');
+    const clickRateEl = card.querySelector('[data-metric="click-rate"]');
+    const openBarEl = card.querySelector('[data-metric-bar="open-rate"]');
+    const clickBarEl = card.querySelector('[data-metric-bar="click-rate"]');
+
+    if (openRateEl) openRateEl.textContent = formatPercent(openRate);
+    if (clickRateEl) clickRateEl.textContent = formatPercent(clickRate);
+    if (openBarEl) openBarEl.style.width = clampPercent(openRate) + '%';
+    if (clickBarEl) clickBarEl.style.width = clampPercent(clickRate) + '%';
 }
 
 // Charger les templates et remplir le select "Modèle de message" (étape 3)
@@ -556,12 +652,178 @@ function fillDatalistWithCounts(id, items) {
     });
 }
 
+async function loadCommercialPriorityProfilesCiblage() {
+    var sel = document.getElementById('ciblage-commercial-profile');
+    if (!sel) return;
+    var keep = sel.value;
+    try {
+        var response = await fetch('/api/commercial/priority-profiles');
+        var data = await response.json();
+        var items = (data && data.items) || [];
+        sel.innerHTML = '<option value="">Défaut</option>';
+        items.forEach(function(p) {
+            var o = document.createElement('option');
+            o.value = String(p.id);
+            o.textContent = p.nom || ('#' + p.id);
+            sel.appendChild(o);
+        });
+        if (keep && Array.prototype.some.call(sel.options, function(o) { return o.value === keep; })) {
+            sel.value = keep;
+        }
+    } catch (e) {}
+}
+
+function clearCiblageSegmentMeta() {
+    var sumEl = document.getElementById('ciblage-segment-summary');
+    var metaEl = document.getElementById('ciblage-segment-preview-total');
+    if (sumEl) {
+        sumEl.textContent = '';
+        sumEl.hidden = true;
+    }
+    if (metaEl) metaEl.textContent = '';
+}
+
+/** Texte lisible des critères (segment ou formulaire) pour l’UI. */
+function formatCriteresSummary(criteres) {
+    if (!criteres || typeof criteres !== 'object') return '';
+    var parts = [];
+    if (criteres.secteur_contains) parts.push('Secteur contient « ' + criteres.secteur_contains + ' »');
+    if (criteres.secteur) parts.push('Secteur = ' + criteres.secteur);
+    if (criteres.opportunite) {
+        var opp = Array.isArray(criteres.opportunite) ? criteres.opportunite.join(', ') : String(criteres.opportunite);
+        if (opp) parts.push('Opportunité : ' + opp);
+    }
+    if (criteres.statut) parts.push('Statut : ' + criteres.statut);
+    if (criteres.tags_contains) parts.push('Tags contiennent « ' + criteres.tags_contains + ' »');
+    if (criteres.score_securite_max != null && criteres.score_securite_max !== '') {
+        parts.push('Score sécurité max ' + criteres.score_securite_max);
+    }
+    if (criteres.exclude_already_contacted) parts.push('Exclure déjà contactés');
+    if (criteres.etape_prospection) parts.push('Étape CRM : ' + criteres.etape_prospection);
+    if (criteres.sort_commercial) parts.push('Tri par priorité commerciale');
+    if (criteres.priority_min != null && criteres.priority_min !== '') {
+        parts.push('Score priorité min ≥ ' + criteres.priority_min);
+    }
+    if (criteres.commercial_profile_id != null && criteres.commercial_profile_id !== '') {
+        parts.push('Profil de pondération #' + criteres.commercial_profile_id);
+    }
+    if (criteres.commercial_limit != null && criteres.commercial_limit !== '') {
+        parts.push('Limite Top ' + criteres.commercial_limit);
+    }
+    if (criteres.cms) parts.push('CMS : ' + (Array.isArray(criteres.cms) ? criteres.cms.join(', ') : criteres.cms));
+    if (criteres.framework) parts.push('Framework : ' + criteres.framework);
+    if (criteres.has_blog) parts.push('Avec blog');
+    if (criteres.has_form) parts.push('Avec formulaire');
+    if (criteres.has_tunnel) parts.push('Avec tunnel e-commerce');
+    if (criteres.performance_max != null) parts.push('Perf. max ' + criteres.performance_max);
+    if (criteres.groupe_ids && criteres.groupe_ids.length) {
+        parts.push('Groupes #' + criteres.groupe_ids.join(', #'));
+    }
+    return parts.join(' · ');
+}
+
+function collectCiblageCriteresFromForm() {
+    var filters = {};
+    var secteurEl = document.getElementById('ciblage-secteur');
+    var secteur = secteurEl ? stripCountSuffix(secteurEl.value.trim()) : '';
+    if (secteur) filters.secteur_contains = secteur;
+    var oppEl = document.getElementById('ciblage-opportunite');
+    var oppRaw = oppEl ? oppEl.value.trim() : '';
+    var opp = oppRaw.split(',').map(function(s) { return stripCountSuffix(s.trim()); }).filter(Boolean);
+    if (opp.length) filters.opportunite = opp;
+    var statutEl = document.getElementById('ciblage-statut');
+    var statut = statutEl ? stripCountSuffix(statutEl.value.trim()) : '';
+    if (statut) filters.statut = statut;
+    var tagsEl = document.getElementById('ciblage-tags');
+    var tags = tagsEl ? stripCountSuffix(tagsEl.value.trim()) : '';
+    if (tags) filters.tags_contains = tags;
+    var scoreMaxEl = document.getElementById('ciblage-score-max');
+    if (scoreMaxEl && scoreMaxEl.value) {
+        var sm = parseInt(scoreMaxEl.value, 10);
+        if (!isNaN(sm)) filters.score_securite_max = sm;
+    }
+    var excl = document.getElementById('ciblage-exclude-contactes');
+    if (excl && excl.checked) filters.exclude_already_contacted = true;
+    var etapeEl = document.getElementById('ciblage-etape-prospection');
+    if (etapeEl && etapeEl.value) filters.etape_prospection = etapeEl.value;
+    var sortC = document.getElementById('ciblage-sort-commercial');
+    if (sortC && sortC.checked) filters.sort_commercial = true;
+    var pminEl = document.getElementById('ciblage-priority-min');
+    if (pminEl && pminEl.value !== '') {
+        var pm = parseFloat(pminEl.value);
+        if (!isNaN(pm)) filters.priority_min = pm;
+    }
+    var profEl = document.getElementById('ciblage-commercial-profile');
+    if (profEl && profEl.value) {
+        var pid = parseInt(profEl.value, 10);
+        if (!isNaN(pid)) filters.commercial_profile_id = pid;
+    }
+    var limEl = document.getElementById('ciblage-commercial-limit');
+    if (limEl && limEl.value !== '') {
+        var lm = parseInt(limEl.value, 10);
+        if (!isNaN(lm)) filters.commercial_limit = lm;
+    }
+    return filters;
+}
+
+function initCiblageSaveSegment() {
+    var btn = document.getElementById('ciblage-save-segment-btn');
+    if (!btn) return;
+    btn.addEventListener('click', async function() {
+        var nomEl = document.getElementById('ciblage-save-segment-nom');
+        var descEl = document.getElementById('ciblage-save-segment-desc');
+        var nom = nomEl ? nomEl.value.trim() : '';
+        if (!nom) {
+            window.alert('Indiquez un nom pour le segment.');
+            return;
+        }
+        var criteres = collectCiblageCriteresFromForm();
+        try {
+            var response = await fetch('/api/ciblage/segments', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: JSON.stringify({
+                    nom: nom,
+                    description: (descEl && descEl.value.trim()) || null,
+                    criteres: criteres
+                })
+            });
+            var data = await response.json().catch(function() { return {}; });
+            if (!response.ok) {
+                window.alert(data.error || 'Enregistrement impossible.');
+                return;
+            }
+            if (nomEl) nomEl.value = '';
+            if (descEl) descEl.value = '';
+            await loadSegmentsCiblage();
+            var sel = document.getElementById('ciblage-segment');
+            var newId = data.id != null ? String(data.id) : '';
+            if (sel && newId) {
+                sel.value = newId;
+                var modeSeg = document.querySelector('input[name="ciblage_mode"][value="segment"]');
+                if (modeSeg) {
+                    modeSeg.checked = true;
+                    modeSeg.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                await loadBySegment();
+            }
+        } catch (e) {
+            window.alert('Erreur réseau lors de l’enregistrement.');
+        }
+    });
+}
+
 // Chargement automatique : objectif/groupes/segment au change, critères en debounce
 function initCiblageAutoLoad() {
     var objSel = document.getElementById('ciblage-objectif');
     var segSel = document.getElementById('ciblage-segment');
     if (objSel) objSel.addEventListener('change', function() { if (objSel.value) loadByObjectif(); });
-    if (segSel) segSel.addEventListener('change', function() { if (segSel.value) loadBySegment(); });
+    if (segSel) {
+        segSel.addEventListener('change', function() {
+            if (segSel.value) loadBySegment();
+            else clearCiblageSegmentMeta();
+        });
+    }
     var debounceMs = 500;
     function scheduleCriteres() {
         if (ciblageDebounceTimer) clearTimeout(ciblageDebounceTimer);
@@ -571,12 +833,22 @@ function initCiblageAutoLoad() {
             if (mode && mode.value === 'criteres') loadByCriteres();
         }, debounceMs);
     }
-    ['ciblage-secteur', 'ciblage-opportunite', 'ciblage-statut', 'ciblage-tags', 'ciblage-score-max'].forEach(function(id) {
+    [
+        'ciblage-secteur', 'ciblage-opportunite', 'ciblage-statut', 'ciblage-tags', 'ciblage-score-max',
+        'ciblage-priority-min', 'ciblage-commercial-limit'
+    ].forEach(function(id) {
         var el = document.getElementById(id);
         if (el) el.addEventListener('input', scheduleCriteres);
     });
+    var critSelectIds = ['ciblage-etape-prospection', 'ciblage-commercial-profile'];
+    critSelectIds.forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.addEventListener('change', scheduleCriteres);
+    });
     var excludeCb = document.getElementById('ciblage-exclude-contactes');
     if (excludeCb) excludeCb.addEventListener('change', scheduleCriteres);
+    var sortCb = document.getElementById('ciblage-sort-commercial');
+    if (sortCb) sortCb.addEventListener('change', scheduleCriteres);
 }
 
 // Listeners sur les filtres emails (partie 2) : réafficher la liste
@@ -778,6 +1050,13 @@ function initCiblageModeSwitch() {
         }
         if (v === 'groupes') {
             loadByGroupes();
+        }
+        if (v === 'criteres') {
+            loadByCriteres();
+        }
+        if (v === 'segment') {
+            var ss = document.getElementById('ciblage-segment');
+            if (ss && ss.value) loadBySegment();
         }
     }
     radios.forEach(function(r) { r.addEventListener('change', updateBlocks); });
@@ -995,20 +1274,7 @@ async function loadByObjectif() {
 
 // Charger les prospects selon les critères saisis
 async function loadByCriteres() {
-    const filters = {};
-    const secteur = stripCountSuffix(document.getElementById('ciblage-secteur').value.trim());
-    if (secteur) filters.secteur_contains = secteur;
-    const oppRaw = document.getElementById('ciblage-opportunite').value.trim();
-    const opp = oppRaw.split(',').map(function(s) { return stripCountSuffix(s.trim()); }).filter(Boolean);
-    if (opp.length) filters.opportunite = opp;
-    const statut = stripCountSuffix(document.getElementById('ciblage-statut').value.trim());
-    if (statut) filters.statut = statut;
-    const tags = stripCountSuffix(document.getElementById('ciblage-tags').value.trim());
-    if (tags) filters.tags_contains = tags;
-    const scoreMax = document.getElementById('ciblage-score-max').value;
-    if (scoreMax) filters.score_securite_max = parseInt(scoreMax, 10);
-    if (document.getElementById('ciblage-exclude-contactes').checked) filters.exclude_already_contacted = true;
-    await loadEntreprisesWithFilters(filters);
+    await loadEntreprisesWithFilters(collectCiblageCriteresFromForm());
 }
 
 // Charger les prospects selon les groupes sélectionnés
@@ -1025,12 +1291,36 @@ async function loadByGroupes() {
 
 // Charger les prospects selon le segment sauvegardé
 async function loadBySegment() {
-    const select = document.getElementById('ciblage-segment');
-    const segId = select.value;
-    if (!segId) return;
-    const opt = select.querySelector('option:checked');
-    const criteres = opt && opt.dataset.criteres ? JSON.parse(opt.dataset.criteres) : {};
+    var select = document.getElementById('ciblage-segment');
+    if (!select) return;
+    var segId = select.value;
+    if (!segId) {
+        clearCiblageSegmentMeta();
+        return;
+    }
+    var opt = select.options[select.selectedIndex];
+    var criteres = {};
+    if (opt && opt.dataset.criteres) {
+        try {
+            criteres = JSON.parse(opt.dataset.criteres) || {};
+        } catch (e) {
+            criteres = {};
+        }
+    }
+    var sumEl = document.getElementById('ciblage-segment-summary');
+    var summaryText = formatCriteresSummary(criteres);
+    if (sumEl) {
+        sumEl.textContent = summaryText;
+        sumEl.hidden = !summaryText;
+    }
     await loadEntreprisesWithFilters(criteres);
+    var metaEl = document.getElementById('ciblage-segment-preview-total');
+    if (metaEl) {
+        var n = (entreprisesData || []).length;
+        metaEl.textContent = n
+            ? n + ' entreprise(s) avec au moins un email pour ce segment.'
+            : 'Aucune entreprise ne correspond à ce segment.';
+    }
 }
 
 // Conteneur étape 1 : priorité entreprises-selector (3 steps), sinon recipients-selector (ancienne structure)
@@ -1055,6 +1345,17 @@ function loadEntreprisesWithFilters(filters) {
     if (filters.exclude_already_contacted) params.set('exclude_already_contacted', '1');
     if (filters.groupe_ids && Array.isArray(filters.groupe_ids) && filters.groupe_ids.length > 0) {
         params.set('groupe_ids', filters.groupe_ids.join(','));
+    }
+    if (filters.etape_prospection) params.set('etape_prospection', filters.etape_prospection);
+    if (filters.sort_commercial) params.set('sort_commercial', '1');
+    if (filters.priority_min != null && String(filters.priority_min) !== '') {
+        params.set('priority_min', String(filters.priority_min));
+    }
+    if (filters.commercial_profile_id != null && String(filters.commercial_profile_id) !== '') {
+        params.set('commercial_profile_id', String(filters.commercial_profile_id));
+    }
+    if (filters.commercial_limit != null && String(filters.commercial_limit) !== '') {
+        params.set('commercial_limit', String(filters.commercial_limit));
     }
     const url = '/api/ciblage/entreprises?' + params.toString();
     return fetch(url)
@@ -1119,10 +1420,14 @@ function displayEntreprisesStep1() {
     container.innerHTML = list.map(function(ent) {
         var nb = (ent.emails && ent.emails.length) || 0;
         if (nb === 0) return '';
+        var prioHtml = (ent.priority_score != null && !isNaN(Number(ent.priority_score)))
+            ? '<div class="entreprise-priority-score">Priorité ' + Math.round(Number(ent.priority_score)) + '</div>'
+            : '';
         return '<div class="entreprise-item step1-ent-item step1-card-clickable" data-entreprise-id="' + ent.id + '" onclick="toggleEntrepriseStep1ByCard(event, ' + ent.id + ')">' +
             '<div class="entreprise-header">' +
             '<div><div class="entreprise-name">' + escapeHtml(ent.nom) + '</div>' +
             (ent.secteur ? '<div class="entreprise-secteur">' + escapeHtml(ent.secteur) + '</div>' : '') +
+            prioHtml +
             '<div class="entreprise-email-count">' + nb + ' email(s)</div>' +
             '</div>' +
             '<div class="checkbox-wrapper">' +
@@ -1742,7 +2047,7 @@ function openResultsModal(campagneId, campagneName) {
         if (currentResultsCampagneId) {
             loadCampagneResults(currentResultsCampagneId, true);
         }
-    }, 5000);
+    }, 8000);
 }
 
 // Fermer la modale de résultats
@@ -1818,11 +2123,25 @@ function displayCampagneResults(stats, silentRefresh) {
 
     const openRate = stats.open_rate ? stats.open_rate.toFixed(1) : '0.0';
     const clickRate = stats.click_rate ? stats.click_rate.toFixed(1) : '0.0';
+    const sentCount = stats.total_emails || 0;
+    const openCount = stats.total_opens || 0;
+    const clickCount = stats.total_clicks || 0;
+    const bouncedCount = typeof stats.total_bounced === 'number'
+        ? stats.total_bounced
+        : (Array.isArray(stats.emails)
+            ? stats.emails.filter(function(e) { return e && e.statut === 'bounced'; }).length
+            : 0);
+    const deliverability = typeof stats.deliverability_rate_strict === 'number'
+        ? stats.deliverability_rate_strict
+        : 0;
     const hasReadTime = stats.avg_read_time != null && !isNaN(stats.avg_read_time);
     const avgReadTime = hasReadTime ? Math.round(stats.avg_read_time) : null;
 
     // Fonction pour obtenir le badge de statut
     function getStatusBadge(statut, hasOpened, hasClicked) {
+        if (statut === 'bounced') {
+            return '<span class="status-badge status-bounced">Bounce</span>';
+        }
         if (statut === 'failed') {
             return '<span class="status-badge status-failed">Échec</span>';
         }
@@ -1840,48 +2159,62 @@ function displayCampagneResults(stats, silentRefresh) {
     if (silentRefresh) {
         const container = body.querySelector('.results-content');
         if (container) {
-            // Mettre à jour les cartes de stats
-            const statCards = container.querySelectorAll('.stat-card');
-            if (statCards.length >= 4) {
-                // Emails envoyés
-                statCards[0].querySelector('.stat-value-large').textContent = stats.total_emails || 0;
-                // Ouvertures
-                statCards[1].querySelector('.stat-value-large').textContent = stats.total_opens || 0;
-                const openSub = statCards[1].querySelector('.stat-sublabel');
-                if (openSub) {
-                    openSub.textContent = `${openRate}% du total`;
+            // Mettre à jour le header de synthèse
+            const sentEl = container.querySelector('[data-summary="sent"]');
+            const delivEl = container.querySelector('[data-summary="deliv"]');
+            const openEl = container.querySelector('[data-summary="open"]');
+            const clickEl = container.querySelector('[data-summary="click"]');
+            const readEl = container.querySelector('[data-summary="read"]');
+            const bounceEl = container.querySelector('[data-summary="bounce"]');
+            if (sentEl) sentEl.textContent = sentCount;
+            if (delivEl) delivEl.textContent = `${(Number(deliverability) || 0).toFixed(1)}%`;
+            if (openEl) openEl.textContent = `${openRate}%`;
+            if (clickEl) clickEl.textContent = `${clickRate}%`;
+            if (readEl) readEl.textContent = avgReadTime !== null ? `${avgReadTime}s` : 'Non mesuré';
+            if (bounceEl) bounceEl.textContent = bouncedCount;
+
+            // Mettre à jour le mini graphe de performance
+            const miniChart = container.querySelector('.campaign-mini-chart');
+            if (miniChart) {
+                // Base du tunnel = délivrabilité stricte (réussis - bounces) / destinataires
+                const sendRate = Number(deliverability) || 0;
+                const openNum = Number(openRate) || 0;
+                const clickNum = Number(clickRate) || 0;
+                const bars = miniChart.querySelectorAll('.mini-chart-bar-fill');
+                const labels = miniChart.querySelectorAll('.mini-chart-row strong');
+                if (bars.length >= 3) {
+                    bars[0].style.width = clampPercent(sendRate) + '%';
+                    bars[1].style.width = clampPercent(openNum) + '%';
+                    bars[2].style.width = clampPercent(clickNum) + '%';
                 }
-                // Clics
-                statCards[2].querySelector('.stat-value-large').textContent = stats.total_clicks || 0;
-                const clickSub = statCards[2].querySelector('.stat-sublabel');
-                if (clickSub) {
-                    clickSub.textContent = `${clickRate}% du total`;
+                if (labels.length >= 3) {
+                    labels[0].textContent = `${(Number(deliverability) || 0).toFixed(1)}%`;
+                    labels[1].textContent = `${openRate}%`;
+                    labels[2].textContent = `${clickRate}%`;
                 }
-                // Taux d'ouverture
-                statCards[3].querySelector('.stat-value-large').textContent = `${openRate}%`;
             }
 
-            // Mettre à jour les indicateurs de performance
-            const perfCards = container.querySelectorAll('.performance-card');
-            if (perfCards.length >= 2) {
-                // Taux de clic
-                const clickValEl = perfCards[0].querySelector('.performance-value');
-                if (clickValEl) {
-                    clickValEl.textContent = `${clickRate}%`;
-                }
-                // Temps de lecture moyen
-                const readValEl = perfCards[1].querySelector('.performance-value');
-                if (readValEl) {
-                    readValEl.textContent = avgReadTime !== null ? `${avgReadTime}s` : 'Non mesuré';
-                }
+            // Mettre à jour le donut d'engagement
+            const openRing = container.querySelector('[data-donut="open"]');
+            const clickRing = container.querySelector('[data-donut="click"]');
+            if (openRing) {
+                openRing.style.setProperty('--pct', clampPercent(Number(openRate)));
+                openRing.querySelector('strong').textContent = `${openRate}%`;
+            }
+            if (clickRing) {
+                clickRing.style.setProperty('--pct', clampPercent(Number(clickRate)));
+                clickRing.querySelector('strong').textContent = `${clickRate}%`;
             }
 
             // Mettre à jour le tableau des emails
             const tbody = container.querySelector('.results-table tbody');
             if (tbody && stats.emails && stats.emails.length > 0) {
                 tbody.innerHTML = stats.emails.map(function(email) {
+                    const rowClass = (email && email.statut === 'bounced')
+                        ? 'row-bounced'
+                        : (email.has_clicked ? 'row-clicked' : (email.has_opened ? 'row-opened' : ''));
                     return (
-                        '<tr class="' + (email.has_clicked ? 'row-clicked' : (email.has_opened ? 'row-opened' : '')) + '">' +
+                        '<tr class="' + rowClass + '">' +
                             '<td>' +
                                 '<div class="contact-name">' + formatContactName(email.nom_destinataire) + '</div>' +
                                 '<div class="contact-email">' + escapeHtml(email.email) + '</div>' +
@@ -1900,6 +2233,9 @@ function displayCampagneResults(stats, silentRefresh) {
                             '</td>' +
                             '<td class="text-muted">' + formatDate(email.date_envoi) + '</td>' +
                             '<td class="text-muted">' + formatDate(email.last_open) + '</td>' +
+                            '<td class="text-center">' +
+                                '<button type="button" class="btn-email-preview" onclick="openSentEmailPreview(' + email.id + ')">Voir l\'email</button>' +
+                            '</td>' +
                         '</tr>'
                     );
                 }).join('');
@@ -1927,11 +2263,12 @@ function displayCampagneResults(stats, silentRefresh) {
                                 <th class="text-center">Clics</th>
                                 <th>Date envoi</th>
                                 <th>Dernière ouverture</th>
+                                <th class="text-center">Action</th>
                             </tr>
                         </thead>
                         <tbody>
                             ${stats.emails.map(email => `
-                                <tr class="${email.has_clicked ? 'row-clicked' : email.has_opened ? 'row-opened' : ''}">    
+                                <tr class="${email && email.statut === 'bounced' ? 'row-bounced' : (email.has_clicked ? 'row-clicked' : email.has_opened ? 'row-opened' : '')}">    
                                     <td>
                                         <div class="contact-name">${formatContactName(email.nom_destinataire)}</div>      
                                         <div class="contact-email">${escapeHtml(email.email)}</div>
@@ -1946,6 +2283,9 @@ function displayCampagneResults(stats, silentRefresh) {
                                     </td>
                                     <td class="text-muted">${formatDate(email.date_envoi)}</td>
                                     <td class="text-muted">${formatDate(email.last_open)}</td>
+                                    <td class="text-center">
+                                        <button type="button" class="btn-email-preview" onclick="openSentEmailPreview(${email.id})">Voir l'email</button>
+                                    </td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -1959,42 +2299,72 @@ function displayCampagneResults(stats, silentRefresh) {
         <div class="results-content">
             <h2 class="results-main-title">Statistiques de prospection</h2>
 
-            <!-- Vue d'ensemble -->
-            <div class="results-stats-grid">
-                <div class="stat-card stat-primary">
-                    <div class="stat-value-large">${stats.total_emails || 0}</div>
-                    <div class="stat-label">Emails envoyés</div>
+            <div class="results-summary-strip">
+                <div class="summary-chip">
+                    <span>Emails envoyés</span>
+                    <strong data-summary="sent">${sentCount}</strong>
                 </div>
-                <div class="stat-card stat-info">
-                    <div class="stat-value-large">${stats.total_opens || 0}</div>
-                    <div class="stat-label">Ouvertures</div>
-                    <div class="stat-sublabel">${openRate}% du total</div>
+                <div class="summary-chip">
+                    <span>Envoi</span>
+                    <strong data-summary="deliv">${(Number(deliverability) || 0).toFixed(1)}%</strong>
                 </div>
-                <div class="stat-card stat-success">
-                    <div class="stat-value-large">${stats.total_clicks || 0}</div>
-                    <div class="stat-label">Clics</div>
-                    <div class="stat-sublabel">${clickRate}% du total</div>
+                <div class="summary-chip">
+                    <span>Bounces</span>
+                    <strong data-summary="bounce">${bouncedCount}</strong>
                 </div>
-                <div class="stat-card stat-warning">
-                    <div class="stat-value-large">${openRate}%</div>
-                    <div class="stat-label">Taux d'ouverture</div>
+                <div class="summary-chip">
+                    <span>Taux d'ouverture</span>
+                    <strong data-summary="open">${openRate}%</strong>
+                </div>
+                <div class="summary-chip">
+                    <span>Taux de clic</span>
+                    <strong data-summary="click">${clickRate}%</strong>
+                </div>
+                <div class="summary-chip">
+                    <span>Temps lecture moyen</span>
+                    <strong data-summary="read">${avgReadTime !== null ? `${avgReadTime}s` : 'Non mesuré'}</strong>
                 </div>
             </div>
 
-            <!-- Indicateurs de performance -->
-            <div class="results-performance-grid">
-                <div class="performance-card">
-                    <div class="performance-icon">📈</div>
-                    <div class="performance-content">
-                        <div class="performance-label">Taux de clic</div>
-                        <div class="performance-value">${clickRate}%</div>
+            <div class="results-visual-grid">
+                <div class="results-visual-card">
+                    <h3>Tunnel de conversion</h3>
+                    <div class="campaign-mini-chart">
+                        <div class="mini-chart-row">
+                            <span>Envoi</span>
+                            <strong>${(Number(deliverability) || 0).toFixed(1)}%</strong>
+                        </div>
+                        <div class="mini-chart-bar"><span class="mini-chart-bar-fill" style="width:${clampPercent(Number(deliverability))}%"></span></div>
+                        <div class="mini-chart-row">
+                            <span>Ouverture</span>
+                            <strong>${openRate}%</strong>
+                        </div>
+                        <div class="mini-chart-bar mini-chart-open"><span class="mini-chart-bar-fill" style="width:${clampPercent(Number(openRate))}%"></span></div>
+                        <div class="mini-chart-row">
+                            <span>Clic</span>
+                            <strong>${clickRate}%</strong>
+                        </div>
+                        <div class="mini-chart-bar mini-chart-click"><span class="mini-chart-bar-fill" style="width:${clampPercent(Number(clickRate))}%"></span></div>
+                        <div class="mini-chart-hint">Base = envoi (délivrabilité stricte)</div>
                     </div>
                 </div>
-                <div class="performance-card">
-                    <div class="performance-icon">⏱</div>
-                    <div class="performance-content">
-                        <div class="performance-label">Temps de lecture moyen</div>
-                        <div class="performance-value">${avgReadTime !== null ? `${avgReadTime}s` : 'Non mesuré'}</div>
+                <div class="results-visual-card">
+                    <h3>Engagement</h3>
+                    <div class="engagement-donuts">
+                        <div class="engagement-donut" data-donut="open" style="--pct:${clampPercent(Number(openRate))}">
+                            <div class="donut-ring"></div>
+                            <div class="donut-center">
+                                <span>Ouverture</span>
+                                <strong>${openRate}%</strong>
+                            </div>
+                        </div>
+                        <div class="engagement-donut is-click" data-donut="click" style="--pct:${clampPercent(Number(clickRate))}">
+                            <div class="donut-ring"></div>
+                            <div class="donut-center">
+                                <span>Clic</span>
+                                <strong>${clickRate}%</strong>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2002,6 +2372,79 @@ function displayCampagneResults(stats, silentRefresh) {
             ${emailsTable}
         </div>
     `;
+}
+
+async function openSentEmailPreview(emailId) {
+    if (!emailId) return;
+    let previewModal = document.getElementById('sent-email-preview-modal');
+    if (!previewModal) {
+        previewModal = document.createElement('div');
+        previewModal.id = 'sent-email-preview-modal';
+        previewModal.className = 'sent-email-preview-modal';
+        previewModal.innerHTML = `
+            <div class="sent-email-preview-content">
+                <div class="sent-email-preview-header">
+                    <h3 id="sent-email-preview-title">Email envoyé</h3>
+                    <button type="button" class="sent-email-preview-close" onclick="closeSentEmailPreview()">&times;</button>
+                </div>
+                <div class="sent-email-preview-body" id="sent-email-preview-body"></div>
+            </div>
+        `;
+        previewModal.addEventListener('click', function(event) {
+            if (event.target === previewModal) closeSentEmailPreview();
+        });
+        document.body.appendChild(previewModal);
+    }
+
+    previewModal.classList.add('show');
+    const body = document.getElementById('sent-email-preview-body');
+    if (body) {
+        body.innerHTML = '<div class="results-loading"><p>Chargement de l\'email envoyé...</p></div>';
+    }
+
+    try {
+        const response = await fetch('/api/emails-envoyes/' + emailId + '/preview');
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data && data.error ? data.error : 'Erreur lors du chargement');
+        }
+        const title = document.getElementById('sent-email-preview-title');
+        if (title) {
+            title.textContent = data.sujet ? ('Email envoyé - ' + data.sujet) : 'Email envoyé';
+        }
+        const sentContent = data.contenu_envoye || '';
+        const looksLikeHtml = /<([a-z][\s\S]*?)>/i.test(sentContent);
+        if (body) {
+            body.innerHTML = `
+                <div class="sent-email-meta">
+                    <div><strong>Destinataire:</strong> ${escapeHtml(data.email || '-')}</div>
+                    <div><strong>Entreprise:</strong> ${escapeHtml(data.entreprise || '-')}</div>
+                    <div><strong>Envoyé:</strong> ${escapeHtml(formatDate(data.date_envoi))}</div>
+                </div>
+                ${looksLikeHtml
+                    ? `<iframe class="sent-email-frame" title="Contenu email"></iframe>`
+                    : `<pre class="sent-email-text">${escapeHtml(sentContent || 'Contenu indisponible')}</pre>`}
+            `;
+            if (looksLikeHtml) {
+                const frame = body.querySelector('.sent-email-frame');
+                if (frame) {
+                    const frameDoc = frame.contentDocument || frame.contentWindow.document;
+                    frameDoc.open();
+                    frameDoc.write(sentContent);
+                    frameDoc.close();
+                }
+            }
+        }
+    } catch (error) {
+        if (body) {
+            body.innerHTML = '<div class="results-loading"><p style="color:#dc2626;">Impossible de charger cet email.</p></div>';
+        }
+    }
+}
+
+function closeSentEmailPreview() {
+    const previewModal = document.getElementById('sent-email-preview-modal');
+    if (previewModal) previewModal.classList.remove('show');
 }
 
 // Fermer la modale en cliquant en dehors
@@ -2032,6 +2475,30 @@ async function deleteCampagne(campagneId) {
         }
     } catch (error) {
         alert('Erreur lors de la suppression');
+    }
+}
+
+async function relaunchCampagne(campagneId) {
+    if (!confirm('Relancer cette campagne avec les mêmes destinataires ?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/campagnes/${campagneId}/relaunch`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data && data.error ? data.error : 'Relance impossible');
+        }
+
+        showNotification('Campagne relancée avec succès', 'success');
+        loadCampagnes();
+    } catch (error) {
+        showNotification('Erreur de relance: ' + (error && error.message ? error.message : 'Erreur inconnue'), 'error');
     }
 }
 
@@ -2247,11 +2714,7 @@ function escapeHtml(text) {
 
 function formatDate(dateString) {
     if (!dateString) return '-';
-    let toParse = String(dateString).trim().replace(' ', 'T');
-    if (!/Z$|[+-]\d{2}:?\d{2}$/.test(toParse) && /^\d{4}-\d{2}-\d{2}/.test(toParse)) {
-        toParse = toParse;
-    }
-    const date = new Date(toParse);
+    const date = parseDateLoose(dateString);
     if (Number.isNaN(date.getTime())) return dateString;
     return date.toLocaleDateString('fr-FR', {
         year: 'numeric',
@@ -2261,6 +2724,115 @@ function formatDate(dateString) {
         minute: '2-digit',
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
     });
+}
+
+function formatRelativeDate(dateString) {
+    if (!dateString) return 'Date inconnue';
+    const date = parseDateLoose(dateString);
+    if (Number.isNaN(date.getTime())) return 'Date inconnue';
+
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    if (diffMs < 0) return 'Dans quelques instants';
+    const minute = 60 * 1000;
+    const hour = 60 * minute;
+    const day = 24 * hour;
+
+    if (diffMs < minute) return 'A l\'instant';
+    if (diffMs < hour) {
+        const m = Math.floor(diffMs / minute);
+        return 'Il y a ' + m + ' min';
+    }
+    if (diffMs < day) {
+        const h = Math.floor(diffMs / hour);
+        return 'Il y a ' + h + ' h';
+    }
+    const d = Math.floor(diffMs / day);
+    if (d < 7) return 'Il y a ' + d + ' jour' + (d > 1 ? 's' : '');
+    return 'Il y a ' + Math.floor(d / 7) + ' sem';
+}
+
+function parseDateLoose(value) {
+    if (!value) return new Date('invalid');
+    const raw = String(value).trim();
+
+    // 1) Tentative directe (gère RFC1123 type "Fri, 27 Mar 2026 10:00:36 GMT")
+    let d = new Date(raw);
+    if (!Number.isNaN(d.getTime())) return d;
+
+    // 2) Normalisation simple des formats DB "YYYY-MM-DD HH:MM:SS"
+    let s = raw.replace(/\s+GMT$/i, 'Z').replace(/\s+UTC$/i, 'Z');
+    s = s.replace(' ', 'T');
+    d = new Date(s);
+    if (!Number.isNaN(d.getTime())) return d;
+
+    // 3) Dernier essai: enlever un suffixe timezone texte (ex: "GMT+0000 (UTC)")
+    s = raw.replace(/\s+GMT[+-]\d{4}.*$/i, '').trim().replace(' ', 'T');
+    d = new Date(s);
+    return d;
+}
+
+function getCampaignStatusLabel(statut) {
+    const s = String(statut || '').trim().toLowerCase();
+    if (s === 'completed_with_errors') return 'Terminée avec erreurs';
+    if (s === 'completed') return 'Terminée';
+    if (s === 'running') return 'En cours';
+    if (s === 'scheduled') return 'Programmée';
+    if (s === 'failed') return 'Échec';
+    if (s === 'draft') return 'Brouillon';
+    return statut || 'Inconnu';
+}
+
+function getEffectiveCampaignStatus(campagne) {
+    const raw = String((campagne && campagne.statut) || '').trim().toLowerCase();
+    const totalReussis = Number(campagne && campagne.total_reussis) || 0;
+    const totalEnvoyes = Number(campagne && campagne.total_envoyes) || 0;
+    // Compat historique: certaines campagnes anciennes restent en "failed"
+    // alors qu'il y a eu des envois réussis.
+    if (raw === 'failed' && totalReussis > 0 && totalEnvoyes > 0) {
+        return 'completed_with_errors';
+    }
+    return raw || 'draft';
+}
+
+function shouldShowRelaunchButton(campagne) {
+    const status = String((campagne && campagne.statut) || '').trim().toLowerCase();
+    if (status === 'failed') return true;
+
+    const dest = Number(campagne && campagne.total_destinataires) || 0;
+    if (dest < 10) return false;
+
+    // On utilise la même base que l'UI "Envoi" pour éviter tout écart.
+    // Priorité: total_delivered_strict (API) -> sinon total_delivered -> sinon total_envoyes.
+    const delivered = (campagne && campagne.total_delivered_strict != null)
+        ? Number(campagne.total_delivered_strict)
+        : (campagne && campagne.total_delivered != null)
+            ? Number(campagne.total_delivered)
+            : Number(campagne && campagne.total_envoyes);
+
+    if (!Number.isFinite(delivered)) return false;
+    const rate = safeRate(delivered, dest);
+
+    // "Envoi très faible" : on évite d'afficher le bouton si c'est juste une campagne avec quelques bounces.
+    // Seuil volontairement strict (relancer uniquement quand ça a vraiment foiré).
+    return rate < 40;
+}
+
+function safeRate(part, total) {
+    const num = Number(part) || 0;
+    const den = Number(total) || 0;
+    if (den <= 0) return 0;
+    return (num / den) * 100;
+}
+
+function formatPercent(value) {
+    const v = Number.isFinite(value) ? value : 0;
+    return v.toFixed(1) + '%';
+}
+
+function clampPercent(value) {
+    const v = Number.isFinite(value) ? value : 0;
+    return Math.max(0, Math.min(100, Math.round(v)));
 }
 
 function formatContactName(nomDestinataire) {

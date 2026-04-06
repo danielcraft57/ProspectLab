@@ -64,3 +64,15 @@ def normalize_website_domain(raw: object) -> Optional[str]:
     host = host.strip()
     return host or None
 
+
+def canonical_website_https_url(raw: object) -> Optional[str]:
+    """
+    URL HTTPS unique pour lancer les analyses et stocker `entreprises.website` :
+    même host que ``normalize_website_domain`` (sans ``www.``, minuscules),
+    forme ``https://exemple.fr`` (évite les doublons ``www`` / apex).
+    """
+    host = normalize_website_domain(raw)
+    if not host:
+        return None
+    return f"https://{host}"
+

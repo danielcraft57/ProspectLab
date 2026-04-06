@@ -4,11 +4,14 @@
 
 (function() {
     let tokens = [];
+    let modalState = { token: '', site: '', subtitle: '' };
     
     // Charger les tokens au démarrage
     document.addEventListener('DOMContentLoaded', function() {
+        setupPermissionsBadgeClick();
         loadTokens();
         setupForm();
+        setupTokenModal();
     });
     
     /**
@@ -31,6 +34,83 @@
         }
     }
     
+    function permBadgeHtml(token, field, label, titleExtra) {
+        const on = !!token[field];
+        const tone = on ? 'badge-success' : 'badge-danger';
+        const clickable = token.is_active ? 'badge--perm' : '';
+        const title = token.is_active
+            ? ('Cliquer pour activer ou désactiver' + (titleExtra ? ' — ' + titleExtra : ''))
+            : 'Token révoqué — modification impossible';
+        return `<span role="button" tabindex="0" class="badge ${tone} ${clickable}" data-token-id="${token.id}" data-perm="${field}" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`;
+    }
+
+    /**
+     * Clic sur les tags de permissions (délégation sur #tokensContainer).
+     */
+    function setupPermissionsBadgeClick() {
+        const container = document.getElementById('tokensContainer');
+        if (!container || container.dataset.badgeClickInit === '1') return;
+        container.dataset.badgeClickInit = '1';
+        container.addEventListener('click', function (e) {
+            const badge = e.target.closest('.badge--perm');
+            if (!badge || badge.classList.contains('is-busy')) return;
+            const id = parseInt(badge.dataset.tokenId, 10);
+            const perm = badge.dataset.perm;
+            if (!id || !perm) return;
+            const tok = tokens.find(function (t) { return t.id === id; });
+            if (!tok || !tok.is_active) return;
+            void toggleTokenPermission(id, perm, badge);
+        });
+    }
+
+    /**
+     * Bascule une permission puis PATCH /api/tokens/:id
+     */
+    async function toggleTokenPermission(tokenId, perm, badgeEl) {
+        const tok = tokens.find(function (t) { return t.id === tokenId; });
+        if (!tok) return;
+        if (perm === 'can_delete_entreprises' && !tok.can_read_entreprises) {
+            showError('Activez d’abord la permission « Entreprises » pour autoriser la suppression.');
+            return;
+        }
+        const next = {
+            can_read_entreprises: !!tok.can_read_entreprises,
+            can_read_emails: !!tok.can_read_emails,
+            can_read_statistics: !!tok.can_read_statistics,
+            can_read_campagnes: !!tok.can_read_campagnes,
+            can_delete_entreprises: !!(tok.can_read_entreprises && tok.can_delete_entreprises),
+        };
+        next[perm] = !next[perm];
+        if (perm === 'can_read_entreprises' && !next.can_read_entreprises) {
+            next.can_delete_entreprises = false;
+        }
+
+        badgeEl.classList.add('is-busy');
+        try {
+            const response = await fetch('/api/tokens/' + tokenId, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(next),
+            });
+            const data = await response.json();
+            if (!data.success) {
+                showError(data.error || 'Mise à jour impossible');
+                await loadTokens();
+                return;
+            }
+            var idx = tokens.findIndex(function (t) { return t.id === tokenId; });
+            if (idx !== -1 && data.data) {
+                tokens[idx] = data.data;
+            }
+            displayTokens(tokens);
+            showSuccess('Permission mise à jour.');
+        } catch (err) {
+            console.error(err);
+            showError('Erreur réseau lors de la mise à jour des permissions');
+            await loadTokens();
+        }
+    }
+
     /**
      * Affiche les tokens dans la liste
      */
@@ -55,31 +135,14 @@
                 ? new Date(token.last_used).toLocaleDateString('fr-FR')
                 : 'Jamais utilisé';
             
-            const permissions = [];
-            if (token.can_read_entreprises) {
-                permissions.push('<span class="badge badge-success">Entreprises</span>');
-            } else {
-                permissions.push('<span class="badge badge-danger">Entreprises</span>');
-            }
-            if (token.can_read_emails) {
-                permissions.push('<span class="badge badge-success">Emails</span>');
-            } else {
-                permissions.push('<span class="badge badge-danger">Emails</span>');
-            }
-            if (token.can_read_statistics) {
-                permissions.push('<span class="badge badge-success">Statistiques</span>');
-            } else {
-                permissions.push('<span class="badge badge-danger">Statistiques</span>');
-            }
-            if (token.can_read_campagnes) {
-                permissions.push('<span class="badge badge-success">Campagnes</span>');
-            } else {
-                permissions.push('<span class="badge badge-danger">Campagnes</span>');
-            }
-            
-            // Échapper le token pour éviter les problèmes avec les guillemets
-            const safeToken = token.token ? token.token.replace(/'/g, "\\'").replace(/"/g, '&quot;') : '';
-            
+            const permissions = [
+                permBadgeHtml(token, 'can_read_entreprises', 'Entreprises', 'liste et détail API'),
+                permBadgeHtml(token, 'can_read_emails', 'Emails'),
+                permBadgeHtml(token, 'can_read_statistics', 'Statistiques'),
+                permBadgeHtml(token, 'can_read_campagnes', 'Campagnes'),
+                permBadgeHtml(token, 'can_delete_entreprises', 'Suppr. entreprises', 'DELETE /api/public/entreprises/<id>'),
+            ];
+
             return `
                 <div class="token-card ${statusClass}">
                     <div class="token-header">
@@ -88,9 +151,9 @@
                             ${token.app_url ? `<div class="token-url"><i class="fas fa-link"></i> ${escapeHtml(token.app_url)}</div>` : ''}
                         </div>
                         <div class="token-actions">
-                            ${token.is_active && safeToken ? `
-                                <button class="btn-action btn-copy" onclick="copyToken('${safeToken}')" title="Copier le token">
-                                    <i class="fas fa-copy"></i> Copier
+                            ${token.is_active ? `
+                                <button class="btn-action btn-view" onclick="openTokenModal(${token.id})" title="Voir le token">
+                                    <i class="fas fa-eye"></i> Voir
                                 </button>
                                 <button class="btn-action btn-revoke" onclick="revokeToken(${token.id})" title="Révoquer le token">
                                     <i class="fas fa-ban"></i> Révoquer
@@ -128,8 +191,38 @@
     }
     
     /**
-     * Active une classe visuelle et gère le clic sur les tuiles de permissions
+     * La suppression entreprises n'a de sens qu'avec la lecture entreprises (formulaire de création).
      */
+    function wireDeleteEntreprisesPermission() {
+        const pe = document.getElementById('permEntreprises');
+        const pd = document.getElementById('permDeleteEntreprises');
+        if (!pe || !pd) return;
+
+        function sync() {
+            const wrap = pd.closest('.permission-item');
+            if (!pe.checked) {
+                pd.checked = false;
+                pd.disabled = true;
+                if (wrap) wrap.classList.remove('is-active');
+            } else {
+                pd.disabled = false;
+                if (wrap) wrap.classList.toggle('is-active', pd.checked);
+            }
+        }
+
+        if (pe.dataset.deletePermWired === '1') {
+            sync();
+            return;
+        }
+        pe.dataset.deletePermWired = '1';
+        pe.addEventListener('change', sync);
+        pd.addEventListener('change', function () {
+            const wrap = pd.closest('.permission-item');
+            if (wrap) wrap.classList.toggle('is-active', pd.checked);
+        });
+        sync();
+    }
+
     function setupPermissionTiles() {
         const items = document.querySelectorAll('.permissions-group .permission-item');
         if (!items.length) return;
@@ -162,6 +255,7 @@
 
         // Initialiser les tuiles de permissions (visuel + clic)
         setupPermissionTiles();
+        wireDeleteEntreprisesPermission();
 
         form.addEventListener('submit', async function(e) {
             e.preventDefault();
@@ -191,7 +285,8 @@
                 can_read_entreprises: document.getElementById('permEntreprises').checked,
                 can_read_emails: document.getElementById('permEmails').checked,
                 can_read_statistics: document.getElementById('permStatistics').checked,
-                can_read_campagnes: document.getElementById('permCampagnes').checked
+                can_read_campagnes: document.getElementById('permCampagnes').checked,
+                can_delete_entreprises: document.getElementById('permDeleteEntreprises').checked
             };
             
             try {
@@ -211,6 +306,7 @@
                     form.reset();
                     // Réinitialiser l'état visuel des tuiles après reset
                     setupPermissionTiles();
+                    wireDeleteEntreprisesPermission();
                     loadTokens();
                 } else {
                     showError('Erreur: ' + (data.error || 'Erreur inconnue'));
@@ -226,26 +322,11 @@
      * Affiche le token créé avec un avertissement
      */
     function showTokenCreated(tokenData) {
-        const alert = document.createElement('div');
-        alert.className = 'alert alert-warning';
-        alert.innerHTML = `
-            <strong><i class="fas fa-exclamation-triangle"></i> Important !</strong>
-            <p>Votre token a été généré. <strong>Sauvegardez-le immédiatement</strong>, il ne sera plus affiché après fermeture de cette alerte.</p>
-            <div class="token-display">
-                <span class="token-value">${tokenData.token}</span>
-                <button class="btn-action btn-copy" onclick="copyToken('${tokenData.token}')">
-                    <i class="fas fa-copy"></i> Copier
-                </button>
-            </div>
-        `;
-        
-        const container = document.querySelector('.create-token-section');
-        container.insertBefore(alert, container.firstChild);
-        
-        // Supprimer l'alerte après 30 secondes
-        setTimeout(() => {
-            alert.remove();
-        }, 30000);
+        openTokenModalWithData({
+            token: tokenData.token || '',
+            site: tokenData.app_url || '',
+            subtitle: "Token créé. Copie-le maintenant, il ne sera plus affiché automatiquement ensuite."
+        });
     }
     
     /**
@@ -305,19 +386,132 @@
     /**
      * Copie un token dans le presse-papier
      */
-    window.copyToken = async function(token) {
+    async function copyToClipboard(text) {
         try {
-            await navigator.clipboard.writeText(token);
-            showSuccess('Token copié dans le presse-papier !');
+            await navigator.clipboard.writeText(text);
+            showSuccess('Copié dans le presse-papier !');
         } catch (error) {
-            // Fallback pour les navigateurs plus anciens
             const textarea = document.createElement('textarea');
-            textarea.value = token;
+            textarea.value = text;
             document.body.appendChild(textarea);
             textarea.select();
             document.execCommand('copy');
             document.body.removeChild(textarea);
-            showSuccess('Token copié dans le presse-papier !');
+            showSuccess('Copié dans le presse-papier !');
+        }
+    }
+
+    window.copyToken = async function(token) {
+        return copyToClipboard(token);
+    };
+
+    function setupTokenModal() {
+        const modal = document.getElementById('tokenModal');
+        if (!modal) return;
+
+        modal.querySelectorAll('[data-close-modal="1"]').forEach((el) => {
+            el.addEventListener('click', closeTokenModal);
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeTokenModal();
+        });
+
+        const siteInput = document.getElementById('tokenModalSite');
+        const tokenInput = document.getElementById('tokenModalValue');
+        const copySiteBtn = document.getElementById('tokenModalCopySite');
+        const copyTokenBtn = document.getElementById('tokenModalCopyToken');
+
+        if (copySiteBtn && siteInput) {
+            copySiteBtn.addEventListener('click', async () => {
+                await copyToClipboard(modalState.site || siteInput.value || '');
+            });
+        }
+        if (copyTokenBtn && tokenInput) {
+            copyTokenBtn.addEventListener('click', async () => {
+                await copyToClipboard(modalState.token || tokenInput.value || '');
+            });
+        }
+    }
+
+    function renderTokenQr(token) {
+        const el = document.getElementById('tokenModalQr');
+        if (!el) return;
+        el.innerHTML = '';
+        const t = (token || '').trim();
+        if (!t || typeof QRCode === 'undefined') {
+            if (!t) {
+                el.innerHTML = '<span style="color:#64748b;font-size:12px;">—</span>';
+            } else {
+                el.innerHTML = '<span style="color:#b45309;font-size:11px;">QR indisponible (script bloqué)</span>';
+            }
+            return;
+        }
+        try {
+            new QRCode(el, {
+                text: t,
+                width: 196,
+                height: 196,
+                colorDark: '#0f172a',
+                colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.M,
+            });
+        } catch (e) {
+            console.error(e);
+            el.innerHTML = '<span style="color:#b45309;font-size:11px;">QR erreur</span>';
+        }
+    }
+
+    function openTokenModalWithData({ token, site, subtitle }) {
+        const modal = document.getElementById('tokenModal');
+        if (!modal) return;
+
+        modalState = { token: token || '', site: site || '', subtitle: subtitle || '' };
+
+        const subtitleEl = document.getElementById('tokenModalSubtitle');
+        const siteInput = document.getElementById('tokenModalSite');
+        const tokenInput = document.getElementById('tokenModalValue');
+        const copySiteBtn = document.getElementById('tokenModalCopySite');
+        const copyTokenBtn = document.getElementById('tokenModalCopyToken');
+
+        if (subtitleEl) subtitleEl.textContent = modalState.subtitle || 'Vérifie le site et copie le token.';
+        if (siteInput) siteInput.value = modalState.site || '';
+        if (tokenInput) tokenInput.value = modalState.token || '';
+
+        if (copySiteBtn) copySiteBtn.disabled = !(modalState.site || '').trim();
+        if (copyTokenBtn) copyTokenBtn.disabled = !(modalState.token || '').trim();
+
+        modal.classList.add('is-open');
+        modal.setAttribute('aria-hidden', 'false');
+
+        renderTokenQr(modalState.token);
+    }
+
+    function closeTokenModal() {
+        const modal = document.getElementById('tokenModal');
+        if (!modal) return;
+        const qr = document.getElementById('tokenModalQr');
+        if (qr) qr.innerHTML = '';
+        modal.classList.remove('is-open');
+        modal.setAttribute('aria-hidden', 'true');
+    }
+
+    window.openTokenModal = async function(tokenId) {
+        try {
+            const res = await fetch(`/api/tokens/${tokenId}/reveal`);
+            const data = await res.json();
+            if (!data.success) {
+                showError(data.error || "Impossible d'afficher le token");
+                return;
+            }
+            const d = data.data || {};
+            openTokenModalWithData({
+                token: d.token || '',
+                site: d.app_url || '',
+                subtitle: d.name ? `Token: ${d.name}` : 'Token API',
+            });
+        } catch (e) {
+            showError("Impossible d'afficher le token");
         }
     };
     

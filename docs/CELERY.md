@@ -59,19 +59,50 @@ python run_celery.py
 
 **Linux/Mac :**
 ```bash
-celery -A celery_app worker --pool=threads --concurrency=6 -Q celery,heavy --loglevel=info
+celery -A celery_app worker --pool=threads --concurrency=6 -Q celery,scraping,scraping_interactive,technical,seo,osint,pentest,heavy --loglevel=info
 ```
 
 ### Files d'attente, charge « bulk » et workers
 
-- **Deux files Redis** : `celery` (tâches courtes : emails, cron, etc.) et `heavy` (analyses techniques, SEO, OSINT, Pentest, scraping). Le worker **doit** consommer les deux : `-Q celery,heavy` (déjà le défaut dans `run_celery.py` via `CELERY_WORKER_QUEUES`).
+- **Files Celery dédiées** : `celery` (tâches courtes : emails, cron, etc.), `scraping` (bulk : `scrape_analysis_task`, packs API avec `queue='scraping'`), **`scraping_interactive`** (scrape unitaire Socket.IO / défaut `scrape_emails_task`), et `technical`, `seo`, `osint`, `pentest`. Le worker **doit** consommer au minimum ces files lourdes : `-Q celery,scraping,scraping_interactive,technical,seo,osint,pentest` (le `heavy` est conservé en compat si des tâches historiques y sont encore routées). Sous **systemd Linux**, `CELERY_WORKER_QUEUE_PRESET=scraping_only` ou `non_scraping` permet de scinder les nœuds (voir `scripts/linux/start_celery_worker.sh`).
 - **Préchargement** : `CELERY_WORKER_PREFETCH_MULTIPLIER=1` — chaque worker ne réserve qu’une tâche à la fois, meilleure répartition sous pic.
 - **Accusés tardifs** : `CELERY_TASK_ACKS_LATE=true` — la tâche n’est acquise qu’après exécution (moins de perte si crash worker).
 - **Étalement des sous-tâches** : lors d’un scraping multi-entreprises, chaque sous-tâche (technique, OSINT, SEO, Pentest) est planifiée avec un `countdown` croissant (`CELERY_BULK_STAGGER_SEC`, défaut **0,75 s** entre chaque index), pour ne pas poster 200 messages instantanément sur le broker.
 - **Interface** : les relances bulk depuis la liste entreprises déclenchent les analyses avec un léger décalage côté navigateur (~300 ms entre chaque).
 - **API `website-analysis`** (interne / publique) : le pack scraping + technique + SEO + OSINT + pentest est planifié avec le même étalement (`tasks.heavy_schedule.BulkSubtaskStagger`), pas cinq `.delay()` simultanés.
+- **Pack « Analyse site complet » (page dédiée)** : la tâche est enqueued sur la file `CELERY_FULL_ANALYSIS_QUEUE` (défaut **`technical`**, comme les autres analyses lourdes). Si l’interface reste sur « Tâche en file… » avec l’état Celery `PENDING`, aucun worker ne consomme cette file : vérifiez `CELERY_WORKER_QUEUES` sur le serveur (doit inclure au minimum `technical`). Une file dédiée `website_full` est possible pour isoler le pack ; dans ce cas, ajoutez `website_full` aux workers concernés.
 
-Variables utiles (`.env`) : `CELERY_WORKERS`, `CELERY_WORKER_QUEUES`, `CELERY_BULK_STAGGER_SEC`, `CELERY_WORKER_PREFETCH_MULTIPLIER`, `CELERY_TASK_ACKS_LATE`, ainsi que les timeouts SEO / OSINT / Pentest (section « Analyses lourdes » dans `.env`).
+Variables utiles (`.env`) : `CELERY_WORKERS`, `CELERY_WORKER_QUEUES`, `CELERY_WORKER_QUEUE_PRESET` (Linux), `CELERY_FULL_ANALYSIS_QUEUE`, `CELERY_BULK_STAGGER_SEC`, `CELERY_WORKER_PREFETCH_MULTIPLIER`, `CELERY_TASK_ACKS_LATE`, ainsi que les timeouts SEO / OSINT / Pentest (section « Analyses lourdes » dans `.env`).
+
+## Tâches périodiques (Beat) - campagnes et bounces
+
+ProspectLab utilise Celery Beat pour plusieurs tâches de fond:
+
+- Lancement des campagnes programmées (toutes les minutes)
+- Rapports campagnes (matin/soir)
+- Monitoring des variations (toutes les 30 min)
+- **Scan des bounces IMAP (2 fois par jour)**
+
+### Scan bounces IMAP
+
+Tâche:
+- `tasks.email_tasks.run_bounce_scan_task`
+
+Planification (heure de Paris via `CELERY_TIMEZONE`):
+- `08:10`
+- `20:10`
+
+Déclenchement post-campagne:
+- une exécution est planifiée **30 min après le lancement réel** d'une campagne (`send_campagne_task`)
+
+Variables `.env`:
+- `BOUNCE_SCAN_ENABLED`
+- `BOUNCE_SCAN_PROFILES` (ex: `gmail,node12`)
+- `BOUNCE_SCAN_DAYS` (fenêtre en jours pour les runs 2x/jour)
+- `BOUNCE_SCAN_AFTER_CAMPAIGN_DAYS` (fenêtre courte post-campagne)
+- `BOUNCE_SCAN_LIMIT` (0 = sans limite)
+- `BOUNCE_SCAN_DELETE_PROCESSED` (supprime/déplace en corbeille après tagging)
+- `BOUNCE_SCAN_POST_CAMPAIGN_DELAY_SEC` (défaut 1800 = 30 min)
 
 ### Configuration Celery
 
@@ -465,9 +496,9 @@ pkill -f "celery worker"
 
 ### Bulk SEO / WebSocket : app bloquée, `logs/seo_tasks.log` vide
 
-- **`seo_tasks.log`** (et les autres `*_tasks.log`) ne sont écrits que par le **processus Celery worker**, pas par Gunicorn. Si le fichier reste vide alors que l’UI dit « démarré », le worker **ne consomme pas** la file `heavy` ou **n’est pas lancé**. Vérifier :  
+- **`seo_tasks.log`** (et les autres `*_tasks.log`) ne sont écrits que par le **processus Celery worker**, pas par Gunicorn. Si le fichier reste vide alors que l’UI dit « démarré », le worker **ne consomme pas** la file dédiée (`seo`, `technical`, `osint`, `pentest` ou `scraping`) ou **n’est pas lancé**. Vérifier :  
   `celery -A celery_app inspect ping`  
-  et la commande systemd / script : **`-Q celery,heavy`** (obligatoire pour SEO, technique, pentest, scraping lourd).
+  et la commande systemd / script : **`-Q celery,scraping,technical,seo,osint,pentest`** (obligatoire pour les analyses/scans lourds).
 - **Redis** : sans broker, aucune tâche n’est enfilée. Un `PING` Redis léger (avec cache de quelques secondes) remplace l’ancien `celery.control.inspect().active()` avant chaque événement WebSocket, pour éviter de saturer Redis quand on lance 20–50 analyses d’affilée (surtout sur Raspberry Pi + Gunicorn **eventlet**).
 - **Charge Redis** : chaque analyse ouvre un thread de suivi qui interroge le résultat Celery. Variable **`CELERY_WS_MONITOR_POLL_SEC`** (défaut **1.0**) = intervalle entre deux lectures ; augmenter à `1.5` ou `2` sur matériel très lent.
 - **Logs côté web** : après déploiement, les enfilements SEO peuvent apparaître dans **`logs/prospectlab.log`** (`WebSocket SEO: tâche enfilée …`) si le logging Flask racine est actif.

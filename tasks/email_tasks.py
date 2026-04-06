@@ -11,17 +11,89 @@ from services.email_sender import EmailSender
 from services.email_tracker import EmailTracker
 from services.logging_config import setup_logger
 import logging
+import os
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
 import json
 from config import MAIL_DEFAULT_RECIPIENT
+from config import (
+    BOUNCE_SCAN_ENABLED,
+    BOUNCE_SCAN_PROFILES,
+    BOUNCE_SCAN_DAYS,
+    BOUNCE_SCAN_AFTER_CAMPAIGN_DAYS,
+    BOUNCE_SCAN_LIMIT,
+    BOUNCE_SCAN_DELETE_PROCESSED,
+    BOUNCE_SCAN_POST_CAMPAIGN_DELAY_SEC,
+)
+import subprocess
+import sys
 
 # Configurer le logger pour cette tâche
 logger = setup_logger(__name__, 'email_tasks.log', level=logging.DEBUG)
 
 # Fichier cache pour le suivi d'évolution des stats de campagnes
 STATS_CACHE_PATH = Path(__file__).resolve().parents[1] / 'logs' / 'campagne_stats_cache.json'
+
+
+@celery.task
+def run_bounce_scan_task(days=None, profiles=None, delete_processed=None, limit=None, debug=False):
+    """
+    Lance le scan IMAP des bounces via le script dédié.
+    """
+    if not BOUNCE_SCAN_ENABLED:
+        logger.info('[BounceScan] Désactivé (BOUNCE_SCAN_ENABLED=false)')
+        return {'success': True, 'skipped': True, 'reason': 'disabled'}
+
+    root = Path(__file__).resolve().parents[1]
+    script = root / 'scripts' / 'fetch_bounces_imap.py'
+    if not script.exists():
+        logger.warning(f'[BounceScan] Script introuvable: {script}')
+        return {'success': False, 'error': 'script_not_found'}
+
+    _days = int(days) if days is not None else int(BOUNCE_SCAN_DAYS)
+    _profiles = (profiles or BOUNCE_SCAN_PROFILES or 'default').strip()
+    _delete = bool(BOUNCE_SCAN_DELETE_PROCESSED if delete_processed is None else delete_processed)
+    _limit = int(BOUNCE_SCAN_LIMIT if limit is None else limit)
+
+    cmd = [
+        sys.executable,
+        str(script),
+        '--apply',
+        '--days', str(_days),
+        '--profiles', _profiles,
+        '--limit', str(_limit),
+    ]
+    if _delete:
+        cmd.append('--delete-processed')
+    if debug:
+        cmd.append('--debug')
+
+    logger.info(f'[BounceScan] Run: {" ".join(cmd)}')
+    try:
+        completed = subprocess.run(
+            cmd,
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=60 * 20,  # 20 min max
+            check=False,
+        )
+        out = (completed.stdout or '').strip()
+        err = (completed.stderr or '').strip()
+        if out:
+            logger.info(f'[BounceScan] stdout:\n{out}')
+        if err:
+            logger.warning(f'[BounceScan] stderr:\n{err}')
+        return {
+            'success': completed.returncode == 0,
+            'returncode': completed.returncode,
+            'stdout': out[-4000:],
+            'stderr': err[-2000:],
+        }
+    except Exception as e:
+        logger.error(f'[BounceScan] Erreur exécution: {e}', exc_info=True)
+        return {'success': False, 'error': str(e)}
 
 
 @celery.task(bind=True)
@@ -184,6 +256,27 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
     logs = []
 
     campagne_manager.update_campagne(campagne_id, statut='running', total_destinataires=total)
+    # Déclencher un scan bounces peu après le lancement de campagne.
+    # Le scan périodique (Beat) tournera aussi 2x/jour.
+    if BOUNCE_SCAN_ENABLED:
+        try:
+            run_bounce_scan_task.apply_async(
+                kwargs={
+                    'days': int(BOUNCE_SCAN_AFTER_CAMPAIGN_DAYS),
+                    'profiles': BOUNCE_SCAN_PROFILES,
+                    'delete_processed': bool(BOUNCE_SCAN_DELETE_PROCESSED),
+                    'limit': int(BOUNCE_SCAN_LIMIT),
+                    'debug': False,
+                },
+                countdown=int(BOUNCE_SCAN_POST_CAMPAIGN_DELAY_SEC),
+            )
+            logger.info(
+                f'[Campagne {campagne_id}] Bounce scan planifié dans '
+                f'{int(BOUNCE_SCAN_POST_CAMPAIGN_DELAY_SEC)}s '
+                f'(days={int(BOUNCE_SCAN_AFTER_CAMPAIGN_DAYS)}, limit={int(BOUNCE_SCAN_LIMIT)})'
+            )
+        except Exception as e:
+            logger.warning(f'[Campagne {campagne_id}] Impossible de planifier le bounce scan: {e}')
 
     template = None
     if template_id:
@@ -289,7 +382,8 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
                 sujet=email_subject,
                 statut='sent' if result.get('success') else 'failed',
                 erreur=None if result.get('success') else result.get('message', 'Erreur inconnue'),
-                tracking_token=tracking_token
+                tracking_token=tracking_token,
+                contenu_envoye=html_message or text_message
             )
 
             if result.get('success'):
@@ -315,7 +409,18 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
             if delay > 0 and idx < total:
                 time.sleep(delay)
 
-        final_statut = 'completed' if (total_sent > 0 or total == 0) else 'failed'
+        # Statut final campagne:
+        # - completed: tout est parti sans échec (ou campagne vide)
+        # - completed_with_errors: envoi partiel (au moins 1 succès + au moins 1 échec)
+        # - failed: aucun email n'a pu être envoyé avec succès
+        if total == 0:
+            final_statut = 'completed'
+        elif total_sent > 0 and total_failed > 0:
+            final_statut = 'completed_with_errors'
+        elif total_sent > 0:
+            final_statut = 'completed'
+        else:
+            final_statut = 'failed'
         campagne_manager.update_campagne(
             campagne_id,
             statut=final_statut,
@@ -323,8 +428,11 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
             total_reussis=total_sent
         )
 
-        # En fin de campagne : passer en "Perdu" les entreprises restées Nouveau/À qualifier sans open ni clic
-        if final_statut == 'completed':
+        # En fin de campagne: le passage auto en "Perdu" est désactivé par défaut,
+        # car il peut fausser fortement le pipeline quand le tracking open/click
+        # est partiellement bloqué (Apple MPP, anti-trackers, clients mail).
+        auto_mark_lost = str(os.getenv('AUTO_MARK_LOST_ON_CAMPAIGN_COMPLETE', '')).strip().lower() in {'1', 'true', 'yes', 'on'}
+        if final_statut == 'completed' and auto_mark_lost:
             try:
                 marked_lost = campagne_manager.mark_campaign_lost_entreprises(campagne_id)
                 if marked_lost:

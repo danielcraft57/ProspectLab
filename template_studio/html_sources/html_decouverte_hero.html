@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Un mot pour {entreprise}</title>
+    <style type="text/css">
+        @media only screen and (max-width: 600px) { .mobile-pad { padding: 20px 16px !important; } }
+    </style>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f9fafb;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        15 minutes pour identifier 2–3 améliorations concrètes sur votre site.
+    </div>
+    <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f9fafb;">
+        <tr>
+            <td style="padding: 32px 20px;" class="mobile-pad">
+                <table role="presentation" style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); overflow: hidden;">
+                    <tr>
+                        <td style="padding: 24px 32px; background: linear-gradient(135deg, #4da9d6 0%, #184c70 100%);">
+                            <p style="margin: 0; color: rgba(255,255,255,0.9); font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em;">Premier contact</p>
+                            <h1 style="margin: 8px 0 0; color: #ffffff; font-size: 22px; font-weight: 600;">Un mot pour {entreprise}</h1>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 36px 32px 28px;" class="mobile-pad">
+                            <h2 style="margin: 0 0 20px 0; color: #1f2937; font-size: 20px; font-weight: 600;">Bonjour {nom},</h2>
+                            <p style="margin: 0 0 20px 0; color: #1f2937; font-size: 16px; line-height: 1.65;">
+                                Je m'adresse à vous au nom de <strong style="color: #4da9d6;">{entreprise}</strong>.
+                                {#if_secteur}Vous évoluez dans le secteur <strong>{secteur}</strong>. {#endif}
+                                {#if_website}Votre site <strong>{website}</strong> {#endif}m'a donné envie de vous proposer un accompagnement sur mesure.
+                            </p>
+                            <p style="margin: 0 0 24px 0; color: #1f2937; font-size: 16px; line-height: 1.65;">
+                                <strong style="color: #4da9d6;">En 15 minutes</strong>, je vous montre concrètement ce qui fait perdre des opportunités sur votre site.
+                            </p>
+                            <p style="margin: 0 0 10px; color: #4b5563; font-size: 14px; line-height: 1.6;">
+                                Mini feuille de route (3 points) :
+                            </p>
+                            <ul style="margin: 0 0 24px 0; padding-left: 20px; color: #1f2937; font-size: 15px; line-height: 1.75;">
+                                <li style="margin-bottom: 8px;">Le point qui freine le plus vos demandes</li>
+                                <li style="margin-bottom: 8px;">La prochaine action la plus rentable</li>
+                                <li style="margin-bottom: 0;">Un “quick win” réaliste à court terme</li>
+                            </ul>
+                            {#include:cta_dual_analysis_and_15min}
+                            {#include:signature_standard}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 20px 32px; background-color: #f9fafb; border-radius: 0 0 12px 12px; text-align: center;">
+                            {#include:footer_standard}
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

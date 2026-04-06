@@ -5,10 +5,136 @@ Contient toutes les méthodes liées aux scrapers et leurs données normalisées
 
 import json
 import logging
+from datetime import datetime, timezone
 from urllib.parse import urljoin
 from .base import DatabaseBase
 
 logger = logging.getLogger(__name__)
+
+_EMAIL_EXTRAS_KEYS = ('hunter', 'abstract_email', 'hunter_error', 'abstract_email_error')
+
+
+def _email_analysis_extras_json(analysis):
+    """Sérialise Hunter / Abstract (et erreurs) pour la colonne analysis_extras."""
+    if not isinstance(analysis, dict):
+        return None
+    extras = {k: analysis[k] for k in _EMAIL_EXTRAS_KEYS if k in analysis}
+    if not extras:
+        return None
+    try:
+        return json.dumps(extras)
+    except (TypeError, ValueError):
+        return None
+
+
+def _email_analysis_from_stored_row(row):
+    """Reconstruit un dict d'analyse (compatible insertion scraper_emails) depuis une ligne existante."""
+    if not row:
+        return None
+    keys = (
+        'email', 'page_url', 'provider', 'type', 'format_valid', 'mx_valid', 'risk_score',
+        'domain', 'name_info', 'is_person', 'analysis_extras', 'analyzed_at',
+    )
+    if isinstance(row, dict):
+        d = row
+    else:
+        d = {keys[i]: row[i] for i in range(min(len(row), len(keys)))}
+    provider = d.get('provider')
+    type_ = d.get('type')
+    domain = d.get('domain')
+    extras_raw = d.get('analysis_extras')
+    name_info_raw = d.get('name_info')
+    if not any([
+        provider, type_, domain, extras_raw, name_info_raw,
+        d.get('risk_score') is not None,
+    ]):
+        return None
+    analysis = {
+        'provider': provider,
+        'type': type_,
+        'domain': domain,
+        'risk_score': d.get('risk_score'),
+    }
+    fv = d.get('format_valid')
+    if fv is not None:
+        analysis['format_valid'] = bool(fv) if fv in (0, 1) else fv
+    mv = d.get('mx_valid')
+    if mv is None:
+        analysis['mx_valid'] = None
+    else:
+        analysis['mx_valid'] = True if mv in (1, True) else False if mv in (0, False) else None
+    if name_info_raw:
+        try:
+            analysis['name_info'] = json.loads(name_info_raw) if isinstance(name_info_raw, str) else name_info_raw
+        except (TypeError, ValueError):
+            pass
+    if extras_raw:
+        try:
+            ex = json.loads(extras_raw) if isinstance(extras_raw, str) else extras_raw
+            if isinstance(ex, dict):
+                analysis.update({k: ex[k] for k in _EMAIL_EXTRAS_KEYS if k in ex})
+        except (TypeError, ValueError):
+            pass
+    if d.get('analyzed_at'):
+        analysis['analyzed_at'] = d['analyzed_at']
+    ip = d.get('is_person')
+    if ip is not None:
+        analysis['is_person'] = bool(ip)
+    return analysis
+
+
+def _phone_row_to_lookup_dict(row):
+    if isinstance(row, dict):
+        return row
+    cols = (
+        'phone', 'page_url', 'phone_e164', 'carrier', 'location', 'line_type',
+        'phone_valid', 'osint_json', 'analyzed_at',
+    )
+    return {cols[i]: row[i] for i in range(min(len(row), len(cols)))}
+
+
+def _phone_analysis_lookup(phone_str, phone_analyses):
+    """Associe une entrée scrapée au résultat OSINT (clés = numéros normalisés)."""
+    if not phone_analyses or not isinstance(phone_analyses, dict):
+        return None
+    try:
+        from tasks.phone_tasks import normalize_phones_for_osint
+    except ImportError:
+        st = (phone_str or '').strip()
+        return phone_analyses.get(st)
+    keys = normalize_phones_for_osint([phone_str])
+    if keys and keys[0] in phone_analyses:
+        return phone_analyses[keys[0]]
+    st = (phone_str or '').strip()
+    if st in phone_analyses:
+        return phone_analyses[st]
+    return None
+
+
+def _phone_osint_db_fields(phone_info):
+    """Colonnes dérivées + JSON complet pour scraper_phones.osint_json."""
+    if not isinstance(phone_info, dict):
+        return None, None, None, None, None, None
+    lib = phone_info.get('libphonenumber') or {}
+    e164 = lib.get('e164')
+    v = phone_info.get('valid')
+    pv = None
+    if v is True:
+        pv = 1
+    elif v is False:
+        pv = 0
+    try:
+        js = json.dumps(phone_info, default=str)
+    except (TypeError, ValueError):
+        js = None
+    return (
+        e164,
+        phone_info.get('carrier'),
+        phone_info.get('location'),
+        phone_info.get('line_type'),
+        pv,
+        js,
+    )
 
 
 class ScraperManager(DatabaseBase):
@@ -24,7 +150,7 @@ class ScraperManager(DatabaseBase):
                      social_profiles=None, technologies=None, metadata=None, images=None, forms=None,
                      visited_urls=0, total_emails=0, total_people=0, total_phones=0,
                      total_social_profiles=0, total_technologies=0, total_metadata=0, total_images=0, total_forms=0, duration=0,
-                     email_analyses=None):
+                     email_analyses=None, phone_analyses=None):
         """
         Sauvegarde ou met à jour un scraper dans la base de données.
         Si un scraper existe déjà pour cette entreprise/URL/type, il est mis à jour.
@@ -53,6 +179,7 @@ class ScraperManager(DatabaseBase):
             total_forms: Nombre total de formulaires
             duration: Durée du scraping en secondes
             email_analyses: Dict avec email comme clé et analyse comme valeur (optionnel)
+            phone_analyses: Dict numéro normalisé -> résultat analyze_phones_osint (optionnel)
         
         Returns:
             int: ID du scraper créé ou mis à jour
@@ -152,7 +279,9 @@ class ScraperManager(DatabaseBase):
             if emails:
                 self._save_scraper_emails_in_transaction(cursor, scraper_id, entreprise_id, emails, email_analyses)
             if phones:
-                self._save_scraper_phones_in_transaction(cursor, scraper_id, entreprise_id, phones)
+                self._save_scraper_phones_in_transaction(
+                    cursor, scraper_id, entreprise_id, phones, phone_analyses
+                )
             if social_profiles:
                 self._save_scraper_social_profiles_in_transaction(cursor, scraper_id, entreprise_id, social_profiles)
             if technologies:
@@ -201,7 +330,17 @@ class ScraperManager(DatabaseBase):
         if not emails:
             return
         
-        # Supprimer les anciens emails de ce scraper
+        prev_by_email = {}
+        self.execute_sql(cursor, '''
+            SELECT email, page_url, provider, type, format_valid, mx_valid, risk_score,
+                   domain, name_info, is_person, analysis_extras, analyzed_at
+            FROM scraper_emails WHERE scraper_id = ?
+        ''', (scraper_id,))
+        for row in cursor.fetchall():
+            em = row.get('email') if isinstance(row, dict) else row[0]
+            if em:
+                prev_by_email[str(em).strip().lower()] = row
+
         self.execute_sql(cursor,'DELETE FROM scraper_emails WHERE scraper_id = ?', (scraper_id,))
         
         # Désérialiser si nécessaire
@@ -234,18 +373,23 @@ class ScraperManager(DatabaseBase):
                 page_url = None
             
             if email_str:
-                # Récupérer l'analyse si elle existe
+                email_key = email_str.strip().lower()
                 analysis = analyses_dict.get(email_str)
+                if analysis is None and email_key != email_str:
+                    analysis = analyses_dict.get(email_key)
+                if not analysis and email_key in prev_by_email:
+                    analysis = _email_analysis_from_stored_row(prev_by_email[email_key])
                 
                 if analysis:
+                    extras_json = _email_analysis_extras_json(analysis)
                     # Sauvegarder avec les données d'analyse
                     if self.is_postgresql():
                         self.execute_sql(cursor,'''
                             INSERT INTO scraper_emails
                             (scraper_id, entreprise_id, email, page_url,
                              provider, type, format_valid, mx_valid,
-                             risk_score, domain, name_info, is_person, analyzed_at)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                             risk_score, domain, name_info, is_person, analysis_extras, analyzed_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             ON CONFLICT (scraper_id, email) DO UPDATE SET
                                 page_url = EXCLUDED.page_url,
                                 provider = EXCLUDED.provider,
@@ -256,6 +400,7 @@ class ScraperManager(DatabaseBase):
                                 domain = EXCLUDED.domain,
                                 name_info = EXCLUDED.name_info,
                                 is_person = EXCLUDED.is_person,
+                                analysis_extras = EXCLUDED.analysis_extras,
                                 analyzed_at = EXCLUDED.analyzed_at
                         ''', (
                             scraper_id, entreprise_id, email_str, page_url,
@@ -267,6 +412,7 @@ class ScraperManager(DatabaseBase):
                             analysis.get('domain'),
                             json.dumps(analysis.get('name_info')) if analysis.get('name_info') else None,
                             1 if analysis.get('is_person') else 0,
+                            extras_json,
                             analysis.get('analyzed_at')
                         ))
                     else:
@@ -274,8 +420,8 @@ class ScraperManager(DatabaseBase):
                             INSERT OR REPLACE INTO scraper_emails
                             (scraper_id, entreprise_id, email, page_url,
                              provider, type, format_valid, mx_valid,
-                             risk_score, domain, name_info, is_person, analyzed_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             risk_score, domain, name_info, is_person, analysis_extras, analyzed_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (
                             scraper_id, entreprise_id, email_str, page_url,
                             analysis.get('provider'),
@@ -286,14 +432,22 @@ class ScraperManager(DatabaseBase):
                             analysis.get('domain'),
                             json.dumps(analysis.get('name_info')) if analysis.get('name_info') else None,
                             1 if analysis.get('is_person') else 0,
+                            extras_json,
                             analysis.get('analyzed_at')
                         ))
                 else:
-                    # Sauvegarder sans analyse
-                    self.execute_sql(cursor,'''
-                        INSERT OR IGNORE INTO scraper_emails (scraper_id, entreprise_id, email, page_url)
-                        VALUES (?, ?, ?, ?)
-                    ''', (scraper_id, entreprise_id, email_str, page_url))
+                    if self.is_postgresql():
+                        self.execute_sql(cursor,'''
+                            INSERT INTO scraper_emails (scraper_id, entreprise_id, email, page_url)
+                            VALUES (?, ?, ?, ?)
+                            ON CONFLICT (scraper_id, email) DO UPDATE SET
+                                page_url = EXCLUDED.page_url
+                        ''', (scraper_id, entreprise_id, email_str, page_url))
+                    else:
+                        self.execute_sql(cursor,'''
+                            INSERT OR IGNORE INTO scraper_emails (scraper_id, entreprise_id, email, page_url)
+                            VALUES (?, ?, ?, ?)
+                        ''', (scraper_id, entreprise_id, email_str, page_url))
     
     def save_scraper_emails(self, scraper_id, entreprise_id, emails):
         """
@@ -313,21 +467,38 @@ class ScraperManager(DatabaseBase):
         conn.commit()
         conn.close()
     
-    def _save_scraper_phones_in_transaction(self, cursor, scraper_id, entreprise_id, phones):
-        """Sauvegarde les téléphones dans la transaction en cours"""
+    def _save_scraper_phones_in_transaction(self, cursor, scraper_id, entreprise_id, phones, phone_analyses=None):
+        """Sauvegarde les téléphones + OSINT (libphonenumber, PhoneInfoga, Numverify, Abstract, etc.)."""
         if not phones:
             return
-        
+
+        prev_by_phone = {}
+        self.execute_sql(cursor, '''
+            SELECT phone, page_url, phone_e164, carrier, location, line_type, phone_valid, osint_json, analyzed_at
+            FROM scraper_phones WHERE scraper_id = ?
+        ''', (scraper_id,))
+        for row in cursor.fetchall():
+            rd = _phone_row_to_lookup_dict(row)
+            p = (rd.get('phone') or '').strip()
+            if p:
+                prev_by_phone[p] = rd
+            e164 = (rd.get('phone_e164') or '').strip()
+            if e164:
+                prev_by_phone[e164] = rd
+
         self.execute_sql(cursor,'DELETE FROM scraper_phones WHERE scraper_id = ?', (scraper_id,))
         
         if isinstance(phones, str):
             try:
                 phones = json.loads(phones)
-            except:
+            except Exception:
                 return
         
         if not isinstance(phones, list):
             return
+        
+        analyses_dict = phone_analyses if isinstance(phone_analyses, dict) else {}
+        analyzed_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         
         for phone in phones:
             if isinstance(phone, dict):
@@ -337,20 +508,75 @@ class ScraperManager(DatabaseBase):
                 phone_str = str(phone)
                 page_url = None
             
-            if phone_str:
+            if not phone_str:
+                continue
+            
+            pi = _phone_analysis_lookup(phone_str, analyses_dict)
+            if pi:
+                e164, carrier, location, line_type, phone_valid, osint_json = _phone_osint_db_fields(pi)
+                at = analyzed_at
+            else:
+                prev = prev_by_phone.get(phone_str.strip())
+                if not prev:
+                    try:
+                        from tasks.phone_tasks import normalize_phones_for_osint
+                        for nk in normalize_phones_for_osint([phone_str]):
+                            if nk in prev_by_phone:
+                                prev = prev_by_phone[nk]
+                                break
+                    except ImportError:
+                        pass
+                if prev:
+                    e164 = prev.get('phone_e164')
+                    carrier = prev.get('carrier')
+                    location = prev.get('location')
+                    line_type = prev.get('line_type')
+                    phone_valid = prev.get('phone_valid')
+                    osint_json = prev.get('osint_json')
+                    at = prev.get('analyzed_at')
+                else:
+                    e164 = carrier = location = line_type = osint_json = None
+                    phone_valid = None
+                    at = None
+            
+            if self.is_postgresql():
                 self.execute_sql(cursor,'''
-                    INSERT OR IGNORE INTO scraper_phones (scraper_id, entreprise_id, phone, page_url)
-                    VALUES (?, ?, ?, ?)
-                ''', (scraper_id, entreprise_id, phone_str, page_url))
+                    INSERT INTO scraper_phones (
+                        scraper_id, entreprise_id, phone, page_url,
+                        phone_e164, carrier, location, line_type, phone_valid, osint_json, analyzed_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (scraper_id, phone) DO UPDATE SET
+                        page_url = EXCLUDED.page_url,
+                        phone_e164 = EXCLUDED.phone_e164,
+                        carrier = EXCLUDED.carrier,
+                        location = EXCLUDED.location,
+                        line_type = EXCLUDED.line_type,
+                        phone_valid = EXCLUDED.phone_valid,
+                        osint_json = EXCLUDED.osint_json,
+                        analyzed_at = EXCLUDED.analyzed_at
+                ''', (
+                    scraper_id, entreprise_id, phone_str, page_url,
+                    e164, carrier, location, line_type, phone_valid, osint_json, at,
+                ))
+            else:
+                self.execute_sql(cursor,'''
+                    INSERT INTO scraper_phones (
+                        scraper_id, entreprise_id, phone, page_url,
+                        phone_e164, carrier, location, line_type, phone_valid, osint_json, analyzed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    scraper_id, entreprise_id, phone_str, page_url,
+                    e164, carrier, location, line_type, phone_valid, osint_json, at,
+                ))
     
-    def save_scraper_phones(self, scraper_id, entreprise_id, phones):
+    def save_scraper_phones(self, scraper_id, entreprise_id, phones, phone_analyses=None):
         """Sauvegarde les téléphones dans la table scraper_phones (normalisation BDD)"""
         if not phones:
             return
         
         conn = self.get_connection()
         cursor = conn.cursor()
-        self._save_scraper_phones_in_transaction(cursor, scraper_id, entreprise_id, phones)
+        self._save_scraper_phones_in_transaction(cursor, scraper_id, entreprise_id, phones, phone_analyses)
         conn.commit()
         conn.close()
     
@@ -583,6 +809,36 @@ class ScraperManager(DatabaseBase):
         self._save_scraper_forms_in_transaction(cursor, scraper_id, entreprise_id, forms)
         conn.commit()
         conn.close()
+
+    def cleanup_invalid_scraper_phones(self, entreprise_id: int = None) -> int:
+        """
+        Supprime physiquement les numéros de téléphone marqués comme invalides (phone_valid = 0)
+        dans la table scraper_phones.
+
+        Args:
+            entreprise_id: Optionnel, si renseigné ne nettoie que les scrapers de cette entreprise.
+
+        Returns:
+            int: Nombre de lignes supprimées.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        if entreprise_id is not None:
+            self.execute_sql(cursor, '''
+                DELETE FROM scraper_phones
+                WHERE phone_valid = 0
+                  AND entreprise_id = ?
+            ''', (entreprise_id,))
+        else:
+            self.execute_sql(cursor, '''
+                DELETE FROM scraper_phones
+                WHERE phone_valid = 0
+            ''')
+        deleted = cursor.rowcount or 0
+        conn.commit()
+        conn.close()
+        logger.info(f'cleanup_invalid_scraper_phones: supprimé {deleted} numéro(s) invalides (entreprise_id={entreprise_id})')
+        return deleted
     
     def get_scraper_forms(self, scraper_id):
         """
@@ -670,7 +926,7 @@ class ScraperManager(DatabaseBase):
         
         self.execute_sql(cursor,'''
             SELECT email, page_url, provider, type, format_valid, 
-                   mx_valid, risk_score, domain, name_info, analyzed_at
+                   mx_valid, risk_score, domain, name_info, analysis_extras, analyzed_at
             FROM scraper_emails WHERE scraper_id = ? ORDER BY date_found DESC
         ''', (scraper_id,))
         
@@ -685,6 +941,18 @@ class ScraperManager(DatabaseBase):
             }
             
             # Ajouter les données d'analyse si elles existent
+            extras = None
+            try:
+                raw_extras = row['analysis_extras']
+            except (KeyError, IndexError, TypeError):
+                raw_extras = None
+            if raw_extras:
+                try:
+                    extras = json.loads(raw_extras)
+                    if not isinstance(extras, dict):
+                        extras = None
+                except (json.JSONDecodeError, TypeError):
+                    extras = None
             if row['provider'] is not None:
                 email_data['analysis'] = {
                     'provider': row['provider'],
@@ -696,7 +964,11 @@ class ScraperManager(DatabaseBase):
                     'name_info': json.loads(row['name_info']) if row['name_info'] else None,
                     'analyzed_at': row['analyzed_at']
                 }
-            
+                if extras:
+                    email_data['analysis'].update(extras)
+            elif extras:
+                email_data['analysis'] = extras
+
             emails.append(email_data)
         
         return emails
@@ -709,19 +981,53 @@ class ScraperManager(DatabaseBase):
             scraper_id: ID du scraper
         
         Returns:
-            list: Liste des téléphones (dicts avec phone et page_url)
+            list: Liste de dicts (phone, page_url, champs OSINT, clé « osint » = objet complet si présent)
         """
         conn = self.get_connection()
         cursor = conn.cursor()
         
+        # Ne remonter que les « bons » numéros :
+        # - phone_valid = 1 : validé par l'OSINT
+        # - phone_valid IS NULL : pas encore analysé (on garde le brut si disponible)
+        # On exclut explicitement les numéros marqués invalides (phone_valid = 0).
         self.execute_sql(cursor,'''
-            SELECT phone, page_url FROM scraper_phones WHERE scraper_id = ? ORDER BY date_found DESC
+            SELECT phone, page_url, phone_e164, carrier, location, line_type, phone_valid,
+                   osint_json, analyzed_at, date_found
+            FROM scraper_phones
+            WHERE scraper_id = ?
+              AND (phone_valid IS NULL OR phone_valid = 1)
+            ORDER BY date_found DESC
         ''', (scraper_id,))
         
         rows = cursor.fetchall()
         conn.close()
         
-        return [{'phone': row['phone'], 'page_url': row['page_url']} for row in rows]
+        out = []
+        for row in rows:
+            r = dict(row) if not isinstance(row, dict) else row
+            oj = None
+            raw = r.get('osint_json')
+            if raw:
+                try:
+                    oj = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    oj = None
+            pv = r.get('phone_valid')
+            item = {
+                'phone': r.get('phone'),
+                'page_url': r.get('page_url'),
+                'phone_e164': r.get('phone_e164'),
+                'carrier': r.get('carrier'),
+                'location': r.get('location'),
+                'line_type': r.get('line_type'),
+                'valid': bool(pv) if pv is not None else None,
+                'analyzed_at': r.get('analyzed_at'),
+                'date_found': r.get('date_found'),
+            }
+            if oj is not None:
+                item['osint'] = oj
+            out.append(item)
+        return out
     
     def get_scraper_social_profiles(self, scraper_id):
         """

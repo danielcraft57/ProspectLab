@@ -8,6 +8,7 @@ techniques (validation format, MX records) et personnelles (nom, type, fournisse
 pour enrichir les données collectées.
 """
 
+import os
 import re
 import socket
 try:
@@ -455,8 +456,68 @@ class EmailAnalyzer:
         
         # Limiter le score à 100 maximum
         analysis['risk_score'] = min(risk_score, 100)
+
+        self._enrich_email_external_apis(analysis)
         
         return analysis
+
+    def _enrich_email_external_apis(self, analysis: dict) -> None:
+        """Enrichissement optionnel via Hunter.io et Abstract Email (clés .env)."""
+        email = analysis.get('email')
+        if not email or '@' not in email:
+            return
+        try:
+            from config import HUNTER_API_KEY, ABSTRACT_EMAIL_API_KEY
+        except ImportError:
+            HUNTER_API_KEY = os.environ.get('HUNTER_API_KEY', '')
+            ABSTRACT_EMAIL_API_KEY = os.environ.get('ABSTRACT_EMAIL_API_KEY', '')
+
+        if HUNTER_API_KEY:
+            try:
+                r = requests.get(
+                    'https://api.hunter.io/v2/email-verifier',
+                    params={'email': email, 'api_key': HUNTER_API_KEY},
+                    timeout=12,
+                )
+                if r.status_code == 200:
+                    j = r.json() or {}
+                    data = j.get('data') if isinstance(j.get('data'), dict) else j
+                    if isinstance(data, dict):
+                        analysis['hunter'] = {
+                            'status': data.get('status'),
+                            'score': data.get('score'),
+                            'regexp': data.get('regexp'),
+                            'disposable': data.get('disposable'),
+                            'webmail': data.get('webmail'),
+                            'mx_records': data.get('mx_records'),
+                            'sources': ['hunter.io'],
+                        }
+            except Exception as e:
+                analysis['hunter_error'] = str(e)[:200]
+
+        if ABSTRACT_EMAIL_API_KEY:
+            try:
+                r = requests.get(
+                    'https://emailvalidation.abstractapi.com/v1/',
+                    params={'api_key': ABSTRACT_EMAIL_API_KEY, 'email': email},
+                    timeout=12,
+                )
+                if r.status_code == 200:
+                    j = r.json()
+                    if isinstance(j, dict):
+                        analysis['abstract_email'] = {
+                            'is_valid_format': j.get('is_valid_format'),
+                            'is_free_email': j.get('is_free_email'),
+                            'is_disposable_email': j.get('is_disposable_email'),
+                            'is_role_email': j.get('is_role_email'),
+                            'is_catchall_email': j.get('is_catchall_email'),
+                            'is_mx_found': j.get('is_mx_found'),
+                            'is_smtp_valid': j.get('is_smtp_valid'),
+                            'quality_score': j.get('quality_score'),
+                            'sources': ['abstractapi.com'],
+                        }
+            except Exception as e:
+                analysis['abstract_email_error'] = str(e)[:200]
     
     def analyze_emails_batch(self, emails, source_url=None):
         """

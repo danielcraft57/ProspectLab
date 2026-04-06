@@ -13,6 +13,7 @@ from utils.helpers import allowed_file, get_file_path
 from config import CELERY_WORKERS
 from utils.template_helpers import render_page
 from services.auth import login_required
+from utils.celery_health import online_workers_count
 
 upload_bp = Blueprint('upload', __name__)
 
@@ -236,6 +237,7 @@ def upload_file():
                 logger = logging.getLogger(__name__)
                 logger.info(f'Rendu preview.html avec celery_workers={CELERY_WORKERS}')
 
+                celery_workers_ui = CELERY_WORKERS if int(CELERY_WORKERS or 0) > 0 else 4
                 return render_page('preview.html',
                                      filename=filename,
                                      preview=preview,
@@ -243,7 +245,8 @@ def upload_file():
                                      total_rows=len(df),
                                      preview_stats=preview_stats,
                                      validation_warnings=validation_warnings[:10],
-                                     celery_workers=CELERY_WORKERS)
+                                     celery_workers=celery_workers_ui,
+                                     celery_nodes_online=online_workers_count())
             except Exception as e:
                 flash(f'Erreur lors de la lecture du fichier: {str(e)}', 'error')
                 return redirect(request.url)
@@ -307,13 +310,15 @@ def preview_file(filename):
         logger = logging.getLogger(__name__)
         logger.info(f'Rendu preview.html avec celery_workers={CELERY_WORKERS}')
 
+        celery_workers_ui = CELERY_WORKERS if int(CELERY_WORKERS or 0) > 0 else 4
         return render_page('preview.html',
                              filename=filename,
                              preview=preview,
                              columns=columns,
                              total_rows=len(df),
                              preview_stats=preview_stats,
-                             celery_workers=CELERY_WORKERS,
+                             celery_workers=celery_workers_ui,
+                             celery_nodes_online=online_workers_count(),
                              validation_warnings=validation_warnings[:10])
     except pd.errors.EmptyDataError:
         return render_template('error.html',

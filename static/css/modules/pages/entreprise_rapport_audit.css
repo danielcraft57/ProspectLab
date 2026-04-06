@@ -1,0 +1,472 @@
+/**
+ * Page Rapport d'audit (prospection commerciale)
+ */
+
+.audit-page-header {
+    margin-bottom: 1.5rem;
+}
+
+.audit-page-header .header-actions {
+    flex-wrap: wrap;
+    gap: 0.65rem;
+}
+
+.audit-report-root {
+    min-height: 200px;
+}
+
+.audit-report-root > .loading {
+    padding: 2.5rem 1rem;
+    text-align: center;
+    color: #64748b;
+    font-size: 0.95rem;
+    animation: audit-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes audit-pulse {
+    0%,
+    100% {
+        opacity: 0.65;
+    }
+    50% {
+        opacity: 1;
+    }
+}
+
+.audit-report {
+    opacity: 0;
+    transform: translateY(10px);
+    transition:
+        opacity 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+        transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.audit-report.audit-report--visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* — Hero — */
+.audit-report-hero {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1.25rem;
+    padding: 1.35rem 1.5rem;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #f8fafc 0%, #eef2ff 45%, #f1f5f9 100%);
+    border: 1px solid rgba(99, 102, 241, 0.18);
+    box-shadow: 0 4px 24px rgba(15, 23, 42, 0.06);
+    margin-bottom: 1.25rem;
+}
+
+.audit-report-hero-main {
+    flex: 1;
+    min-width: min(100%, 280px);
+}
+
+.audit-report-company {
+    margin: 0 0 0.35rem;
+    font-size: 1.55rem;
+    font-weight: 700;
+    color: #0f172a;
+    letter-spacing: -0.02em;
+}
+
+.audit-report-website {
+    margin: 0 0 0.25rem;
+    font-size: 0.95rem;
+}
+
+.audit-report-website a {
+    color: #4f46e5;
+    font-weight: 500;
+    text-decoration: none;
+    border-bottom: 1px solid rgba(79, 70, 229, 0.35);
+    transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.audit-report-website a:hover {
+    color: #3730a3;
+    border-bottom-color: #3730a3;
+}
+
+.audit-report-sector {
+    margin: 0;
+    font-size: 0.88rem;
+    color: #64748b;
+}
+
+.audit-report-hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.audit-report-hero-actions .btn {
+    font-size: 0.85rem;
+    padding: 0.45rem 0.85rem;
+}
+
+.audit-report-opportunity {
+    flex-shrink: 0;
+    text-align: right;
+    min-width: 140px;
+}
+
+.audit-report-opportunity .label {
+    display: block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #64748b;
+    margin-bottom: 0.35rem;
+}
+
+/* — Métriques — */
+.audit-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+    margin-bottom: 1.35rem;
+}
+
+.audit-metric {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.65rem 0.9rem;
+    border-radius: 12px;
+    background: #fff;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+    min-width: 118px;
+    transition:
+        transform 0.2s ease,
+        box-shadow 0.2s ease;
+}
+
+.audit-metric:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(99, 102, 241, 0.1);
+}
+
+.audit-metric-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #64748b;
+}
+
+.audit-metric-value {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #312e81;
+}
+
+.audit-metric.is-warn .audit-metric-value {
+    color: #b45309;
+}
+
+.audit-metric.is-risk-high .audit-metric-value {
+    color: #b91c1c;
+}
+
+.audit-metric.is-risk-mid .audit-metric-value {
+    color: #c2410c;
+}
+
+/* — Accordéon — */
+.audit-report-accordion {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.audit-acc-item {
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 12px;
+    background: #fff;
+    overflow: hidden;
+    transition:
+        box-shadow 0.25s ease,
+        transform 0.22s ease,
+        border-color 0.2s ease;
+}
+
+.audit-acc-item:hover {
+    box-shadow: 0 4px 18px rgba(99, 102, 241, 0.1);
+    transform: translateY(-1px);
+}
+
+.audit-acc-item[open] {
+    border-color: rgba(99, 102, 241, 0.35);
+    box-shadow: 0 8px 28px rgba(99, 102, 241, 0.12);
+}
+
+.audit-acc-summary {
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.95rem 1.1rem;
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: #0f172a;
+    user-select: none;
+    background: linear-gradient(180deg, rgba(99, 102, 241, 0.05) 0%, transparent 100%);
+    transition: background 0.2s ease;
+}
+
+.audit-acc-summary::-webkit-details-marker {
+    display: none;
+}
+
+.audit-acc-summary:hover {
+    background: linear-gradient(180deg, rgba(99, 102, 241, 0.1) 0%, rgba(99, 102, 241, 0.02) 100%);
+}
+
+.audit-acc-summary::after {
+    content: '';
+    margin-left: auto;
+    width: 0.45rem;
+    height: 0.45rem;
+    border-right: 2px solid #64748b;
+    border-bottom: 2px solid #64748b;
+    transform: rotate(-45deg);
+    transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+    flex-shrink: 0;
+}
+
+.audit-acc-item[open] > .audit-acc-summary::after {
+    transform: rotate(45deg) scale(1.05);
+}
+
+.audit-acc-icon {
+    width: 2rem;
+    height: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    background: rgba(99, 102, 241, 0.12);
+    color: #4f46e5;
+    font-size: 0.95rem;
+}
+
+.audit-acc-panel {
+    padding: 0 1.1rem 1.1rem;
+    border-top: 1px solid rgba(15, 23, 42, 0.06);
+    animation: audit-panel-in 0.38s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes audit-panel-in {
+    from {
+        opacity: 0;
+        transform: translateY(-6px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.audit-insights {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+}
+
+.audit-insight {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+    padding: 0.75rem 0.9rem;
+    border-radius: 10px;
+    background: #f8fafc;
+    border: 1px solid rgba(15, 23, 42, 0.05);
+    font-size: 0.9rem;
+    line-height: 1.55;
+    color: #334155;
+}
+
+.audit-insight > i {
+    margin-top: 0.15rem;
+    color: #6366f1;
+    flex-shrink: 0;
+}
+
+.audit-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+}
+
+.audit-tag {
+    display: inline-block;
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%);
+    color: #3730a3;
+    border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+.audit-acc-panel .audit-report-card {
+    padding: 0.85rem 1rem;
+    border-radius: 10px;
+    background: #f8fafc;
+    border: 1px solid rgba(15, 23, 42, 0.06);
+    margin-bottom: 0.65rem;
+}
+
+.audit-acc-panel .audit-report-card:last-child {
+    margin-bottom: 0;
+}
+
+.audit-acc-panel .audit-report-card h4 {
+    margin: 0 0 0.4rem;
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.audit-acc-panel .audit-report-card p {
+    margin: 0;
+    font-size: 0.88rem;
+    line-height: 1.55;
+    color: #475569;
+}
+
+.audit-report-footer {
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(15, 23, 42, 0.08);
+    font-size: 0.82rem;
+    color: #64748b;
+    text-align: center;
+}
+
+.audit-report-root .error {
+    color: #b91c1c;
+    padding: 1rem;
+}
+
+.audit-report-root .empty-state {
+    color: #64748b;
+    font-size: 0.9rem;
+    margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .audit-report,
+    .audit-acc-panel,
+    .audit-report-root > .loading {
+        animation: none !important;
+        transition: none !important;
+    }
+
+    .audit-report.audit-report--visible {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+/* — Dark mode — */
+body[data-theme="dark"] .audit-report-hero {
+    background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+    border-color: rgba(129, 140, 248, 0.25);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+
+body[data-theme="dark"] .audit-report-company {
+    color: #f1f5f9;
+}
+
+body[data-theme="dark"] .audit-report-website a {
+    color: #a5b4fc;
+    border-bottom-color: rgba(165, 180, 252, 0.45);
+}
+
+body[data-theme="dark"] .audit-report-sector {
+    color: #94a3b8;
+}
+
+body[data-theme="dark"] .audit-metric {
+    background: #020617;
+    border-color: rgba(51, 65, 85, 0.85);
+}
+
+body[data-theme="dark"] .audit-metric-value {
+    color: #e2e8f0;
+}
+
+body[data-theme="dark"] .audit-metric-label {
+    color: #94a3b8;
+}
+
+body[data-theme="dark"] .audit-acc-item {
+    background: #020617;
+    border-color: rgba(51, 65, 85, 0.9);
+}
+
+body[data-theme="dark"] .audit-acc-item[open] {
+    border-color: rgba(129, 140, 248, 0.45);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+
+body[data-theme="dark"] .audit-acc-summary {
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] .audit-acc-summary::after {
+    border-color: #94a3b8;
+}
+
+body[data-theme="dark"] .audit-acc-panel {
+    border-top-color: rgba(51, 65, 85, 0.7);
+}
+
+body[data-theme="dark"] .audit-insight {
+    background: #0f172a;
+    border-color: rgba(51, 65, 85, 0.6);
+    color: #cbd5e1;
+}
+
+body[data-theme="dark"] .audit-insight > i {
+    color: #a5b4fc;
+}
+
+body[data-theme="dark"] .audit-tag {
+    background: rgba(99, 102, 241, 0.2);
+    color: #c7d2fe;
+    border-color: rgba(129, 140, 248, 0.35);
+}
+
+body[data-theme="dark"] .audit-acc-panel .audit-report-card {
+    background: #0f172a;
+    border-color: rgba(51, 65, 85, 0.65);
+}
+
+body[data-theme="dark"] .audit-acc-panel .audit-report-card h4 {
+    color: #e5e7eb;
+}
+
+body[data-theme="dark"] .audit-acc-panel .audit-report-card p {
+    color: #94a3b8;
+}
+
+body[data-theme="dark"] .audit-report-footer {
+    border-top-color: rgba(51, 65, 85, 0.7);
+    color: #94a3b8;
+}
+
+body[data-theme="dark"] .audit-report-root > .loading {
+    color: #94a3b8;
+}

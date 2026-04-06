@@ -138,6 +138,21 @@ class SEOManager(DatabaseBase):
                         INSERT INTO analysis_seo_issues (analysis_id, issue_type, category, message, impact)
                         VALUES (?, ?, ?, ?, ?)
                     ''', (analysis_id, issue_type, category, message, impact))
+
+        if entreprise_id and analysis_id:
+            try:
+                self.record_metric_snapshot(
+                    cursor,
+                    entreprise_id,
+                    'seo',
+                    analysis_id,
+                    {
+                        'seo_score': seo_data.get('score'),
+                        'domain': domain_clean,
+                    },
+                )
+            except Exception as e:
+                logger.warning('Snapshot métriques (analyse SEO): %s', e)
         
         conn.commit()
         conn.close()
@@ -158,6 +173,19 @@ class SEOManager(DatabaseBase):
         """
         conn = self.get_connection()
         cursor = conn.cursor()
+
+        self.execute_sql(
+            cursor,
+            'SELECT entreprise_id, domain FROM analyses_seo WHERE id = ?',
+            (analysis_id,),
+        )
+        row_e = cursor.fetchone()
+        entreprise_id_upd = None
+        domain_prev = None
+        if row_e:
+            re = dict(row_e)
+            entreprise_id_upd = re.get('entreprise_id')
+            domain_prev = re.get('domain')
         
         # Mettre à jour l'analyse principale
         if self.is_postgresql():
@@ -261,6 +289,21 @@ class SEOManager(DatabaseBase):
                         INSERT INTO analysis_seo_issues (analysis_id, issue_type, category, message, impact)
                         VALUES (?, ?, ?, ?, ?)
                     ''', (analysis_id, issue_type, category, message, impact))
+
+        if entreprise_id_upd:
+            try:
+                self.record_metric_snapshot(
+                    cursor,
+                    entreprise_id_upd,
+                    'seo',
+                    analysis_id,
+                    {
+                        'seo_score': seo_data.get('score'),
+                        'domain': domain_prev,
+                    },
+                )
+            except Exception as e:
+                logger.warning('Snapshot métriques (mise à jour SEO): %s', e)
         
         conn.commit()
         conn.close()

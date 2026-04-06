@@ -10,8 +10,9 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Uniquement à la racine du dépôt (évite d’ignorer mobile/src/lib/)
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -35,6 +36,7 @@ instance/
 .env.local
 .env.*.local
 .env.prod
+.env.cluster
 .env.dev
 .env.prod.*
 .env.dev.*
@@ -51,6 +53,7 @@ logs/*.log.*
 *.log
 logs_analysis/
 logs_server/
+logs/campagne_stats_cache.json
 
 # Uploads et exports
 uploads/*
@@ -80,9 +83,11 @@ dump.rdb
 htmlcov/
 .tox/
 
-# Documentation temporaire
+# Documentation temporaire / exports Cursor non versionnés
 docs/developpement/cursor_*.md
+docs/cursor_*.md
 cursor_*.md
+docs/configuration/CLUSTER_NODES_DEBIAN_MODELS.md
 
 # Fichiers temporaires
 *.tmp
@@ -90,6 +95,9 @@ cursor_*.md
 *.old
 *_old.*
 *.backup
+
+# Template Studio (préviews navigateur générées)
+.template_studio_preview/
 
 # OS
 Thumbs.db
@@ -105,3 +113,11 @@ templates_local/
 Data/
 scripts/experiments/
 deploy_cluster_worker/
+
+# Mobile / outillage local
+backups/
+scan_report.json
+mobile/scripts/.patch-tmp/
+scripts/google_maps_tools/.google_maps_api_key
+ml_face/
+.cursorrules

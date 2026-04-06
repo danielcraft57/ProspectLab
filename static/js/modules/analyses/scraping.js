@@ -97,10 +97,24 @@
             emailsList.innerHTML = '<div class="empty-state" style="text-align: center; padding: 2rem; color: #94a3b8;"><i class="fas fa-envelope" style="font-size: 2rem; margin-bottom: 0.5rem; opacity: 0.5;"></i><p>Aucun email trouvé</p></div>';
         } else {
             emails.forEach(email => {
-                const emailStr = typeof email === 'string' ? email : (email.email || email.value || '');
+                const emailObj = (typeof email === 'object' && email !== null) ? email : null;
+                const analysis = emailObj ? (emailObj.analysis || null) : null;
+                const emailStr = typeof email === 'string' ? email : (emailObj?.email || emailObj?.value || '');
                 if (emailStr) {
+                    const metaParts = [];
+                    if (analysis) {
+                        if (analysis.provider) metaParts.push(`${analysis.provider}`);
+                        if (analysis.type) metaParts.push(`${analysis.type}`);
+                        if (analysis.mx_valid === true) metaParts.push('MX OK');
+                        else if (analysis.mx_valid === false) metaParts.push('MX KO');
+                        if (analysis.risk_score !== undefined && analysis.risk_score !== null && analysis.risk_score !== '') {
+                            metaParts.push(`Score ${analysis.risk_score}`);
+                        }
+                    }
+                    const metaLine = metaParts.length ? metaParts.slice(0, 3).join(' • ') : '';
+                    const searchable = [emailStr, ...metaParts].join(' ').trim();
                     const item = document.createElement('div');
-                    item.setAttribute('data-searchable', emailStr);
+                    item.setAttribute('data-searchable', searchable);
                     item.style.cssText = 'background: white; border-radius: 10px; padding: 1rem; box-shadow: 0 2px 6px rgba(0,0,0,0.08); display: flex; align-items: center; gap: 1rem; transition: transform 0.2s, box-shadow 0.2s; border-left: 3px solid #3b82f6; position: relative;';
                     item.onmouseover = function() { this.style.transform = 'translateY(-2px)'; this.style.boxShadow = '0 4px 12px rgba(0,0,0,0.12)'; };
                     item.onmouseout = function() { this.style.transform = 'translateY(0)'; this.style.boxShadow = '0 2px 6px rgba(0,0,0,0.08)'; };
@@ -110,6 +124,7 @@
                         </div>
                         <div style="flex: 1; min-width: 0;">
                             <a href="mailto:${Formatters.escapeHtml(emailStr)}" style="color: #1e293b; font-weight: 600; text-decoration: none; font-size: 1rem; word-break: break-all;">${Formatters.escapeHtml(emailStr)}</a>
+                            ${metaLine ? `<div style="color: #64748b; font-size: 0.85rem; margin-top: 0.25rem; word-break: break-word;">${Formatters.escapeHtml(metaLine)}</div>` : ''}
                         </div>
                         <button data-copy-email="${Formatters.escapeHtml(emailStr)}" 
                                 style="background: #f1f5f9; border: none; border-radius: 6px; padding: 0.5rem; color: #64748b; cursor: pointer; transition: all 0.2s; opacity: 0;"
@@ -177,12 +192,36 @@
             phonesList.innerHTML = '<div class="empty-state" style="text-align: center; padding: 2rem; color: #94a3b8;"><i class="fas fa-phone" style="font-size: 2rem; margin-bottom: 0.5rem; opacity: 0.5;"></i><p>Aucun téléphone trouvé</p></div>';
         } else {
             phones.forEach(phoneData => {
-                const phoneStr = typeof phoneData === 'object' && phoneData !== null && phoneData.phone 
-                    ? phoneData.phone 
+                const phoneObj = (typeof phoneData === 'object' && phoneData !== null) ? phoneData : null;
+                const phoneStr = phoneObj && phoneObj.phone
+                    ? phoneObj.phone
                     : (typeof phoneData === 'string' ? phoneData : String(phoneData));
                 if (phoneStr) {
+                    const phoneE164 = phoneObj?.phone_e164 || '';
+                    const carrier = phoneObj?.carrier || '';
+                    const location = phoneObj?.location || '';
+                    const lineType = phoneObj?.line_type || '';
+                    const valid = phoneObj?.valid;
+
+                    const metaParts = [];
+                    if (carrier) metaParts.push(carrier);
+                    if (lineType) metaParts.push(lineType);
+                    if (location) metaParts.push(location);
+                    const metaLine = metaParts.length ? metaParts.slice(0, 3).join(' • ') : '';
+
+                    const validBadge = (valid === true) ? 'Validé' : ((valid === false) ? 'Invalide' : '');
+                    const e164Line = (phoneE164 && phoneE164 !== phoneStr) ? `E.164: ${phoneE164}` : '';
+
+                    const searchable = [
+                        phoneStr,
+                        phoneE164,
+                        carrier,
+                        location,
+                        lineType,
+                    ].filter(Boolean).join(' ');
+
                     const item = document.createElement('div');
-                    item.setAttribute('data-searchable', phoneStr);
+                    item.setAttribute('data-searchable', searchable);
                     item.style.cssText = 'background: white; border-radius: 10px; padding: 1rem; box-shadow: 0 2px 6px rgba(0,0,0,0.08); display: flex; align-items: center; gap: 1rem; transition: transform 0.2s, box-shadow 0.2s; border-left: 3px solid #f59e0b; position: relative;';
                     item.onmouseover = function() { this.style.transform = 'translateY(-2px)'; this.style.boxShadow = '0 4px 12px rgba(0,0,0,0.12)'; };
                     item.onmouseout = function() { this.style.transform = 'translateY(0)'; this.style.boxShadow = '0 2px 6px rgba(0,0,0,0.08)'; };
@@ -192,6 +231,8 @@
                         </div>
                         <div style="flex: 1; min-width: 0;">
                             <a href="tel:${Formatters.escapeHtml(phoneStr)}" style="color: #1e293b; font-weight: 600; text-decoration: none; font-size: 1rem;">${Formatters.escapeHtml(phoneStr)}</a>
+                            ${validBadge ? `<div style="display:inline-flex; align-items:center; gap:0.4rem; margin-top:0.35rem;"><span style="background: ${validBadge === 'Validé' ? '#10b98122' : '#ef444422'}; color:${validBadge === 'Validé' ? '#059669' : '#dc2626'}; font-size:0.8rem; font-weight:600; padding:0.15rem 0.5rem; border-radius:999px;">${Formatters.escapeHtml(validBadge)}</span></div>` : ''}
+                            ${(e164Line || metaLine) ? `<div style="color: #64748b; font-size: 0.85rem; margin-top: 0.25rem; word-break: break-word;">${Formatters.escapeHtml([e164Line, metaLine].filter(Boolean).join(' • '))}</div>` : ''}
                         </div>
                         <button data-copy-phone="${Formatters.escapeHtml(phoneStr)}" 
                                 style="background: #f1f5f9; border: none; border-radius: 6px; padding: 0.5rem; color: #64748b; cursor: pointer; transition: all 0.2s; opacity: 0;"

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audit complet de votre présence digitale</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f9fafb;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        Audit complet : performance, sécurité, SEO, quick wins prioritaires.
+    </div>
+    <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f9fafb;">
+        <tr>
+            <td style="padding: 32px 16px;">
+                <table role="presentation" style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.07);">
+                    <tr>
+                        <td style="padding: 26px 28px; background: linear-gradient(135deg, #4da9d6 0%, #184c70 100%); text-align: center;">
+                            <p style="margin: 0 0 10px 0; color: rgba(255,255,255,0.92); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700;">Vue 360°</p>
+                            <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700; line-height: 1.3;">Audit : une feuille de route claire</h1>
+                            <p style="margin: 12px 0 0 0; color: rgba(255,255,255,0.92); font-size: 14px;">{entreprise}</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 32px 28px;">
+                            <p style="margin: 0 0 20px 0; color: #1f2937; font-size: 16px; line-height: 1.6;">
+                                Bonjour {nom},
+                            </p>
+                            <p style="margin: 0 0 16px 0; color: #1f2937; font-size: 16px; line-height: 1.6;">
+                                {#if_secteur}Dans le secteur <strong>{secteur}</strong>, {#endif}j'ai effectué une analyse complète de la présence digitale de <strong style="color: #4da9d6;">{entreprise}</strong>{#if_website} ({website}){#endif} et j'ai identifié plusieurs axes d'amélioration pour optimiser votre visibilité et vos performances en ligne.
+                            </p>
+                            {#if_website}
+                            <p style="margin: 0 0 20px 0; color: #4b5563; font-size: 14px; line-height: 1.6;">
+                                Vous pouvez consulter le rapport en ligne ici :
+                                <a href="{analysis_url}" style="display:inline-block;background:#f3f4f6;color:#4da9d6;text-decoration:none;font-size:13px;font-weight:600;padding:10px 16px;border-radius:999px;line-height:1.2;">Voir l'analyse du site</a>.
+                            </p>
+                            {#endif}
+                            {#if_all_data}
+                            <div style="background-color: #f9fafb; padding: 25px; border-radius: 6px; margin: 25px 0;">
+                                <h3 style="margin: 0 0 20px 0; color: #4da9d6; font-size: 18px; text-align: center;">Synthèse de l'analyse</h3>
+                                <table role="presentation" style="width: 100%; border-collapse: collapse;">
+                                    {analysis_summary}
+                                </table>
+                            </div>
+                            {#endif}
+                            <p style="margin: 0 0 20px 0; color: #1f2937; font-size: 16px; line-height: 1.6;">
+                                <strong style="color: #4da9d6;">Mes recommandations prioritaires :</strong>
+                            </p>
+                            <ol style="margin: 0 0 25px 0; padding-left: 20px; color: #1f2937; font-size: 16px; line-height: 1.8;">
+                                <li style="margin-bottom: 12px;"><strong style="color: #4da9d6;">Modernisation technique</strong> : Mise à jour des technologies et amélioration de l'architecture</li>
+                                <li style="margin-bottom: 12px;"><strong style="color: #4da9d6;">Optimisation des performances</strong> : Réduction des temps de chargement et amélioration de l'expérience utilisateur</li>
+                                <li style="margin-bottom: 12px;"><strong style="color: #4da9d6;">Renforcement de la sécurité</strong> : Mise en conformité et protection des données</li>
+                                <li style="margin-bottom: 12px;"><strong style="color: #4da9d6;">Amélioration de la présence digitale</strong> : Optimisation du référencement et de la visibilité</li>
+                            </ol>
+                            <div style="background-color: #4da9d6; padding: 25px; border-radius: 6px; text-align: center; margin: 30px 0;">
+                                <p style="margin: 0 0 15px 0; color: #ffffff; font-size: 20px; font-weight: 600;">Audit & Optimisation (audit gratuit)</p>
+                                <p style="margin: 0 0 10px 0; color: #ffffff; font-size: 14px;">✓ Audit complet de votre site</p>
+                                <p style="margin: 0 0 10px 0; color: #ffffff; font-size: 14px;">✓ Correctifs prioritaires</p>
+                                <p style="margin: 0 0 10px 0; color: #ffffff; font-size: 14px;">✓ Métriques avant/après</p>
+                                <p style="margin: 0; color: #ffffff; font-size: 14px;">✓ Rapport détaillé + 14 jours de support</p>
+                            </div>
+                            {#include:cta_dual_analysis_and_15min}
+                            <p style="margin: 0 0 20px 0; color: #1f2937; font-size: 16px; line-height: 1.6;">
+                                Seriez-vous d’accord pour 15 minutes pour que je vous présente les résultats et qu’on choisisse ensemble l’action la plus prioritaire (celle qui donne des résultats vite) ?
+                            </p>
+                            {#include:signature_standard}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 18px 28px 24px; background-color: #f9fafb; text-align: center;">
+                            {#include:footer_standard}
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

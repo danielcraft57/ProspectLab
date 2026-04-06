@@ -293,11 +293,13 @@ L'application peut effectuer une recherche OSINT (Open Source Intelligence) sur 
 ## Documentation
 
 La documentation complète est disponible dans le dossier `docs/`. Consultez [docs/INDEX.md](docs/INDEX.md) pour une vue d'ensemble.
+Pour la partie mobile, voir aussi [docs/mobile/INDEX.md](docs/mobile/INDEX.md).
 
 ### Documentation rapide
 
 - **Installation** : [docs/installation/INSTALLATION.md](docs/installation/INSTALLATION.md)
 - **Configuration** : [docs/configuration/CONFIGURATION.md](docs/configuration/CONFIGURATION.md)
+- **API publique** : [docs/guides/API_PUBLIQUE.md](docs/guides/API_PUBLIQUE.md) — référence `/api/public` ; mobile : [docs/mobile/API_INTEGRATION.md](docs/mobile/API_INTEGRATION.md)
 - **Interface utilisateur** : [docs/guides/INTERFACE_UTILISATEUR.md](docs/guides/INTERFACE_UTILISATEUR.md) - Guide complet de l'interface
 - **Scraping** : [docs/SCRAPING.md](docs/SCRAPING.md) - Documentation du système de scraping unifié
 - **Celery** : [docs/CELERY.md](docs/CELERY.md) - Configuration et utilisation de Celery

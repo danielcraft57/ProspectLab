@@ -24,11 +24,17 @@
             </div>
         </div>
 
-        <div class="filters-header">
+        <div class="filters-header filters-header-actions">
             <button id="btn-toggle-advanced-filters" type="button" class="btn filters-toggle">
                 <i class="fas fa-sliders-h" aria-hidden="true"></i>
                 <span>Filtres avancés</span>
                 <span id="active-filters-count" class="filters-toggle-badge" style="display: none;">0</span>
+            </button>
+            <button type="button" id="btn-commercial-top" class="btn btn-outline btn-small" title="Score pondéré (SEO, sécu, perf, opportunité) puis dernier contact">
+                <i class="fas fa-phone-alt" aria-hidden="true"></i> Top 50 à appeler
+            </button>
+            <button type="button" id="btn-commercial-top-off" class="btn btn-small" style="display:none">
+                Liste normale
             </button>
         </div>
 
@@ -36,7 +42,7 @@
             <!-- Bloc 1 - Segmentation de base -->
             <div class="filters-advanced-section">
                 <div class="filters-advanced-section-header">
-                    <h4>Segmentation</h4>
+                    <h4>Segmentation <span id="section-filter-count-segmentation" class="section-filter-count" style="display:none;">0</span></h4>
                     <p>Affiner rapidement par secteur, groupe, email et statut.</p>
                 </div>
                 <div class="filters-advanced-section-body">
@@ -53,6 +59,13 @@
                         <select id="filter-groupe" class="form-select">
                             <option value="">Tous les groupes</option>
                             <option value="none">Sans groupe</option>
+                        </select>
+                    </div>
+
+                    <div class="filter-group">
+                        <label for="filter-opportunite">Opportunité</label>
+                        <select id="filter-opportunite" class="form-select">
+                            <option value="">Toutes les opportunités</option>
                         </select>
                     </div>
 
@@ -85,6 +98,19 @@
                         <!-- Champ caché utilisé par le JS pour construire les filtres -->
                         <input type="hidden" id="filter-statut" value="">
                     </div>
+
+                    <div class="filter-group">
+                        <label for="filter-etape-prospection">Étape prospection</label>
+                        <select id="filter-etape-prospection" class="form-select">
+                            <option value="">Toutes</option>
+                            <option value="À prospecter">À prospecter</option>
+                            <option value="Contacté">Contacté</option>
+                            <option value="RDV">RDV</option>
+                            <option value="Proposition">Proposition</option>
+                            <option value="Gagné">Gagné</option>
+                            <option value="Perdu">Perdu</option>
+                        </select>
+                    </div>
                 </div>
             </div>
             </div>
@@ -92,11 +118,18 @@
             <!-- Bloc 2 - Scores -->
             <div class="filters-advanced-section">
                 <div class="filters-advanced-section-header">
-                    <h4>Scores</h4>
-                    <p>Cibler selon les scores technique, SEO et pentest. Cochez « sans score » pour les entreprises jamais analysées (valeur NULL en base).</p>
+                    <h4>Scores <span id="section-filter-count-scores" class="section-filter-count" style="display:none;">0</span></h4>
+                    <p>Cibler selon les scores technique, SEO et pentest ; priorité commerciale pour la vue « Top 50 à appeler ». Cochez « sans score » pour les entreprises jamais analysées (valeur NULL en base).</p>
                 </div>
                 <div class="filters-advanced-section-body">
                     <div class="filters-grid">
+                    <div class="filter-group filter-group--commercial-profile">
+                        <label for="filter-commercial-profile">Profil de pondération</label>
+                        <select id="filter-commercial-profile" class="form-select commercial-profile-select-full" title="Poids SEO / sécu / perf / opportunité (vue Top commercial)">
+                            <option value="">Défaut (équilibré)</option>
+                        </select>
+                        <div id="commercial-profile-weights-visual" class="commercial-profile-weights-visual" aria-live="polite" role="img" aria-label="Répartition des poids du profil"></div>
+                    </div>
                     <!-- Jauges de score sécurité (min / max) -->
                     <div class="filter-group">
                         <label class="filter-label" for="filter-security-min">Score Technique</label>
@@ -247,7 +280,7 @@
             <!-- Bloc 3 - Technologies -->
             <div class="filters-advanced-section">
                 <div class="filters-advanced-section-header">
-                    <h4>Technologies</h4>
+                    <h4>Technologies <span id="section-filter-count-tech" class="section-filter-count" style="display:none;">0</span></h4>
                     <p>Filtrer par CMS et framework principal.</p>
                 </div>
                 <div class="filters-advanced-section-body">
@@ -292,7 +325,7 @@
             <!-- Bloc 4 - Comportement & tags -->
             <div class="filters-advanced-section">
                 <div class="filters-advanced-section-header">
-                    <h4>Comportement & contenu</h4>
+                    <h4>Comportement & contenu <span id="section-filter-count-behavior" class="section-filter-count" style="display:none;">0</span></h4>
                     <p>Repérer les sites avec blog, formulaire, tunnel ou tags spécifiques.</p>
                 </div>
                 <div class="filters-advanced-section-body">
@@ -356,12 +389,12 @@
                 <div class="bulk-actions-controls">
                     <select id="bulk-action-select" class="form-select bulk-action-select">
                         <option value="">Action...</option>
-                        <optgroup label="Analyses">
-                            <option value="launch-technique">Lancer / relancer analyse technique</option>
-                            <option value="launch-seo">Lancer / relancer analyse SEO</option>
-                            <option value="launch-pentest">Lancer / relancer analyse Pentest</option>
-                            <option value="launch-scraping">Lancer / relancer le scraping</option>
-                            <option value="launch-all">Lancer / relancer toutes les analyses</option>
+                        <optgroup label="Relances">
+                            <option value="launch-osint">Relancer analyse OSINT</option>
+                            <option value="launch-technique">Relancer analyse technique</option>
+                            <option value="launch-seo">Relancer analyse SEO</option>
+                            <option value="launch-pentest">Relancer analyse Pentest</option>
+                            <option value="launch-scraping">Relancer le scraping</option>
                         </optgroup>
                         <optgroup label="Groupes">
                             <option value="group-add">Ajouter au groupe...</option>
@@ -387,6 +420,8 @@
             </div>
         </div>
     </div>
+
+    <div id="pipeline-kanban-strip" class="pipeline-kanban-strip" style="display:none;" aria-label="Répartition par statut pipeline"></div>
     
     <div id="entreprises-container" class="entreprises-grid">
         <p>Chargement des entreprises...</p>
@@ -416,13 +451,13 @@
 <script src="{{ url_for('static', filename='js/modules/utils/notifications.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/utils/debounce.js') }}"></script>
 <!-- Module API -->
-<script src="{{ url_for('static', filename='js/modules/entreprises/api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/entreprises/api.js') }}?v=17"></script>
 <!-- Modules d'affichage des analyses -->
 <script src="{{ url_for('static', filename='js/modules/analyses/technical.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/analyses/osint.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/analyses/pentest.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/analyses/scraping.js') }}"></script>
 <!-- Script principal (chargement différé) -->
-<script src="{{ url_for('static', filename='js/entreprises.refactored.js') }}?v=6" defer></script>
+<script src="{{ url_for('static', filename='js/entreprises.refactored.js') }}?v=17" defer></script>
 {% endblock %}
 

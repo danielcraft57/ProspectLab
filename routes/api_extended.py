@@ -8,9 +8,12 @@ from flask import Blueprint, request, jsonify, session
 from services.database import Database
 from services.export_manager import ExportManager
 from services.auth import login_required
+from config import CELERY_FULL_ANALYSIS_QUEUE, SEO_USE_LIGHTHOUSE_DEFAULT
 import json
 import pandas as pd
 from urllib.parse import urlparse
+
+from utils.url_utils import canonical_website_https_url
 
 api_extended_bp = Blueprint('api_extended', __name__, url_prefix='/api')
 
@@ -19,20 +22,10 @@ database = Database()
 export_manager = ExportManager()
 
 def _normalize_url_for_analysis(raw: str) -> str | None:
-    if not raw:
+    """URL HTTPS canonique (sans www.) — alignée sur la dédup domaine en base."""
+    if raw is None:
         return None
-    s = str(raw).strip()
-    if not s:
-        return None
-    if not s.startswith(('http://', 'https://')):
-        s = f'https://{s}'
-    try:
-        parsed = urlparse(s)
-        if not parsed.scheme or not parsed.netloc:
-            return None
-    except Exception:
-        return None
-    return s
+    return canonical_website_https_url(str(raw).strip() or None)
 
 
 def _get_entreprise_id_for_website(database: Database, website: str) -> int | None:
@@ -1027,7 +1020,7 @@ def website_analysis():
     max_time = int(payload.get('max_time', 180) or 180)
     max_pages = int(payload.get('max_pages', 30) or 30)
     enable_nmap = bool(payload.get('enable_nmap', False))
-    use_lighthouse = bool(payload.get('use_lighthouse', False))
+    use_lighthouse = bool(payload.get('use_lighthouse', SEO_USE_LIGHTHOUSE_DEFAULT))
 
     from tasks.scraping_tasks import scrape_emails_task
     from tasks.technical_analysis_tasks import technical_analysis_task
@@ -1050,7 +1043,7 @@ def website_analysis():
                 entreprise_id=entreprise_id,
             ),
             countdown=_st.next_countdown(),
-            queue='heavy',
+            queue='scraping',
         )
         tasks_launched['scraping_task_id'] = scraping_task.id
     except Exception as e:
@@ -1060,7 +1053,7 @@ def website_analysis():
         tech_task = technical_analysis_task.apply_async(
             kwargs=dict(url=website, entreprise_id=entreprise_id, enable_nmap=enable_nmap),
             countdown=_st.next_countdown(),
-            queue='heavy',
+            queue='technical',
         )
         tasks_launched['technical_task_id'] = tech_task.id
     except Exception as e:
@@ -1070,7 +1063,7 @@ def website_analysis():
         seo_task = seo_analysis_task.apply_async(
             kwargs=dict(url=website, entreprise_id=entreprise_id, use_lighthouse=use_lighthouse),
             countdown=_st.next_countdown(),
-            queue='heavy',
+            queue='seo',
         )
         tasks_launched['seo_task_id'] = seo_task.id
     except Exception as e:
@@ -1081,7 +1074,7 @@ def website_analysis():
         osint_task = osint_analysis_task.apply_async(
             kwargs=dict(url=website, entreprise_id=entreprise_id),
             countdown=_st.next_countdown(),
-            queue='heavy',
+            queue='osint',
         )
         tasks_launched['osint_task_id'] = osint_task.id
     except Exception as e:
@@ -1105,4 +1098,161 @@ def website_analysis():
         'tasks': tasks_launched,
         'message': 'Analyses lancées. Utilisez GET /api/website-analysis?website=... pour récupérer le rapport.',
     }), 202
+
+
+def _json_safe_celery_result(value):
+    """Rend un résultat Celery sérialisable (dates, Exception)."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return {k: _json_safe_celery_result(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_celery_result(v) for v in value]
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)[:8000]
+
+
+def _format_celery_failure_message(async_res):
+    """
+    Message d'échec Celery lisible (info / traceback).
+    Les workers non à jour renvoient souvent NotRegistered('tasks.xxx.task_name').
+    """
+    info = getattr(async_res, 'info', None)
+    parts = []
+
+    if info is not None:
+        if isinstance(info, (list, tuple)):
+            if len(info) >= 2 and info[1] is not None:
+                parts.append(f'{info[0]}: {info[1]}')
+            elif len(info) >= 1:
+                parts.append(str(info[0]))
+        elif isinstance(info, BaseException):
+            parts.append(f'{type(info).__name__}: {info}')
+        else:
+            parts.append(str(info))
+
+    tb = getattr(async_res, 'traceback', None)
+    if isinstance(tb, str) and tb.strip():
+        lines = [ln.strip() for ln in tb.strip().split('\n') if ln.strip()]
+        if lines:
+            parts.append('— '.join(lines[-3:]))
+
+    msg = ' '.join(parts) if parts else 'Erreur inconnue (tâche Celery).'
+
+    low = msg.lower()
+    if 'notregistered' in low or ("'tasks." in msg and 'full_website' in low):
+        msg += (
+            ' — Vérifiez que les workers écoutent la file configurée (CELERY_FULL_ANALYSIS_QUEUE, '
+            'souvent « technical ») et que CELERY_WORKER_QUEUES sur le serveur l’inclut. '
+            'Redémarrez les workers après déploiement.'
+        )
+    return msg[:12000]
+
+
+@api_extended_bp.route('/website-full-analysis/start', methods=['POST'])
+@login_required
+def website_full_analysis_start():
+    """
+    Démarre le pack complet (scraping → technique → SEO → OSINT → pentest) pour une URL.
+    Crée une ligne ``analyses`` (statut En cours) et rattache l'``entreprise`` à cette analyse.
+    """
+    database = Database()
+    if not session.get('user_id'):
+        return jsonify({
+            'error': 'Authentification requise',
+            'message': 'Connectez-vous à ProspectLab pour lancer cette analyse.',
+        }), 401
+
+    payload = request.get_json(silent=True) or {}
+    website = _normalize_url_for_analysis((payload.get('website') or '').strip())
+    if not website:
+        return jsonify({'error': 'Le champ "website" est requis (URL ou domaine).'}), 400
+
+    netloc = urlparse(website).netloc or website
+    filename = f'full-scan:{netloc}'
+    parametres = {'source': 'website_full', 'url': website}
+
+    analyse_id = database.create_pending_analysis(filename, parametres, total_entreprises=1)
+    if not analyse_id:
+        return jsonify({'error': 'Impossible de créer l\'enregistrement d\'analyse.'}), 500
+
+    entreprise_id = database.save_entreprise(
+        analyse_id,
+        {
+            'name': netloc,
+            'website': website,
+            'statut': 'Nouveau',
+        },
+        skip_duplicates=True,
+    )
+    if not entreprise_id:
+        try:
+            database.finalize_analysis(analyse_id, statut='Erreur')
+        except Exception:
+            pass
+        return jsonify({'error': 'Impossible de créer ou retrouver l\'entreprise.'}), 500
+
+    max_depth = int(payload.get('max_depth', 2) or 2)
+    max_workers = int(payload.get('max_workers', 5) or 5)
+    max_time = int(payload.get('max_time', 240) or 240)
+    max_pages = int(payload.get('max_pages', 40) or 40)
+    enable_nmap = bool(payload.get('enable_nmap', False))
+    use_lighthouse = bool(payload.get('use_lighthouse', SEO_USE_LIGHTHOUSE_DEFAULT))
+
+    try:
+        from tasks.analysis_tasks import full_website_analysis_task
+        async_res = full_website_analysis_task.apply_async(
+            kwargs=dict(
+                url=website,
+                entreprise_id=entreprise_id,
+                analyse_id=analyse_id,
+                max_depth=max_depth,
+                max_workers=max_workers,
+                max_time=max_time,
+                max_pages=max_pages,
+                enable_nmap=enable_nmap,
+                use_lighthouse=use_lighthouse,
+            ),
+            queue=CELERY_FULL_ANALYSIS_QUEUE,
+        )
+    except Exception as e:
+        try:
+            database.finalize_analysis(analyse_id, statut='Erreur')
+        except Exception:
+            pass
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+    return jsonify({
+        'success': True,
+        'task_id': async_res.id,
+        'entreprise_id': entreprise_id,
+        'analyse_id': analyse_id,
+        'website': website,
+        'message': 'Analyse complète démarrée. Interroger /api/celery-task/<task_id> jusqu\'à state=SUCCESS.',
+    }), 202
+
+
+@api_extended_bp.route('/celery-task/<task_id>', methods=['GET'])
+@login_required
+def celery_task_status(task_id):
+    """État d'une tâche Celery (progression ou résultat)."""
+    if not session.get('user_id'):
+        return jsonify({'error': 'Authentification requise'}), 401
+
+    from celery_app import celery as celery_app
+
+    async_res = celery_app.AsyncResult(task_id)
+    out = {'state': async_res.state, 'task_id': task_id}
+    if async_res.state == 'PENDING':
+        out['pending'] = True
+    elif async_res.state == 'PROGRESS':
+        out['meta'] = async_res.info
+    elif async_res.state == 'SUCCESS':
+        out['result'] = _json_safe_celery_result(async_res.result)
+    elif async_res.state == 'FAILURE':
+        out['error'] = _format_celery_failure_message(async_res)
+    elif async_res.state in ('REJECTED', 'REVOKED'):
+        out['error'] = f"Tâche {async_res.state.lower()} (annulée ou refusée)."
+    return jsonify(out)
 

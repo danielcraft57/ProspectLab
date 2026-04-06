@@ -2,7 +2,12 @@
 Helpers pour la gestion des templates avec support de la nouvelle architecture
 """
 
+import os
+import time
 from flask import render_template
+
+
+_DEFAULT_ASSET_VERSION = str(int(time.time()))
 
 
 def render_page(template_name, **kwargs):
@@ -20,6 +25,10 @@ def render_page(template_name, **kwargs):
         render_page('dashboard') -> cherche pages/dashboard.html puis dashboard.html
         render_page('pages/dashboard') -> cherche pages/dashboard.html directement
     """
+    # Cache-buster pour les assets (JS/CSS) afin d'éviter que le navigateur garde une ancienne version.
+    # Surcharge possible via .env: APP_BUILD_ID=20260330-1 (par ex).
+    kwargs.setdefault('asset_version', (os.getenv('APP_BUILD_ID') or '').strip() or _DEFAULT_ASSET_VERSION)
+
     # Si le nom contient déjà 'pages/', utiliser tel quel
     if template_name.startswith('pages/'):
         try:

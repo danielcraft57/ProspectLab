@@ -19,6 +19,9 @@ APP_DIR = Path(__file__).parent
 
 # Configuration Flask
 SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+# Débogueur Werkzeug / pages d'erreur détaillées : désactivé par défaut (production).
+# Mettre FLASK_DEBUG=1 uniquement en développement local — jamais sur Internet.
+FLASK_DEBUG = os.environ.get('FLASK_DEBUG', '0').lower() in ('1', 'true', 'yes', 'on')
 UPLOAD_FOLDER = Path(os.environ.get('UPLOAD_FOLDER', str(APP_DIR / 'uploads')))
 EXPORT_FOLDER = Path(os.environ.get('EXPORT_FOLDER', str(APP_DIR / 'exports')))
 MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
@@ -65,6 +68,11 @@ SHODAN_API_KEY = os.environ.get('SHODAN_API_KEY', '')
 CENSYS_API_ID = os.environ.get('CENSYS_API_ID', '')
 CENSYS_API_SECRET = os.environ.get('CENSYS_API_SECRET', '')
 HUNTER_API_KEY = os.environ.get('HUNTER_API_KEY', '')
+# Abstract (https://www.abstractapi.com/) — validation email / téléphone en option
+ABSTRACT_EMAIL_API_KEY = os.environ.get('ABSTRACT_EMAIL_API_KEY', '')
+ABSTRACT_PHONE_API_KEY = os.environ.get('ABSTRACT_PHONE_API_KEY', '')
+# Numverify (APILayer) — ligne type / pays / opérateur pour un E.164
+NUMVERIFY_API_KEY = os.environ.get('NUMVERIFY_API_KEY', '')
 BUILTWITH_API_KEY = os.environ.get('BUILTWITH_API_KEY', '')
 HIBP_API_KEY = os.environ.get('HIBP_API_KEY', '')
 
@@ -74,12 +82,30 @@ WSL_USER = os.environ.get('WSL_USER', 'loupix')
 
 # Configuration timeout pour les outils externes
 OSINT_TOOL_TIMEOUT = int(os.environ.get('OSINT_TOOL_TIMEOUT', '60'))  # secondes
+
+# Parse des numéros (lib phonenumbers) et cap analyse OSINT téléphone
+PHONE_DEFAULT_REGION = os.environ.get('PHONE_DEFAULT_REGION', 'FR')
+PHONE_OSINT_MAX_NUMBERS = int(os.environ.get('PHONE_OSINT_MAX_NUMBERS', '8'))
+# PhoneInfoga v2 : scanners optionnels via variables documentées upstream (ex. NUMVERIFY_API_KEY).
 PENTEST_TOOL_TIMEOUT = int(os.environ.get('PENTEST_TOOL_TIMEOUT', '120'))  # secondes
 
 # Analyse SEO : timeouts séparés connexion / lecture (plusieurs URL candidates)
 SEO_FETCH_CONNECT_TIMEOUT = float(os.environ.get('SEO_FETCH_CONNECT_TIMEOUT', '12'))
 SEO_FETCH_READ_TIMEOUT = float(os.environ.get('SEO_FETCH_READ_TIMEOUT', '25'))
 SEO_TOOL_TIMEOUT = int(os.environ.get('SEO_TOOL_TIMEOUT', '120'))
+# Active Lighthouse par défaut via l'environnement (prod recommandé).
+SEO_USE_LIGHTHOUSE_DEFAULT = os.environ.get('SEO_USE_LIGHTHOUSE_DEFAULT', 'false').lower() in ('1', 'true', 'yes', 'on')
+# HTTP 429 / 503 : nouveaux essais avec attente (Retry-After ou backoff exponentiel)
+SEO_FETCH_RATE_LIMIT_MAX_RETRIES = max(
+    0, int(os.environ.get('SEO_FETCH_RATE_LIMIT_MAX_RETRIES', '5'))
+)
+SEO_FETCH_RATE_LIMIT_BASE_DELAY_SEC = float(
+    os.environ.get('SEO_FETCH_RATE_LIMIT_BASE_DELAY_SEC', '4')
+)
+# Pack « analyse site complète » : pause après le scraping avant technique/SEO (réduit le rafale sur l’hôte)
+FULL_ANALYSIS_INTER_STEP_PAUSE_SEC = float(
+    os.environ.get('FULL_ANALYSIS_INTER_STEP_PAUSE_SEC', '3')
+)
 # Lighthouse (Node chrome-launcher) : sur Linux embarqué / Raspberry Pi, Chrome n’est pas dans le PATH standard
 CHROME_PATH = (os.environ.get('CHROME_PATH') or os.environ.get('LIGHTHOUSE_CHROME_PATH') or '').strip() or None
 
@@ -108,9 +134,46 @@ CELERY_BULK_STAGGER_SLOT_MODULO = max(1, int(os.environ.get('CELERY_BULK_STAGGER
 # 1 = le worker ne précharge qu'une tâche à la fois (meilleure répartition sous charge)
 CELERY_WORKER_PREFETCH_MULTIPLIER = int(os.environ.get('CELERY_WORKER_PREFETCH_MULTIPLIER', '1'))
 CELERY_TASK_ACKS_LATE = os.environ.get('CELERY_TASK_ACKS_LATE', 'true').lower() in ('1', 'true', 'yes')
-# Files à consommer (lourd vs léger) — le worker doit écouter les deux, ex: celery,heavy
-CELERY_WORKER_QUEUES = os.environ.get('CELERY_WORKER_QUEUES', 'celery,heavy')
+# Files Celery à consommer.
+# En dev, si CELERY_WORKER_QUEUES n'est pas fourni, on doit écouter aussi les queues dédiées
+# (scraping/technical/seo/osint/pentest), sinon les tâches routées ne sont jamais exécutées.
+CELERY_WORKER_QUEUES = os.environ.get(
+    'CELERY_WORKER_QUEUES',
+    'celery,scraping,scraping_interactive,technical,seo,osint,pentest,heavy,website_full',
+)
+
+# File d’enqueue pour le pack « analyse site complet ».
+# Défaut « technical » : les workers existants écoutent déjà cette file (voir CELERY_WORKER_QUEUES).
+# Pour isoler le pack sur un worker dédié : CELERY_FULL_ANALYSIS_QUEUE=website_full et ajoutez
+# « website_full » à CELERY_WORKER_QUEUES sur ce nœud (sinon la tâche reste PENDING à l’infini).
+CELERY_FULL_ANALYSIS_QUEUE = (
+    (os.environ.get('CELERY_FULL_ANALYSIS_QUEUE') or 'technical').strip() or 'technical'
+)
+
+# Mise à l’échelle (cluster) : plusieurs workers → même CELERY_BROKER_URL vers Redis (ex. node15.lan).
+# Pas de variable « nombre de workers » côté app : chaque nœud définit CELERY_WORKERS localement.
+# Surveiller Redis (mémoire) et PostgreSQL max_connections — voir docs/configuration/DEPLOIEMENT_PRODUCTION.md.
 
 # URL de base pour le tracking des emails (doit être accessible publiquement)
 # Exemple: https://votre-domaine.com ou http://votre-ip:5000
 BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5000')
+
+# Scan automatique des bounces (IMAP -> tags/statuts)
+BOUNCE_SCAN_ENABLED = os.environ.get('BOUNCE_SCAN_ENABLED', 'true').lower() in ('1', 'true', 'yes', 'on')
+# Profils IMAP à scanner (doit correspondre à IMAP_PROFILES et variables IMAP_*_PROFIL)
+BOUNCE_SCAN_PROFILES = (os.environ.get('BOUNCE_SCAN_PROFILES') or os.environ.get('IMAP_PROFILES') or 'default').strip()
+# Fenêtre de scan périodique en jours (cron 2x/jour)
+BOUNCE_SCAN_DAYS = max(1, int(os.environ.get('BOUNCE_SCAN_DAYS', '14')))
+# Fenêtre de scan pour le run déclenché peu après lancement d'une campagne
+BOUNCE_SCAN_AFTER_CAMPAIGN_DAYS = max(1, int(os.environ.get('BOUNCE_SCAN_AFTER_CAMPAIGN_DAYS', '2')))
+# 0 = sans limite de messages IMAP, >0 = limite
+BOUNCE_SCAN_LIMIT = int(os.environ.get('BOUNCE_SCAN_LIMIT', '0'))
+# true = déplacer/supprimer les bounces traités côté IMAP (Gmail/node12)
+BOUNCE_SCAN_DELETE_PROCESSED = os.environ.get('BOUNCE_SCAN_DELETE_PROCESSED', 'true').lower() in ('1', 'true', 'yes', 'on')
+# Délai (secondes) après lancement campagne avant 1er scan auto
+BOUNCE_SCAN_POST_CAMPAIGN_DELAY_SEC = max(30, int(os.environ.get('BOUNCE_SCAN_POST_CAMPAIGN_DELAY_SEC', '1800')))
+
+# Cache mémoire des réponses GET /api/public (décorateur public_response_cache).
+# PUBLIC_API_RESPONSE_CACHE=false pour désactiver.
+# TTL par défaut (secondes) si un décorateur ne fixe pas de durée : PUBLIC_API_CACHE_TTL_DEFAULT=30
+# Taille max du cache (entrées) : PUBLIC_API_CACHE_MAX_ENTRIES=512

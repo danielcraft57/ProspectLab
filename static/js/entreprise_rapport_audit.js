@@ -83,6 +83,67 @@
         return items;
     }
 
+    function buildMetricsHtml(oppData, pipeline) {
+        const parts = [];
+        if (oppData && typeof oppData.score === 'number') {
+            parts.push(
+                `<div class="audit-metric"><span class="audit-metric-label">Opportunité</span>`
+                + `<span class="audit-metric-value">${oppData.score}/100</span></div>`
+            );
+        }
+        const tech = pipeline && pipeline.technical;
+        if (tech && typeof tech.security_score === 'number') {
+            let cls = 'audit-metric';
+            if (tech.security_score < 50) cls += ' is-warn';
+            parts.push(
+                `<div class="${cls}"><span class="audit-metric-label">Sécurité technique</span>`
+                + `<span class="audit-metric-value">${tech.security_score}/100</span></div>`
+            );
+        }
+        const seo = pipeline && pipeline.seo;
+        if (seo && typeof seo.score === 'number') {
+            let cls = 'audit-metric';
+            if (seo.score < 50) cls += ' is-warn';
+            parts.push(
+                `<div class="${cls}"><span class="audit-metric-label">SEO</span>`
+                + `<span class="audit-metric-value">${seo.score}/100</span></div>`
+            );
+        }
+        const pentest = pipeline && pipeline.pentest;
+        if (pentest && typeof pentest.risk_score === 'number') {
+            let cls = 'audit-metric';
+            if (pentest.risk_score >= 70) cls += ' is-risk-high';
+            else if (pentest.risk_score >= 40) cls += ' is-risk-mid';
+            parts.push(
+                `<div class="${cls}"><span class="audit-metric-label">Risque pentest</span>`
+                + `<span class="audit-metric-value">${pentest.risk_score}/100</span></div>`
+            );
+        }
+        if (!parts.length) return '';
+        return `<div class="audit-metrics">${parts.join('')}</div>`;
+    }
+
+    function initExclusiveAccordion(mountRoot) {
+        const accRoot = mountRoot.querySelector('.audit-report-accordion');
+        if (!accRoot) return;
+        accRoot.querySelectorAll('details.audit-acc-item').forEach((det) => {
+            det.addEventListener('toggle', () => {
+                if (!det.open) return;
+                accRoot.querySelectorAll('details.audit-acc-item').forEach((other) => {
+                    if (other !== det) other.open = false;
+                });
+            });
+        });
+    }
+
+    function revealAuditReport(mountRoot) {
+        const section = mountRoot.querySelector('.audit-report');
+        if (!section) return;
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => section.classList.add('audit-report--visible'));
+        });
+    }
+
     async function initReport() {
         const root = getRoot();
         if (!root) return;
@@ -124,14 +185,31 @@
 
             const website = entreprise.website || '';
             const secteur = entreprise.secteur || '';
+            const metricsHtml = buildMetricsHtml(oppData, pipeline);
+
+            const execInsightsHtml = execLines.map((line) => (
+                `<div class="audit-insight">`
+                + `<i class="fa-solid fa-circle-check" aria-hidden="true"></i>`
+                + `<div>${line}</div></div>`
+            )).join('');
+
+            const quickWinsHtml = quickWins.length
+                ? `<div class="audit-tags">${quickWins.map((w) => (
+                    `<span class="audit-tag">${escapeHtml(w)}</span>`
+                )).join('')}</div>`
+                : '<p class="empty-state">Aucun quick win spécifique n\'a encore été identifié.</p>';
 
             root.innerHTML = `
-                <section class="audit-report">
-                    <header class="audit-report-header">
-                        <div>
+                <section class="audit-report" aria-label="Rapport d'audit">
+                    <header class="audit-report-hero">
+                        <div class="audit-report-hero-main">
                             <h2 class="audit-report-company">${escapeHtml(entreprise.nom || 'Entreprise')}</h2>
                             ${website ? `<p class="audit-report-website"><a href="${escapeHtml(website)}" target="_blank" rel="noopener">${escapeHtml(website)}</a></p>` : ''}
                             ${secteur ? `<p class="audit-report-sector">${escapeHtml(secteur)}</p>` : ''}
+                        </div>
+                        <div class="audit-report-hero-actions">
+                            <a href="/entreprise/${id}" class="btn btn-secondary btn-small">← Fiche entreprise</a>
+                            <a href="/entreprises" class="btn btn-outline btn-small">← Liste des entreprises</a>
                         </div>
                         <div class="audit-report-opportunity">
                             <span class="label">Opportunité</span>
@@ -139,48 +217,82 @@
                         </div>
                     </header>
 
-                    <section class="audit-report-section">
-                        <h3>Résumé exécutif</h3>
-                        <ul class="audit-report-bullets">
-                            ${execLines.map(l => `<li>${l}</li>`).join('')}
-                        </ul>
-                    </section>
+                    ${metricsHtml}
 
-                    <section class="audit-report-section">
-                        <h3>Quick wins prioritaires</h3>
-                        ${
-                            quickWins.length
-                                ? `<ul class="audit-report-bullets">
-                                        ${quickWins.map(w => `<li>${escapeHtml(w)}</li>`).join('')}
-                                   </ul>`
-                                : '<p class="empty-state">Aucun quick win spécifique n\'a encore été identifié.</p>'
-                        }
-                    </section>
-
-                    <section class="audit-report-section audit-report-grid">
-                        <div class="audit-report-card">
-                            <h4>Technique & performance</h4>
-                            <p>Voir les onglets « Analyse technique » et « Pipeline d\'audit » pour le détail des performances, sécurité, et technologies utilisées.</p>
-                        </div>
-                        <div class="audit-report-card">
-                            <h4>SEO & visibilité</h4>
-                            <p>Le score SEO et les problèmes détectés (balises, structure, Lighthouse) orientent les actions d\'amélioration de la visibilité.</p>
-                        </div>
-                        <div class="audit-report-card">
-                            <h4>Sécurité & Pentest</h4>
-                            <p>Les vulnérabilités identifiées (Pentest) ainsi que la configuration SSL/headers guident les priorités de correction.</p>
-                        </div>
-                        <div class="audit-report-card">
-                            <h4>Données OSINT & contacts</h4>
-                            <p>Les données personnes/emails issues de l\'OSINT et du scraping facilitent la prise de contact ciblée.</p>
-                        </div>
-                    </section>
+                    <div class="audit-report-accordion" role="region" aria-label="Détail du rapport">
+                        <details class="audit-acc-item" open>
+                            <summary class="audit-acc-summary">
+                                <span class="audit-acc-icon" aria-hidden="true"><i class="fa-solid fa-clipboard-list"></i></span>
+                                Résumé exécutif
+                            </summary>
+                            <div class="audit-acc-panel">
+                                <div class="audit-insights">${execInsightsHtml}</div>
+                            </div>
+                        </details>
+                        <details class="audit-acc-item">
+                            <summary class="audit-acc-summary">
+                                <span class="audit-acc-icon" aria-hidden="true"><i class="fa-solid fa-bolt"></i></span>
+                                Quick wins prioritaires
+                            </summary>
+                            <div class="audit-acc-panel">${quickWinsHtml}</div>
+                        </details>
+                        <details class="audit-acc-item">
+                            <summary class="audit-acc-summary">
+                                <span class="audit-acc-icon" aria-hidden="true"><i class="fa-solid fa-microchip"></i></span>
+                                Technique &amp; performance
+                            </summary>
+                            <div class="audit-acc-panel">
+                                <div class="audit-report-card">
+                                    <h4>Scraping &amp; stack</h4>
+                                    <p>Voir les onglets « Analyse technique » et « Pipeline d’audit » pour les performances, la sécurité applicative et les technologies détectées sur le site.</p>
+                                </div>
+                            </div>
+                        </details>
+                        <details class="audit-acc-item">
+                            <summary class="audit-acc-summary">
+                                <span class="audit-acc-icon" aria-hidden="true"><i class="fa-solid fa-magnifying-glass-chart"></i></span>
+                                SEO &amp; visibilité
+                            </summary>
+                            <div class="audit-acc-panel">
+                                <div class="audit-report-card">
+                                    <h4>SEO</h4>
+                                    <p>Le score SEO et les anomalies (balises, structure, Lighthouse) servent de base aux actions pour améliorer la visibilité organique.</p>
+                                </div>
+                            </div>
+                        </details>
+                        <details class="audit-acc-item">
+                            <summary class="audit-acc-summary">
+                                <span class="audit-acc-icon" aria-hidden="true"><i class="fa-solid fa-shield-halved"></i></span>
+                                Sécurité &amp; pentest
+                            </summary>
+                            <div class="audit-acc-panel">
+                                <div class="audit-report-card">
+                                    <h4>Pentest &amp; posture</h4>
+                                    <p>Les vulnérabilités Pentest et la configuration SSL / en-têtes HTTP guident les priorités de durcissement.</p>
+                                </div>
+                            </div>
+                        </details>
+                        <details class="audit-acc-item">
+                            <summary class="audit-acc-summary">
+                                <span class="audit-acc-icon" aria-hidden="true"><i class="fa-solid fa-user-secret"></i></span>
+                                OSINT &amp; contacts
+                            </summary>
+                            <div class="audit-acc-panel">
+                                <div class="audit-report-card">
+                                    <h4>Contacts &amp; résilience</h4>
+                                    <p>Les personnes et e-mails issus de l’OSINT et du scraping permettent une prospection ciblée et un suivi des points de contact.</p>
+                                </div>
+                            </div>
+                        </details>
+                    </div>
 
                     <footer class="audit-report-footer">
-                        <p>Rapport généré automatiquement par ProspectLab. Utilisez la fonction d\'impression du navigateur pour l\'exporter en PDF.</p>
+                        <p>Rapport généré automatiquement par ProspectLab. Utilisez la fonction d’impression du navigateur pour l’exporter en PDF.</p>
                     </footer>
                 </section>
             `;
+            initExclusiveAccordion(root);
+            revealAuditReport(root);
         } catch (e) {
             console.error('Erreur lors de la génération du rapport:', e);
             root.innerHTML = '<p class="error">Erreur lors de la génération du rapport d\'audit.</p>';

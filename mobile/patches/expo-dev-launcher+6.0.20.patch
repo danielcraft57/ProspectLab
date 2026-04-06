@@ -1,0 +1,117 @@
+diff --git a/node_modules/expo-dev-launcher/android/src/debug/java/expo/modules/devlauncher/compose/ui/ServerUrlInput.kt b/node_modules/expo-dev-launcher/android/src/debug/java/expo/modules/devlauncher/compose/ui/ServerUrlInput.kt
+index 867dbc0..96b0709 100644
+--- a/node_modules/expo-dev-launcher/android/src/debug/java/expo/modules/devlauncher/compose/ui/ServerUrlInput.kt
++++ b/node_modules/expo-dev-launcher/android/src/debug/java/expo/modules/devlauncher/compose/ui/ServerUrlInput.kt
+@@ -15,6 +15,7 @@ import androidx.compose.runtime.getValue
+ import androidx.compose.runtime.mutableStateOf
+ import androidx.compose.runtime.remember
+ import androidx.compose.runtime.setValue
++import com.facebook.react.R
+ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.draw.clip
+ import androidx.compose.ui.graphics.Color
+@@ -37,6 +38,14 @@ fun ServerUrlInput(
+ ) {
+   var url by remember { mutableStateOf("") }
+   val context = LocalContext.current
++  val appCtx = context.applicationContext
++  val placeholderUrl = remember(appCtx) {
++    runCatching {
++      val host = appCtx.resources.getString(R.string.react_native_dev_server_ip)
++      val port = appCtx.resources.getInteger(R.integer.react_native_dev_server_port)
++      if (host.isEmpty()) "http://localhost:8081" else "http://$host:$port"
++    }.getOrDefault("http://localhost:8081")
++  }
+ 
+   fun connectToURL() {
+     val sanitizedURL = sanitizeUrlString(url)
+@@ -84,7 +93,7 @@ fun ServerUrlInput(
+       TextInput(
+         placeholder = {
+           NewText(
+-            text = "http://localhost:8081",
++            text = placeholderUrl,
+             style = NewAppTheme.font.md,
+             color = NewAppTheme.colors.text.secondary
+           )
+diff --git a/node_modules/expo-dev-launcher/android/src/debug/java/expo/modules/devlauncher/services/DependencyInjection.kt b/node_modules/expo-dev-launcher/android/src/debug/java/expo/modules/devlauncher/services/DependencyInjection.kt
+index 229ca29..89ff3f9 100644
+--- a/node_modules/expo-dev-launcher/android/src/debug/java/expo/modules/devlauncher/services/DependencyInjection.kt
++++ b/node_modules/expo-dev-launcher/android/src/debug/java/expo/modules/devlauncher/services/DependencyInjection.kt
+@@ -29,7 +29,7 @@ object DependencyInjection {
+   var devLauncherController: DevLauncherController? = null
+     private set
+ 
+-  var packagerService: PackagerService = PackagerService(httpClientService)
++  lateinit var packagerService: PackagerService
+     private set
+ 
+   var appService: AppService = AppService()
+@@ -59,6 +59,8 @@ object DependencyInjection {
+     )
+ 
+     errorRegistryService = ErrorRegistryService(context.applicationContext)
++
++    packagerService = PackagerService(context.applicationContext, httpClientService)
+   }
+ }
+ 
+diff --git a/node_modules/expo-dev-launcher/android/src/debug/java/expo/modules/devlauncher/services/PackagerService.kt b/node_modules/expo-dev-launcher/android/src/debug/java/expo/modules/devlauncher/services/PackagerService.kt
+index d92a7dd..7c6df99 100644
+--- a/node_modules/expo-dev-launcher/android/src/debug/java/expo/modules/devlauncher/services/PackagerService.kt
++++ b/node_modules/expo-dev-launcher/android/src/debug/java/expo/modules/devlauncher/services/PackagerService.kt
+@@ -1,6 +1,8 @@
+ package expo.modules.devlauncher.services
+ 
++import android.content.Context
+ import androidx.core.net.toUri
++import com.facebook.react.R
+ import expo.modules.core.utilities.EmulatorUtilities
+ import expo.modules.devlauncher.helpers.await
+ import kotlinx.coroutines.CoroutineScope
+@@ -19,13 +21,6 @@ import kotlinx.coroutines.flow.update
+ import kotlinx.coroutines.launch
+ import okhttp3.Request
+ 
+-private val portsToCheck = arrayOf(8081, 8082, 8083, 8084, 8085, 19000, 19001, 19002)
+-private val hostToCheck = if (EmulatorUtilities.isRunningOnEmulator()) {
+-  "10.0.2.2"
+-} else {
+-  "localhost"
+-}
+-
+ data class PackagerInfo(
+   val url: String,
+   val description: String? = null,
+@@ -45,12 +40,31 @@ data class PackagerInfo(
+  * Class responsible for discovering running packagers.
+  */
+ class PackagerService(
++  appContext: Context,
+   private val httpClientService: HttpClientService
+ ) {
++  private val applicationContext = appContext.applicationContext
++
+   private val coroutineScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+ 
++  private val portsToCheck = arrayOf(8081, 8082, 8083, 8084, 8085, 19000, 19001, 19002)
++
++  private val hostToCheck: String = resolvePackagerHost()
++
+   private val packagersToCheck = portsToCheck.map { port -> PackagerInfo("http://$hostToCheck:$port") }
+ 
++  private fun resolvePackagerHost(): String {
++    if (EmulatorUtilities.isRunningOnEmulator()) {
++      return "10.0.2.2"
++    }
++    return try {
++      val host = applicationContext.resources.getString(R.string.react_native_dev_server_ip)
++      if (host.isNotEmpty()) host else "localhost"
++    } catch (_: Exception) {
++      "localhost"
++    }
++  }
++
+   private val _runningPackagers = MutableStateFlow<Set<PackagerInfo>>(emptySet())
+   private val _isLoading = MutableStateFlow(false)
+ 

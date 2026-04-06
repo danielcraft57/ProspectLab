@@ -4,4 +4,3 @@ set -e
 echo "[*] Flush Redis..."
 redis-cli FLUSHALL
 echo "[*] Redis vidé."
-

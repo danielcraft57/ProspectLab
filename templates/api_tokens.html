@@ -7,6 +7,7 @@
     .tokens-container {
         max-width: 1200px;
         margin: 0 auto;
+        padding: 0 14px;
     }
     
     .page-header {
@@ -175,6 +176,8 @@
     .token-actions {
         display: flex;
         gap: 10px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
     }
     
     .btn-action {
@@ -201,6 +204,11 @@
     }
     
     .btn-copy {
+        background: #667eea;
+        color: white;
+    }
+
+    .btn-view {
         background: #667eea;
         color: white;
     }
@@ -235,6 +243,20 @@
         flex-wrap: wrap;
         gap: 8px;
         margin-top: 10px;
+    }
+    .permissions-badges .badge--perm {
+        cursor: pointer;
+        user-select: none;
+        transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.2s;
+    }
+    .permissions-badges .badge--perm:hover:not(.is-busy) {
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    }
+    .permissions-badges .badge--perm.is-busy {
+        opacity: 0.65;
+        pointer-events: none;
+        cursor: wait;
     }
     
     .badge {
@@ -422,12 +444,262 @@
         background: #450a0a;
         color: #fecaca;
     }
+    body[data-theme="dark"] .permissions-badges .badge--perm:hover:not(.is-busy) {
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+    }
     body[data-theme="dark"] .btn-open-api-doc {
         background: #4338ca;
         color: #e2e8f0;
     }
     body[data-theme="dark"] .btn-open-api-doc:hover {
         background: #3730a3;
+    }
+
+    /* ========== Modale "Voir token" ========== */
+    .pl-modal {
+        position: fixed;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 18px;
+        z-index: 1000;
+    }
+    .pl-modal.is-open {
+        display: flex;
+    }
+    .pl-modal__backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.55);
+    }
+    .pl-modal__panel {
+        position: relative;
+        width: min(720px, 100%);
+        background: #ffffff;
+        border: 1px solid rgba(16, 24, 40, 0.10);
+        border-radius: 14px;
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+        padding: 16px;
+    }
+    body[data-theme="dark"] .pl-modal__panel {
+        background: #0f172a;
+        border-color: #334155;
+    }
+    .pl-modal__header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+    }
+    .pl-modal__title {
+        margin: 0;
+        font-size: 1.15em;
+        font-weight: 800;
+        color: #101828;
+    }
+    body[data-theme="dark"] .pl-modal__title {
+        color: #e2e8f0;
+    }
+    .pl-modal__subtitle {
+        margin: 6px 0 0 0;
+        color: #475467;
+        font-size: 0.95em;
+    }
+    body[data-theme="dark"] .pl-modal__subtitle {
+        color: #94a3b8;
+    }
+    .pl-modal__close {
+        background: transparent;
+        border: 0;
+        cursor: pointer;
+        padding: 10px;
+        border-radius: 10px;
+        color: #475467;
+    }
+    body[data-theme="dark"] .pl-modal__close {
+        color: #94a3b8;
+    }
+    .pl-modal__close:hover {
+        background: rgba(16, 24, 40, 0.06);
+    }
+    body[data-theme="dark"] .pl-modal__close:hover {
+        background: rgba(148, 163, 184, 0.12);
+    }
+    .pl-field {
+        display: grid;
+        gap: 8px;
+        margin-top: 12px;
+    }
+    .pl-field label {
+        font-weight: 700;
+        color: #101828;
+    }
+    body[data-theme="dark"] .pl-field label {
+        color: #e2e8f0;
+    }
+    .pl-inputRow {
+        display: flex;
+        gap: 10px;
+        align-items: stretch;
+    }
+    .pl-input {
+        flex: 1;
+        width: 100%;
+        padding: 12px;
+        border: 2px solid #e0e0e0;
+        border-radius: 10px;
+        font-size: 1em;
+        background: #fff;
+        color: #101828;
+    }
+    body[data-theme="dark"] .pl-input {
+        background: #0b1220;
+        border-color: #334155;
+        color: #e2e8f0;
+    }
+    .pl-input.mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 0.95em;
+    }
+    .pl-miniBtn {
+        flex: 0 0 auto;
+        padding: 0 14px;
+        min-width: 110px;
+        border: 0;
+        border-radius: 10px;
+        cursor: pointer;
+        font-weight: 800;
+        background: #667eea;
+        color: #fff;
+    }
+    .pl-miniBtn:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+    }
+    .pl-modal__footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        margin-top: 16px;
+    }
+    .pl-secondaryBtn {
+        background: transparent;
+        border: 2px solid #e0e0e0;
+        color: #101828;
+        padding: 10px 14px;
+        border-radius: 10px;
+        cursor: pointer;
+        font-weight: 800;
+    }
+    body[data-theme="dark"] .pl-secondaryBtn {
+        border-color: #334155;
+        color: #e2e8f0;
+    }
+
+    .pl-tokenReveal {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 14px;
+        align-items: start;
+        margin-top: 8px;
+    }
+    @media (max-width: 640px) {
+        .pl-tokenReveal {
+            grid-template-columns: 1fr;
+        }
+    }
+    .pl-tokenQrCol {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+    }
+    .pl-tokenQrBox {
+        padding: 12px;
+        background: #fff;
+        border-radius: 12px;
+        border: 2px solid #e5e7eb;
+        box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+    }
+    body[data-theme="dark"] .pl-tokenQrBox {
+        background: #fff;
+        border-color: #cbd5e1;
+    }
+    .pl-tokenQrHint {
+        margin: 0;
+        font-size: 0.82em;
+        color: #475467;
+        text-align: center;
+        max-width: 220px;
+        line-height: 1.35;
+    }
+    body[data-theme="dark"] .pl-tokenQrHint {
+        color: #94a3b8;
+    }
+    .pl-tokenTextCol {
+        min-width: 0;
+    }
+    .pl-tokenReadonly {
+        width: 100%;
+        min-height: 120px;
+        padding: 14px;
+        border: 2px solid #e0e0e0;
+        border-radius: 10px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 1.05rem;
+        line-height: 1.5;
+        word-break: break-all;
+        background: #f8fafc;
+        color: #0f172a;
+        resize: vertical;
+        user-select: text;
+    }
+    body[data-theme="dark"] .pl-tokenReadonly {
+        background: #0b1220;
+        border-color: #334155;
+        color: #e2e8f0;
+    }
+    .pl-tokenReadonly:focus {
+        outline: none;
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.25);
+    }
+
+    /* ========== Responsive mobile ========== */
+    @media (max-width: 760px) {
+        .create-token-section,
+        .tokens-list {
+            padding: 16px;
+        }
+        .token-header {
+            flex-direction: column;
+            gap: 10px;
+        }
+        .token-actions {
+            width: 100%;
+            justify-content: flex-start;
+        }
+        .btn-action {
+            flex: 1;
+            min-width: 0;
+            padding: 10px 12px;
+            border-radius: 10px;
+            font-weight: 700;
+        }
+        .token-info {
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+        .pl-inputRow {
+            flex-direction: column;
+        }
+        .pl-miniBtn {
+            width: 100%;
+            min-width: 0;
+            height: 44px;
+        }
     }
 </style>
 {% endblock %}
@@ -436,7 +708,7 @@
 <div class="tokens-container">
     <div class="page-header">
         <h1><i class="fas fa-key"></i> Gestion des Tokens API</h1>
-        <p>Créez et gérez les tokens API pour permettre à d'autres applications d'accéder aux données ProspectLab</p>
+        <p>Créez et gérez les tokens API pour permettre à d'autres applications d'accéder aux données ProspectLab. Sur les tokens <strong>actifs</strong>, cliquez sur les <strong>tags de permissions</strong> pour les activer ou désactiver (notification de confirmation).</p>
     </div>
     
     <div class="create-token-section">
@@ -456,6 +728,10 @@
                         <input type="checkbox" id="permEntreprises" name="can_read_entreprises" checked>
                         <span class="permission-label">Lire les entreprises</span>
                     </label>
+                    <label class="permission-item" for="permDeleteEntreprises" title="Nécessite « Lire les entreprises »">
+                        <input type="checkbox" id="permDeleteEntreprises" name="can_delete_entreprises">
+                        <span class="permission-label">Supprimer des entreprises (API)</span>
+                    </label>
                     <label class="permission-item" for="permEmails">
                         <input type="checkbox" id="permEmails" name="can_read_emails" checked>
                         <span class="permission-label">Lire les emails</span>
@@ -469,6 +745,7 @@
                         <span class="permission-label">Lire les campagnes email</span>
                     </label>
                 </div>
+                <small style="display:block;margin-top:10px;color:#666;">La suppression concerne <code>DELETE /api/public/entreprises/&lt;id&gt;</code> (irréversible). Sans la case « Supprimer », le token reste en <strong>lecture seule</strong> pour les fiches. La case suppression est ignorée si « Lire les entreprises » est décochée.</small>
             </div>
             
             <button type="submit" class="btn-create">
@@ -487,9 +764,53 @@
         </div>
     </div>
 </div>
+
+<div id="tokenModal" class="pl-modal" aria-hidden="true">
+    <div class="pl-modal__backdrop" data-close-modal="1"></div>
+    <div class="pl-modal__panel" role="dialog" aria-modal="true" aria-labelledby="tokenModalTitle">
+        <div class="pl-modal__header">
+            <div>
+                <h3 id="tokenModalTitle" class="pl-modal__title">Token API</h3>
+                <p id="tokenModalSubtitle" class="pl-modal__subtitle">Vérifie le site et copie le token.</p>
+            </div>
+            <button class="pl-modal__close" type="button" title="Fermer" data-close-modal="1">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+
+        <div class="pl-field">
+            <label for="tokenModalSite">Site / application</label>
+            <div class="pl-inputRow">
+                <input id="tokenModalSite" class="pl-input" type="text" inputmode="url" placeholder="https://..." readonly>
+                <button id="tokenModalCopySite" class="pl-miniBtn" type="button">Copier</button>
+            </div>
+        </div>
+
+        <div class="pl-field">
+            <label for="tokenModalValue">Token</label>
+            <div class="pl-tokenReveal">
+                <div class="pl-tokenTextCol">
+                    <textarea id="tokenModalValue" class="pl-tokenReadonly" readonly rows="5" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Valeur du token"></textarea>
+                    <div class="pl-inputRow" style="margin-top:10px;">
+                        <button id="tokenModalCopyToken" class="pl-miniBtn" type="button" style="width:100%;min-height:44px;">Copier le token</button>
+                    </div>
+                </div>
+                <div class="pl-tokenQrCol">
+                    <div id="tokenModalQr" class="pl-tokenQrBox" role="img" aria-label="QR code du token"></div>
+                    <p class="pl-tokenQrHint">Le QR encode le même texte que le token. Dans l’app mobile, pointe la caméra vers ce QR : décodage automatique (recommandé). L’OCR reste possible sur le texte affiché en grand.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="pl-modal__footer">
+            <button class="pl-secondaryBtn" type="button" data-close-modal="1">Fermer</button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script src="{{ url_for('static', filename='js/api_tokens.js') }}"></script>
 {% endblock %}
 

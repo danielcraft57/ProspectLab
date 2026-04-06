@@ -91,6 +91,7 @@ Dans `services/database/entreprises.py` :
 - Étendre `get_entreprises_for_campagne(filters=None)` pour reconnaître les mêmes filtres métier :
   - `secteur`, `secteur_contains`, `opportunite`, `statut`, `tags_contains`, `favori`, `search`, `score_securite_max`, `exclude_already_contacted`, `groupe_ids` (déjà en place),
   - **+** `cms`, `framework`, `has_blog`, `has_form`, `has_tunnel`, `performance_max` (pour limiter aux sites faibles).
+  - **+ (Sprint 2)** `etape_prospection` ; tri / filtre priorité : `sort_commercial`, `priority_min`, `commercial_profile_id` (ID table `commercial_priority_profiles`), `commercial_limit`. Les segments peuvent inclure ces clés dans `criteres_json` ; `loadEntreprisesWithFilters` les transmet à `/api/ciblage/entreprises`.
 
 Dans `services/database/campagnes.py` :
 

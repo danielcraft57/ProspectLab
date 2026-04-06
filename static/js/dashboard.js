@@ -10,20 +10,32 @@
     function getChartThemeOptions() {
         const isDark = document.body.getAttribute('data-theme') === 'dark';
         const textColor = isDark ? '#e2e8f0' : '#666';
+        const gridColor = isDark ? 'rgba(148, 163, 184, 0.16)' : 'rgba(148, 163, 184, 0.22)';
         return {
             textColor,
+            gridColor,
             legend: {
                 labels: { color: textColor }
             }
         };
     }
 
+    function getStatutPalette(statut) {
+        const map = {
+            'À qualifier': '#facc15',
+            'Relance': '#fb923c',
+            'Gagné': '#22c55e',
+            'Perdu': '#9ca3af',
+            'Contacté': '#60a5fa',
+            'En cours': '#a78bfa',
+        };
+        return map[statut] || '#60a5fa';
+    }
+
     async function loadStatistics() {
         try {
             document.body.classList.add('dashboard-loading');
-            const query = currentDaysFilter ? `?days=${encodeURIComponent(currentDaysFilter)}` : '';
-            const response = await fetch(`/api/statistics${query}`);
-            const stats = await response.json();
+            const stats = await fetchStatistics(currentDaysFilter || '', 0);
 
             // Sécurité basique
             if (!stats || stats.error) {
@@ -33,34 +45,61 @@
             }
 
             const parStatut = stats.par_statut || {};
-            const totalEntreprises = stats.total_entreprises || 0;
+            const currentKpi = computeKpi(stats);
+            let previousKpi = null;
+            const compareDays = Number.parseInt(currentDaysFilter, 10);
+            if (Number.isFinite(compareDays) && compareDays > 0) {
+                try {
+                    const previousStats = await fetchStatistics(compareDays, compareDays);
+                    previousKpi = computeKpi(previousStats);
+                } catch (e) {
+                    // eslint-disable-next-line no-console
+                    console.warn('Comparaison période précédente indisponible:', e);
+                }
+            }
 
-            const actifs = Object.entries(parStatut)
-                .filter(([statut]) => statut && statut !== 'Perdu')
-                .reduce((acc, [, count]) => acc + (count || 0), 0);
-            const totalGagnes = parStatut['Gagné'] || 0;
-            const conversion = totalEntreprises > 0
-                ? ((totalGagnes / totalEntreprises) * 100)
-                : 0;
-
-            setNumber('stat-total-entreprises', totalEntreprises, true);
-            setNumber('stat-actifs', actifs, true);
-            setNumber('stat-gagnes', totalGagnes, true);
-            setPercent('stat-conversion', conversion, true);
+            setNumber('stat-total-entreprises', currentKpi.totalEntreprises, true);
+            setNumber('stat-actifs', currentKpi.actifs, true);
+            setNumber('stat-avec-email', currentKpi.entreprisesAvecEmail, true);
+            setNumber('stat-gagnes', currentKpi.totalGagnes, true);
+            setPercent('stat-conversion', currentKpi.conversion, true);
 
             setNumber('stat-emails-envoyes', stats.emails_envoyes || 0, true);
             setPercent('stat-open-rate', stats.open_rate || 0, true);
             setPercent('stat-click-rate', stats.click_rate || 0, true);
+            renderKpiDeltas(currentKpi, previousKpi);
+            const insightContext = {
+                totalEntreprises: currentKpi.totalEntreprises,
+                actifs: currentKpi.actifs,
+                totalGagnes: currentKpi.totalGagnes,
+                conversion: currentKpi.conversion,
+                emailsEnvoyes: stats.emails_envoyes || 0,
+                emailsOuverts: stats.emails_ouverts || 0,
+                emailsCliques: stats['emails_cliqués'] || stats.emails_cliques || 0,
+                openRate: stats.open_rate || 0,
+                clickRate: stats.click_rate || 0,
+                favoris: stats.favoris || 0,
+                totalAnalyses: stats.total_analyses || 0,
+                totalCampagnes: stats.total_campagnes || 0,
+                parStatut,
+                parOpportunite: stats.par_opportunite || {},
+                parSecteur: stats.par_secteur || {},
+                topTags: stats.top_tags || [],
+                secteursGagnes: stats.secteurs_gagnes || [],
+                recentCampagnes: stats.recent_campagnes || [],
+                recentGagnes: stats.recent_gagnes || []
+            };
+            renderDashboardInsights(insightContext);
+            renderDashboardAnalysis(insightContext);
 
             createStatutsChart(parStatut);
-            createSecteursChart(stats.par_secteur || {});
+            createOpportunitesChart(stats.par_opportunite || {});
             createEmailsChart({
                 envoyes: stats.emails_envoyes || 0,
                 ouverts: stats.emails_ouverts || 0,
                 cliques: stats['emails_cliqués'] || stats.emails_cliques || 0
             });
             createSecteursGagnesChart(stats.secteurs_gagnes || []);
-            createOpportunitesChart(stats.par_opportunite || {});
             renderTopTags(stats.top_tags || []);
 
             renderRecentGagnes(stats.recent_gagnes || []);
@@ -71,6 +110,79 @@
         } finally {
             document.body.classList.remove('dashboard-loading');
         }
+    }
+
+    async function fetchStatistics(days = '', offsetDays = 0) {
+        const params = new URLSearchParams();
+        const d = Number.parseInt(days, 10);
+        if (Number.isFinite(d) && d > 0) {
+            params.set('days', String(d));
+        }
+        const off = Number.parseInt(offsetDays, 10);
+        if (Number.isFinite(off) && off > 0) {
+            params.set('offset_days', String(off));
+        }
+        const qs = params.toString();
+        const response = await fetch(`/api/statistics${qs ? `?${qs}` : ''}`);
+        return await response.json();
+    }
+
+    function computeKpi(stats) {
+        const parStatut = stats.par_statut || {};
+        const totalEntreprises = Number(stats.total_entreprises || 0);
+        const actifs = Object.entries(parStatut)
+            .filter(([statut]) => statut && statut !== 'Perdu')
+            .reduce((acc, [, count]) => acc + (count || 0), 0);
+        const totalGagnes = Number(parStatut['Gagné'] || 0);
+        const conversion = totalEntreprises > 0
+            ? ((totalGagnes / totalEntreprises) * 100)
+            : 0;
+        return {
+            totalEntreprises,
+            actifs,
+            entreprisesAvecEmail: Number(stats.entreprises_avec_email || 0),
+            totalGagnes,
+            conversion,
+            emailsEnvoyes: Number(stats.emails_envoyes || 0),
+            openRate: Number(stats.open_rate || 0),
+            clickRate: Number(stats.click_rate || 0)
+        };
+    }
+
+    function renderKpiDeltas(currentKpi, previousKpi) {
+        const setDelta = (id, value, mode = 'number') => {
+            const el = document.getElementById(`${id}-delta`);
+            if (!el) return;
+            if (value === null || value === undefined || Number.isNaN(value)) {
+                el.textContent = '';
+                el.classList.remove('is-positive', 'is-negative');
+                return;
+            }
+            const sign = value > 0 ? '+' : '';
+            const absValue = Math.abs(value);
+            const formatted = mode === 'percent'
+                ? `${sign}${value.toFixed(1)} pt`
+                : `${sign}${value.toLocaleString('fr-FR')}`;
+            el.textContent = `${formatted} vs période précédente`;
+            el.classList.toggle('is-positive', value > 0);
+            el.classList.toggle('is-negative', value < 0);
+        };
+
+        if (!previousKpi) {
+            ['stat-total-entreprises', 'stat-actifs', 'stat-gagnes', 'stat-conversion', 'stat-emails-envoyes', 'stat-open-rate', 'stat-click-rate']
+                .concat(['stat-avec-email'])
+                .forEach((id) => setDelta(id, null));
+            return;
+        }
+
+        setDelta('stat-total-entreprises', currentKpi.totalEntreprises - previousKpi.totalEntreprises);
+        setDelta('stat-actifs', currentKpi.actifs - previousKpi.actifs);
+        setDelta('stat-avec-email', currentKpi.entreprisesAvecEmail - previousKpi.entreprisesAvecEmail);
+        setDelta('stat-gagnes', currentKpi.totalGagnes - previousKpi.totalGagnes);
+        setDelta('stat-conversion', currentKpi.conversion - previousKpi.conversion, 'percent');
+        setDelta('stat-emails-envoyes', currentKpi.emailsEnvoyes - previousKpi.emailsEnvoyes);
+        setDelta('stat-open-rate', currentKpi.openRate - previousKpi.openRate, 'percent');
+        setDelta('stat-click-rate', currentKpi.clickRate - previousKpi.clickRate, 'percent');
     }
 
     function setNumber(id, value, animate = false) {
@@ -120,8 +232,16 @@
     function createStatutsChart(parStatut) {
         const ctx = document.getElementById('chart-statuts');
         if (!ctx) return;
-        const labels = Object.keys(parStatut || {});
-        const data = Object.values(parStatut || {});
+        const allEntries = Object.entries(parStatut || {})
+            .filter(([label, count]) => !!label && (count || 0) > 0);
+        // Par défaut on retire "Nouveau" pour mieux lire les statuts réellement travaillés.
+        // Fallback: si cela vide le graphe, on réaffiche tout (incluant Nouveau).
+        const entries = (allEntries.filter(([label]) => label !== 'Nouveau').length > 0
+            ? allEntries.filter(([label]) => label !== 'Nouveau')
+            : allEntries
+        ).sort((a, b) => (b[1] || 0) - (a[1] || 0));
+        const labels = entries.map(([label]) => label);
+        const data = entries.map(([, count]) => count || 0);
         if (!labels.length) {
             ctx.parentElement.innerHTML += '<p>Aucune donnée de statut.</p>';
             return;
@@ -131,26 +251,36 @@
 
         if (charts.statuts) charts.statuts.destroy();
         const chart = new Chart(ctx, {
-            type: 'doughnut',
+            type: 'bar',
             data: {
                 labels,
                 datasets: [{
                     data,
-                    backgroundColor: [
-                        '#3b82f6', // Nouveau
-                        '#facc15', // À qualifier
-                        '#fb923c', // Relance
-                        '#22c55e', // Gagné
-                        '#9ca3af'  // Perdu
-                    ]
+                    backgroundColor: labels.map(getStatutPalette),
+                    borderWidth: 0,
+                    borderRadius: 10,
+                    borderSkipped: false
                 }]
             },
             options: {
                 responsive: true,
+                indexAxis: 'y',
+                maintainAspectRatio: false,
                 plugins: {
                     legend: {
-                        position: 'bottom',
+                        display: false,
                         labels: theme.legend.labels
+                    }
+                },
+                scales: {
+                    x: {
+                        beginAtZero: true,
+                        ticks: { color: theme.textColor },
+                        grid: { color: theme.gridColor }
+                    },
+                    y: {
+                        ticks: { color: theme.textColor },
+                        grid: { display: false }
                     }
                 }
             }
@@ -165,66 +295,6 @@
             const statut = labels[idx];
             if (!statut) return;
             const params = new URLSearchParams({ statut });
-            window.location.href = `/entreprises?${params.toString()}`;
-        };
-    }
-
-    function createSecteursChart(parSecteur) {
-        const ctx = document.getElementById('chart-secteurs');
-        if (!ctx) return;
-        const entries = Object.entries(parSecteur || {});
-        if (!entries.length) {
-            ctx.parentElement.innerHTML += '<p>Aucune donnée de secteur.</p>';
-            return;
-        }
-        // Garder les 8 principaux secteurs
-        const top = entries
-            .sort((a, b) => (b[1] || 0) - (a[1] || 0))
-            .slice(0, 8);
-        const labels = top.map(([label]) => label);
-        const data = top.map(([, count]) => count || 0);
-
-        const theme = getChartThemeOptions();
-
-        if (charts.secteurs) charts.secteurs.destroy();
-        const chart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels,
-                datasets: [{
-                    label: 'Entreprises',
-                    data,
-                    backgroundColor: '#3b82f6'
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: {
-                    legend: {
-                        labels: theme.legend.labels
-                    }
-                },
-                scales: {
-                    x: {
-                        ticks: { color: theme.textColor }
-                    },
-                    y: {
-                        beginAtZero: true,
-                        ticks: { color: theme.textColor }
-                    }
-                }
-            }
-        });
-        charts.secteurs = chart;
-
-        // Clic sur une barre de secteur -> liste des entreprises filtrée par secteur
-        ctx.onclick = (evt) => {
-            const points = chart.getElementsAtEventForMode(evt, 'nearest', { intersect: true }, true);
-            if (!points.length) return;
-            const idx = points[0].index;
-            const secteur = labels[idx];
-            if (!secteur) return;
-            const params = new URLSearchParams({ secteur });
             window.location.href = `/entreprises?${params.toString()}`;
         };
     }
@@ -254,21 +324,25 @@
                 datasets: [{
                     label: 'Emails',
                     data,
-                    backgroundColor: ['#3b82f6', '#22c55e', '#f97316']
+                    backgroundColor: ['rgba(99, 102, 241, 0.9)', 'rgba(14, 165, 233, 0.9)', 'rgba(16, 185, 129, 0.9)'],
+                    borderRadius: 10,
+                    borderSkipped: false
                 }]
             },
             options: {
                 responsive: true,
+                maintainAspectRatio: false,
                 plugins: {
                     legend: {
                         labels: theme.legend.labels
                     }
                 },
                 scales: {
-                    x: { ticks: { color: theme.textColor } },
+                    x: { ticks: { color: theme.textColor }, grid: { display: false } },
                     y: {
                         beginAtZero: true,
-                        ticks: { color: theme.textColor }
+                        ticks: { color: theme.textColor },
+                        grid: { color: theme.gridColor }
                     }
                 }
             }
@@ -297,12 +371,15 @@
                 datasets: [{
                     label: 'Prospects gagnés',
                     data,
-                    backgroundColor: '#22c55e'
+                    backgroundColor: 'rgba(16, 185, 129, 0.9)',
+                    borderRadius: 10,
+                    borderSkipped: false
                 }]
             },
             options: {
                 indexAxis: 'y',
                 responsive: true,
+                maintainAspectRatio: false,
                 plugins: {
                     legend: {
                         labels: theme.legend.labels
@@ -311,10 +388,12 @@
                 scales: {
                     x: {
                         beginAtZero: true,
-                        ticks: { color: theme.textColor }
+                        ticks: { color: theme.textColor },
+                        grid: { color: theme.gridColor }
                     },
                     y: {
-                        ticks: { color: theme.textColor }
+                        ticks: { color: theme.textColor },
+                        grid: { display: false }
                     }
                 }
             }
@@ -356,17 +435,20 @@
                 datasets: [{
                     label: 'Prospects',
                     data,
-                    backgroundColor: '#8b5cf6'
+                    backgroundColor: 'rgba(139, 92, 246, 0.9)',
+                    borderRadius: 10,
+                    borderSkipped: false
                 }]
             },
             options: {
                 responsive: true,
+                maintainAspectRatio: false,
                 plugins: {
                     legend: { labels: theme.legend.labels }
                 },
                 scales: {
-                    x: { ticks: { color: theme.textColor } },
-                    y: { beginAtZero: true, ticks: { color: theme.textColor } }
+                    x: { ticks: { color: theme.textColor }, grid: { display: false } },
+                    y: { beginAtZero: true, ticks: { color: theme.textColor }, grid: { color: theme.gridColor } }
                 }
             }
         });
@@ -412,6 +494,284 @@
                 window.location.href = `/entreprises?${params.toString()}`;
             });
         });
+    }
+
+    function renderDashboardInsights(metrics) {
+        const container = document.getElementById('dashboard-insights-list');
+        const section = document.getElementById('dashboard-insights');
+        if (!container) return;
+
+        const chips = [];
+        const pushChip = (type, label, href, severity = 1) => {
+            chips.push({ type, label, href, severity });
+        };
+        const total = Number(metrics.totalEntreprises || 0);
+        const actifs = Number(metrics.actifs || 0);
+        const conversion = Number(metrics.conversion || 0);
+        const emails = Number(metrics.emailsEnvoyes || 0);
+        const openRate = Number(metrics.openRate || 0);
+        const clickRate = Number(metrics.clickRate || 0);
+        const favoris = Number(metrics.favoris || 0);
+        const totalCampagnes = Number(metrics.totalCampagnes || 0);
+        const parStatut = metrics.parStatut || {};
+        const parOpportunite = metrics.parOpportunite || {};
+        const topTags = Array.isArray(metrics.topTags) ? metrics.topTags : [];
+        const relance = Number(parStatut['Relance'] || 0);
+        const aRappeler = Number(parStatut['À rappeler'] || 0);
+        const percutifs = relance + aRappeler;
+        const oppHigh = Number(parOpportunite['Très élevée'] || 0) + Number(parOpportunite['Élevée'] || 0);
+        const oppLow = Number(parOpportunite['Très faible'] || 0) + Number(parOpportunite['Faible'] || 0);
+        const topTag = topTags.length ? String(topTags[0].tag || '') : '';
+        const topTagCount = topTags.length ? Number(topTags[0].count || 0) : 0;
+
+        if (total === 0) {
+            pushChip('warning', 'Aucune entreprise en base', '/entreprises', 100);
+            pushChip('neutral', 'Ajouter vos premiers prospects', '/entreprises', 70);
+        } else {
+            pushChip('neutral', `${actifs.toLocaleString('fr-FR')} prospect${actifs > 1 ? 's' : ''} actif${actifs > 1 ? 's' : ''}`, '/entreprises?statut=Nouveau', 20);
+            if (actifs > 0) {
+                pushChip('neutral', 'Prioriser les statuts Relance et À rappeler', '/entreprises?statut=Relance', 45);
+            }
+            if (favoris > 0) {
+                pushChip('neutral', `${favoris.toLocaleString('fr-FR')} prospects favoris à traiter en priorité`, '/entreprises?favori=true', 35);
+            }
+        }
+
+        if (emails === 0) {
+            pushChip('warning', 'Aucun email envoyé, lancer une campagne', '/campagnes', 95);
+            pushChip('neutral', 'Préparer une séquence avec 2 relances', '/campagnes', 55);
+        } else {
+            pushChip('neutral', `${emails.toLocaleString('fr-FR')} emails envoyés sur la période`, '/campagnes', 20);
+            if (openRate < 20) {
+                pushChip('warning', `Ouverture faible (${openRate.toFixed(1)}%)`, '/campagnes', 80);
+                pushChip('neutral', 'Tester de nouveaux objets d’email (A/B)', '/campagnes', 50);
+            } else {
+                pushChip('success', `Ouverture correcte (${openRate.toFixed(1)}%)`, '/campagnes', 10);
+            }
+            if (clickRate < 2) {
+                pushChip('warning', `Clics à améliorer (${clickRate.toFixed(1)}%)`, '/campagnes', 75);
+                pushChip('neutral', 'Renforcer le CTA et la promesse dans le corps', '/campagnes', 48);
+            } else {
+                pushChip('success', `Clics engagés (${clickRate.toFixed(1)}%)`, '/campagnes', 10);
+            }
+        }
+
+        if (conversion <= 0 && total > 0) {
+            pushChip('warning', '0 conversion: relancer les prospects chauds', '/entreprises?statut=Relance', 90);
+            pushChip('neutral', 'Créer une task de suivi commercial sur les clics', '/entreprises?statut=À+rappeler', 52);
+        } else if (conversion > 0) {
+            pushChip('success', `Conversion ${conversion.toFixed(1)}%`, '/entreprises?statut=Gagné', 15);
+            pushChip('neutral', 'Analyser les prospects gagnés pour dupliquer le pattern', '/entreprises?statut=Gagné', 25);
+        }
+
+        if (percutifs > 0) {
+            pushChip('warning', `${percutifs.toLocaleString('fr-FR')} prospects chauds (Relance + À rappeler)`, '/entreprises?statut=Relance', 72);
+        }
+
+        if (oppHigh > 0) {
+            pushChip('success', `${oppHigh.toLocaleString('fr-FR')} opportunités élevées à contacter vite`, '/entreprises?opportunite=Élevée', 22);
+        }
+
+        if (oppLow > 0 && oppLow >= oppHigh && total > 0) {
+            pushChip('neutral', `Beaucoup d’opportunités faibles (${oppLow.toLocaleString('fr-FR')})`, '/entreprises?opportunite=Très+faible', 42);
+        }
+
+        if (topTag && topTagCount > 0) {
+            pushChip('neutral', `Tag dominant: ${topTag} (${topTagCount.toLocaleString('fr-FR')})`, `/entreprises?tags_any=${encodeURIComponent(topTag)}`, 15);
+        }
+
+        if (totalCampagnes === 0 && total > 0) {
+            pushChip('warning', 'Aucune campagne enregistrée: lancer une première séquence', '/campagnes', 88);
+        }
+
+        if (total > 0 && actifs === 0) {
+            pushChip('warning', 'Aucun prospect actif: vérifier vos statuts pipeline', '/entreprises', 92);
+        }
+
+        if (total > 0 && emails > 0 && openRate === 0) {
+            pushChip('warning', '0% ouverture: vérifier tracking et délivrabilité', '/campagnes', 94);
+        }
+
+        if (total > 0 && emails > 0 && clickRate === 0) {
+            pushChip('warning', '0% clic: retravailler offre + CTA', '/campagnes', 90);
+        }
+
+        if (!chips.length) {
+            container.innerHTML = '<p class="dashboard-muted">Aucun insight disponible.</p>';
+            return;
+        }
+
+        const dedup = [];
+        const seen = new Set();
+        chips.forEach((c) => {
+            const key = `${c.type}|${c.label}|${c.href}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            dedup.push(c);
+        });
+
+        const topUrgent = dedup
+            .filter((c) => (c.severity || 0) >= 70)
+            .sort((a, b) => (b.severity || 0) - (a.severity || 0))
+            .slice(0, 4);
+
+        if (!topUrgent.length) {
+            if (section) section.style.display = 'none';
+            return;
+        }
+        if (section) section.style.display = '';
+
+        container.innerHTML = topUrgent.map((chip) => {
+            const tone = chip.type === 'success' ? 'is-success' : (chip.type === 'warning' ? 'is-warning' : 'is-neutral');
+            const icon = chip.type === 'success' ? 'fa-check-circle' : (chip.type === 'warning' ? 'fa-triangle-exclamation' : 'fa-lightbulb');
+            return `<a class="dashboard-insight-chip ${tone}" href="${chip.href}">
+                <i class="fas ${icon}" aria-hidden="true"></i>
+                <span>${escapeHtml(chip.label)}</span>
+            </a>`;
+        }).join('');
+    }
+
+    function renderDashboardAnalysis(metrics) {
+        const container = document.getElementById('dashboard-analysis-grid');
+        const section = document.getElementById('dashboard-analysis');
+        if (!container) return;
+
+        const total = Number(metrics.totalEntreprises || 0);
+        const actifs = Number(metrics.actifs || 0);
+        const conversion = Number(metrics.conversion || 0);
+        const emails = Number(metrics.emailsEnvoyes || 0);
+        const openRate = Number(metrics.openRate || 0);
+        const clickRate = Number(metrics.clickRate || 0);
+        const activeRate = total > 0 ? (actifs / total) * 100 : 0;
+        const emailsOuverts = Number(metrics.emailsOuverts || 0);
+        const emailsCliques = Number(metrics.emailsCliques || 0);
+        const totalAnalyses = Number(metrics.totalAnalyses || 0);
+        const totalCampagnes = Number(metrics.totalCampagnes || 0);
+        const parStatut = metrics.parStatut || {};
+        const parOpportunite = metrics.parOpportunite || {};
+        const parSecteur = metrics.parSecteur || {};
+        const topTags = Array.isArray(metrics.topTags) ? metrics.topTags : [];
+        const secteursGagnes = Array.isArray(metrics.secteursGagnes) ? metrics.secteursGagnes : [];
+        const relance = Number(parStatut['Relance'] || 0);
+        const aRappeler = Number(parStatut['À rappeler'] || 0);
+        const perdu = Number(parStatut['Perdu'] || 0);
+        const perduRate = total > 0 ? (perdu / total) * 100 : 0;
+        const oppHigh = Number(parOpportunite['Très élevée'] || 0) + Number(parOpportunite['Élevée'] || 0);
+        const oppLow = Number(parOpportunite['Très faible'] || 0) + Number(parOpportunite['Faible'] || 0);
+        const topSecteur = Object.entries(parSecteur).sort((a, b) => (b[1] || 0) - (a[1] || 0))[0];
+        const topTag = topTags[0] || null;
+        const topWonSector = secteursGagnes[0] || null;
+
+        const blocks = [];
+        const pushBlock = (title, text, next, severity = 1) => {
+            blocks.push({ title, text, next, severity });
+        };
+        pushBlock(
+            'Lecture du pipeline',
+            total === 0
+                ? 'Votre base est vide, le pipeline commercial ne peut pas alimenter les campagnes.'
+                : `${actifs.toLocaleString('fr-FR')} prospects actifs sur ${total.toLocaleString('fr-FR')} (${activeRate.toFixed(1)}%).`,
+            total === 0
+                ? 'Action: importer une première liste qualifiée.'
+                : activeRate < 25
+                    ? 'Action: retravailler la qualification et les statuts.'
+                    : 'Action: maintenir le rythme de qualification.',
+            total === 0 ? 100 : (activeRate < 25 ? 70 : 20)
+        );
+
+        pushBlock(
+            'Lecture emailing',
+            emails === 0
+                ? 'Aucun envoi sur la période: impossible de mesurer ouverture/clic.'
+                : `${emails.toLocaleString('fr-FR')} envois, ${openRate.toFixed(1)}% d’ouverture et ${clickRate.toFixed(1)}% de clic.`,
+            emails === 0
+                ? 'Action: lancer une campagne test et vérifier le tracking.'
+                : openRate < 20
+                    ? 'Action: optimiser objet + nom expéditeur.'
+                    : clickRate < 2
+                        ? 'Action: renforcer la valeur perçue et le CTA.'
+                        : 'Action: dupliquer la structure des meilleures campagnes.',
+            emails === 0 ? 95 : (openRate < 20 || clickRate < 2 ? 78 : 15)
+        );
+
+        pushBlock(
+            'Lecture conversion',
+            conversion <= 0
+                ? 'Aucune conversion détectée: le tunnel passe mal de l’intérêt à la décision.'
+                : `Conversion actuelle: ${conversion.toFixed(1)}%. Les campagnes produisent des opportunités.`,
+            conversion <= 0
+                ? 'Action: relancer en priorité les statuts Relance / À rappeler.'
+                : 'Action: analyser les prospects gagnés pour industrialiser le playbook.',
+            conversion <= 0 ? 90 : 25
+        );
+
+        pushBlock(
+            'Lecture statuts CRM',
+            `${relance.toLocaleString('fr-FR')} en Relance, ${aRappeler.toLocaleString('fr-FR')} à rappeler, ${perdu.toLocaleString('fr-FR')} perdus (${perduRate.toFixed(1)}%).`,
+            (relance + aRappeler) > 0
+                ? 'Action: lancer un batch d’appels/emails sur ces statuts en priorité.'
+                : 'Action: définir une cadence de relance pour nourrir le pipeline.',
+            (relance + aRappeler) > 0 ? 75 : 30
+        );
+
+        pushBlock(
+            'Lecture opportunités',
+            `${oppHigh.toLocaleString('fr-FR')} opportunités élevées contre ${oppLow.toLocaleString('fr-FR')} faibles.`,
+            oppHigh >= oppLow
+                ? 'Action: concentrer la prospection sortante sur les opportunités élevées.'
+                : 'Action: améliorer le ciblage amont pour réduire les opportunités faibles.',
+            oppLow > oppHigh ? 62 : 26
+        );
+
+        pushBlock(
+            'Lecture segmentation',
+            `${topSecteur ? `Secteur dominant: ${topSecteur[0]} (${Number(topSecteur[1] || 0).toLocaleString('fr-FR')}).` : 'Aucun secteur dominant détecté.'} ${topTag ? `Tag leader: ${topTag.tag} (${Number(topTag.count || 0).toLocaleString('fr-FR')}).` : ''}`,
+            topTag
+                ? 'Action: créer une campagne dédiée sur ce segment dominant.'
+                : 'Action: enrichir les tags pour segmenter vos campagnes.',
+            22
+        );
+
+        pushBlock(
+            'Lecture production',
+            `${totalAnalyses.toLocaleString('fr-FR')} analyses exécutées, ${totalCampagnes.toLocaleString('fr-FR')} campagne(s) en base, ${emailsOuverts.toLocaleString('fr-FR')} ouvertures et ${emailsCliques.toLocaleString('fr-FR')} clics.`,
+            totalCampagnes === 0
+                ? 'Action: lancer une première campagne avec suivi complet.'
+                : (emailsCliques === 0 && emails > 0)
+                    ? 'Action: revoir le CTA et proposer une offre plus directe.'
+                    : 'Action: monitorer hebdomadairement les tendances de réponse.',
+            totalCampagnes === 0 ? 85 : (emailsCliques === 0 && emails > 0 ? 70 : 20)
+        );
+
+        pushBlock(
+            'Lecture secteurs gagnants',
+            topWonSector
+                ? `Secteur gagnant actuel: ${topWonSector.secteur} (${Number(topWonSector.count || 0).toLocaleString('fr-FR')} gagnés).`
+                : 'Aucun secteur gagnant notable sur la période.',
+            topWonSector
+                ? 'Action: prioriser ce secteur dans vos prochaines campagnes.'
+                : 'Action: tester 2 à 3 verticales avec messages spécialisés.',
+            topWonSector ? 18 : 45
+        );
+
+        const topBlocks = blocks
+            .filter((b) => (b.severity || 0) >= 70)
+            .sort((a, b) => (b.severity || 0) - (a.severity || 0))
+            .slice(0, 3);
+
+        if (!topBlocks.length) {
+            if (section) section.style.display = 'none';
+            return;
+        }
+        if (section) section.style.display = '';
+
+        container.innerHTML = topBlocks.map((b) => `
+            <article class="analysis-card">
+                <h4>${escapeHtml(b.title)}</h4>
+                <p>${escapeHtml(b.text)}</p>
+                <p class="analysis-next">${escapeHtml(b.next)}</p>
+            </article>
+        `).join('');
     }
 
     function escapeHtml(str) {
@@ -507,7 +867,7 @@
     function setupStatCards() {
         const mapping = {
             'stat-total-entreprises': '#chart-statuts',
-            'stat-actifs': '#chart-statuts',
+            'stat-actifs': '#chart-opportunites',
             'stat-gagnes': '#chart-secteurs-gagnes',
             'stat-conversion': '#chart-secteurs-gagnes',
             'stat-emails-envoyes': '#chart-emails',
@@ -518,7 +878,8 @@
         document.querySelectorAll('.stat-card').forEach((card) => {
             const numberEl = card.querySelector('.stat-number');
             if (!numberEl || !numberEl.id) return;
-            const targetSelector = mapping[numberEl.id];
+            const override = card.getAttribute('data-kpi-scroll');
+            const targetSelector = override || mapping[numberEl.id];
             if (!targetSelector) return;
 
             card.classList.add('stat-card-clickable');

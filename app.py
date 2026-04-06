@@ -29,6 +29,7 @@ from config import (
     MAX_CONTENT_LENGTH,
     SECRET_KEY,
     RESTRICT_TO_LOCAL_NETWORK,
+    FLASK_DEBUG,
 )
 from celery_app import make_celery
 
@@ -59,6 +60,8 @@ app.config['UPLOAD_FOLDER'] = str(UPLOAD_FOLDER)
 app.config['EXPORT_FOLDER'] = str(EXPORT_FOLDER)
 app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 app.secret_key = SECRET_KEY
+app.config['DEBUG'] = FLASK_DEBUG
+app.config['TESTING'] = False
 
 # Configurer les logs de l'application Flask (après création de l'app)
 setup_root_logger(app)
@@ -83,6 +86,10 @@ socketio = SocketIO(
     async_mode=_socketio_async_mode,
     logger=False,
     engineio_logger=False,
+    # Robustesse : éviter les déconnexions intempestives quand le serveur est occupé
+    # (bulk d'events + eventlet) ou derrière un proxy qui coupe vite les websockets.
+    ping_timeout=60,
+    ping_interval=25,
     allow_unsafe_werkzeug=True
 )
 
@@ -118,11 +125,20 @@ except Exception:
     _am = 'erreur'
 app.logger.info('ProspectLab Socket.IO prêt (async_mode=%s)', _am)
 
-# CORS : autoriser l'app prospection (ex: Vite sur localhost:5173) à appeler l'API
-ALLOWED_CORS_ORIGINS = [
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-]
+# CORS : autoriser les clients web locaux (Vite, Expo Web, etc.) à appeler l'API.
+# Surchargable via CORS_ALLOWED_ORIGINS="https://foo,https://bar"
+_cors_origins_env = os.environ.get('CORS_ALLOWED_ORIGINS', '')
+if _cors_origins_env.strip():
+    ALLOWED_CORS_ORIGINS = [o.strip() for o in _cors_origins_env.split(',') if o.strip()]
+else:
+    ALLOWED_CORS_ORIGINS = [
+        'http://localhost:5173',
+        'http://127.0.0.1:5173',
+        'http://localhost:8081',
+        'http://127.0.0.1:8081',
+        'http://localhost:19006',
+        'http://127.0.0.1:19006',
+    ]
 
 @app.after_request
 def add_cors_headers(response):
@@ -220,6 +236,10 @@ def restrict_to_local_network():
             return None
         if path.startswith('/api/public'):
             return None
+        # Socket.IO doit rester accessible, sinon handshake WS/polling échoue
+        # et le navigateur affiche "WebSocket is closed before the connection is established."
+        if path.startswith('/socket.io'):
+            return None
 
         if _client_ip_allowed():
             return None
@@ -284,12 +304,14 @@ if __name__ == '__main__':
         """Lance SocketIO dans un thread séparé"""
         try:
             socketio.run(
-                app, 
-                debug=True, 
-                host='0.0.0.0', 
-                port=5000, 
-                use_reloader=False, 
-                allow_unsafe_werkzeug=True
+                app,
+                debug=bool(app.config.get('DEBUG')),
+                host=os.environ.get('FLASK_RUN_HOST', '0.0.0.0'),
+                port=int(os.environ.get('FLASK_RUN_PORT', '5000')),
+                # Reloader désactivé (stable sous Windows + thread SocketIO) ; activer via FLASK_USE_RELOADER=1 si besoin.
+                use_reloader=bool(app.config.get('DEBUG'))
+                and os.environ.get('FLASK_USE_RELOADER', '0').lower() in ('1', 'true', 'yes', 'on'),
+                allow_unsafe_werkzeug=True,
             )
         except Exception as e:
             print(f'Erreur SocketIO: {e}')
@@ -299,7 +321,10 @@ if __name__ == '__main__':
     if sys.platform == 'win32':
         signal.signal(signal.SIGTERM, signal_handler)
     
-    print('Démarrage de l\'application Flask sur http://0.0.0.0:5000')
+    _port = int(os.environ.get('FLASK_RUN_PORT', '5000'))
+    _host = os.environ.get('FLASK_RUN_HOST', '0.0.0.0')
+    _mode = 'DEBUG' if app.config.get('DEBUG') else 'production (pas de débogueur)'
+    print(f"Démarrage Flask mode {_mode} sur http://{_host}:{_port}")
     print('Appuyez sur Ctrl+C pour arrêter l\'application\n')
     
     # Lancer SocketIO dans un thread séparé (non-daemon pour qu'il reste actif)

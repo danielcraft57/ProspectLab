@@ -14,6 +14,7 @@ set -e
 
 PROJECT_DIR="/opt/prospectlab"
 ENV_DIR="$PROJECT_DIR/env"
+export PROJECT_DIR
 
 echo "=========================================="
 echo "Test du worker Celery ProspectLab (noeud cluster)"
@@ -56,17 +57,32 @@ fi
 echo "[1/4] Test import Celery + configuration..."
 $PYTHON_BIN - << 'EOF'
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-base_dir = Path(__file__).resolve().parent
+base_dir = Path(os.environ["PROJECT_DIR"])
 load_dotenv(base_dir / ".env")
 
 from celery_app import celery  # noqa: E402
 
 print("  - CELERY_BROKER_URL :", os.environ.get("CELERY_BROKER_URL"))
 print("  - CELERY_RESULT_BACKEND :", os.environ.get("CELERY_RESULT_BACKEND"))
+
+preset = (os.environ.get("CELERY_WORKER_QUEUE_PRESET") or "").strip().lower()
+if preset == "non_scraping":
+    print("  [!] CELERY_WORKER_QUEUE_PRESET=non_scraping → ce nœud n'écoute pas la file scraping (bulk).")
+queues_raw = (os.environ.get("CELERY_WORKER_QUEUES") or "").strip()
+if queues_raw:
+    parts = [p.strip() for p in queues_raw.split(",") if p.strip()]
+    if "scraping" not in parts:
+        print("  [✗] CELERY_WORKER_QUEUES ne contient pas « scraping ».")
+        print("      Les tâches scrape_analysis (bulk) ne s'exécuteront pas ici (ex. seul node15 travaillera).")
+        print("      Corrige le .env puis : sudo systemctl restart prospectlab-celery")
+        sys.exit(1)
+else:
+    print("  - CELERY_WORKER_QUEUES : (absent → défaut du wrapper, inclut scraping)")
 
 tasks = [name for name in celery.tasks.keys() if not name.startswith("celery.")]
 if not tasks:
@@ -87,15 +103,19 @@ $CELERY_BIN -A celery_app status || {
 }
 echo "[✓] Workers Celery répondent"
 echo
+echo "[2b/4] Files actives (inspect active_queues) — chaque nœud doit lister « scraping » pour le bulk :"
+$CELERY_BIN -A celery_app inspect active_queues 2>/dev/null | head -120 || echo "[!] inspect active_queues indisponible (timeout broker ?)"
+echo
 
 echo "[3/4] Test d'une tâche Celery simple..."
 $PYTHON_BIN - << 'EOF'
+import os
 import time
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-base_dir = Path(__file__).resolve().parent
+base_dir = Path(os.environ["PROJECT_DIR"])
 load_dotenv(base_dir / ".env")
 
 from celery_app import celery  # noqa: E402

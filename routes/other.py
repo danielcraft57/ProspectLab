@@ -5,6 +5,7 @@ Contient les routes pour les emails, templates, scraping et téléchargements.
 """
 
 from flask import Blueprint, render_template, request, jsonify, send_file, redirect, url_for, flash
+import time
 import os
 from services.email_sender import EmailSender
 from config import MAIL_DEFAULT_RECIPIENT
@@ -17,6 +18,11 @@ other_bp = Blueprint('other', __name__)
 
 # Initialiser les services
 template_manager = TemplateManager()
+
+# Cache très léger en mémoire pour /api/tracking/campagne/<id>
+# Objectif: éviter de retaper la BDD toutes les 5s quand la modale est ouverte.
+_CAMPAGNE_TRACKING_CACHE = {}
+_CAMPAGNE_TRACKING_CACHE_TTL_SEC = 45
 
 
 @other_bp.route('/analyse/scraping')
@@ -371,6 +377,116 @@ def api_list_campagnes():
     campagne_manager = CampagneManager()
     statut = request.args.get('statut')
     campagnes = campagne_manager.list_campagnes(statut=statut, limit=100)
+
+    # Ajouter des métriques de délivrabilité (bounces) calculées depuis emails_envoyes.
+    # On ne modifie pas les compteurs historiques stockés dans campagnes_email,
+    # on enrichit juste la réponse API pour l'UI.
+    try:
+        ids = [c.get('id') for c in (campagnes or []) if c and c.get('id') is not None]
+        ids = [int(x) for x in ids if str(x).isdigit()]
+    except Exception:
+        ids = []
+
+    bounced_by_cid = {}
+    open_unique_by_cid = {}
+    click_unique_by_cid = {}
+    if ids:
+        try:
+            conn = campagne_manager.get_connection()
+            cursor = conn.cursor()
+            placeholders = ','.join(['?'] * len(ids))
+            campagne_manager.execute_sql(
+                cursor,
+                f'''
+                SELECT campagne_id, COUNT(*) as cnt
+                FROM emails_envoyes
+                WHERE campagne_id IN ({placeholders}) AND statut = ?
+                GROUP BY campagne_id
+                ''',
+                tuple(ids) + ('bounced',),
+            )
+            for row in cursor.fetchall() or []:
+                cid = row.get('campagne_id') if isinstance(row, dict) else row[0]
+                cnt = row.get('cnt') if isinstance(row, dict) else row[1]
+                try:
+                    bounced_by_cid[int(cid)] = int(cnt or 0)
+                except Exception:
+                    continue
+
+            # Open / click uniques par campagne (1 requête pour tout le lot)
+            campagne_manager.execute_sql(
+                cursor,
+                f'''
+                SELECT
+                    e.campagne_id as campagne_id,
+                    et.event_type as event_type,
+                    COUNT(DISTINCT et.email_id) as unique_emails
+                FROM email_tracking_events et
+                JOIN emails_envoyes e ON e.id = et.email_id
+                WHERE e.campagne_id IN ({placeholders})
+                  AND et.event_type IN ('open', 'click')
+                GROUP BY e.campagne_id, et.event_type
+                ''',
+                tuple(ids),
+            )
+            for row in cursor.fetchall() or []:
+                cid = row.get('campagne_id') if isinstance(row, dict) else row[0]
+                etype = row.get('event_type') if isinstance(row, dict) else row[1]
+                uniq = row.get('unique_emails') if isinstance(row, dict) else row[2]
+                try:
+                    cid_int = int(cid)
+                except Exception:
+                    continue
+                if str(etype) == 'open':
+                    open_unique_by_cid[cid_int] = int(uniq or 0)
+                else:
+                    click_unique_by_cid[cid_int] = int(uniq or 0)
+
+            conn.close()
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    for c in campagnes or []:
+        try:
+            cid = int(c.get('id')) if c and c.get('id') is not None else None
+        except Exception:
+            cid = None
+        bcnt = bounced_by_cid.get(cid, 0) if cid is not None else 0
+        c['total_bounced'] = int(bcnt)
+        try:
+            total_envoyes = int(c.get('total_envoyes') or 0)
+            c['total_delivered'] = max(0, total_envoyes - int(bcnt))
+        except Exception:
+            c['total_delivered'] = None
+
+        # Délivrabilité stricte = réussites - bounces
+        # (donc exclut aussi les erreurs d'envoi, puisqu'elles ne sont pas dans total_reussis)
+        try:
+            total_reussis = int(c.get('total_reussis') or 0)
+            c['total_delivered_strict'] = max(0, total_reussis - int(bcnt))
+        except Exception:
+            c['total_delivered_strict'] = None
+
+        # Métriques open/click directement sur la réponse (évite 1 fetch par carte)
+        opens_u = int(open_unique_by_cid.get(cid, 0) if cid is not None else 0)
+        clicks_u = int(click_unique_by_cid.get(cid, 0) if cid is not None else 0)
+        c['total_opens'] = opens_u
+        c['total_clicks'] = clicks_u
+        try:
+            denom = int(c.get('total_emails') or c.get('total_envoyes') or 0)
+            if denom <= 0:
+                c['open_rate'] = 0.0
+                c['click_rate'] = 0.0
+            else:
+                c['open_rate'] = (opens_u / denom) * 100.0
+                c['click_rate'] = (clicks_u / denom) * 100.0
+        except Exception:
+            c['open_rate'] = 0.0
+            c['click_rate'] = 0.0
+
     return jsonify(campagnes)
 
 
@@ -513,6 +629,91 @@ def api_delete_campagne(campagne_id):
     if deleted:
         return jsonify({'success': True})
     return jsonify({'error': 'Campagne introuvable'}), 404
+
+
+@other_bp.route('/api/campagnes/<int:campagne_id>/relaunch', methods=['POST'])
+@login_required
+def api_relaunch_campagne(campagne_id):
+    """
+    API: Relance une campagne existante en recréant un envoi immédiat
+    avec les mêmes destinataires.
+
+    Args:
+        campagne_id (int): ID de la campagne source
+
+    Returns:
+        JSON: {'success': bool, 'campagne_id': int, 'task_id': str}
+    """
+    from services.database.campagnes import CampagneManager
+    from tasks.email_tasks import send_campagne_task
+    import json
+
+    campagne_manager = CampagneManager()
+    campagne = campagne_manager.get_campagne(campagne_id)
+    if not campagne:
+        return jsonify({'error': 'Campagne introuvable'}), 404
+
+    existing_emails = campagne_manager.get_emails_campagne(campagne_id)
+    if not existing_emails:
+        return jsonify({'error': 'Aucun destinataire trouvé pour cette campagne'}), 400
+
+    recipients = []
+    seen = set()
+    for email_row in existing_emails:
+        email = (email_row.get('email') or '').strip()
+        if not email:
+            continue
+        entreprise_id = email_row.get('entreprise_id')
+        uniq_key = f"{email.lower()}::{entreprise_id or ''}"
+        if uniq_key in seen:
+            continue
+        seen.add(uniq_key)
+        recipients.append({
+            'email': email,
+            'nom': email_row.get('nom_destinataire'),
+            'entreprise': email_row.get('entreprise') or email_row.get('entreprise_nom'),
+            'entreprise_id': entreprise_id
+        })
+
+    if not recipients:
+        return jsonify({'error': 'Destinataires invalides pour la relance'}), 400
+
+    template_id = campagne.get('template_id')
+    sujet = campagne.get('sujet')
+    custom_message = None
+
+    params_json = campagne.get('campaign_params_json')
+    if params_json:
+        try:
+            params = json.loads(params_json)
+            custom_message = params.get('custom_message')
+        except (ValueError, TypeError):
+            custom_message = None
+
+    if not template_id and not custom_message:
+        return jsonify({'error': 'Impossible de relancer: campagne sans template ni message source'}), 400
+
+    source_name = campagne.get('nom') or f'Campagne #{campagne_id}'
+    new_name = f"{source_name} Relance"
+    new_campagne_id = campagne_manager.create_campagne(
+        nom=new_name[:190],
+        template_id=template_id,
+        sujet=sujet,
+        total_destinataires=len(recipients),
+        statut='draft'
+    )
+
+    task = send_campagne_task.delay(
+        campagne_id=new_campagne_id,
+        recipients=recipients,
+        template_id=template_id,
+        subject=sujet,
+        custom_message=custom_message,
+        delay=2
+    )
+    campagne_manager.update_campagne(new_campagne_id, statut='scheduled')
+
+    return jsonify({'success': True, 'campagne_id': new_campagne_id, 'task_id': task.id})
 
 
 @other_bp.route('/api/campagnes/<int:campagne_id>/send-report-email', methods=['POST'])
@@ -782,7 +983,8 @@ def api_ciblage_entreprises():
     API: Entreprises avec emails pour campagne, avec filtres de ciblage.
     Query params: secteur, secteur_contains, opportunite (virgule), statut, tags_contains,
     favori (1/0), search, score_securite_max, exclude_already_contacted (1/true),
-    groupe_ids (virgule) : liste d'IDs de groupes d'entreprises.
+    groupe_ids (virgule), etape_prospection, sort_commercial (1), priority_min, commercial_profile_id,
+    commercial_limit (avec tri commercial).
     """
     from services.database.entreprises import EntrepriseManager
     from utils.helpers import clean_json_dict
@@ -830,6 +1032,25 @@ def api_ciblage_entreprises():
             filters['performance_max'] = int(request.args.get('performance_max'))
         except ValueError:
             pass
+    if request.args.get('etape_prospection'):
+        filters['etape_prospection'] = request.args.get('etape_prospection').strip()
+    if request.args.get('sort_commercial') in ('1', 'true', 'True'):
+        filters['sort_commercial'] = True
+    if request.args.get('priority_min') not in (None, ''):
+        try:
+            filters['priority_min'] = float(request.args.get('priority_min'))
+        except ValueError:
+            pass
+    if request.args.get('commercial_profile_id') not in (None, ''):
+        try:
+            filters['commercial_profile_id'] = int(request.args.get('commercial_profile_id'))
+        except ValueError:
+            pass
+    if request.args.get('commercial_limit') not in (None, ''):
+        try:
+            filters['commercial_limit'] = int(request.args.get('commercial_limit'))
+        except ValueError:
+            pass
     entreprise_manager = EntrepriseManager()
     entreprises = entreprise_manager.get_entreprises_for_campagne(filters)
     return jsonify(clean_json_dict(entreprises))
@@ -857,6 +1078,55 @@ def api_ciblage_segments():
         criteres=data.get('criteres') or {}
     )
     return jsonify({'id': segment_id, 'nom': nom}), 201
+
+
+@other_bp.route('/api/ciblage/segments/<int:segment_id>/preview', methods=['GET'])
+@login_required
+def api_ciblage_segment_preview(segment_id):
+    """
+    Aperçu d'un segment : total + échantillon d'entreprises (mêmes filtres que le ciblage campagne).
+
+    Query: limit (défaut 50, max 200).
+    """
+    from services.database.campagnes import CampagneManager
+    from services.database.entreprises import EntrepriseManager
+    from utils.helpers import clean_json_dict
+
+    try:
+        lim = int(request.args.get('limit', 50))
+    except ValueError:
+        lim = 50
+    lim = max(1, min(lim, 200))
+
+    db = CampagneManager()
+    seg = db.get_segment(segment_id)
+    if not seg:
+        return jsonify({'error': 'Segment introuvable'}), 404
+
+    filters = seg.get('criteres') or {}
+    if not isinstance(filters, dict):
+        filters = {}
+
+    entreprise_manager = EntrepriseManager()
+    entreprises = entreprise_manager.get_entreprises_for_campagne(filters)
+    total = len(entreprises)
+    items = entreprises[:lim]
+
+    return jsonify(
+        clean_json_dict(
+            {
+                'success': True,
+                'total': total,
+                'limit': lim,
+                'items': items,
+                'segment': {
+                    'id': seg.get('id'),
+                    'nom': seg.get('nom'),
+                    'description': seg.get('description'),
+                },
+            }
+        )
+    )
 
 
 @other_bp.route('/api/ciblage/segments/<int:segment_id>', methods=['DELETE'])
@@ -971,6 +1241,37 @@ def api_get_email_tracking(email_id):
     return jsonify(stats)
 
 
+@other_bp.route('/api/emails-envoyes/<int:email_id>/preview', methods=['GET'])
+@login_required
+def api_get_sent_email_preview(email_id):
+    """
+    API: Récupère le contenu envoyé pour un email précis.
+
+    Args:
+        email_id (int): ID de l'email envoyé
+
+    Returns:
+        JSON: sujet + contenu + méta utiles à l'affichage
+    """
+    from services.database.campagnes import CampagneManager
+
+    campagne_manager = CampagneManager()
+    email_data = campagne_manager.get_email_envoye(email_id)
+    if not email_data:
+        return jsonify({'error': 'Email introuvable'}), 404
+
+    return jsonify({
+        'id': email_data.get('id'),
+        'campagne_id': email_data.get('campagne_id'),
+        'email': email_data.get('email'),
+        'nom_destinataire': email_data.get('nom_destinataire'),
+        'entreprise': email_data.get('entreprise'),
+        'sujet': email_data.get('sujet'),
+        'contenu_envoye': email_data.get('contenu_envoye'),
+        'date_envoi': email_data.get('date_envoi'),
+    })
+
+
 @other_bp.route('/api/tracking/campagne/<int:campagne_id>', methods=['GET'])
 @login_required
 def api_get_campagne_tracking(campagne_id):
@@ -986,8 +1287,15 @@ def api_get_campagne_tracking(campagne_id):
     from services.database.campagnes import CampagneManager
     
     campagne_manager = CampagneManager()
+    now = time.time()
+    cached = _CAMPAGNE_TRACKING_CACHE.get(int(campagne_id))
+    if cached:
+        ts, payload = cached
+        if (now - ts) < _CAMPAGNE_TRACKING_CACHE_TTL_SEC:
+            return jsonify(payload)
+
     stats = campagne_manager.get_campagne_tracking_stats(campagne_id)
-    
+    _CAMPAGNE_TRACKING_CACHE[int(campagne_id)] = (now, stats)
     return jsonify(stats)
 
 

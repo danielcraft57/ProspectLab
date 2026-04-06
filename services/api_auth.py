@@ -24,9 +24,11 @@ class APITokenManager:
         Génère un nouveau token API sécurisé.
         
         Returns:
-            str: Token API (32 caractères hexadécimaux)
+            str: Token API (uniquement lettres/chiffres, sans caractères spéciaux)
         """
-        return secrets.token_urlsafe(32)
+        # token_urlsafe() inclut souvent '-' et '_' (pas souhaité ici).
+        # token_hex() renvoie uniquement [0-9a-f], donc aucun caractère spécial.
+        return secrets.token_hex(32)
     
     def create_token(
         self, 
@@ -36,7 +38,8 @@ class APITokenManager:
         can_read_entreprises: bool = True,
         can_read_emails: bool = True,
         can_read_statistics: bool = True,
-        can_read_campagnes: bool = True
+        can_read_campagnes: bool = True,
+        can_delete_entreprises: bool = False,
     ) -> dict:
         """
         Crée un nouveau token API.
@@ -48,7 +51,8 @@ class APITokenManager:
             can_read_entreprises (bool): Permission de lire les entreprises
             can_read_emails (bool): Permission de lire les emails
             can_read_statistics (bool): Permission de lire les statistiques
-            
+            can_delete_entreprises (bool): Permission de supprimer des fiches entreprise (API DELETE, en plus de la lecture)
+
         Returns:
             dict: Dictionnaire avec le token et ses informations
         """
@@ -64,15 +68,16 @@ class APITokenManager:
             1 if can_read_entreprises else 0,
             1 if can_read_emails else 0,
             1 if can_read_statistics else 0,
-            1 if can_read_campagnes else 0
+            1 if can_read_campagnes else 0,
+            1 if (can_delete_entreprises and can_read_entreprises) else 0,
         )
         
         # Compatibilité SQLite / PostgreSQL
         if self.db.is_postgresql():
             self.db.execute_sql(cursor, '''
                 INSERT INTO api_tokens 
-                (token, name, app_url, user_id, is_active, can_read_entreprises, can_read_emails, can_read_statistics, can_read_campagnes)
-                VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
+                (token, name, app_url, user_id, is_active, can_read_entreprises, can_read_emails, can_read_statistics, can_read_campagnes, can_delete_entreprises)
+                VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
                 RETURNING id
             ''', params)
             row = cursor.fetchone()
@@ -83,8 +88,8 @@ class APITokenManager:
         else:
             self.db.execute_sql(cursor, '''
                 INSERT INTO api_tokens 
-                (token, name, app_url, user_id, is_active, can_read_entreprises, can_read_emails, can_read_statistics, can_read_campagnes)
-                VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
+                (token, name, app_url, user_id, is_active, can_read_entreprises, can_read_emails, can_read_statistics, can_read_campagnes, can_delete_entreprises)
+                VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
             ''', params)
             token_id = cursor.lastrowid
         
@@ -101,7 +106,8 @@ class APITokenManager:
             'can_read_entreprises': can_read_entreprises,
             'can_read_emails': can_read_emails,
             'can_read_statistics': can_read_statistics,
-            'can_read_campagnes': can_read_campagnes
+            'can_read_campagnes': can_read_campagnes,
+            'can_delete_entreprises': bool(can_delete_entreprises and can_read_entreprises),
         }
     
     def _row_to_token_dict(self, row, mask_token: bool = False) -> dict:
@@ -119,6 +125,7 @@ class APITokenManager:
             'can_read_emails': bool(d.get('can_read_emails', 0)),
             'can_read_statistics': bool(d.get('can_read_statistics', 0)),
             'can_read_campagnes': bool(d.get('can_read_campagnes', 0)),
+            'can_delete_entreprises': bool(d.get('can_read_entreprises', 0)) and bool(d.get('can_delete_entreprises', 0)),
             'date_creation': d.get('date_creation'),
             'last_used': d.get('last_used')
         }
@@ -139,6 +146,7 @@ class APITokenManager:
         self.db.execute_sql(cursor, '''
             SELECT id, token, name, app_url, user_id, is_active, 
                    can_read_entreprises, can_read_emails, can_read_statistics, can_read_campagnes,
+                   can_delete_entreprises,
                    date_creation, last_used
             FROM api_tokens
             WHERE token = ? AND is_active = 1
@@ -146,7 +154,7 @@ class APITokenManager:
         
         row = cursor.fetchone()
         token_data = self._row_to_token_dict(row, mask_token=False) if row else None
-        
+
         if token_data:
             # Mettre à jour la dernière utilisation
             self.db.execute_sql(cursor, '''
@@ -176,6 +184,7 @@ class APITokenManager:
             self.db.execute_sql(cursor, '''
                 SELECT id, token, name, app_url, user_id, is_active,
                        can_read_entreprises, can_read_emails, can_read_statistics, can_read_campagnes,
+                       can_delete_entreprises,
                        date_creation, last_used
                 FROM api_tokens
                 WHERE user_id = ?
@@ -185,6 +194,7 @@ class APITokenManager:
             self.db.execute_sql(cursor, '''
                 SELECT id, token, name, app_url, user_id, is_active,
                        can_read_entreprises, can_read_emails, can_read_statistics, can_read_campagnes,
+                       can_delete_entreprises,
                        date_creation, last_used
                 FROM api_tokens
                 ORDER BY date_creation DESC
@@ -193,7 +203,95 @@ class APITokenManager:
         rows = cursor.fetchall()
         conn.close()
         return [self._row_to_token_dict(row, mask_token=True) for row in rows]
-    
+
+    _PERMISSION_COLUMN_KEYS = (
+        'can_read_entreprises',
+        'can_read_emails',
+        'can_read_statistics',
+        'can_read_campagnes',
+        'can_delete_entreprises',
+    )
+
+    def update_token_permissions(self, token_id: int, updates: Dict[str, Any]) -> Optional[dict]:
+        """
+        Met à jour les drapeaux de permission d'un token existant.
+        Seules les clés présentes dans updates sont appliquées (merge).
+        Si can_read_entreprises devient faux, can_delete_entreprises est forcé à faux.
+        Retourne le dict token (token masqué) ou None si id introuvable.
+        """
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+        self.db.execute_sql(
+            cursor,
+            '''
+            SELECT id, token, name, app_url, user_id, is_active,
+                   can_read_entreprises, can_read_emails, can_read_statistics, can_read_campagnes,
+                   can_delete_entreprises,
+                   date_creation, last_used
+            FROM api_tokens
+            WHERE id = ?
+            ''',
+            (token_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return None
+
+        d = dict(row)
+        cur: Dict[str, bool] = {
+            'can_read_entreprises': bool(d.get('can_read_entreprises', 0)),
+            'can_read_emails': bool(d.get('can_read_emails', 0)),
+            'can_read_statistics': bool(d.get('can_read_statistics', 0)),
+            'can_read_campagnes': bool(d.get('can_read_campagnes', 0)),
+            'can_delete_entreprises': bool(d.get('can_delete_entreprises', 0)),
+        }
+
+        for key in self._PERMISSION_COLUMN_KEYS:
+            if key in updates:
+                cur[key] = bool(updates[key])
+
+        if not cur['can_read_entreprises']:
+            cur['can_delete_entreprises'] = False
+
+        self.db.execute_sql(
+            cursor,
+            '''
+            UPDATE api_tokens SET
+                can_read_entreprises = ?,
+                can_read_emails = ?,
+                can_read_statistics = ?,
+                can_read_campagnes = ?,
+                can_delete_entreprises = ?
+            WHERE id = ?
+            ''',
+            (
+                1 if cur['can_read_entreprises'] else 0,
+                1 if cur['can_read_emails'] else 0,
+                1 if cur['can_read_statistics'] else 0,
+                1 if cur['can_read_campagnes'] else 0,
+                1 if cur['can_delete_entreprises'] else 0,
+                token_id,
+            ),
+        )
+        conn.commit()
+
+        self.db.execute_sql(
+            cursor,
+            '''
+            SELECT id, token, name, app_url, user_id, is_active,
+                   can_read_entreprises, can_read_emails, can_read_statistics, can_read_campagnes,
+                   can_delete_entreprises,
+                   date_creation, last_used
+            FROM api_tokens
+            WHERE id = ?
+            ''',
+            (token_id,),
+        )
+        row2 = cursor.fetchone()
+        conn.close()
+        return self._row_to_token_dict(row2, mask_token=True) if row2 else None
+
     def revoke_token(self, token_id: int) -> bool:
         """
         Révoque un token API (le désactive).
@@ -244,6 +342,7 @@ class APITokenManager:
 # Mapping logique permission -> champ booléen dans api_tokens
 API_PERMISSION_FIELD_MAP = {
     'entreprises': 'can_read_entreprises',
+    'entreprises_delete': 'can_delete_entreprises',
     'emails': 'can_read_emails',
     'statistics': 'can_read_statistics',
     'campagnes': 'can_read_campagnes',
@@ -417,6 +516,7 @@ def require_api_permission(permission_key: str):
     
     Permissions possibles (clé -> champ BDD):
         - 'entreprises' -> can_read_entreprises
+        - 'entreprises_delete' -> can_delete_entreprises (suppression fiches, requiert aussi entreprises)
         - 'emails'      -> can_read_emails
         - 'statistics'  -> can_read_statistics
         - 'campagnes'   -> can_read_campagnes

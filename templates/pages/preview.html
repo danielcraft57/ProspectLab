@@ -58,6 +58,9 @@
             <p>
                 L'analyse utilise Celery avec {{ celery_workers|default(4) }} workers en parallèle pour une performance optimale.
             </p>
+            <p style="margin-top: 0.25rem; opacity: 0.85;">
+                Cluster détecté: {{ celery_nodes_online|default(0) }} noeud(s) worker en ligne.
+            </p>
         </div>
         
         <div class="form-actions analyze-actions">

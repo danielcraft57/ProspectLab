@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 _broker_cache: dict = {"ts": 0.0, "ok": True}
 _broker_lock = threading.Lock()
 
+_workers_cache: dict = {"ts": 0.0, "count": 0}
+_workers_lock = threading.Lock()
+
 
 def broker_ping_ok(ttl_seconds: float = 5.0) -> bool:
     """
@@ -59,3 +62,35 @@ def invalidate_broker_cache() -> None:
     """Après redémarrage Redis, forcer un nouveau ping au prochain appel."""
     with _broker_lock:
         _broker_cache["ts"] = 0.0
+
+
+def online_workers_count(ttl_seconds: float = 5.0, timeout: float = 1.0) -> int:
+    """
+    Nombre de workers Celery en ligne (nodes qui répondent).
+
+    Important: c'est plus lourd qu'un ping Redis, donc c'est mis en cache.
+    On l'utilise surtout pour afficher une info UI (preview), pas à haute fréquence.
+    """
+    now = time.time()
+    with _workers_lock:
+        if now - float(_workers_cache["ts"]) < ttl_seconds:
+            return int(_workers_cache["count"])
+
+        count = _inspect_online_workers_count(timeout=timeout)
+        _workers_cache["ts"] = now
+        _workers_cache["count"] = int(count)
+        return int(count)
+
+
+def _inspect_online_workers_count(timeout: float = 1.0) -> int:
+    try:
+        from celery_app import celery
+
+        insp = celery.control.inspect(timeout=timeout)
+        replies = insp.ping() or {}
+        if isinstance(replies, dict):
+            return len(replies.keys())
+        return 0
+    except Exception as e:
+        logger.debug("Celery inspect ping error: %s", e)
+        return 0

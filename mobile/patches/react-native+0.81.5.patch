@@ -1,0 +1,15 @@
+diff --git a/node_modules/react-native/ReactAndroid/src/main/java/com/facebook/react/modules/systeminfo/AndroidInfoHelpers.kt b/node_modules/react-native/ReactAndroid/src/main/java/com/facebook/react/modules/systeminfo/AndroidInfoHelpers.kt
+index fb8f2cb..c3b5234 100644
+--- a/node_modules/react-native/ReactAndroid/src/main/java/com/facebook/react/modules/systeminfo/AndroidInfoHelpers.kt
++++ b/node_modules/react-native/ReactAndroid/src/main/java/com/facebook/react/modules/systeminfo/AndroidInfoHelpers.kt
+@@ -96,6 +96,10 @@ public object AndroidInfoHelpers {
+           getMetroHostPropValue().isNotEmpty() -> getMetroHostPropValue()
+           isRunningOnGenymotion() -> GENYMOTION_LOCALHOST
+           isRunningOnStockEmulator() -> EMULATOR_LOCALHOST
++          context != null -> {
++            val fromRes = context.resources.getString(R.string.react_native_dev_server_ip)
++            if (fromRes.isNotEmpty()) fromRes else DEVICE_LOCALHOST
++          }
+           else -> DEVICE_LOCALHOST
+         }
+     return String.format(Locale.US, "%s:%d", ipAddress, port)

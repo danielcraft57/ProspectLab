@@ -27,12 +27,32 @@ try:
         SEO_FETCH_CONNECT_TIMEOUT,
         SEO_FETCH_READ_TIMEOUT,
         CHROME_PATH,
+        SEO_FETCH_RATE_LIMIT_MAX_RETRIES,
+        SEO_FETCH_RATE_LIMIT_BASE_DELAY_SEC,
     )
 except ImportError:
     SEO_TOOL_TIMEOUT = int(os.environ.get('SEO_TOOL_TIMEOUT', '120'))
     SEO_FETCH_CONNECT_TIMEOUT = float(os.environ.get('SEO_FETCH_CONNECT_TIMEOUT', '12'))
     SEO_FETCH_READ_TIMEOUT = float(os.environ.get('SEO_FETCH_READ_TIMEOUT', '25'))
     CHROME_PATH = (os.environ.get('CHROME_PATH') or os.environ.get('LIGHTHOUSE_CHROME_PATH') or '').strip() or None
+    SEO_FETCH_RATE_LIMIT_MAX_RETRIES = max(0, int(os.environ.get('SEO_FETCH_RATE_LIMIT_MAX_RETRIES', '5')))
+    SEO_FETCH_RATE_LIMIT_BASE_DELAY_SEC = float(os.environ.get('SEO_FETCH_RATE_LIMIT_BASE_DELAY_SEC', '4'))
+
+
+def _http_rate_limit_retry_delay(response: requests.Response, attempt_index: int) -> float:
+    """Délai avant un nouvel essai après HTTP 429 / 503 (Retry-After ou backoff)."""
+    h = response.headers.get('Retry-After')
+    if h:
+        try:
+            return min(max(float(str(h).strip()), 0.5), 120.0)
+        except ValueError:
+            pass
+    base = SEO_FETCH_RATE_LIMIT_BASE_DELAY_SEC
+    return min(base * (2 ** attempt_index), 60.0)
+
+
+def _status_is_rate_limited(code: Optional[int]) -> bool:
+    return code in (429, 503)
 
 
 def _lighthouse_chrome_executable() -> Optional[str]:
@@ -54,6 +74,74 @@ def _lighthouse_chrome_executable() -> Optional[str]:
         if _usable(candidate):
             return candidate
     return None
+
+
+def _lighthouse_cli_executable() -> Optional[str]:
+    """Retourne un binaire lighthouse exécutable, même avec PATH systemd incomplet."""
+    candidate = shutil.which('lighthouse')
+    if candidate:
+        return candidate
+    common_path = '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
+    candidate = shutil.which('lighthouse', path=common_path)
+    if candidate:
+        return candidate
+    # Emplacements usuels npm global (Raspberry / Debian)
+    for p in (
+        '/usr/local/bin/lighthouse',
+        '/usr/bin/lighthouse',
+        '/home/pi/.npm-global/bin/lighthouse',
+        '/home/pi/.local/bin/lighthouse',
+        '/root/.npm-global/bin/lighthouse',
+        '/root/.local/bin/lighthouse',
+    ):
+        if os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+    return None
+
+
+def _node_executable() -> Optional[str]:
+    """Retourne un binaire node exécutable, même avec PATH systemd incomplet."""
+    candidate = shutil.which('node')
+    if candidate:
+        return candidate
+    common_path = '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
+    candidate = shutil.which('node', path=common_path)
+    if candidate:
+        return candidate
+    for p in (
+        '/usr/bin/node',
+        '/usr/local/bin/node',
+        '/home/pi/.nvm/versions/node/current/bin/node',
+        '/root/.nvm/versions/node/current/bin/node',
+    ):
+        if os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+    return None
+
+
+def _build_runtime_path(base_path: Optional[str]) -> str:
+    """PATH robuste pour exécuter les binaires npm/global sous systemd."""
+    parts = [
+        '/usr/local/sbin',
+        '/usr/local/bin',
+        '/usr/sbin',
+        '/usr/bin',
+        '/sbin',
+        '/bin',
+        '/home/pi/.local/bin',
+        '/home/pi/.npm-global/bin',
+        '/root/.local/bin',
+        '/root/.npm-global/bin',
+    ]
+    if base_path:
+        parts.extend([p for p in str(base_path).split(':') if p])
+    out: List[str] = []
+    seen = set()
+    for p in parts:
+        if p and p not in seen:
+            seen.add(p)
+            out.append(p)
+    return ':'.join(out)
 
 
 def _host_is_ip(hostname: Optional[str]) -> bool:
@@ -161,14 +249,32 @@ class SEOAnalyzer:
     def _check_tools_availability(self):
         """Vérifie la disponibilité des outils SEO"""
         self.tools = {
-            'lighthouse': self._check_tool('lighthouse'),
+            'lighthouse': _lighthouse_cli_executable() is not None,
             'curl': self._check_tool('curl'),
             'wget': self._check_tool('wget'),
         }
     
     def _check_tool(self, tool_name: str) -> bool:
         """Vérifie si un outil est disponible (natif uniquement, pas de WSL pour SEO)"""
-        return shutil.which(tool_name) is not None
+        # 1) Résolution standard via PATH courant du process Celery
+        if shutil.which(tool_name) is not None:
+            return True
+
+        # 2) Fallback robuste: certains services systemd exposent un PATH incomplet.
+        common_path = '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
+        if shutil.which(tool_name, path=common_path) is not None:
+            return True
+
+        # 3) Fallback chemins absolus connus pour les outils SEO principaux
+        known_bins = {
+            'curl': ('/usr/bin/curl', '/bin/curl'),
+            'wget': ('/usr/bin/wget', '/bin/wget'),
+            'lighthouse': ('/usr/local/bin/lighthouse', '/usr/bin/lighthouse'),
+        }
+        for candidate in known_bins.get(tool_name, ()):
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                return True
+        return False
     
     def get_diagnostic(self) -> Dict:
         """
@@ -259,21 +365,67 @@ class SEOAnalyzer:
                         if len(short) > 72:
                             short = short[:69] + '...'
                         progress_callback(f'Nouvel essai : {short}')
-                    resp = requests.get(
-                        candidate,
-                        headers=self.headers,
-                        timeout=timeout_fetch,
-                        allow_redirects=True,
-                    )
-                    resp.raise_for_status()
-                    response = resp
-                    last_candidate_ok = candidate
-                    fetch_log.append({'url': candidate, 'ok': True, 'status': resp.status_code})
+                    attempt_rl = 0
+                    resp = None
+                    while True:
+                        resp = requests.get(
+                            candidate,
+                            headers=self.headers,
+                            timeout=timeout_fetch,
+                            allow_redirects=True,
+                        )
+                        code = resp.status_code
+                        if _status_is_rate_limited(code):
+                            fetch_log.append({
+                                'url': candidate,
+                                'ok': False,
+                                'http_status': code,
+                                'rate_limit_attempt': attempt_rl,
+                            })
+                            if attempt_rl < SEO_FETCH_RATE_LIMIT_MAX_RETRIES:
+                                delay = _http_rate_limit_retry_delay(resp, attempt_rl)
+                                logger.warning(
+                                    'HTTP %s pour %s (SEO), attente %.1fs puis retry %s/%s',
+                                    code,
+                                    candidate,
+                                    delay,
+                                    attempt_rl + 1,
+                                    SEO_FETCH_RATE_LIMIT_MAX_RETRIES,
+                                )
+                                if progress_callback:
+                                    progress_callback(
+                                        f'Limite de débit (HTTP {code}), attente {delay:.0f}s…'
+                                    )
+                                time.sleep(delay)
+                                attempt_rl += 1
+                                continue
+                            try:
+                                resp.raise_for_status()
+                            except requests.HTTPError as rate_err:
+                                last_error = rate_err
+                                raise
+                        if code in (401, 403) and idx + 1 < len(candidates):
+                            fetch_log.append({'url': candidate, 'ok': False, 'http_status': code})
+                            logger.warning(f'HTTP {code} pour {candidate} lors de l\'analyse SEO')
+                            if progress_callback:
+                                progress_callback('Accès refusé, essai d’une autre variante d’URL...')
+                            break
+                        resp.raise_for_status()
+                        response = resp
+                        last_candidate_ok = candidate
+                        fetch_log.append({'url': candidate, 'ok': True, 'status': resp.status_code})
+                        break
+                    if response is not None:
+                        break
+                    if idx + 1 < len(candidates):
+                        continue
                     break
                 except requests.HTTPError as e:
                     last_error = e
                     status = e.response.status_code if e.response is not None else None
-                    fetch_log.append({'url': candidate, 'ok': False, 'http_status': status})
+                    # 429/503 : déjà journalisés dans la boucle de retry
+                    if status not in (429, 503):
+                        fetch_log.append({'url': candidate, 'ok': False, 'http_status': status})
                     logger.warning(f'HTTP {status} pour {candidate} lors de l\'analyse SEO')
                     if status in (401, 403) and idx + 1 < len(candidates):
                         if progress_callback:
@@ -300,6 +452,17 @@ class SEOAnalyzer:
                         msg = (
                             f'Le site a refusé l\'accès (HTTP {status}). '
                             f'Certaines protections bloquent les robots : l’analyse SEO détaillée n’est pas possible.'
+                        )
+                    elif status == 429:
+                        msg = (
+                            'Limite de débit (HTTP 429) : le serveur refuse encore la page après plusieurs '
+                            'attentes. Réessayez dans quelques minutes, ou augmentez les variables '
+                            'SEO_FETCH_RATE_LIMIT_MAX_RETRIES / FULL_ANALYSIS_INTER_STEP_PAUSE_SEC.'
+                        )
+                    elif status == 503:
+                        msg = (
+                            'Service indisponible (HTTP 503) après plusieurs tentatives. '
+                            'Réessayez plus tard.'
                         )
                     else:
                         msg = f'Erreur HTTP {status} lors de la récupération de la page.'
@@ -588,7 +751,8 @@ class SEOAnalyzer:
     
     def _run_lighthouse(self, url: str) -> Optional[Dict]:
         """Exécute Lighthouse pour un audit SEO/perfs"""
-        if not self.tools['lighthouse']:
+        lighthouse_bin = _lighthouse_cli_executable()
+        if not lighthouse_bin:
             return None
         
         try:
@@ -599,8 +763,7 @@ class SEOAnalyzer:
             
             # Exécuter Lighthouse (chrome-launcher exige CHROME_PATH si Chrome n’est pas détecté, ex. Raspberry Pi)
             chrome_bin = _lighthouse_chrome_executable()
-            cmd = [
-                'lighthouse',
+            cmd_args = [
                 url,
                 '--output=json',
                 '--output-path=' + output_path,
@@ -609,11 +772,21 @@ class SEOAnalyzer:
                 '--only-categories=seo,performance',
             ]
             if chrome_bin:
-                cmd.insert(2, '--chrome-path=' + chrome_bin)
+                cmd_args.insert(1, '--chrome-path=' + chrome_bin)
 
             run_env = os.environ.copy()
+            run_env['PATH'] = _build_runtime_path(run_env.get('PATH'))
             if chrome_bin:
                 run_env['CHROME_PATH'] = chrome_bin
+            node_bin = _node_executable()
+
+            # Beaucoup d'installations npm exposent un script lighthouse avec shebang "/usr/bin/env node".
+            # En service systemd, "node" peut être absent du PATH; on force alors "node <lighthouse>".
+            cmd: List[str]
+            if node_bin:
+                cmd = [node_bin, lighthouse_bin, *cmd_args]
+            else:
+                cmd = [lighthouse_bin, *cmd_args]
 
             result = subprocess.run(
                 cmd,

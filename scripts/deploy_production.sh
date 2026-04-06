@@ -20,7 +20,7 @@ echo "=========================================="
 echo ""
 
 # Vérifier la connexion SSH
-echo "[1/8] Vérification de la connexion SSH..."
+echo "[1/9] Vérification de la connexion SSH..."
 if ! ssh -o ConnectTimeout=5 "$USER@$SERVER" "echo 'Connexion OK'" > /dev/null 2>&1; then
     echo "❌ Impossible de se connecter au serveur"
     echo "   Vérifiez que:"
@@ -33,7 +33,7 @@ echo "✅ Connexion SSH OK"
 echo ""
 
 # Créer le répertoire de déploiement local
-echo "[2/8] Préparation des fichiers locaux..."
+echo "[2/9] Préparation des fichiers locaux..."
 DEPLOY_DIR="$PROJECT_DIR/deploy"
 if [ -d "$DEPLOY_DIR" ]; then
     rm -rf "$DEPLOY_DIR"
@@ -108,7 +108,7 @@ echo "✅ Fichiers préparés"
 echo ""
 
 # Vérifier Conda sur le serveur
-echo "[3/8] Vérification de Conda..."
+echo "[3/9] Vérification de Conda..."
 CONDA_CMD=$(ssh "$USER@$SERVER" "which conda 2>/dev/null || (source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null && which conda) || (source ~/anaconda3/etc/profile.d/conda.sh 2>/dev/null && which conda) || true" || echo "")
 if [ -z "$CONDA_CMD" ]; then
     echo "❌ Conda n'est pas installé sur le serveur (miniconda3 ou anaconda3)"
@@ -119,13 +119,13 @@ echo "✅ Conda détecté"
 echo ""
 
 # Créer le répertoire sur le serveur
-echo "[4/8] Préparation du répertoire sur le serveur..."
+echo "[4/9] Préparation du répertoire sur le serveur..."
 ssh "$USER@$SERVER" "sudo mkdir -p $REMOTE_PATH && sudo chown -R $USER:$USER $REMOTE_PATH"
 echo "✅ Répertoire créé sur le serveur"
 echo ""
 
 # Copier les fichiers vers le serveur
-echo "[5/8] Transfert des fichiers vers le serveur..."
+echo "[5/9] Transfert des fichiers vers le serveur..."
 echo "   Cela peut prendre quelques instants..."
 scp -r "$DEPLOY_DIR"/* "$USER@$SERVER:$REMOTE_PATH/" > /dev/null 2>&1
 if [ $? -ne 0 ]; then
@@ -147,8 +147,92 @@ done
 echo "✅ Dossiers synchronisés"
 echo ""
 
+# Lit une clé depuis un fichier .env (ignorer # et lignes vides)
+get_env_val_from_file() {
+  f="$1"
+  key="$2"
+  if [ ! -f "$f" ]; then
+    printf '%s\n' ""
+    return
+  fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      \#*|'') continue ;;
+    esac
+    case "$line" in
+      "${key}="*)
+        val="${line#*=}"
+        # trim espaces début/fin (sans sed pour rester portable)
+        val="${val#"${val%%[![:space:]]*}"}"
+        val="${val%"${val##*[![:space:]]}"}"
+        printf '%s\n' "$val"
+        return
+        ;;
+    esac
+  done < "$f"
+  printf '%s\n' ""
+}
+
+# Montage NFS si NFS_SERVER est défini dans .env.prod (sauf NFS_SKIP_CLIENT_MOUNT)
+SKIP_NFS="${SKIP_NFS_CLIENT:-0}"
+if [ "$SKIP_NFS" != "1" ]; then
+  NFS_SKIP_MOUNT="$(get_env_val_from_file "$PROJECT_DIR/.env.prod" "NFS_SKIP_CLIENT_MOUNT")"
+  case "$(printf '%s' "$NFS_SKIP_MOUNT" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on)
+      echo "[5b/9] Montage NFS client ignoré (NFS_SKIP_CLIENT_MOUNT dans .env.prod)."
+      echo ""
+      NFS_SERVER_DEPLOY=""
+      ;;
+    *)
+      NFS_SERVER_DEPLOY="$(get_env_val_from_file "$PROJECT_DIR/.env.prod" "NFS_SERVER")"
+      ;;
+  esac
+  NFS_EXPORT_DEPLOY="$(get_env_val_from_file "$PROJECT_DIR/.env.prod" "NFS_EXPORT_ROOT")"
+  if [ -z "$NFS_EXPORT_DEPLOY" ]; then
+    NFS_EXPORT_DEPLOY="/srv/nfs/prospectlab"
+  fi
+  if [ -n "$NFS_SERVER_DEPLOY" ]; then
+    NFS_AUTO_DEPLOY="$(get_env_val_from_file "$PROJECT_DIR/.env.prod" "NFS_AUTO_STASH")"
+    if [ -z "$NFS_AUTO_DEPLOY" ]; then
+      NFS_AUTO_DEPLOY="1"
+    fi
+    case "$(printf '%s' "$NFS_AUTO_DEPLOY" | tr '[:upper:]' '[:lower:]')" in
+      0|false|no|off) NFS_AUTO_DEPLOY="0" ;;
+      *) NFS_AUTO_DEPLOY="1" ;;
+    esac
+    echo "[5b/9] Montage NFS client (serveur $NFS_SERVER_DEPLOY, NFS_AUTO_STASH=$NFS_AUTO_DEPLOY)..."
+    if ! ssh "$USER@$SERVER" "sudo env REMOTE_PATH=$REMOTE_PATH NFS_SERVER=$NFS_SERVER_DEPLOY NFS_EXPORT_ROOT=$NFS_EXPORT_DEPLOY NFS_AUTO_STASH=$NFS_AUTO_DEPLOY bash $REMOTE_PATH/scripts/linux/setup_nfs_client_prospectlab.sh"; then
+      echo "Échec montage NFS client"
+      exit 1
+    fi
+    echo "Montage NFS OK"
+    echo ""
+  fi
+fi
+
+# Déployer la configuration : .env.prod local → .env sur le serveur
+echo "[5.5/9] Envoi de .env.prod vers le serveur (copie en .env)..."
+ENV_PROD_LOCAL="$PROJECT_DIR/.env.prod"
+if [ -f "$ENV_PROD_LOCAL" ]; then
+    scp "$ENV_PROD_LOCAL" "$USER@$SERVER:$REMOTE_PATH/.env.prod"
+    if [ $? -ne 0 ]; then
+        echo "❌ Erreur lors de l'envoi de .env.prod"
+        exit 1
+    fi
+    ssh "$USER@$SERVER" "cd $REMOTE_PATH && cp -f .env.prod .env && chmod 600 .env .env.prod"
+    if [ $? -ne 0 ]; then
+        echo "❌ Erreur lors de la copie .env.prod → .env sur le serveur"
+        exit 1
+    fi
+    echo "✅ .env mis à jour sur $REMOTE_PATH (depuis .env.prod)"
+else
+    echo "⚠️  Fichier .env.prod introuvable à la racine du projet ($ENV_PROD_LOCAL)"
+    echo "   Le .env existant sur le serveur n'a pas été modifié."
+fi
+echo ""
+
 # Créer ou mettre à jour l'environnement Conda sur le serveur (prefix = env)
-echo "[6/8] Configuration de l'environnement Conda..."
+echo "[6/9] Configuration de l'environnement Conda..."
 ssh "$USER@$SERVER" "set -e; source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/anaconda3/etc/profile.d/conda.sh; cd $REMOTE_PATH; if [ ! -d env ]; then conda create --prefix $REMOTE_PATH/env python=3.11 -y --override-channels -c conda-forge; fi; $REMOTE_PATH/env/bin/pip install --upgrade pip setuptools wheel; $REMOTE_PATH/env/bin/pip install -r requirements.txt"
 if [ $? -ne 0 ]; then
     echo "❌ Erreur lors de l'installation des dépendances Conda/pip"
@@ -158,7 +242,7 @@ echo "✅ Environnement Conda configuré (prefix=$REMOTE_PATH/env)"
 echo ""
 
 # Créer les répertoires nécessaires
-echo "[7/8] Création des répertoires nécessaires..."
+echo "[7/9] Création des répertoires nécessaires..."
 ssh "$USER@$SERVER" "cd $REMOTE_PATH && mkdir -p logs logs_server"
 echo "✅ Répertoires créés"
 echo ""
@@ -180,8 +264,8 @@ fi
 echo ""
 
 # Nettoyage du cache et redémarrage des services
-echo "[8/9] Nettoyage du cache et redémarrage des services..."
-ssh "$USER@$SERVER" "cd $REMOTE_PATH; if [ -x scripts/linux/clear-logs.sh ]; then ./scripts/linux/clear-logs.sh; fi"
+echo "[8/9] Nettoyage Redis/Logs et redémarrage des services..."
+ssh "$USER@$SERVER" "cd $REMOTE_PATH; if [ -x scripts/linux/clear-redis.sh ]; then ./scripts/linux/clear-redis.sh; fi; if [ -x scripts/linux/clear-logs.sh ]; then ./scripts/linux/clear-logs.sh; fi"
 ssh "$USER@$SERVER" "sudo systemctl restart prospectlab prospectlab-celery prospectlab-celerybeat"
 echo "✅ Cache vidé et services redémarrés"
 echo ""
@@ -217,12 +301,10 @@ fi
 echo "[9/9] Déploiement terminé !"
 echo ""
 echo "Prochaines étapes:"
-echo "1. Connectez-vous au serveur de production"
-echo "2. Allez dans le répertoire de déploiement"
-echo "3. Configurez le fichier .env avec vos paramètres de production"
-echo "4. Environnement Conda: $REMOTE_PATH/env (activer avec: source \$CONDA_PREFIX/etc/profile.d/conda.sh && conda activate $REMOTE_PATH/env)"
-echo "5. Initialisez la base de données si nécessaire"
-echo "6. Démarrez l'application avec Gunicorn ou vérifiez les services systemd"
+echo "1. Si .env.prod était présent localement, .env a été mis à jour sur le serveur (sinon éditez $REMOTE_PATH/.env à la main)."
+echo "2. Environnement Conda: $REMOTE_PATH/env (activer avec: source \$CONDA_PREFIX/etc/profile.d/conda.sh && conda activate $REMOTE_PATH/env)"
+echo "3. Initialisez la base de données si nécessaire"
+echo "4. Les services systemd (prospectlab, celery) ont été redémarrés en fin de script"
 echo ""
 echo "Pour plus d'informations, consultez:"
 echo "  docs/configuration/DEPLOIEMENT_PRODUCTION.md"

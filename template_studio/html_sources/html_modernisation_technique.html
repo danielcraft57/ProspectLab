@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Modernisation de votre site web</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f9fafb;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        Analyse rapide + 2–3 améliorations concrètes pour moderniser votre site.
+    </div>
+    <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f9fafb;">
+        <tr>
+            <td style="padding: 32px 16px;">
+                <table role="presentation" style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.07);">
+                    <tr>
+                        <td style="padding: 26px 28px; background: linear-gradient(135deg, #4da9d6 0%, #184c70 100%); text-align: center;">
+                            <p style="margin: 0 0 10px 0; color: rgba(255,255,255,0.92); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700;">Modernisation</p>
+                            <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700; line-height: 1.3;">Évoluer sans tout reconstruire</h1>
+                            <p style="margin: 12px 0 0 0; color: rgba(255,255,255,0.92); font-size: 14px; line-height: 1.45;">{entreprise}</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 32px 28px;">
+                            <p style="margin: 0 0 20px 0; color: #1f2937; font-size: 16px; line-height: 1.6;">
+                                Bonjour {nom},
+                            </p>
+                            <p style="margin: 0 0 16px 0; color: #1f2937; font-size: 16px; line-height: 1.6;">
+                                {#if_secteur}Dans le secteur <strong>{secteur}</strong>, {#endif}j'ai analysé {#if_website}le site <strong>{website}</strong> de {#endif}<strong style="color: #4da9d6;">{entreprise}</strong> et j'ai identifié plusieurs opportunités d'amélioration pour moderniser votre présence digitale.
+                            </p>
+                            {#if_website}
+                            <p style="margin: 0 0 20px 0; color: #4b5563; font-size: 14px; line-height: 1.6;">
+                                Vous pouvez consulter un aperçu détaillé de cette analyse ici :
+                                <a href="{analysis_url}" style="display:inline-block;background:#f3f4f6;color:#4da9d6;text-decoration:none;font-size:13px;font-weight:600;padding:10px 16px;border-radius:999px;line-height:1.2;">Voir l'analyse du site</a>.
+                            </p>
+                            {#endif}
+                            {#if_tech_data}
+                            <div style="background-color: #f9fafb; padding: 20px; border-radius: 6px; margin: 25px 0;">
+                                <h3 style="margin: 0 0 15px 0; color: #4da9d6; font-size: 18px;">Observations techniques</h3>
+                                <ul style="margin: 0; padding-left: 20px; color: #4b5563; font-size: 15px; line-height: 1.8;">
+                                    {framework_info}
+                                    {cms_info}
+                                    {hosting_info}
+                                    {performance_info}
+                                </ul>
+                            </div>
+                            {#endif}
+                            <p style="margin: 0 0 20px 0; color: #1f2937; font-size: 16px; line-height: 1.6;">
+                                En tant que développeur web freelance spécialisé en TypeScript, React et Node.js, je peux vous accompagner pour :
+                            </p>
+                            <ul style="margin: 0 0 25px 0; padding-left: 20px; color: #1f2937; font-size: 16px; line-height: 1.8;">
+                                <li style="margin-bottom: 10px;"><strong style="color: #4da9d6;">Moderniser votre stack technique</strong> avec des technologies performantes et maintenables</li>
+                                <li style="margin-bottom: 10px;"><strong style="color: #4da9d6;">Améliorer les performances</strong> (vitesse de chargement, expérience utilisateur)</li>
+                                <li style="margin-bottom: 10px;"><strong style="color: #4da9d6;">Optimiser pour mobile</strong> avec un design responsive moderne</li>
+                                <li style="margin-bottom: 10px;"><strong style="color: #4da9d6;">Renforcer la sécurité</strong> et la conformité aux standards</li>
+                            </ul>
+                            <div style="background-color: #4da9d6; padding: 20px; border-radius: 6px; text-align: center; margin: 30px 0;">
+                                <p style="margin: 0 0 15px 0; color: #ffffff; font-size: 18px; font-weight: 600;">Je propose un audit gratuit</p>
+                                <p style="margin: 0; color: #ffffff; font-size: 14px;">Pour identifier les opportunités d'amélioration spécifiques à votre site</p>
+                            </div>
+                            {#include:cta_dual_analysis_and_15min}
+                            <p style="margin: 0 0 20px 0; color: #1f2937; font-size: 16px; line-height: 1.6;">
+                                Seriez-vous partant pour 15 minutes cette semaine pour que je vous dise (franchement) : 1) ce qui vous coûte le plus aujourd'hui, 2) si un audit rapide vaut le coup ? 
+                            </p>
+                            {#include:signature_standard}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 18px 28px 24px; background-color: #f9fafb; text-align: center;">
+                            {#include:footer_standard}
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

@@ -4,6 +4,33 @@
  */
 
 (function() {
+    // Throttle "trailing" : limite la fréquence de mise à jour UI
+    // tout en appliquant la dernière valeur reçue (évite DOM storms + pertes de connexion).
+    function createTrailingThrottle(fn, waitMs) {
+        let lastCallTs = 0;
+        let timer = null;
+        let pendingArgs = null;
+        return function throttled(...args) {
+            const now = Date.now();
+            pendingArgs = args;
+            const elapsed = now - lastCallTs;
+            const run = () => {
+                timer = null;
+                lastCallTs = Date.now();
+                const a = pendingArgs;
+                pendingArgs = null;
+                try { fn.apply(null, a); } catch (e) {}
+            };
+            if (elapsed >= waitMs && !timer) {
+                run();
+                return;
+            }
+            if (!timer) {
+                timer = setTimeout(run, Math.max(0, waitMs - elapsed));
+            }
+        };
+    }
+
     // Récupérer les données depuis les data attributes
     const pageHeader = document.querySelector('.page-header');
     const filename = pageHeader ? pageHeader.dataset.filename || '' : '';
@@ -443,7 +470,7 @@
     scrapingProgressContainer.appendChild(entreprisesProgressBar);
     scrapingProgressContainer.appendChild(scrapingStatsContainer);
     
-    document.addEventListener('analysis:progress', function(e) {
+    const throttledMainAnalysisProgress = createTrailingThrottle(function(e) {
         const data = e.detail;
         const percentage = data.percentage || 0;
         
@@ -458,7 +485,8 @@
         if (data.current_entreprise) {
             statusDiv.innerHTML = `Analyse en cours: <strong>${data.current_entreprise}</strong> (${data.current}/${data.total})`;
         }
-    });
+    }, 120);
+    document.addEventListener('analysis:progress', throttledMainAnalysisProgress);
     
     // Écouter les événements de scraping
     function setupScrapingListener() {
@@ -467,7 +495,7 @@
             window.wsManager.socket.off('scraping_progress');
             window.wsManager.socket.off('scraping_complete');
             
-            window.wsManager.socket.on('scraping_progress', function(data) {
+            const throttledScrapingProgress = createTrailingThrottle(function(data) {
                 if (!scrapingProgressContainer.parentNode) {
                     progressContainer.after(scrapingProgressContainer);
                 }
@@ -613,7 +641,8 @@
                 }
 
                 scrapingProgressText.innerHTML = htmlContent || 'Scraping en cours...';
-            });
+            }, 200);
+            window.wsManager.socket.on('scraping_progress', throttledScrapingProgress);
 
             // Afficher un résumé final quand le scraping est terminé
             window.wsManager.socket.on('scraping_complete', function(data) {
@@ -803,7 +832,7 @@
                 }, 100);
             });
             
-            window.wsManager.socket.on('technical_analysis_progress', function(data) {
+            const throttledTechnicalProgress = createTrailingThrottle(function(data) {
                 if (!technicalProgressContainer.parentNode) {
                     scrapingProgressContainer.after(technicalProgressContainer);
                 }
@@ -883,7 +912,8 @@
                     technicalSummary.style.display = 'none';
                     technicalSummary.innerHTML = '';
                 }
-            });
+            }, 160);
+            window.wsManager.socket.on('technical_analysis_progress', throttledTechnicalProgress);
             
             window.wsManager.socket.on('technical_analysis_complete', function(data) {
                 if (!technicalProgressContainer.parentNode) {
@@ -1406,6 +1436,10 @@
                 window.wsManager.socket.off('pentest_analysis_error');
             }
 
+            // Mémorise la dernière progression globale affichée
+            // (pour éviter de régressions lors d'évènements où total/expected_total sont temporairement absents)
+            let pentestLastTotalPercent = null;
+
             window.wsManager.socket.on('pentest_analysis_started', function(data) {
                 // Dispatch aussi un CustomEvent pour rester cohérent avec websocket.js
                 document.dispatchEvent(new CustomEvent('pentest_analysis:started', { detail: data }));
@@ -1444,13 +1478,15 @@
                 pentestTotalFill.style.width = '0%';
                 pentestTotalLabelInner.textContent = '0%';
                 pentestTotalInfo.textContent = 'En cours...';
+                // Permet d'éviter que des events "partiels" à total=0 écrasent la progression globale
+                pentestLastTotalPercent = 0;
 
                 setTimeout(() => {
                     pentestProgressContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }, 100);
             });
 
-            window.wsManager.socket.on('pentest_analysis_progress', function(data) {
+            const throttledPentestProgress = createTrailingThrottle(function(data) {
                 document.dispatchEvent(new CustomEvent('pentest_analysis:progress', { detail: data }));
                 if (typeof data.total === 'number' && data.total === 0) {
                     pentestProgressContainer.style.display = 'none';
@@ -1492,15 +1528,29 @@
                 // Pour la progression globale Pentest, on s'aligne sur la logique OSINT :
                 // priorité au ratio entreprises terminées / total entreprises, pour éviter
                 // les incohérences quand toutes les tâches ne sont pas encore connues.
+                let nextTotalPercent = null;
+                let shouldUpdateTotal = false;
+
                 if (pentestTotal > 0) {
-                    const totalPercent = Math.min(100, Math.max(0, (pentestCurrent / pentestTotal) * 100));
-                    pentestTotalFill.style.width = `${totalPercent}%`;
-                    pentestTotalLabelInner.textContent = `${Math.round(totalPercent)}%`;
+                    nextTotalPercent = Math.min(100, Math.max(0, (pentestCurrent / pentestTotal) * 100));
+                    // Ne pas laisser un event "partiel" remettre la progression globale à 0
+                    // (on évite les régressions visuelles)
+                    if (pentestLastTotalPercent === null || nextTotalPercent >= pentestLastTotalPercent) {
+                        shouldUpdateTotal = true;
+                    }
                 } else if (typeof data.progress === 'number') {
-                    // Fallback si jamais on n'a pas de total fiable
-                    const totalPercent = Math.min(100, Math.max(0, data.progress));
-                    pentestTotalFill.style.width = `${totalPercent}%`;
-                    pentestTotalLabelInner.textContent = `${Math.round(totalPercent)}%`;
+                    // Fallback seulement si ça ne régresse pas (évite le "reset à 0")
+                    const fallbackPercent = Math.min(100, Math.max(0, data.progress));
+                    if (pentestLastTotalPercent === null || fallbackPercent >= pentestLastTotalPercent) {
+                        nextTotalPercent = fallbackPercent;
+                        shouldUpdateTotal = true;
+                    }
+                }
+
+                if (shouldUpdateTotal && nextTotalPercent !== null) {
+                    pentestLastTotalPercent = nextTotalPercent;
+                    pentestTotalFill.style.width = `${nextTotalPercent}%`;
+                    pentestTotalLabelInner.textContent = `${Math.round(nextTotalPercent)}%`;
                 }
 
                 // Libellé \"entreprise en cours\" :
@@ -1555,7 +1605,8 @@
                     }
                     pentestCumulativeBox.style.display = 'block';
                 }
-            });
+            }, 160);
+            window.wsManager.socket.on('pentest_analysis_progress', throttledPentestProgress);
 
             window.wsManager.socket.on('pentest_analysis_complete', function(data) {
                 document.dispatchEvent(new CustomEvent('pentest_analysis:complete', { detail: data }));
@@ -1576,6 +1627,7 @@
                 pentestCurrentLabelInner.textContent = '100%';
                 pentestTotalFill.style.width = '100%';
                 pentestTotalLabelInner.textContent = '100%';
+                pentestLastTotalPercent = 100;
 
                 const current = typeof data.current === 'number' ? data.current : null;
                 const total = typeof data.total === 'number' ? data.total : null;
@@ -1664,6 +1716,134 @@
     }
     
     // Configurer l'écoute au chargement et après connexion WebSocket
+    function applyPreviewTheme() {
+        const isDark = document.body && (document.body.getAttribute('data-theme') === 'dark');
+
+        // Technique
+        try {
+            technicalProgressContainer.style.background = isDark ? 'rgba(15,23,42,0.95)' : '#ffffff';
+            technicalProgressContainer.style.boxShadow = isDark ? '0 8px 20px rgba(15,23,42,0.9)' : '0 6px 16px rgba(17,24,39,0.08)';
+            technicalProgressContainer.style.border = isDark ? '1px solid rgba(34,197,94,0.35)' : '1px solid #d7e3f0';
+            technicalProgressContainer.style.borderLeft = isDark ? '5px solid #22c55e' : '5px solid #22c55e';
+            technicalProgressTitle.style.color = isDark ? '#e5e7eb' : '#111827';
+            technicalProgressText.style.color = isDark ? '#e5e7eb' : '#111827';
+            technicalProgressLabel.style.color = isDark ? '#ffffff' : '#111827';
+            technicalProgressCountBadge.style.background = isDark ? 'rgba(34,197,94,0.18)' : 'rgba(34,197,94,0.12)';
+            technicalProgressCountBadge.style.color = isDark ? '#bbf7d0' : '#166534';
+            technicalProgressCountBadge.style.border = isDark ? '1px solid rgba(74,222,128,0.7)' : '1px solid rgba(34,197,94,0.35)';
+            technicalProgressBar.style.background = isDark ? 'rgba(15,23,42,0.8)' : '#e5e7eb';
+        } catch (e) {}
+
+        // OSINT
+        try {
+            osintProgressContainer.style.background = isDark ? 'rgba(15,23,42,0.95)' : '#ffffff';
+            osintProgressContainer.style.boxShadow = isDark ? '0 8px 20px rgba(15,23,42,0.9)' : '0 6px 16px rgba(17,24,39,0.08)';
+            osintProgressContainer.style.border = isDark ? '1px solid rgba(129,140,248,0.45)' : '1px solid #d7e3f0';
+            osintProgressContainer.style.borderLeft = isDark ? '5px solid #8b5cf6' : '5px solid #8b5cf6';
+            osintProgressTitle.style.color = isDark ? '#e5e7eb' : '#111827';
+            osintCurrentLabel.style.color = isDark ? '#9ca3af' : '#374151';
+            osintTotalLabel.style.color = isDark ? '#9ca3af' : '#374151';
+            osintCurrentInfo.style.color = isDark ? '#e5e7eb' : '#111827';
+            osintTotalInfo.style.color = isDark ? '#e5e7eb' : '#111827';
+            osintProgressCountBadge.style.background = isDark ? 'rgba(129,140,248,0.18)' : 'rgba(129,140,248,0.12)';
+            osintProgressCountBadge.style.color = isDark ? '#ede9fe' : '#3730a3';
+            osintProgressCountBadge.style.border = isDark ? '1px solid rgba(167,139,250,0.7)' : '1px solid rgba(129,140,248,0.35)';
+            osintCurrentLabelInner.style.color = isDark ? '#ffffff' : '#111827';
+            osintTotalLabelInner.style.color = isDark ? '#ffffff' : '#111827';
+            osintCurrentBar.style.background = isDark ? 'rgba(15,23,42,0.8)' : '#e5e7eb';
+            osintTotalBar.style.background = isDark ? 'rgba(15,23,42,0.8)' : '#e5e7eb';
+        } catch (e) {}
+
+        // Pentest
+        try {
+            pentestProgressContainer.style.background = isDark ? 'rgba(15,23,42,0.95)' : '#ffffff';
+            pentestProgressContainer.style.boxShadow = isDark ? '0 8px 20px rgba(15,23,42,0.9)' : '0 6px 16px rgba(17,24,39,0.08)';
+            pentestProgressContainer.style.border = isDark ? '1px solid rgba(248,113,113,0.35)' : '1px solid #d7e3f0';
+            pentestProgressContainer.style.borderLeft = isDark ? '5px solid #ef4444' : '5px solid #ef4444';
+            pentestProgressTitle.style.color = isDark ? '#e5e7eb' : '#111827';
+            pentestCurrentLabel.style.color = isDark ? '#9ca3af' : '#374151';
+            pentestTotalLabel.style.color = isDark ? '#9ca3af' : '#374151';
+            pentestCurrentInfo.style.color = isDark ? '#e5e7eb' : '#111827';
+            pentestTotalInfo.style.color = isDark ? '#e5e7eb' : '#111827';
+            pentestProgressCountBadge.style.background = isDark ? 'rgba(239,68,68,0.15)' : 'rgba(239,68,68,0.12)';
+            pentestProgressCountBadge.style.color = isDark ? '#fecaca' : '#991b1b';
+            pentestProgressCountBadge.style.border = isDark ? '1px solid rgba(248,113,113,0.6)' : '1px solid rgba(239,68,68,0.35)';
+            pentestCurrentLabelInner.style.color = isDark ? '#ffffff' : '#111827';
+            pentestTotalLabelInner.style.color = isDark ? '#ffffff' : '#111827';
+            pentestCurrentBar.style.background = isDark ? 'rgba(15,23,42,0.8)' : '#e5e7eb';
+            pentestTotalBar.style.background = isDark ? 'rgba(15,23,42,0.8)' : '#e5e7eb';
+        } catch (e) {}
+
+        // Summary boxes finales : re-coloriser au changement de thème
+        try {
+            const restyleSummaryBox = (box, summaryBg, summaryBorderLeft, titleColor, textColor) => {
+                if (!box || !box.firstElementChild) return;
+                const inner = box.firstElementChild;
+                inner.style.background = summaryBg;
+                inner.style.borderLeft = `3px solid ${summaryBorderLeft}`;
+
+                const titleDiv = inner.children && inner.children.length > 0 ? inner.children[0] : null;
+                const messageDiv = inner.children && inner.children.length > 1 ? inner.children[1] : null;
+                if (titleDiv) titleDiv.style.color = titleColor;
+                if (messageDiv) messageDiv.style.color = textColor;
+            };
+
+            // Technical summary
+            const technicalBox = document.getElementById('technical-summary-box');
+            if (technicalBox) {
+                const summaryBg = isDark ? '#022c22' : 'linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%)';
+                const summaryBorderLeft = isDark ? '#22c55e' : '#27ae60';
+                const titleColor = isDark ? '#bbf7d0' : '#229954';
+                const textColor = isDark ? '#e5e7eb' : '#2c3e50';
+                restyleSummaryBox(technicalBox, summaryBg, summaryBorderLeft, titleColor, textColor);
+            }
+
+            // OSINT summary
+            const osintBox = document.getElementById('osint-summary-box');
+            if (osintBox) {
+                const summaryBg = isDark ? '#020617' : 'linear-gradient(135deg, #eef2ff 0%, #e0f2fe 100%)';
+                const summaryBorderLeft = isDark ? '#6366f1' : '#2563eb';
+                const titleColor = isDark ? '#c7d2fe' : '#1d4ed8';
+                const textColor = isDark ? '#e5e7eb' : '#1f2937';
+                restyleSummaryBox(osintBox, summaryBg, summaryBorderLeft, titleColor, textColor);
+            }
+
+            // Pentest summary
+            const pentestBox = document.getElementById('pentest-summary-box');
+            if (pentestBox) {
+                const summaryBg = isDark ? '#130b0b' : 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)';
+                const summaryBorderLeft = isDark ? '#f97316' : '#ef4444';
+                const titleColor = isDark ? '#fed7aa' : '#b91c1c';
+                const textColor = isDark ? '#e5e7eb' : '#1f2937';
+                restyleSummaryBox(pentestBox, summaryBg, summaryBorderLeft, titleColor, textColor);
+            }
+        } catch (e) {}
+
+        // Cumulative boxes : en light, elles restent lisibles (border + text)
+        try {
+            if (!isDark) {
+                if (osintCumulativeBox) osintCumulativeBox.style.background = '#f8fafc';
+                if (osintCumulativeContent) osintCumulativeContent.style.color = '#111827';
+                if (pentestCumulativeBox) pentestCumulativeBox.style.background = '#f8fafc';
+                if (pentestCumulativeContent) pentestCumulativeContent.style.color = '#111827';
+            } else {
+                if (osintCumulativeBox) osintCumulativeBox.style.background = 'rgba(15,118,110,0.18)';
+                if (osintCumulativeContent) osintCumulativeContent.style.color = '#e5e7eb';
+                if (pentestCumulativeBox) pentestCumulativeBox.style.background = 'rgba(30,64,175,0.12)';
+                if (pentestCumulativeContent) pentestCumulativeContent.style.color = '#e5e7eb';
+            }
+        } catch (e) {}
+    }
+
+    // Appliquer une première fois + écouter les changements de thème (data-theme sur <body>)
+    try {
+        applyPreviewTheme();
+        if (window.MutationObserver && document.body) {
+            const mo = new MutationObserver(() => applyPreviewTheme());
+            mo.observe(document.body, { attributes: true, attributeFilter: ['data-theme'] });
+        }
+    } catch (e) {}
+
     setupScrapingListener();
     setupTechnicalListener();
     setupOSINTListener();

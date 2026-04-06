@@ -5,12 +5,15 @@ Ces tâches permettent d'exécuter le scraping de manière asynchrone,
 évitant ainsi de bloquer l'application Flask principale.
 """
 
+import time
+
 from celery_app import celery
 from services.unified_scraper import UnifiedScraper
 from services.database import Database
 from services.logging_config import setup_logger
 from services.name_validator import is_valid_human_name, validate_name_pair
 import logging
+import os
 import json
 from typing import Dict
 
@@ -18,11 +21,114 @@ from typing import Dict
 logger = setup_logger(__name__, 'scraping_tasks.log', level=logging.INFO)
 
 from tasks.heavy_schedule import BulkSubtaskStagger
+from tasks.phone_tasks import analyze_phones_dict_for_storage
 
 try:
-    from config import CELERY_BULK_STAGGER_SEC
+    from config import CELERY_BULK_STAGGER_SEC, SEO_USE_LIGHTHOUSE_DEFAULT
 except ImportError:
     CELERY_BULK_STAGGER_SEC = 0.75
+    SEO_USE_LIGHTHOUSE_DEFAULT = False
+
+_SCRAPE_ANALYSIS_BATCH_SIZE = max(1, int(os.environ.get('SCRAPE_ANALYSIS_BATCH_SIZE', '20')))
+_SCRAPE_ANALYSIS_BATCH_RETRY_MAX = max(0, int(os.environ.get('SCRAPE_ANALYSIS_BATCH_RETRY_MAX', '1')))
+
+
+# Verrou global optionnel (désactivé par défaut) : si activé, un seul scrape à la fois sur tout le cluster.
+# Par défaut : parallélisme = Celery worker (--concurrency) + étalement côté enqueue, comme avant.
+def _env_bool(name: str, default: bool = False) -> bool:
+    v = os.environ.get(name)
+    if v is None or str(v).strip() == '':
+        return default
+    return str(v).strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+_SCRAPING_GLOBAL_LOCK_ENABLED = _env_bool('SCRAPING_GLOBAL_LOCK_ENABLED', False)
+
+_SCRAPING_LOCK_KEY = os.environ.get('SCRAPING_LOCK_KEY', 'prospectlab:lock:scraping:global')
+_SCRAPING_LOCK_TTL_SEC = int(os.environ.get('SCRAPING_LOCK_TTL_SEC', '3600'))
+_SCRAPING_LOCK_RETRY_SEC = float(os.environ.get('SCRAPING_LOCK_RETRY_SEC', '10'))
+# Attente du verrou dans la même exécution Celery (pas de self.retry() : évite MaxRetriesExceeded en bulk).
+try:
+    _SCRAPING_LOCK_WAIT_MAX_SEC = int(os.environ.get('SCRAPING_LOCK_WAIT_MAX_SEC', str(86400)))
+except ValueError:
+    _SCRAPING_LOCK_WAIT_MAX_SEC = 86400
+_SCRAPING_LOCK_WAIT_MAX_SEC = max(int(_SCRAPING_LOCK_RETRY_SEC) * 2, _SCRAPING_LOCK_WAIT_MAX_SEC)
+
+_redis_lock_client = None
+_redis_lock_release_script = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+  return redis.call("del", KEYS[1])
+else
+  return 0
+end
+"""
+
+
+def _redis_lock():
+    global _redis_lock_client
+    if _redis_lock_client is None:
+        import redis
+        from config import CELERY_BROKER_URL
+
+        _redis_lock_client = redis.Redis.from_url(
+            CELERY_BROKER_URL,
+            decode_responses=True,
+            socket_connect_timeout=2.0,
+            socket_timeout=2.0,
+        )
+    return _redis_lock_client
+
+
+def _acquire_scraping_lock(lock_value: str) -> bool:
+    r = _redis_lock()
+    return bool(r.set(_SCRAPING_LOCK_KEY, lock_value, nx=True, ex=_SCRAPING_LOCK_TTL_SEC))
+
+
+def _release_scraping_lock(lock_value: str) -> None:
+    r = _redis_lock()
+    try:
+        r.eval(_redis_lock_release_script, 1, _SCRAPING_LOCK_KEY, lock_value)
+    except Exception:
+        # Si Redis est instable, on évite d'écraser l'exécution de la tâche.
+        pass
+
+
+def _wait_acquire_scraping_lock(lock_value: str, task_self=None, wait_label: str = 'Scraping') -> bool:
+    """
+    Attend le verrou Redis sans utiliser Celery retry (sinon max_retries épuisé sur les gros bulk).
+
+    Returns:
+        True si le verrou a été acquis, False si délai max dépassé.
+    """
+    deadline = time.monotonic() + float(_SCRAPING_LOCK_WAIT_MAX_SEC)
+    logged_wait = False
+    last_meta = 0.0
+
+    while time.monotonic() < deadline:
+        if _acquire_scraping_lock(lock_value):
+            return True
+        if not logged_wait:
+            logger.info(
+                f'{wait_label}: verrou déjà pris, attente active (file « un à un », '
+                f'jusqu’à {_SCRAPING_LOCK_WAIT_MAX_SEC}s)...'
+            )
+            logged_wait = True
+        now = time.monotonic()
+        if task_self is not None and (now - last_meta) >= 30.0:
+            last_meta = now
+            try:
+                task_self.update_state(
+                    state='PROGRESS',
+                    meta={'message': 'En file d’attente (scraping global, verrou)...'},
+                )
+            except Exception:
+                pass
+        time.sleep(_SCRAPING_LOCK_RETRY_SEC)
+
+    logger.warning(
+        f'{wait_label}: délai max d’attente sur le verrou global dépassé ({_SCRAPING_LOCK_WAIT_MAX_SEC}s).'
+    )
+    return False
 
 
 def _safe_update_state(task, task_id, **kwargs):
@@ -51,6 +157,100 @@ def _safe_update_state(task, task_id, **kwargs):
         # Ne log que si ce n'est pas une erreur de task_id vide
         if 'task_id' not in str(exc).lower() and 'empty' not in str(exc).lower():
             logger.warning(f'update_state impossible: {exc}')
+
+
+def _build_email_analyses_dict(emails_found, source_url: str, log_prefix: str = '') -> Dict:
+    """Analyse les emails scrapés (MX, Hunter, Abstract, etc.) pour la persistance scraper_emails."""
+    email_analyses: Dict = {}
+    if not emails_found:
+        return email_analyses
+    prefix = f'{log_prefix} ' if log_prefix else ''
+    logger.info(f'{prefix}{len(emails_found)} email(s) trouvé(s), lancement de l\'analyse...')
+    try:
+        from services.email_analyzer import EmailAnalyzer
+
+        emails_list = []
+        for email in emails_found:
+            if isinstance(email, dict):
+                email_str = email.get('email') or email.get('value') or str(email)
+            else:
+                email_str = str(email)
+            if email_str:
+                emails_list.append(email_str)
+
+        analyzer = EmailAnalyzer()
+        analyzed_count = 0
+        for idx, email_str in enumerate(emails_list, start=1):
+            try:
+                logger.debug(f'{prefix}Analyse de {email_str} ({idx}/{len(emails_list)})')
+                analysis = analyzer.analyze_email(email_str, source_url=source_url)
+                if analysis:
+                    email_analyses[email_str] = analysis
+                    analyzed_count += 1
+                    logger.debug(
+                        f'{prefix}✓ {email_str} analysé: type={analysis.get("type")}, '
+                        f'provider={analysis.get("provider")}, mx_valid={analysis.get("mx_valid")}'
+                    )
+            except Exception as email_error:
+                logger.warning(f'{prefix}Erreur lors de l\'analyse de {email_str}: {email_error}')
+
+        logger.info(
+            f'{prefix}Analyse des emails terminée: {analyzed_count}/{len(emails_list)} analysé(s)'
+        )
+    except Exception as email_error:
+        logger.error(f'{prefix}Erreur lors de l\'analyse des emails: {email_error}', exc_info=True)
+    return email_analyses
+
+
+def _persist_personnes_from_email_analyses(db, entreprise_id: int, email_analyses: Dict, log_context: str) -> int:
+    """Enregistre les contacts détectés depuis les analyses d'emails (table personnes)."""
+    if not email_analyses:
+        return 0
+    people_saved = 0
+    for email_str, analysis in email_analyses.items():
+        if not analysis.get('is_person') or not analysis.get('name_info'):
+            continue
+        name_info = analysis['name_info']
+        first_name = name_info.get('first_name')
+        last_name = name_info.get('last_name')
+        if not (first_name and last_name):
+            continue
+        validated = validate_name_pair(first_name, last_name)
+        if not validated:
+            full_name = f'{first_name} {last_name}'
+            if not is_valid_human_name(full_name):
+                logger.debug(
+                    f'{log_context} ⚠ Nom invalide ignoré depuis email: '
+                    f'{first_name} {last_name} ({email_str})'
+                )
+                continue
+            if not is_valid_human_name(first_name) or not is_valid_human_name(last_name):
+                logger.debug(
+                    f'{log_context} ⚠ Nom invalide ignoré depuis email: '
+                    f'{first_name} {last_name} ({email_str})'
+                )
+                continue
+        else:
+            first_name, last_name = validated
+        try:
+            db.save_personne(
+                entreprise_id=entreprise_id,
+                prenom=first_name,
+                nom=last_name,
+                email=email_str,
+                source='scraper_email',
+            )
+            people_saved += 1
+            logger.debug(
+                f'{log_context} ✓ Personne enregistrée: {first_name} {last_name} ({email_str})'
+            )
+        except Exception as person_error:
+            logger.warning(
+                f'{log_context} ⚠ Erreur enregistrement personne {first_name} {last_name}: {person_error}'
+            )
+    if people_saved > 0:
+        logger.info(f'{log_context} ✓ {people_saved} personne(s) enregistrée(s) depuis les emails')
+    return people_saved
 
 
 @celery.task(bind=True)
@@ -82,6 +282,20 @@ def scrape_emails_task(self, url, max_depth=3, max_workers=5, max_time=300,
     """
     try:
         logger.info(f'Démarrage du scraping pour {url}')
+
+        # Verrou global optionnel (SCRAPING_GLOBAL_LOCK_ENABLED=1) : sinon parallèle selon le worker Celery.
+        lock_value = str(getattr(self.request, "id", None) or id(self))
+        lock_acquired = False
+        if _SCRAPING_GLOBAL_LOCK_ENABLED:
+            if not _wait_acquire_scraping_lock(lock_value, task_self=self, wait_label='Scraping'):
+                return {
+                    'success': False,
+                    'url': url,
+                    'entreprise_id': entreprise_id,
+                    'error': 'scraping_lock_wait_timeout',
+                    'results': {},
+                }
+            lock_acquired = True
         
         def progress_callback(message):
             """Callback pour mettre à jour la progression de la tâche"""
@@ -118,7 +332,19 @@ def scrape_emails_task(self, url, max_depth=3, max_workers=5, max_time=300,
                 
                 metadata_value = results.get('metadata', {})
                 metadata_total = len(metadata_value) if isinstance(metadata_value, dict) else 0
-                
+
+                emails_found = results.get('emails') or []
+                email_analyses = _build_email_analyses_dict(
+                    emails_found,
+                    url,
+                    log_prefix=f'[Relance scraping entreprise_id={entreprise_id}]',
+                )
+
+                phone_analyses = {}
+                phones_found = results.get('phones') or []
+                if phones_found:
+                    phone_analyses = analyze_phones_dict_for_storage(phones_found, source_url=url)
+
                 db.save_scraper(
                     entreprise_id=entreprise_id,
                     url=url,
@@ -130,6 +356,7 @@ def scrape_emails_task(self, url, max_depth=3, max_workers=5, max_time=300,
                     technologies=results.get('technologies'),
                     metadata=metadata_value,
                     images=results.get('images'),
+                    forms=results.get('forms'),
                     visited_urls=visited_urls_count,
                     total_emails=results.get('total_emails', 0),
                     total_people=results.get('total_people', 0),
@@ -138,11 +365,23 @@ def scrape_emails_task(self, url, max_depth=3, max_workers=5, max_time=300,
                     total_technologies=results.get('total_technologies', 0),
                     total_metadata=metadata_total,
                     total_images=results.get('total_images', 0),
-                    duration=results.get('duration', 0)
+                    total_forms=results.get('total_forms', 0),
+                    duration=results.get('duration', 0),
+                    email_analyses=email_analyses if email_analyses else None,
+                    phone_analyses=phone_analyses if phone_analyses else None,
+                )
+                _persist_personnes_from_email_analyses(
+                    db,
+                    entreprise_id,
+                    email_analyses,
+                    f'[Relance scraping entreprise_id={entreprise_id}]',
                 )
             except Exception as e:
                 logger.warning(f'Erreur lors de la sauvegarde du scraper pour {url}: {e}')
         
+        if lock_acquired:
+            _release_scraping_lock(lock_value)
+
         logger.info(f'Scraping terminé pour {url}: {len(results.get("emails", []))} emails trouvés')
         
         return {
@@ -153,13 +392,16 @@ def scrape_emails_task(self, url, max_depth=3, max_workers=5, max_time=300,
         }
         
     except Exception as e:
+        if lock_acquired:
+            _release_scraping_lock(lock_value)
         logger.error(f'Erreur lors du scraping de {url}: {e}', exc_info=True)
         raise
 
 
 @celery.task(bind=True)
 def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers: int = 5,
-                         max_time: int = 180, max_pages: int = 30) -> Dict:
+                         max_time: int = 180, max_pages: int = 30,
+                         entreprise_ids: list | None = None) -> Dict:
     """
     Tâche Celery pour scraper automatiquement toutes les entreprises d'une analyse.
     
@@ -180,6 +422,23 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
         dict: Statistiques globales du scraping pour cette analyse.
     """
     logger.info(f'Demarrage du scraping pour l analyse {analysis_id}')
+
+    # Verrou global optionnel pour le pack analyse (même interrupteur que scrape_emails_task).
+    lock_value = str(getattr(self.request, 'id', None) or id(self))
+    lock_acquired = False
+    if _SCRAPING_GLOBAL_LOCK_ENABLED:
+        if not _wait_acquire_scraping_lock(
+            lock_value, task_self=self, wait_label=f'Scraping pack analyse {analysis_id}'
+        ):
+            return {
+                'success': False,
+                'analysis_id': analysis_id,
+                'error': 'scraping_lock_wait_timeout',
+                'scraped_count': 0,
+                'stats': {},
+            }
+        lock_acquired = True
+
     task_id = getattr(self.request, 'id', None)
     if not task_id:
         logger.debug('task_id introuvable au demarrage de scrape_analysis_task')
@@ -187,7 +446,8 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
     conn = db.get_connection()
     cursor = conn.cursor()
     
-    db.execute_sql(cursor,
+    db.execute_sql(
+        cursor,
         '''
         SELECT id, nom, website
         FROM entreprises
@@ -199,9 +459,28 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
     )
     rows = cursor.fetchall()
     conn.close()
+
+    if entreprise_ids:
+        allowed = set()
+        for rid in entreprise_ids:
+            try:
+                allowed.add(int(rid))
+            except Exception:
+                continue
+        filtered_rows = []
+        for row in rows:
+            try:
+                row_id = row.get('id') if isinstance(row, dict) else row[0]
+                if row_id is not None and int(row_id) in allowed:
+                    filtered_rows.append(row)
+            except Exception:
+                continue
+        rows = filtered_rows
     
     if not rows:
         logger.info(f'Aucune entreprise avec website pour l analyse {analysis_id}')
+        if lock_acquired:
+            _release_scraping_lock(lock_value)
         return {
             'success': True,
             'analysis_id': analysis_id,
@@ -277,7 +556,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                 tech_task = technical_analysis_task.apply_async(
                     kwargs=dict(url=website_str, entreprise_id=entreprise_id, enable_nmap=False),
                     countdown=cd,
-                    queue='heavy',
+                    queue='technical',
                 )
                 tech_tasks.append({
                     'task': tech_task,
@@ -414,65 +693,29 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
             
             results = scraper.scrape()
             
-            # Analyser les emails trouvés avant de sauvegarder
             emails_found = results.get('emails', [])
-            email_analyses = {}
-            
-            if emails_found:
-                logger.info(
-                    f'[Scraping Analyse {analysis_id}] {len(emails_found)} email(s) trouvé(s) pour {entreprise_name}, '
-                    f'lancement de l\'analyse...'
-                )
-                try:
-                    from services.email_analyzer import EmailAnalyzer
-                    
-                    # Extraire les emails sous forme de liste de strings
-                    emails_list = []
-                    for email in emails_found:
-                        if isinstance(email, dict):
-                            email_str = email.get('email') or email.get('value') or str(email)
-                        else:
-                            email_str = str(email)
-                        if email_str:
-                            emails_list.append(email_str)
-                    
-                    # Analyser directement les emails (sans passer par une tâche Celery)
-                    analyzer = EmailAnalyzer()
-                    analyzed_count = 0
-                    
-                    for idx, email_str in enumerate(emails_list, start=1):
-                        try:
-                            logger.debug(
-                                f'[Scraping Analyse {analysis_id}] Analyse de {email_str} ({idx}/{len(emails_list)}) pour {entreprise_name}'
-                            )
-                            analysis = analyzer.analyze_email(email_str, source_url=website_str)
-                            if analysis:
-                                email_analyses[email_str] = analysis
-                                analyzed_count += 1
-                                logger.debug(
-                                    f'[Scraping Analyse {analysis_id}] ✓ {email_str} analysé: '
-                                    f'type={analysis.get("type")}, provider={analysis.get("provider")}, '
-                                    f'mx_valid={analysis.get("mx_valid")}'
-                                )
-                        except Exception as email_error:
-                            logger.warning(
-                                f'[Scraping Analyse {analysis_id}] ⚠ Erreur lors de l\'analyse de {email_str}: {email_error}'
-                            )
-                    
-                    logger.info(
-                        f'[Scraping Analyse {analysis_id}] ✓ Analyse des emails terminée pour {entreprise_name}: '
-                        f'{analyzed_count}/{len(emails_list)} email(s) analysé(s)'
-                    )
-                except Exception as email_error:
-                    logger.error(
-                        f'[Scraping Analyse {analysis_id}] ✗ Erreur lors de l\'analyse des emails pour {entreprise_name}: {email_error}',
-                        exc_info=True
-                    )
-            else:
+            if not emails_found:
                 logger.info(
                     f'[Scraping Analyse {analysis_id}] Aucun email trouvé pour {entreprise_name}, '
                     f'pas d\'analyse nécessaire'
                 )
+            email_analyses = _build_email_analyses_dict(
+                emails_found,
+                website_str,
+                log_prefix=f'[Scraping Analyse {analysis_id}] {entreprise_name}',
+            )
+            
+            phone_analyses = {}
+            phones_found = results.get('phones') or []
+            if phones_found:
+                try:
+                    phone_analyses = analyze_phones_dict_for_storage(
+                        phones_found, source_url=website_str
+                    )
+                except Exception as pe:
+                    logger.warning(
+                        f'[Scraping Analyse {analysis_id}] Analyse téléphones pour BDD: {pe}'
+                    )
             
             # Sauvegarder les résultats complets en BDD avec les analyses
             try:
@@ -510,65 +753,16 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                     total_images=results.get('total_images', 0),
                     total_forms=results.get('total_forms', 0),
                     duration=results.get('duration', 0),
-                    email_analyses=email_analyses if email_analyses else None
+                    email_analyses=email_analyses if email_analyses else None,
+                    phone_analyses=phone_analyses if phone_analyses else None,
                 )
                 
-                # Enregistrer les personnes détectées depuis les emails dans la table personnes
-                if email_analyses:
-                    people_saved = 0
-                    for email_str, analysis in email_analyses.items():
-                        if analysis.get('is_person') and analysis.get('name_info'):
-                            name_info = analysis['name_info']
-                            first_name = name_info.get('first_name')
-                            last_name = name_info.get('last_name')
-                            
-                            if first_name and last_name:
-                                # Valider que c'est bien un nom humain avant de sauvegarder
-                                validated = validate_name_pair(first_name, last_name)
-                                if not validated:
-                                    # Si validate_name_pair échoue, essayer avec is_valid_human_name
-                                    full_name = f'{first_name} {last_name}'
-                                    if not is_valid_human_name(full_name):
-                                        logger.debug(
-                                            f'[Scraping Analyse {analysis_id}] ⚠ Nom invalide ignoré depuis email: '
-                                            f'{first_name} {last_name} ({email_str})'
-                                        )
-                                        continue
-                                    # Valider chaque partie individuellement
-                                    if not is_valid_human_name(first_name) or not is_valid_human_name(last_name):
-                                        logger.debug(
-                                            f'[Scraping Analyse {analysis_id}] ⚠ Nom invalide ignoré depuis email: '
-                                            f'{first_name} {last_name} ({email_str})'
-                                        )
-                                        continue
-                                else:
-                                    # Utiliser les versions validées
-                                    first_name, last_name = validated
-                                
-                                try:
-                                    personne_id = db.save_personne(
-                                        entreprise_id=entreprise_id,
-                                        prenom=first_name,
-                                        nom=last_name,
-                                        email=email_str,
-                                        source='scraper_email'
-                                    )
-                                    people_saved += 1
-                                    logger.debug(
-                                        f'[Scraping Analyse {analysis_id}] ✓ Personne enregistrée: '
-                                        f'{first_name} {last_name} ({email_str})'
-                                    )
-                                except Exception as person_error:
-                                    logger.warning(
-                                        f'[Scraping Analyse {analysis_id}] ⚠ Erreur lors de l\'enregistrement '
-                                        f'de la personne {first_name} {last_name}: {person_error}'
-                                    )
-                    
-                    if people_saved > 0:
-                        logger.info(
-                            f'[Scraping Analyse {analysis_id}] ✓ {people_saved} personne(s) enregistrée(s) '
-                            f'depuis les emails pour {entreprise_name}'
-                        )
+                _persist_personnes_from_email_analyses(
+                    db,
+                    entreprise_id,
+                    email_analyses,
+                    f'[Scraping Analyse {analysis_id}] {entreprise_name}',
+                )
                 
                 # Enregistrer les personnes trouvées dans les textes des pages
                 scraper_people = results.get('people', [])
@@ -695,7 +889,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                             phones_from_scrapers=phones_from_scrapers,
                         ),
                         countdown=osint_cd,
-                        queue='heavy',
+                        queue='osint',
                     )
                     
                     # Stocker la tâche OSINT pour le monitoring (liste alimentée à chaque fin de site scrapé)
@@ -718,10 +912,10 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                             kwargs=dict(
                                 url=website_str,
                                 entreprise_id=entreprise_id,
-                                use_lighthouse=False,
+                                use_lighthouse=SEO_USE_LIGHTHOUSE_DEFAULT,
                             ),
                             countdown=seo_cd,
-                            queue='heavy',
+                            queue='seo',
                         )
                         seo_tasks.append({
                             'task': seo_task,
@@ -931,7 +1125,10 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
         f'Scraping terminé pour l\'analyse {analysis_id}: '
         f'{scraped_count}/{total} entreprises traitées'
     )
-    
+
+    if lock_acquired:
+        _release_scraping_lock(lock_value)
+
     return {
         'success': True,
         'analysis_id': analysis_id,
@@ -954,5 +1151,219 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
             {'task_id': t['task_id'], 'entreprise_id': t['entreprise_id'], 'url': t['url'], 'nom': t['nom']}
             for t in pentest_tasks
         ]
+    }
+
+
+@celery.task(bind=True)
+def scrape_analysis_orchestrator_task(
+    self,
+    analysis_id: int,
+    max_depth: int = 2,
+    max_workers: int = 5,
+    max_time: int = 180,
+    max_pages: int = 30,
+    batch_size: int = _SCRAPE_ANALYSIS_BATCH_SIZE,
+) -> Dict:
+    """
+    Orchestrateur du scraping d'analyse:
+    - découpe les entreprises en lots,
+    - lance un scrape_analysis_task par lot,
+    - agrège la progression websocket,
+    - retry simple par lot en cas d'échec.
+    """
+    logger.info(
+        '[Scraping Orchestrator %s] Démarrage analysis_id=%s batch_size=%s',
+        getattr(self.request, 'id', None),
+        analysis_id,
+        batch_size,
+    )
+
+    db = Database()
+    conn = db.get_connection()
+    cursor = conn.cursor()
+    db.execute_sql(
+        cursor,
+        '''
+        SELECT id
+        FROM entreprises
+        WHERE analyse_id = ?
+          AND website IS NOT NULL
+          AND TRIM(website) <> ''
+        ''',
+        (analysis_id,),
+    )
+    raw_ids = cursor.fetchall()
+    conn.close()
+
+    entreprise_ids = []
+    for row in raw_ids:
+        try:
+            eid = row.get('id') if isinstance(row, dict) else row[0]
+            if eid is not None:
+                entreprise_ids.append(int(eid))
+        except Exception:
+            continue
+
+    total_entreprises = len(entreprise_ids)
+    if total_entreprises == 0:
+        return {
+            'success': True,
+            'analysis_id': analysis_id,
+            'scraped_count': 0,
+            'total_entreprises': 0,
+            'stats': {
+                'total_emails': 0,
+                'total_people': 0,
+                'total_phones': 0,
+                'total_social_platforms': 0,
+                'total_technologies': 0,
+                'total_images': 0,
+            },
+            'tech_tasks': [],
+            'osint_tasks': [],
+            'seo_tasks': [],
+            'pentest_tasks': [],
+            'failed_batches': [],
+        }
+
+    bs = max(1, int(batch_size or _SCRAPE_ANALYSIS_BATCH_SIZE))
+    batches = [entreprise_ids[i:i + bs] for i in range(0, total_entreprises, bs)]
+
+    # Aggregats globaux
+    global_stats = {
+        'total_emails': 0,
+        'total_people': 0,
+        'total_phones': 0,
+        'total_social_platforms': 0,
+        'total_technologies': 0,
+        'total_images': 0,
+    }
+    scraped_count = 0
+    tech_tasks_all = {}
+    osint_tasks_all = {}
+    seo_tasks_all = {}
+    pentest_tasks_all = {}
+    failed_batches = []
+
+    # Map tid -> metadata batch
+    running = {}
+    completed_tids = set()
+
+    def _launch_batch(batch_idx: int, ids: list[int], retry_count: int = 0):
+        res = scrape_analysis_task.apply_async(
+            kwargs=dict(
+                analysis_id=analysis_id,
+                max_depth=max_depth,
+                max_workers=max_workers,
+                max_time=max_time,
+                max_pages=max_pages,
+                entreprise_ids=ids,
+            ),
+            queue='heavy',
+        )
+        running[res.id] = {
+            'batch_idx': batch_idx,
+            'ids': ids,
+            'retry_count': retry_count,
+        }
+
+    for idx, ids in enumerate(batches):
+        _launch_batch(idx, ids, retry_count=0)
+
+    while len(completed_tids) < len(running):
+        # snapshot car running peut changer (retry -> nouveau tid)
+        for tid, meta in list(running.items()):
+            if tid in completed_tids:
+                continue
+            r = celery.AsyncResult(tid)
+            state = r.state
+
+            if state == 'PROGRESS':
+                info = r.info if isinstance(r.info, dict) else {}
+                for t in info.get('tech_tasks_launched_ids', []) or []:
+                    if isinstance(t, dict) and t.get('task_id'):
+                        tech_tasks_all[t['task_id']] = t
+                for t in info.get('osint_tasks_launched_ids', []) or []:
+                    if isinstance(t, dict) and t.get('task_id'):
+                        osint_tasks_all[t['task_id']] = t
+                for t in info.get('seo_tasks_launched_ids', []) or []:
+                    if isinstance(t, dict) and t.get('task_id'):
+                        seo_tasks_all[t['task_id']] = t
+                for t in info.get('pentest_tasks_launched_ids', []) or []:
+                    if isinstance(t, dict) and t.get('task_id'):
+                        pentest_tasks_all[t['task_id']] = t
+
+            elif state == 'SUCCESS':
+                completed_tids.add(tid)
+                res = r.result if isinstance(r.result, dict) else {}
+                scraped_count += int(res.get('scraped_count', 0) or 0)
+                s = res.get('stats', {}) if isinstance(res.get('stats', {}), dict) else {}
+                for k in global_stats.keys():
+                    global_stats[k] += int(s.get(k, 0) or 0)
+
+                for t in res.get('tech_tasks', []) or []:
+                    if isinstance(t, dict) and t.get('task_id'):
+                        tech_tasks_all[t['task_id']] = t
+                for t in res.get('osint_tasks', []) or []:
+                    if isinstance(t, dict) and t.get('task_id'):
+                        osint_tasks_all[t['task_id']] = t
+                for t in res.get('seo_tasks', []) or []:
+                    if isinstance(t, dict) and t.get('task_id'):
+                        seo_tasks_all[t['task_id']] = t
+                for t in res.get('pentest_tasks', []) or []:
+                    if isinstance(t, dict) and t.get('task_id'):
+                        pentest_tasks_all[t['task_id']] = t
+
+            elif state in ('FAILURE', 'REVOKED'):
+                retry_count = int(meta.get('retry_count', 0) or 0)
+                if retry_count < _SCRAPE_ANALYSIS_BATCH_RETRY_MAX:
+                    # Retry du batch uniquement
+                    completed_tids.add(tid)
+                    _launch_batch(meta['batch_idx'], meta['ids'], retry_count=retry_count + 1)
+                else:
+                    completed_tids.add(tid)
+                    failed_batches.append(
+                        {
+                            'batch_idx': meta.get('batch_idx'),
+                            'size': len(meta.get('ids') or []),
+                            'error': str(r.info),
+                        }
+                    )
+
+        percentage = int((scraped_count / total_entreprises) * 100) if total_entreprises > 0 else 0
+        self.update_state(
+            state='PROGRESS',
+            meta={
+                'analysis_id': analysis_id,
+                'current': scraped_count,
+                'total': total_entreprises,
+                'message': f'Scraping en cours ({scraped_count}/{total_entreprises})',
+                'total_emails': global_stats['total_emails'],
+                'total_people': global_stats['total_people'],
+                'total_phones': global_stats['total_phones'],
+                'total_social_platforms': global_stats['total_social_platforms'],
+                'total_technologies': global_stats['total_technologies'],
+                'total_images': global_stats['total_images'],
+                'tech_tasks_launched_ids': list(tech_tasks_all.values()),
+                'osint_tasks_launched_ids': list(osint_tasks_all.values()),
+                'seo_tasks_launched_ids': list(seo_tasks_all.values()),
+                'pentest_tasks_launched_ids': list(pentest_tasks_all.values()),
+                'failed_batches': failed_batches,
+                'progress': percentage,
+            },
+        )
+        time.sleep(1.0)
+
+    return {
+        'success': len(failed_batches) == 0,
+        'analysis_id': analysis_id,
+        'scraped_count': scraped_count,
+        'total_entreprises': total_entreprises,
+        'stats': global_stats,
+        'tech_tasks': list(tech_tasks_all.values()),
+        'osint_tasks': list(osint_tasks_all.values()),
+        'seo_tasks': list(seo_tasks_all.values()),
+        'pentest_tasks': list(pentest_tasks_all.values()),
+        'failed_batches': failed_batches,
     }
 

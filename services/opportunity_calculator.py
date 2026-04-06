@@ -3,8 +3,9 @@ Calculateur de score d'opportunité pour les entreprises
 Combine les données OSINT, Pentest et Analyse Technique pour calculer un score d'opportunité précis
 """
 
+import json
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple, List
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,164 @@ class OpportunityCalculator:
             database: Instance de Database (optionnel, pour charger les analyses)
         """
         self.database = database
+
+    def _safe_json_list(self, value) -> List[str]:
+        """
+        Normalise une valeur de tags en liste de chaînes.
+        """
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [str(v).strip() for v in value if str(v).strip()]
+        if isinstance(value, str):
+            txt = value.strip()
+            if not txt:
+                return []
+            try:
+                parsed = json.loads(txt)
+                if isinstance(parsed, list):
+                    return [str(v).strip() for v in parsed if str(v).strip()]
+            except Exception:
+                pass
+            return [p.strip() for p in txt.split(',') if p.strip()]
+        return []
+
+    def _status_signal(self, statut: str) -> Tuple[float, List[str]]:
+        """
+        Score d'ajustement lié au statut CRM.
+        """
+        s = (statut or '').strip()
+        if not s:
+            return 0.0, []
+
+        # Statuts fermés (faible opportunité commerciale)
+        closed_lost = {'Perdu', 'Réponse négative', 'Bounce', 'Désabonné', 'Ne pas contacter', 'Plainte spam'}
+        closed_won = {'Gagné', 'Réponse positive'}
+        if s in closed_lost:
+            return -14.0, ['Pipeline fermé: perdu']
+        if s in closed_won:
+            return -10.0, ['Pipeline fermé: gagné']
+
+        # Pipeline actif
+        if s in {'Relance', 'À rappeler'}:
+            return 8.0, ['Prospect en relance active']
+        if s in {'Contacté', 'En cours'}:
+            return 6.0, ['Prospect déjà engagé']
+        if s in {'À qualifier'}:
+            return 4.0, ['Prospect à qualifier']
+        if s in {'Nouveau'}:
+            return 2.0, ['Prospect nouveau']
+        return 1.0, [f'Statut CRM: {s}']
+
+    def _tags_signal(self, tags: List[str]) -> Tuple[float, List[str]]:
+        """
+        Ajuste le score selon les tags métiers/techniques.
+        """
+        if not tags:
+            return 0.0, []
+        normalized = [t.lower() for t in tags]
+        score = 0.0
+        indicators = []
+
+        positive_keywords = {
+            'risque_cyber_eleve': (4.0, 'Risque cyber élevé'),
+            'seo_a_ameliorer': (2.5, 'SEO à améliorer'),
+            'perf_lente': (2.5, 'Performance lente'),
+            'site_sans_https': (3.0, 'Site sans HTTPS'),
+            'refonte': (2.5, 'Besoin de refonte'),
+            'migration': (2.0, 'Potentiel de migration'),
+            'wordpress': (1.5, 'CMS exploitable'),
+            'prestashop': (1.5, 'E-commerce exploitable'),
+            'shopify': (1.0, 'Stack e-commerce active'),
+        }
+        negative_keywords = {
+            'ne_pas_contacter': (6.0, 'Tag ne_pas_contacter'),
+            'spam': (4.0, 'Risque de plainte spam'),
+            'client': (3.0, 'Déjà client / hors cible'),
+        }
+
+        for key, (pts, label) in positive_keywords.items():
+            if any(key in t for t in normalized):
+                score += pts
+                indicators.append(label)
+        for key, (pts, label) in negative_keywords.items():
+            if any(key in t for t in normalized):
+                score -= pts
+                indicators.append(label)
+
+        return max(-12.0, min(12.0, score)), indicators
+
+    def _engagement_signal(self, entreprise_id: int) -> Tuple[float, List[str]]:
+        """
+        Mesure un signal commercial basé sur les emails envoyés/open/click.
+        Retourne un score dans [-8 ; +10].
+        """
+        if not self.database or not hasattr(self.database, 'get_connection') or entreprise_id is None:
+            return 0.0, []
+        conn = None
+        try:
+            conn = self.database.get_connection()
+            cursor = conn.cursor()
+            # Total d'emails envoyés à cette entreprise
+            self.database.execute_sql(
+                cursor,
+                '''
+                SELECT COUNT(*) AS sent_count
+                FROM emails_envoyes
+                WHERE entreprise_id = ?
+                ''',
+                (entreprise_id,)
+            )
+            row = cursor.fetchone()
+            sent_count = int((row['sent_count'] if isinstance(row, dict) else row[0]) or 0) if row else 0
+            if sent_count <= 0:
+                return 0.0, []
+
+            # Uniques ouvrants / cliqueurs
+            self.database.execute_sql(
+                cursor,
+                '''
+                SELECT
+                    COUNT(DISTINCT CASE WHEN et.event_type = 'open' THEN et.email_id END) AS open_unique,
+                    COUNT(DISTINCT CASE WHEN et.event_type = 'click' THEN et.email_id END) AS click_unique
+                FROM emails_envoyes e
+                LEFT JOIN email_tracking_events et ON et.email_id = e.id
+                WHERE e.entreprise_id = ?
+                ''',
+                (entreprise_id,)
+            )
+            row2 = cursor.fetchone()
+            open_unique = int((row2['open_unique'] if isinstance(row2, dict) else row2[0]) or 0) if row2 else 0
+            click_unique = int((row2['click_unique'] if isinstance(row2, dict) else row2[1]) or 0) if row2 else 0
+
+            open_rate = (open_unique / max(sent_count, 1)) * 100.0
+            click_rate = (click_unique / max(sent_count, 1)) * 100.0
+            # Engagement fort => opportunité commerciale plus élevée
+            score = min(10.0, open_rate * 0.08 + click_rate * 0.16)
+            # Taux très faibles malgré plusieurs envois => pénalité
+            if sent_count >= 5 and open_rate < 5.0 and click_rate < 1.0:
+                score -= 8.0
+            indicators = [f'Engagement email: {open_rate:.1f}% open / {click_rate:.1f}% click']
+            return max(-8.0, min(10.0, score)), indicators
+        except Exception:
+            return 0.0, []
+        finally:
+            try:
+                if conn:
+                    conn.close()
+            except Exception:
+                pass
+
+    def _score_to_band(self, score: int) -> Dict:
+        """
+        Echelle fine 1-10 pour le pilotage interne (compatible avec les 5 niveaux existants).
+        """
+        s = max(0, min(100, int(score)))
+        level = min(10, max(1, (s // 10) + 1))
+        return {
+            'level': level,
+            'label': f'Niveau {level}/10'
+        }
     
     def calculate_opportunity_score(self, entreprise_id: int, 
                                    site_age_score: Optional[int] = None,
@@ -88,6 +247,13 @@ class OpportunityCalculator:
                     except Exception:
                         seo_analysis = None
         
+        ent_data = None
+        if self.database and hasattr(self.database, 'get_entreprise'):
+            try:
+                ent_data = self.database.get_entreprise(entreprise_id)
+            except Exception:
+                ent_data = None
+
         breakdown = {}
         indicators = []
         total_score = 0
@@ -107,31 +273,37 @@ class OpportunityCalculator:
         
         # 2. Score de sécurité technique (0-20 points)
         # Plus la sécurité est faible, plus l'opportunité est élevée
+        security_score = None
         if technical_analysis:
             security_score = technical_analysis.get('security_score')
-            if security_score is not None:
-                # Inverser : sécurité faible = opportunité élevée
-                security_opportunity = max(0, (100 - security_score) / 5)  # Max 20 points
-                breakdown['security'] = security_opportunity
-                total_score += security_opportunity
-                max_score += 20
-                if security_score < 40:
-                    indicators.append('Sécurité faible détectée')
-                elif security_score < 60:
-                    indicators.append('Sécurité moyenne')
+        if security_score is None and ent_data:
+            security_score = ent_data.get('score_securite')
+        if security_score is not None:
+            # Inverser : sécurité faible = opportunité élevée
+            security_opportunity = max(0, (100 - float(security_score)) / 5)  # Max 20 points
+            breakdown['security'] = security_opportunity
+            total_score += security_opportunity
+            max_score += 20
+            if security_score < 40:
+                indicators.append('Sécurité faible détectée')
+            elif security_score < 60:
+                indicators.append('Sécurité moyenne')
         
         # 3. Score de performance technique (0-15 points)
         # Plus les performances sont faibles, plus l'opportunité est élevée
+        performance_score = None
         if technical_analysis:
             performance_score = technical_analysis.get('performance_score')
-            if performance_score is not None:
-                # Inverser : performance faible = opportunité élevée
-                perf_opportunity = max(0, (100 - performance_score) / 6.67)  # Max 15 points
-                breakdown['performance'] = perf_opportunity
-                total_score += perf_opportunity
-                max_score += 15
-                if performance_score < 50:
-                    indicators.append('Performances faibles')
+        if performance_score is None and ent_data:
+            performance_score = ent_data.get('performance_score')
+        if performance_score is not None:
+            # Inverser : performance faible = opportunité élevée
+            perf_opportunity = max(0, (100 - float(performance_score)) / 6.67)  # Max 15 points
+            breakdown['performance'] = perf_opportunity
+            total_score += perf_opportunity
+            max_score += 15
+            if performance_score < 50:
+                indicators.append('Performances faibles')
         
         # 4. Score Pentest (0-20 points)
         # Plus le risque est élevé, plus l'opportunité est élevée
@@ -230,6 +402,27 @@ class OpportunityCalculator:
                         indicators.append('SEO perfectible')
                 except Exception:
                     pass
+
+        # 8. Signal CRM (statut) : -14 à +8 points
+        status_pts, status_indicators = self._status_signal((ent_data or {}).get('statut') if ent_data else None)
+        breakdown['status'] = status_pts
+        total_score += status_pts
+        max_score += 14
+        indicators.extend(status_indicators)
+
+        # 9. Signal tags : -12 à +12 points
+        tags_pts, tags_indicators = self._tags_signal(self._safe_json_list((ent_data or {}).get('tags') if ent_data else None))
+        breakdown['tags'] = tags_pts
+        total_score += tags_pts
+        max_score += 12
+        indicators.extend(tags_indicators)
+
+        # 10. Signal engagement email : -8 à +10 points
+        engagement_pts, engagement_indicators = self._engagement_signal(entreprise_id)
+        breakdown['engagement'] = engagement_pts
+        total_score += engagement_pts
+        max_score += 10
+        indicators.extend(engagement_indicators)
         
         # Calculer le score final (0-100)
         if max_score > 0:
@@ -253,13 +446,15 @@ class OpportunityCalculator:
         else:
             opportunity = 'Très faible'
         
+        band = self._score_to_band(final_score)
         return {
             'opportunity': opportunity,
             'score': final_score,
             'breakdown': breakdown,
             'indicators': indicators,
             'max_possible_score': max_score,
-            'actual_score': total_score
+            'actual_score': total_score,
+            'score_band': band
         }
     
     def calculate_opportunity_from_entreprise(self, entreprise_data: Dict) -> Dict:

@@ -211,6 +211,8 @@
     let tagsSuggestions = [];
     let activeTagFilters = [];
     let initialAnalyseId = null;
+    /** Vue « Top N commercial » (score pondéré + dernier touchpoint), sans pagination classique. */
+    let commercialTopMode = false;
     
     const ENTREPRISES_FILTERS_MEMENTO_KEY = 'entreprises_last_filters';
     const ENTREPRISES_FILTERS_STORAGE_KEY = 'entreprises_last_filters_v1';
@@ -269,13 +271,14 @@
     }
     
     function buildFiltersMementoState() {
-        // Note: on ne stocke pas "opportunite" dans un champ dédié UI,
-        // elle est conservée via data-attribute sur <body>.
         return {
             search: getElValue('search-input'),
             secteur: getElValue('filter-secteur'),
             groupe: getElValue('filter-groupe'), // '' | 'none' | <id>
+            opportunite: getElValue('filter-opportunite'),
             statut: getElValue('filter-statut'),
+            etape_prospection: getElValue('filter-etape-prospection'),
+            commercial_profile: getElValue('filter-commercial-profile'),
             security_min: getElValue('filter-security-min'),
             security_max: getElValue('filter-security-max'),
             seo_min: getElValue('filter-seo-min'),
@@ -291,8 +294,7 @@
             has_tunnel: getElChecked('filter-has-tunnel'),
             cms: getElValue('filter-cms'),
             framework: getElValue('filter-framework'),
-            tags: Array.isArray(activeTagFilters) ? activeTagFilters.slice() : [],
-            opportunite: document.body && document.body.dataset ? (document.body.dataset.initialOpportunite || null) : null
+            tags: Array.isArray(activeTagFilters) ? activeTagFilters.slice() : []
         };
     }
     
@@ -327,6 +329,8 @@
             
             const filterGroupe = document.getElementById('filter-groupe');
             if (filterGroupe && typeof s.groupe === 'string') filterGroupe.value = s.groupe;
+            const filterOpportunite = document.getElementById('filter-opportunite');
+            if (filterOpportunite && typeof s.opportunite === 'string') filterOpportunite.value = s.opportunite;
             
             const filterStatutHidden = document.getElementById('filter-statut');
             const statut = typeof s.statut === 'string' ? s.statut : '';
@@ -337,6 +341,14 @@
                 const v = p.getAttribute('data-value') || '';
                 p.classList.toggle('active', v === statut);
             });
+
+            const filterEtape = document.getElementById('filter-etape-prospection');
+            if (filterEtape && typeof s.etape_prospection === 'string') filterEtape.value = s.etape_prospection;
+
+            const filterCommercialProfile = document.getElementById('filter-commercial-profile');
+            if (filterCommercialProfile && typeof s.commercial_profile === 'string') {
+                filterCommercialProfile.value = s.commercial_profile;
+            }
             
             const setSlider = (id, value) => {
                 const el = document.getElementById(id);
@@ -380,12 +392,6 @@
                     suggestions.innerHTML = '';
                     suggestions.classList.add('hidden');
                 }
-            }
-            
-            // Opportunite est traitée comme un filtre backend injecté via data-attribute.
-            if (document.body && document.body.dataset) {
-                if (s.opportunite) document.body.dataset.initialOpportunite = s.opportunite;
-                else delete document.body.dataset.initialOpportunite;
             }
             
             syncScoreNullSlidersDisabled();
@@ -444,18 +450,23 @@
         return (e && e.nom) ? String(e.nom) : 'Entreprise';
     }
     
-    async function triggerScrapingRelaunch(entrepriseId) {
+    async function triggerScrapingRelaunch(entrepriseId, options = {}) {
+        const notify = options.notify !== false;
         const entreprise = allEntreprises.find(e => e && e.id === entrepriseId)
             || filteredEntreprises.find(e => e && e.id === entrepriseId);
         const url = entreprise && entreprise.website ? String(entreprise.website).trim() : '';
         if (!url) {
-            Notifications.show('Aucune URL de site pour relancer le scraping.', 'warning');
+            if (notify) {
+                Notifications.show('Aucune URL de site pour relancer le scraping.', 'warning');
+            }
             return;
         }
 
         const socket = window.wsManager && window.wsManager.socket;
         if (!socket) {
-            Notifications.show('Connexion temps réel non disponible. Rechargez la page.', 'warning');
+            if (notify) {
+                Notifications.show('Connexion temps réel non disponible. Rechargez la page.', 'warning');
+            }
             return;
         }
 
@@ -469,7 +480,9 @@
         }
 
         const nom = entreprise && entreprise.nom ? entreprise.nom : getEntrepriseNom(entrepriseId);
-        Notifications.show(nom + ' — Scraping lancé...', 'info', 'fa-spider');
+        if (notify) {
+            Notifications.show(nom + ' — Scraping lancé...', 'info', 'fa-spider');
+        }
 
         socket.emit('start_scraping', {
             url: url,
@@ -494,6 +507,34 @@
             });
         } catch (error) {
             console.error('Erreur lors du chargement des secteurs:', error);
+        }
+    }
+
+    async function loadOpportunites() {
+        try {
+            const opportunites = await EntreprisesAPI.loadOpportunites();
+            const select = document.getElementById('filter-opportunite');
+            if (!select) return;
+
+            const currentValue = select.value;
+            // Conserver uniquement l'option par defaut, puis recharger avec les valeurs reelles de la base.
+            select.innerHTML = '<option value="">Toutes les opportunités</option>';
+            opportunites.forEach((opportunite) => {
+                if (!opportunite) return;
+                const option = document.createElement('option');
+                option.value = opportunite;
+                option.textContent = opportunite;
+                select.appendChild(option);
+            });
+
+            if (currentValue) {
+                const matchingOption = select.querySelector(`option[value="${currentValue}"]`);
+                if (matchingOption) {
+                    select.value = currentValue;
+                }
+            }
+        } catch (error) {
+            console.error('Erreur lors du chargement des opportunités:', error);
         }
     }
 
@@ -552,6 +593,9 @@
             input.value = '';
         }
         renderTagFilterChips();
+        if (typeof updateAdvancedFiltersBadge === 'function') {
+            updateAdvancedFiltersBadge();
+        }
         if (typeof applyFilters === 'function') {
             applyFilters();
         }
@@ -672,6 +716,7 @@
         const search = (get('search-input') || '').trim();
         const secteur = get('filter-secteur') || '';
         const groupeFilter = get('filter-groupe') || '';
+        const opportunite = get('filter-opportunite') || '';
         const statut = get('filter-statut') || '';
         const securityMinRaw = get('filter-security-min') || '0';
         const securityMaxRaw = get('filter-security-max') || '100';
@@ -715,6 +760,9 @@
             }
         }
         if (statut) filters.statut = statut;
+        if (opportunite) filters.opportunite = opportunite;
+        const etapeProspection = get('filter-etape-prospection') || '';
+        if (etapeProspection) filters.etape_prospection = etapeProspection;
         const hasEmailCheckbox = document.getElementById('filter-has-email');
         if (hasEmailCheckbox && hasEmailCheckbox.checked) {
             filters.has_email = 'true';
@@ -832,12 +880,13 @@
                 hasAnyUrlFilter = true;
             }
 
-            // Opportunité -> seulement backend (pas encore de champ dans le formulaire)
+            // Opportunité -> select dédié
             const opportuniteParam = params.get('opportunite');
             if (opportuniteParam) {
-                // On encode dans un attribut data pour que getCurrentFilters puisse l'ajouter si besoin plus tard
-                const root = document.body;
-                if (root) root.dataset.initialOpportunite = opportuniteParam;
+                const opportuniteSelect = document.getElementById('filter-opportunite');
+                if (opportuniteSelect) {
+                    opportuniteSelect.value = opportuniteParam;
+                }
                 hasAnyUrlFilter = true;
             }
 
@@ -849,7 +898,8 @@
                     activeTagFilters = Array.from(new Set([...(activeTagFilters || []), ...parts]));
                     const input = document.getElementById('filter-tags');
                     if (input) {
-                        input.value = activeTagFilters.join(', ');
+                        // L'input reste visuellement vide: l'etat est porte par les chips.
+                        input.value = '';
                     }
                     renderTagFilterChips();
                     hasAnyUrlFilter = true;
@@ -864,15 +914,162 @@
         }
     }
 
+    /**
+     * Barre synthèse prospection CRM (effectifs par étape Kanban) alignée sur les filtres liste.
+     */
+    async function refreshKanbanStrip() {
+        const el = document.getElementById('pipeline-kanban-strip');
+        if (!el || !window.EntreprisesAPI) return;
+        try {
+            const filters = getCurrentFilters();
+            const data = await EntreprisesAPI.loadPipelineKanbanCrm(filters, initialAnalyseId);
+            if (!data || !data.columns) {
+                el.style.display = 'none';
+                el.innerHTML = '';
+                return;
+            }
+            el.style.display = 'block';
+            const esc = (t) => (Formatters && Formatters.escapeHtml ? Formatters.escapeHtml(String(t ?? '')) : String(t ?? ''));
+            const total = typeof data.total === 'number' ? data.total : '';
+            const filteredNote = data.filtered ? ' <span class="kanban-strip-filtered">(filtres actifs)</span>' : '';
+            const columnsNonZero = (data.columns || []).filter((col) => Number(col.count) > 0);
+            let cols = columnsNonZero.map((col) => {
+                const raw = col.couleur && String(col.couleur).trim();
+                const bg = raw && /^#[0-9A-Fa-f]{6}$/.test(raw) ? raw : '#94a3b8';
+                const label = col.etape != null ? col.etape : '';
+                return `<div class="kanban-strip-col" title="${esc(label)}">
+                    <span class="kanban-strip-dot" style="background:${bg}"></span>
+                    <span class="kanban-strip-label">${esc(label)}</span>
+                    <span class="kanban-strip-count">${col.count}</span>
+                </div>`;
+            }).join('');
+            let hors = '';
+            const horsNonZero = (data.hors_referentiel || []).filter((h) => Number(h.count) > 0);
+            if (horsNonZero.length) {
+                const parts = horsNonZero.map((h) => `${esc(h.etape)} (${h.count})`);
+                hors = `<div class="kanban-strip-hors">Autres étapes en base : ${parts.join(', ')}</div>`;
+            }
+            const colsHtml = cols ? `<div class="kanban-strip-columns">${cols}</div>` : '';
+            el.innerHTML = `
+                <div class="kanban-strip-inner">
+                    <div class="kanban-strip-meta">
+                        <strong>Prospection CRM</strong>${filteredNote}
+                        <span class="kanban-strip-total">${total} prospect(s)</span>
+                    </div>
+                    ${colsHtml}
+                    ${hors}
+                </div>`;
+        } catch (e) {
+            console.warn('[entreprises] Kanban strip:', e);
+            el.style.display = 'none';
+        }
+    }
+
+    function updateCommercialProfileWeightsVisual() {
+        const sel = document.getElementById('filter-commercial-profile');
+        const host = document.getElementById('commercial-profile-weights-visual');
+        if (!host) return;
+        let w = { w_seo: 0.25, w_secu: 0.25, w_perf: 0.25, w_opp: 0.25 };
+        const opt = sel && sel.options[sel.selectedIndex];
+        if (sel && opt && opt.dataset && opt.dataset.poids) {
+            try {
+                const p = JSON.parse(opt.dataset.poids);
+                if (p && typeof p === 'object') {
+                    const a = Number(p.w_seo) || 0;
+                    const b = Number(p.w_secu) || 0;
+                    const c = Number(p.w_perf) || 0;
+                    const d = Number(p.w_opp) || 0;
+                    const sum = a + b + c + d;
+                    if (sum > 0) {
+                        w = { w_seo: a / sum, w_secu: b / sum, w_perf: c / sum, w_opp: d / sum };
+                    }
+                }
+            } catch (e) {
+                /* garder le défaut */
+            }
+        }
+        const rows = [
+            { cls: 'commercial-weight-bar--seo', label: 'SEO', pct: w.w_seo },
+            { cls: 'commercial-weight-bar--secu', label: 'Sécurité', pct: w.w_secu },
+            { cls: 'commercial-weight-bar--perf', label: 'Performance', pct: w.w_perf },
+            { cls: 'commercial-weight-bar--opp', label: 'Opportunité', pct: w.w_opp },
+        ];
+        host.innerHTML = rows
+            .map(
+                (r) =>
+                    `<div class="commercial-weight-row"><span class="commercial-weight-label">${r.label}</span>` +
+                    `<div class="commercial-weight-bar-wrap"><div class="commercial-weight-bar ${r.cls}" style="width:${Math.round(r.pct * 100)}%"></div></div>` +
+                    `<span class="commercial-weight-pct">${Math.round(r.pct * 100)}%</span></div>`,
+            )
+            .join('');
+    }
+
+    async function populateCommercialProfileSelect() {
+        const sel = document.getElementById('filter-commercial-profile');
+        if (!sel || !window.EntreprisesAPI) return;
+        const previous = sel.value;
+        try {
+            const data = await EntreprisesAPI.loadCommercialPriorityProfiles();
+            const items = (data && data.items) ? data.items : [];
+            const first = sel.querySelector('option[value=""]');
+            sel.innerHTML = '';
+            if (first) {
+                sel.appendChild(first);
+            } else {
+                const def = document.createElement('option');
+                def.value = '';
+                def.textContent = 'Défaut (équilibré)';
+                sel.appendChild(def);
+            }
+            items.forEach((p) => {
+                const o = document.createElement('option');
+                o.value = String(p.id);
+                o.textContent = p.nom || ('Profil ' + p.id);
+                const po = p && p.poids && typeof p.poids === 'object' ? p.poids : {};
+                o.dataset.poids = JSON.stringify(po);
+                sel.appendChild(o);
+            });
+            if (previous && Array.from(sel.options).some((o) => o.value === previous)) {
+                sel.value = previous;
+            }
+            updateCommercialProfileWeightsVisual();
+        } catch (e) {
+            console.warn('[entreprises] Profils priorité:', e);
+        }
+    }
+
+    function setCommercialTopUi(on) {
+        const btnTop = document.getElementById('btn-commercial-top');
+        const btnOff = document.getElementById('btn-commercial-top-off');
+        if (btnTop) btnTop.style.display = on ? 'none' : '';
+        if (btnOff) btnOff.style.display = on ? 'inline-flex' : 'none';
+    }
+
     /** Charge les entreprises avec les filtres courants (côté serveur, pagination). */
     async function loadEntreprises() {
         try {
             const filters = getCurrentFilters();
-            // Opportunité passée dans l'URL (data-attribute sur body)
-            const body = document.body;
-            if (body && body.dataset.initialOpportunite && !filters.opportunite) {
-                filters.opportunite = body.dataset.initialOpportunite;
+            if (commercialTopMode && window.EntreprisesAPI && typeof EntreprisesAPI.loadCommercialTop === 'function') {
+                let profileId;
+                const profileSel = document.getElementById('filter-commercial-profile');
+                if (profileSel && profileSel.value) {
+                    const pid = parseInt(profileSel.value, 10);
+                    if (!Number.isNaN(pid)) profileId = pid;
+                }
+                const data = await EntreprisesAPI.loadCommercialTop(filters, initialAnalyseId, {
+                    limit: 50,
+                    profile_id: profileId,
+                });
+                const items = data && data.items ? data.items : [];
+                allEntreprises = items;
+                filteredEntreprises = [...items];
+                totalEntreprises = items.length;
+                setCommercialTopUi(true);
+                renderEntreprises();
+                refreshKanbanStrip();
+                return;
             }
+            setCommercialTopUi(false);
             const data = await EntreprisesAPI.loadAll(filters, currentPage, itemsPerPage, false, initialAnalyseId);
             const items = data && data.items ? data.items : [];
             allEntreprises = items;
@@ -889,6 +1086,7 @@
                 return loadEntreprises();
             }
             renderEntreprises();
+            refreshKanbanStrip();
         } catch (error) {
             console.error('[entreprises] Erreur loadEntreprises:', error);
             document.getElementById('entreprises-container').innerHTML =
@@ -948,8 +1146,12 @@
         const container = document.getElementById('entreprises-container');
         const pageEntreprises = filteredEntreprises;
         
-        document.getElementById('results-count').textContent = 
-            `${totalEntreprises} entreprise${totalEntreprises > 1 ? 's' : ''} trouvée${totalEntreprises > 1 ? 's' : ''}`;
+        const rc = document.getElementById('results-count');
+        if (rc) {
+            rc.textContent = commercialTopMode
+                ? `${totalEntreprises} prospect(s) — vue « Top commercial » (priorité + dernier contact)`
+                : `${totalEntreprises} entreprise${totalEntreprises > 1 ? 's' : ''} trouvée${totalEntreprises > 1 ? 's' : ''}`;
+        }
         
         if (pageEntreprises.length === 0) {
             container.innerHTML = '<p class="no-results">Aucune entreprise ne correspond aux critères</p>';
@@ -1176,7 +1378,24 @@
         `;
     }
     
+    function buildOpportunityTagHtml(entreprise) {
+        const niveau = entreprise && typeof entreprise.opportunite === 'string'
+            ? entreprise.opportunite.trim()
+            : '';
+        if (!niveau) return '';
+
+        // On ne met en avant que les opportunites interessantes.
+        if (niveau === 'Très élevée') {
+            return '<span class="tag tag-opportunity tag-opportunity-very-high" data-tag="opportunite:tres-elevee">Opportunité: Très élevée</span>';
+        }
+        if (niveau === 'Élevée') {
+            return '<span class="tag tag-opportunity tag-opportunity-high" data-tag="opportunite:elevee">Opportunité: Élevée</span>';
+        }
+        return '';
+    }
+
     function createEntrepriseCard(entreprise) {
+        const opportunityTagHtml = buildOpportunityTagHtml(entreprise);
         const tagsHtml = entreprise.tags && entreprise.tags.length > 0
             ? entreprise.tags
                 .slice() // ne pas muter l'array originale
@@ -1283,6 +1502,7 @@
                 return `<span class="${base}${extra}" data-tag="${Formatters.escapeHtml(tag)}">${Formatters.escapeHtml(label)}</span>`;
             }).join('')
             : '';
+        const visibleTagsHtml = [opportunityTagHtml, tagsHtml].filter(Boolean).join('');
         
         let resumePreview = '';
         if (entreprise.resume) {
@@ -1413,12 +1633,19 @@
                         </div>
                     </div>
                 </div>
+                ${commercialTopMode && entreprise.priority_score != null ? `
+                <div class="card-commercial-priority">
+                    <span class="badge badge-secondary" title="Score pondéré + dernier contact">Priorité ${Math.round(Number(entreprise.priority_score))}</span>
+                    ${entreprise.last_touchpoint_at
+                        ? ` · Dernier contact ${Formatters.escapeHtml(String(entreprise.last_touchpoint_at).slice(0, 16))}`
+                        : ' · Aucun contact enregistré'}
+                </div>` : ''}
                 <div class="card-body">
                     ${resumePreview ? `<p class="resume-preview" style="color: #666; font-size: 0.9rem; margin-bottom: 0.75rem; font-style: italic;">${Formatters.escapeHtml(resumePreview)}</p>` : ''}
                     ${entreprise.website ? `<p><strong>Site:</strong> <a href="${entreprise.website}" target="_blank">${Formatters.escapeHtml(getDisplayDomain(entreprise.website))}</a></p>` : ''}
                     ${entreprise.secteur ? `<p><strong>Secteur:</strong> ${Formatters.escapeHtml(entreprise.secteur)}</p>` : ''}
                     ${scoresSection}
-                    ${tagsHtml ? `<div class="tags-container">${tagsHtml}</div>` : ''}
+                    ${visibleTagsHtml ? `<div class="tags-container">${visibleTagsHtml}</div>` : ''}
                 </div>
                 <div class="card-footer">
                     <div class="card-footer-left">
@@ -1436,6 +1663,7 @@
     }
     
     function createEntrepriseRow(entreprise) {
+        const opportunityTagHtml = buildOpportunityTagHtml(entreprise);
         let langChipLabel = null;
         if (entreprise.tags && Array.isArray(entreprise.tags)) {
             for (const t of entreprise.tags) {
@@ -1560,6 +1788,7 @@
                 return `<span class="${base}${extra}" data-tag="${Formatters.escapeHtml(tag)}">${Formatters.escapeHtml(label)}</span>`;
             }).join('')
             : '';
+        const visibleTagsHtml = [opportunityTagHtml, tagsHtml].filter(Boolean).join('');
 
         const hasSecurityScore = typeof entreprise.score_securite !== 'undefined' && entreprise.score_securite !== null;
         const hasSeoScore = typeof entreprise.score_seo !== 'undefined' && entreprise.score_seo !== null;
@@ -1650,11 +1879,16 @@
                             <i class="fas fa-exclamation-triangle row-pentest-warn" style="color: ${entreprise.score_pentest >= 70 ? '#ef4444' : '#f59e0b'};" title="Score Pentest: ${entreprise.score_pentest}/100"></i>
                             ` : ''}
                         </div>
-                        ${tagsHtml ? `<div class="tags-container">${tagsHtml}</div>` : ''}
+                        ${visibleTagsHtml ? `<div class="tags-container">${visibleTagsHtml}</div>` : ''}
                     </div>
                     <div class="row-meta">
                         ${entreprise.secteur ? `<span class="row-chip row-chip-sector" title="Secteur"><i class="fas fa-industry" aria-hidden="true"></i> ${Formatters.escapeHtml(entreprise.secteur)}</span>` : ''}
                         ${langChipLabel ? `<span class="row-chip row-chip-lang" title="Langue principale"><i class="fas fa-language" aria-hidden="true"></i> ${Formatters.escapeHtml(langChipLabel)}</span>` : ''}
+                        ${commercialTopMode && entreprise.priority_score != null ? `
+                        <span class="row-chip row-chip-priority" title="Priorité commerciale">
+                            <i class="fas fa-sort-amount-down" aria-hidden="true"></i> ${Math.round(Number(entreprise.priority_score))}
+                            ${entreprise.last_touchpoint_at ? ` · ${Formatters.escapeHtml(String(entreprise.last_touchpoint_at).slice(0, 16))}` : ' · —'}
+                        </span>` : ''}
                         ${entreprise.statut ? (() => {
                             const statut = String(entreprise.statut || '').trim();
                             const cls = (Badges && typeof Badges.getStatusClass === 'function') ? Badges.getStatusClass(statut) : 'secondary';
@@ -1688,9 +1922,13 @@
     }
     
     function renderPagination() {
-        const totalPages = Math.ceil(totalEntreprises / itemsPerPage);
         const pagination = document.getElementById('pagination');
         if (!pagination) return;
+        if (commercialTopMode) {
+            pagination.innerHTML = '<p class="pagination-commercial-hint">Tri : score pondéré (SEO, sécu, perf, opportunité) puis entreprises sans contact récent en priorité.</p>';
+            return;
+        }
+        const totalPages = Math.ceil(totalEntreprises / itemsPerPage);
         
         if (totalPages <= 1) {
             pagination.innerHTML = '';
@@ -2011,32 +2249,41 @@
         }
     }
 
-    async function triggerAnalysisRelaunch(entrepriseId, analysisType) {
+    async function triggerAnalysisRelaunch(entrepriseId, analysisType, options = {}) {
+        const notify = options.notify !== false;
         const entreprise = allEntreprises.find(e => e && e.id === entrepriseId)
             || filteredEntreprises.find(e => e && e.id === entrepriseId);
         const url = entreprise && entreprise.website ? String(entreprise.website).trim() : '';
         if (!url) {
-            Notifications.show('Aucune URL de site pour relancer l\'analyse.', 'warning');
+            if (notify) {
+                Notifications.show('Aucune URL de site pour relancer l\'analyse.', 'warning');
+            }
             return;
         }
 
         const socket = window.wsManager && window.wsManager.socket;
         if (!socket) {
-            Notifications.show('Connexion temps réel non disponible. Rechargez la page.', 'warning');
+            if (notify) {
+                Notifications.show('Connexion temps réel non disponible. Rechargez la page.', 'warning');
+            }
             return;
         }
 
         ensureModalWebSocketListeners();
         setScoreRelaunchLoading(entrepriseId, analysisType, true);
 
-        const launchLabels = { technique: 'technique', seo: 'SEO', pentest: 'Pentest' };
+        const launchLabels = { technique: 'technique', seo: 'SEO', osint: 'OSINT', pentest: 'Pentest' };
         const nom = entreprise && entreprise.nom ? entreprise.nom : getEntrepriseNom(entrepriseId);
-        Notifications.show(nom + ' — Analyse ' + (launchLabels[analysisType] || analysisType) + ' lancée...', 'info', 'fa-play-circle');
+        if (notify) {
+            Notifications.show(nom + ' — Analyse ' + (launchLabels[analysisType] || analysisType) + ' lancée...', 'info', 'fa-play-circle');
+        }
 
         if (analysisType === 'technique') {
             socket.emit('start_technical_analysis', { url, entreprise_id: entrepriseId });
         } else if (analysisType === 'seo') {
             socket.emit('start_seo_analysis', { url, entreprise_id: entrepriseId, use_lighthouse: true });
+        } else if (analysisType === 'osint') {
+            socket.emit('start_osint_analysis', { url, entreprise_id: entrepriseId });
         } else if (analysisType === 'pentest') {
             socket.emit('start_pentest_analysis', { url, entreprise_id: entrepriseId });
         }
@@ -2437,7 +2684,10 @@
         const advancedFilterIds = [
             'filter-secteur',
             'filter-groupe',
+            'filter-opportunite',
             'filter-statut',
+            'filter-etape-prospection',
+            'filter-commercial-profile',
             'filter-security-min',
             'filter-security-max',
             'filter-seo-min',
@@ -2447,13 +2697,22 @@
             'filter-security-null',
             'filter-seo-null',
             'filter-pentest-null',
-            'filter-has-email'
+            'filter-has-email',
+            'filter-cms',
+            'filter-framework',
+            'filter-has-blog',
+            'filter-has-form',
+            'filter-has-tunnel'
         ];
+        const handledAdvancedFilterIds = new Set(advancedFilterIds);
 
         advancedFilterIds.forEach(id => {
             const el = document.getElementById(id);
             if (el) {
                 el.addEventListener('change', () => {
+                    if (id === 'filter-commercial-profile') {
+                        updateCommercialProfileWeightsVisual();
+                    }
                     if (id.endsWith('-null')) {
                         syncScoreNullSlidersDisabled();
                     }
@@ -2462,6 +2721,20 @@
                 });
             }
         });
+
+        // Filet de sécurité: tout nouveau filtre ajouté dans #advanced-filters
+        // avec un id "filter-*" déclenche aussi le refresh auto, même s'il n'est
+        // pas encore listé explicitement ci-dessus.
+        const advancedFiltersRoot = document.getElementById('advanced-filters');
+        if (advancedFiltersRoot) {
+            advancedFiltersRoot.addEventListener('change', (e) => {
+                const target = e.target;
+                if (!target || !target.id || !String(target.id).startsWith('filter-')) return;
+                if (handledAdvancedFilterIds.has(target.id)) return;
+                updateAdvancedFiltersBadge();
+                debouncedApplyFilters();
+            });
+        }
 
         // Pills de statut
         const statutPills = document.querySelectorAll('#filter-statut-pills .pill');
@@ -2478,6 +2751,30 @@
                     updateAdvancedFiltersBadge();
                     debouncedApplyFilters();
                 });
+            });
+        }
+
+        const btnCommercialTop = document.getElementById('btn-commercial-top');
+        const btnCommercialOff = document.getElementById('btn-commercial-top-off');
+        if (btnCommercialTop) {
+            btnCommercialTop.addEventListener('click', async () => {
+                commercialTopMode = true;
+                currentPage = 1;
+                try {
+                    if (window.localStorage) {
+                        window.localStorage.setItem(ENTREPRISES_CURRENT_PAGE_STORAGE_KEY, String(currentPage));
+                    }
+                } catch (e) {}
+                await loadEntreprises();
+                if (window.Notifications && typeof Notifications.show === 'function') {
+                    Notifications.show('Vue « Top 50 commercial » (pondération + dernier contact)', 'info');
+                }
+            });
+        }
+        if (btnCommercialOff) {
+            btnCommercialOff.addEventListener('click', async () => {
+                commercialTopMode = false;
+                await loadEntreprises();
             });
         }
 
@@ -2500,6 +2797,7 @@
             securitySliderMin.addEventListener('input', () => {
                 securityLabelMin.textContent = formatScoreMinLabel(securitySliderMin.value);
                 updateAdvancedFiltersBadge();
+                debouncedApplyFilters();
             });
         }
 
@@ -2508,6 +2806,7 @@
             securitySliderMax.addEventListener('input', () => {
                 securityLabelMax.textContent = formatScoreMaxLabel(securitySliderMax.value);
                 updateAdvancedFiltersBadge();
+                debouncedApplyFilters();
             });
         }
 
@@ -2516,6 +2815,7 @@
             seoSliderMin.addEventListener('input', () => {
                 seoLabelMin.textContent = formatScoreMinLabel(seoSliderMin.value);
                 updateAdvancedFiltersBadge();
+                debouncedApplyFilters();
             });
         }
 
@@ -2524,6 +2824,7 @@
             seoSliderMax.addEventListener('input', () => {
                 seoLabelMax.textContent = formatScoreMaxLabel(seoSliderMax.value);
                 updateAdvancedFiltersBadge();
+                debouncedApplyFilters();
             });
         }
 
@@ -2532,6 +2833,7 @@
             pentestSliderMin.addEventListener('input', () => {
                 pentestLabelMin.textContent = formatScoreMinLabel(pentestSliderMin.value);
                 updateAdvancedFiltersBadge();
+                debouncedApplyFilters();
             });
         }
 
@@ -2540,6 +2842,7 @@
             pentestSliderMax.addEventListener('input', () => {
                 pentestLabelMax.textContent = formatScoreMaxLabel(pentestSliderMax.value);
                 updateAdvancedFiltersBadge();
+                debouncedApplyFilters();
             });
         }
 
@@ -2627,16 +2930,32 @@
                 }
 
                 try {
-                    if (action === 'launch-technique' || action === 'launch-seo' || action === 'launch-pentest' || action === 'launch-all') {
-                        const types = action === 'launch-all'
-                            ? ['technique', 'seo', 'pentest']
-                            : [action.replace('launch-', '')];
+                    if (action === 'launch-technique' || action === 'launch-seo' || action === 'launch-osint' || action === 'launch-pentest') {
+                        const types = [action.replace('launch-', '')];
                         /** @type {{ id: number, t: string }[]} */
                         const jobs = [];
+                        let skippedNoUrl = 0;
                         ids.forEach((id) => {
+                            const entreprise = allEntreprises.find(e => e && e.id === id)
+                                || filteredEntreprises.find(e => e && e.id === id);
+                            const hasUrl = !!(entreprise && entreprise.website && String(entreprise.website).trim());
+                            if (!hasUrl) {
+                                skippedNoUrl++;
+                                return;
+                            }
                             types.forEach((t) => jobs.push({ id, t }));
                         });
-                        const staggerMs = jobs.length > 20 ? 700 : 300;
+                        const isOsint = action === 'launch-osint';
+                        const staggerMs = isOsint
+                            ? (jobs.length > 20 ? 1200 : 700)
+                            : (jobs.length > 20 ? 700 : 300);
+                        if (jobs.length === 0) {
+                            Notifications.show(
+                                'Aucune entreprise valide à relancer (URL manquante).',
+                                'warning'
+                            );
+                            return;
+                        }
                         if (jobs.length > 3) {
                             Notifications.show(
                                 `${jobs.length} analyse(s) planifiées (lancement étalé ~${staggerMs} ms entre chaque pour ne pas saturer Celery).`,
@@ -2644,15 +2963,56 @@
                                 'fa-layer-group'
                             );
                         }
+                        if (skippedNoUrl > 0) {
+                            Notifications.show(
+                                `${skippedNoUrl} entreprise${skippedNoUrl > 1 ? 's' : ''} ignorée${skippedNoUrl > 1 ? 's' : ''} (URL manquante).`,
+                                'warning'
+                            );
+                        }
                         jobs.forEach((job, i) => {
                             setTimeout(() => {
-                                triggerAnalysisRelaunch(job.id, job.t);
+                                triggerAnalysisRelaunch(job.id, job.t, { notify: true });
                             }, i * staggerMs);
                         });
                     } else if (action === 'launch-scraping') {
-                        for (const id of ids) {
-                            await triggerScrapingRelaunch(id);
+                        const jobs = [];
+                        let skippedNoUrl = 0;
+                        ids.forEach((id) => {
+                            const entreprise = allEntreprises.find(e => e && e.id === id)
+                                || filteredEntreprises.find(e => e && e.id === id);
+                            const hasUrl = !!(entreprise && entreprise.website && String(entreprise.website).trim());
+                            if (!hasUrl) {
+                                skippedNoUrl++;
+                                return;
+                            }
+                            jobs.push({ id });
+                        });
+                        const staggerMs = jobs.length > 20 ? 900 : 450;
+                        if (jobs.length === 0) {
+                            Notifications.show(
+                                'Aucune entreprise valide à relancer (URL manquante).',
+                                'warning'
+                            );
+                            return;
                         }
+                        if (jobs.length > 3) {
+                            Notifications.show(
+                                `${jobs.length} scraping(s) planifiés (lancement étalé ~${staggerMs} ms entre chaque pour ne pas saturer Celery).`,
+                                'info',
+                                'fa-layer-group'
+                            );
+                        }
+                        if (skippedNoUrl > 0) {
+                            Notifications.show(
+                                `${skippedNoUrl} entreprise${skippedNoUrl > 1 ? 's' : ''} ignorée${skippedNoUrl > 1 ? 's' : ''} (URL manquante).`,
+                                'warning'
+                            );
+                        }
+                        jobs.forEach((job, i) => {
+                            setTimeout(() => {
+                                triggerScrapingRelaunch(job.id, { notify: true });
+                            }, i * staggerMs);
+                        });
                     } else if (action === 'delete-bulk') {
                         const count = ids.length;
                         if (!confirm(`Êtes-vous sûr de vouloir supprimer ${count} entreprise${count > 1 ? 's' : ''} ? Cette action est irréversible.`)) {
@@ -2738,6 +3098,27 @@
                             }
                         } catch (e) {
                             console.error('[entreprises] Erreur refresh bulk groups après action de masse:', e);
+                        }
+                    } else if (action === 'recalculate-opportunity') {
+                        Notifications.show(
+                            `${ids.length} recalcul(s) d'opportunité en cours...`,
+                            'info',
+                            'fa-calculator'
+                        );
+                        const resp = await EntreprisesAPI.recalculateOpportunitiesBulk(ids);
+                        const okCount = resp && typeof resp.ok === 'number' ? resp.ok : 0;
+                        const failCount = resp && typeof resp.failed === 'number' ? resp.failed : 0;
+                        await applyFilters();
+                        if (failCount > 0) {
+                            Notifications.show(
+                                `Recalcul terminé: ${okCount} OK, ${failCount} en échec.`,
+                                'warning'
+                            );
+                        } else {
+                            Notifications.show(
+                                `${okCount} opportunité${okCount > 1 ? 's' : ''} recalculée${okCount > 1 ? 's' : ''}`,
+                                'success'
+                            );
                         }
                     }
                 } catch (e) {
@@ -2927,10 +3308,12 @@
             return;
         }
 
-        let count = 0;
         const secteur = document.getElementById('filter-secteur')?.value;
         const groupe = document.getElementById('filter-groupe')?.value;
+        const opportunite = document.getElementById('filter-opportunite')?.value;
         const statut = document.getElementById('filter-statut')?.value;
+        const etapeProspection = document.getElementById('filter-etape-prospection')?.value;
+        const tagsInputValue = (document.getElementById('filter-tags')?.value || '').trim();
         const securityMin = document.getElementById('filter-security-min')?.value;
         const securityMax = document.getElementById('filter-security-max')?.value;
         const seoMin = document.getElementById('filter-seo-min')?.value;
@@ -2939,19 +3322,55 @@
         const pentestMax = document.getElementById('filter-pentest-max')?.value;
         const hasEmail = document.getElementById('filter-has-email')?.checked;
 
-        if (secteur) count += 1;
-        if (groupe) count += 1;
-        if (statut) count += 1;
-        if (securityMin && parseInt(securityMin, 10) > 0) count += 1;
-        if (securityMax && parseInt(securityMax, 10) < 100) count += 1;
-        if (seoMin && parseInt(seoMin, 10) > 0) count += 1;
-        if (seoMax && parseInt(seoMax, 10) < 100) count += 1;
-        if (pentestMin && parseInt(pentestMin, 10) > 0) count += 1;
-        if (pentestMax && parseInt(pentestMax, 10) < 100) count += 1;
-        if (document.getElementById('filter-security-null')?.checked) count += 1;
-        if (document.getElementById('filter-seo-null')?.checked) count += 1;
-        if (document.getElementById('filter-pentest-null')?.checked) count += 1;
-        if (hasEmail) count += 1;
+        const hasActiveTags = Array.isArray(activeTagFilters) && activeTagFilters.length > 0;
+        const typedTags = tagsInputValue
+            ? tagsInputValue.split(/[, ]+/).map((s) => s.trim()).filter(Boolean)
+            : [];
+        const tagCount = Array.from(new Set([...(hasActiveTags ? activeTagFilters : []), ...typedTags])).length;
+
+        const segmentationCount =
+            (secteur ? 1 : 0) +
+            (groupe ? 1 : 0) +
+            (opportunite ? 1 : 0) +
+            (statut ? 1 : 0) +
+            (etapeProspection ? 1 : 0) +
+            (hasEmail ? 1 : 0);
+        const commercialProfile = document.getElementById('filter-commercial-profile')?.value;
+        const scoresCount =
+            (commercialProfile ? 1 : 0) +
+            ((securityMin && parseInt(securityMin, 10) > 0) ? 1 : 0) +
+            ((securityMax && parseInt(securityMax, 10) < 100) ? 1 : 0) +
+            ((seoMin && parseInt(seoMin, 10) > 0) ? 1 : 0) +
+            ((seoMax && parseInt(seoMax, 10) < 100) ? 1 : 0) +
+            ((pentestMin && parseInt(pentestMin, 10) > 0) ? 1 : 0) +
+            ((pentestMax && parseInt(pentestMax, 10) < 100) ? 1 : 0) +
+            (document.getElementById('filter-security-null')?.checked ? 1 : 0) +
+            (document.getElementById('filter-seo-null')?.checked ? 1 : 0) +
+            (document.getElementById('filter-pentest-null')?.checked ? 1 : 0);
+        const techCount =
+            ((document.getElementById('filter-cms')?.value ? 1 : 0)) +
+            ((document.getElementById('filter-framework')?.value ? 1 : 0));
+        const behaviorCount =
+            tagCount +
+            (document.getElementById('filter-has-blog')?.checked ? 1 : 0) +
+            (document.getElementById('filter-has-form')?.checked ? 1 : 0) +
+            (document.getElementById('filter-has-tunnel')?.checked ? 1 : 0);
+        const count = segmentationCount + scoresCount + techCount + behaviorCount;
+
+        const setSectionCount = (id, value) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            if (value > 0) {
+                el.textContent = String(value);
+                el.style.display = 'inline-flex';
+            } else {
+                el.style.display = 'none';
+            }
+        };
+        setSectionCount('section-filter-count-segmentation', segmentationCount);
+        setSectionCount('section-filter-count-scores', scoresCount);
+        setSectionCount('section-filter-count-tech', techCount);
+        setSectionCount('section-filter-count-behavior', behaviorCount);
 
         if (count > 0) {
             badge.textContent = String(count);
@@ -2994,6 +3413,8 @@
             loadOSINTAnalysis(entrepriseId);
             loadPentestAnalysis(entrepriseId);
             loadAuditPipeline(entrepriseId);
+            loadProspectionTab(entrepriseId);
+            loadMetricEvolutionTab(entrepriseId);
             refreshOpportunityScore(entrepriseId);
         } catch (error) {
             console.error('Erreur lors du chargement:', error);
@@ -3136,6 +3557,235 @@
     }
 
     /**
+     * Rend la liste HTML des touchpoints (modale prospection).
+     * @param {Array<Object>} items
+     * @returns {string}
+     */
+    function renderTouchpointsListHtml(items) {
+        if (!items || !items.length) {
+            return '<p class="empty-state" style="margin:0;">Aucune interaction enregistrée.</p>';
+        }
+        const esc = (t) => (Formatters && Formatters.escapeHtml ? Formatters.escapeHtml(String(t ?? '')) : String(t ?? ''));
+        return items.map((tp) => {
+            const dateRaw = tp.happened_at || tp.created_at || '';
+            const dateStr = dateRaw ? esc(dateRaw) : '';
+            return `
+                <div class="touchpoint-card">
+                    <div class="touchpoint-card-main">
+                        <div>
+                            <strong>${esc(tp.canal)}</strong>
+                            <span class="touchpoint-sujet"> — ${esc(tp.sujet)}</span>
+                            ${dateStr ? `<div class="touchpoint-date">${dateStr}</div>` : ''}
+                            ${tp.note ? `<div class="touchpoint-note">${esc(tp.note)}</div>` : ''}
+                        </div>
+                        <button type="button" class="btn btn-small btn-outline touchpoint-delete-btn" data-touchpoint-delete="${tp.id}" title="Supprimer"><i class="fas fa-trash"></i></button>
+                    </div>
+                </div>`;
+        }).join('');
+    }
+
+    /**
+     * Charge statut pipeline + touchpoints et branche les actions dans la modale.
+     * @param {number} entrepriseId
+     */
+    async function loadProspectionTab(entrepriseId) {
+        const container = document.getElementById('entreprise-prospection-container');
+        if (!container || !window.EntreprisesAPI) return;
+        container.innerHTML = '<p class="loading">Chargement de la prospection...</p>';
+        try {
+            const [statuts, crmEtapes, tpRes] = await Promise.all([
+                EntreprisesAPI.loadStatutsPipeline(),
+                EntreprisesAPI.loadCrmEtapes(),
+                EntreprisesAPI.loadTouchpoints(entrepriseId, 100, 0)
+            ]);
+            const items = (tpRes && tpRes.items) ? tpRes.items : [];
+            const currentStatut = (currentModalEntrepriseData && currentModalEntrepriseData.statut) ? String(currentModalEntrepriseData.statut) : '';
+            const statutOptions = (statuts || []).map((s) => {
+                const sel = s === currentStatut ? ' selected' : '';
+                return `<option value="${Formatters.escapeHtml(s)}"${sel}>${Formatters.escapeHtml(s)}</option>`;
+            }).join('');
+            const rawEtape = (currentModalEntrepriseData && currentModalEntrepriseData.etape_prospection)
+                ? String(currentModalEntrepriseData.etape_prospection).trim() : '';
+            const currentEtape = rawEtape || 'À prospecter';
+            const etapeList = Array.isArray(crmEtapes) && crmEtapes.length ? crmEtapes : ['À prospecter', 'Contacté', 'RDV', 'Proposition', 'Gagné', 'Perdu'];
+            const etapeOptions = etapeList.map((s) => {
+                const sel = s === currentEtape ? ' selected' : '';
+                return `<option value="${Formatters.escapeHtml(s)}"${sel}>${Formatters.escapeHtml(s)}</option>`;
+            }).join('');
+
+            container.innerHTML = `
+                <div class="prospection-panel">
+                    <div class="prospection-statut-block">
+                        <label for="modal-prospection-etape" class="prospection-label">Étape prospection (Kanban)</label>
+                        <div class="prospection-statut-row">
+                            <select id="modal-prospection-etape" class="form-select">${etapeOptions}</select>
+                            <button type="button" class="btn btn-primary btn-small" id="modal-prospection-save-etape">Enregistrer</button>
+                        </div>
+                    </div>
+                    <div class="prospection-statut-block">
+                        <label for="modal-prospection-statut" class="prospection-label">Statut (campagnes / email)</label>
+                        <div class="prospection-statut-row">
+                            <select id="modal-prospection-statut" class="form-select">${statutOptions}</select>
+                            <button type="button" class="btn btn-primary btn-small" id="modal-prospection-save-statut">Enregistrer</button>
+                        </div>
+                    </div>
+                    <h4 class="prospection-journal-title"><i class="fas fa-comments"></i> Journal d'interactions</h4>
+                    <div id="touchpoints-list" class="touchpoints-list">${renderTouchpointsListHtml(items)}</div>
+                    <form id="touchpoint-form" class="touchpoint-form">
+                        <div class="touchpoint-quick-actions" role="group" aria-label="Raccourcis canal">
+                            <span class="touchpoint-quick-label">Ajouter un touchpoint :</span>
+                            <button type="button" class="btn btn-small btn-outline touchpoint-preset" data-canal="Email">Email</button>
+                            <button type="button" class="btn btn-small btn-outline touchpoint-preset" data-canal="Appel">Appel</button>
+                            <button type="button" class="btn btn-small btn-outline touchpoint-preset" data-canal="RDV">RDV</button>
+                            <button type="button" class="btn btn-small btn-outline touchpoint-preset" data-canal="Note">Note</button>
+                        </div>
+                        <div class="touchpoint-form-grid">
+                            <div>
+                                <label class="form-label">Canal</label>
+                                <input type="text" name="canal" class="form-input" placeholder="Email, téléphone, LinkedIn…" required autocomplete="off">
+                            </div>
+                            <div>
+                                <label class="form-label">Sujet</label>
+                                <input type="text" name="sujet" class="form-input" placeholder="Objet court" required autocomplete="off">
+                            </div>
+                        </div>
+                        <div class="touchpoint-form-note">
+                            <label class="form-label">Note (optionnel)</label>
+                            <textarea name="note" class="form-input" rows="2" placeholder="Détails"></textarea>
+                        </div>
+                        <div class="touchpoint-form-date">
+                            <label class="form-label">Date de l'événement (optionnel)</label>
+                            <input type="datetime-local" name="happened_at" class="form-input">
+                        </div>
+                        <button type="submit" class="btn btn-outline touchpoint-submit"><i class="fas fa-plus"></i> Ajouter l'interaction</button>
+                    </form>
+                </div>
+            `;
+
+            const saveEtapeBtn = document.getElementById('modal-prospection-save-etape');
+            if (saveEtapeBtn) {
+                saveEtapeBtn.onclick = async () => {
+                    const sel = document.getElementById('modal-prospection-etape');
+                    if (!sel || !currentModalEntrepriseId) return;
+                    const etape = (sel.value || '').trim();
+                    if (!etape) {
+                        Notifications.show('Choisis une étape', 'warning');
+                        return;
+                    }
+                    try {
+                        await EntreprisesAPI.updateEtapeProspection(currentModalEntrepriseId, etape);
+                        if (currentModalEntrepriseData) currentModalEntrepriseData.etape_prospection = etape;
+                        const row = allEntreprises.find((e) => e.id === currentModalEntrepriseId);
+                        if (row) row.etape_prospection = etape;
+                        Notifications.show('Étape prospection mise à jour', 'success');
+                        refreshKanbanStrip();
+                        scheduleApplyFilters();
+                    } catch (err) {
+                        console.error(err);
+                        Notifications.show(err.message || 'Erreur étape', 'error');
+                    }
+                };
+            }
+
+            const saveBtn = document.getElementById('modal-prospection-save-statut');
+            if (saveBtn) {
+                saveBtn.onclick = async () => {
+                    const sel = document.getElementById('modal-prospection-statut');
+                    if (!sel || !currentModalEntrepriseId) return;
+                    const statut = (sel.value || '').trim();
+                    if (!statut) {
+                        Notifications.show('Choisis un statut', 'warning');
+                        return;
+                    }
+                    try {
+                        await EntreprisesAPI.updateStatutPipeline(currentModalEntrepriseId, statut);
+                        if (currentModalEntrepriseData) currentModalEntrepriseData.statut = statut;
+                        const badgeEl = document.getElementById('info-statut-value');
+                        if (badgeEl && window.Badges) {
+                            badgeEl.innerHTML = Badges.getStatusBadge(statut);
+                        }
+                        const row = allEntreprises.find((e) => e.id === currentModalEntrepriseId);
+                        if (row) row.statut = statut;
+                        Notifications.show('Statut mis à jour', 'success');
+                        scheduleApplyFilters();
+                    } catch (err) {
+                        console.error(err);
+                        Notifications.show(err.message || 'Erreur statut', 'error');
+                    }
+                };
+            }
+
+            container.querySelectorAll('.touchpoint-preset').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    const canal = btn.getAttribute('data-canal') || '';
+                    const tf = document.getElementById('touchpoint-form');
+                    if (!tf) return;
+                    const canalInput = tf.querySelector('[name="canal"]');
+                    const sujetInput = tf.querySelector('[name="sujet"]');
+                    if (canalInput) canalInput.value = canal;
+                    if (sujetInput) sujetInput.focus();
+                });
+            });
+
+            const form = document.getElementById('touchpoint-form');
+            if (form) {
+                form.onsubmit = async (ev) => {
+                    ev.preventDefault();
+                    if (!currentModalEntrepriseId) return;
+                    const fd = new FormData(form);
+                    const canal = (fd.get('canal') || '').trim();
+                    const sujet = (fd.get('sujet') || '').trim();
+                    const note = fd.get('note');
+                    const ha = fd.get('happened_at');
+                    const payload = { canal, sujet };
+                    if (note !== null && String(note).trim() !== '') payload.note = String(note);
+                    if (ha) {
+                        try {
+                            const d = new Date(String(ha));
+                            if (!Number.isNaN(d.getTime())) payload.happened_at = d.toISOString();
+                        } catch (_) { /* ignore */ }
+                    }
+                    try {
+                        await EntreprisesAPI.createTouchpoint(currentModalEntrepriseId, payload);
+                        form.reset();
+                        Notifications.show('Interaction enregistrée', 'success');
+                        const refreshed = await EntreprisesAPI.loadTouchpoints(currentModalEntrepriseId, 100, 0);
+                        const list = document.getElementById('touchpoints-list');
+                        if (list) {
+                            const next = (refreshed && refreshed.items) ? refreshed.items : [];
+                            list.innerHTML = renderTouchpointsListHtml(next);
+                            list.querySelectorAll('.touchpoint-delete-btn').forEach((btn) => bindTouchpointDelete(btn));
+                        }
+                    } catch (err) {
+                        console.error(err);
+                        Notifications.show(err.message || 'Erreur à l\'enregistrement', 'error');
+                    }
+                };
+            }
+
+            function bindTouchpointDelete(btn) {
+                btn.onclick = async () => {
+                    const tid = btn.getAttribute('data-touchpoint-delete');
+                    if (!tid || !currentModalEntrepriseId) return;
+                    if (!confirm('Supprimer cette interaction ?')) return;
+                    try {
+                        await EntreprisesAPI.deleteTouchpoint(currentModalEntrepriseId, Number(tid));
+                        Notifications.show('Interaction supprimée', 'success');
+                        await loadProspectionTab(currentModalEntrepriseId);
+                    } catch (err) {
+                        console.error(err);
+                        Notifications.show(err.message || 'Erreur suppression', 'error');
+                    }
+                };
+            }
+            container.querySelectorAll('.touchpoint-delete-btn').forEach((btn) => bindTouchpointDelete(btn));
+        } catch (e) {
+            console.error('Prospection:', e);
+            container.innerHTML = '<p class="error">Impossible de charger la prospection.</p>';
+        }
+    }
+
+    /**
      * Recalcule le score d'opportunité pour une entreprise et met à jour la modale.
      * Utilise l'endpoint /api/entreprise/<id>/recalculate-opportunity.
      */
@@ -3190,10 +3840,12 @@
                     </button>
                     <div class="tabs-header-scroll">
                         <button class="tab-btn active" data-tab="info">Info</button>
+                        <button class="tab-btn" data-tab="prospection">Prospection</button>
                         <button class="tab-btn" data-tab="images">Images (${nbImages})</button>
                         <button class="tab-btn" data-tab="pages">Pages (${nbPages})</button>
                         <button class="tab-btn" data-tab="scraping">Résultats scraping</button>
                         <button class="tab-btn" data-tab="pipeline">Pipeline d'audit</button>
+                        <button class="tab-btn" data-tab="evolution-metrics">Évolution</button>
                         <button class="tab-btn" data-tab="technique">Analyse technique</button>
                         <button class="tab-btn" data-tab="seo">Analyse SEO</button>
                         <button class="tab-btn" data-tab="osint">Analyse OSINT</button>
@@ -3259,7 +3911,10 @@
                             ${createInfoRow('Nom', entreprise.nom)}
                             ${createInfoRow('Site web', entreprise.website, true)}
                             ${createInfoRow('Secteur', entreprise.secteur)}
-                            ${createInfoRow('Statut', entreprise.statut, false, Badges.getStatusBadge(entreprise.statut))}
+                            <div class="info-row" id="info-statut-row">
+                                <span class="info-label">Statut:</span>
+                                <span class="info-value" id="info-statut-value">${Badges.getStatusBadge(entreprise.statut)}</span>
+                            </div>
                             ${typeof entreprise.score_securite !== 'undefined' && entreprise.score_securite !== null ? `
                             <div class="info-row">
                                 <span class="info-label">Score sécurité:</span>
@@ -3298,6 +3953,12 @@
                     <div class="tab-panel" id="tab-pages">
                         <div id="entreprise-pages-container" class="pages-tab-content">
                             <p class="empty-state">Aucune donnée OpenGraph disponible pour le moment. Lancez un scraping pour récupérer les métadonnées des pages.</p>
+                        </div>
+                    </div>
+                    
+                    <div class="tab-panel" id="tab-prospection" style="display:none;">
+                        <div id="entreprise-prospection-container" class="prospection-tab-content">
+                            <p class="empty-state">Chargement de la prospection...</p>
                         </div>
                     </div>
                     
@@ -3351,6 +4012,12 @@
                     <div class="tab-panel" id="tab-pipeline">
                         <div id="entreprise-pipeline-container" class="pipeline-tab-content">
                             <p class="empty-state">Chargement du pipeline d'audit...</p>
+                        </div>
+                    </div>
+
+                    <div class="tab-panel" id="tab-evolution-metrics">
+                        <div id="metric-evolution-root" class="metric-evolution-root">
+                            <p class="empty-state">Chargement de l'évolution des métriques…</p>
                         </div>
                     </div>
                     
@@ -3443,6 +4110,7 @@
             Notifications.show(nom + ' — Analyse technique terminée', 'success', 'fa-check-circle');
             if (data.entreprise_id === currentModalEntrepriseId) {
                 setTimeout(() => loadTechnicalAnalysis(currentModalEntrepriseId, { skipClear: true }), 400);
+                setTimeout(() => loadMetricEvolutionTab(currentModalEntrepriseId), 650);
             }
         });
         s.on('technical_analysis_error', function(data) {
@@ -3466,6 +4134,7 @@
             Notifications.show(nom + ' — Analyse SEO terminée', 'success', 'fa-check-circle');
             if (data.entreprise_id === currentModalEntrepriseId) {
                 setTimeout(() => loadSEOAnalysis(currentModalEntrepriseId, { skipClear: true }), 400);
+                setTimeout(() => loadMetricEvolutionTab(currentModalEntrepriseId), 650);
             }
         });
         s.on('seo_analysis_error', function(data) {
@@ -3593,6 +4262,35 @@
                     closeEntrepriseModal();
                 }
             };
+
+            if (!window._modalMetricRescanDelegation) {
+                window._modalMetricRescanDelegation = true;
+                modal.addEventListener('click', async (e) => {
+                    const btn = e.target && e.target.closest && e.target.closest('#btn-metric-evolution-rescan');
+                    if (!btn || btn.disabled) return;
+                    const eid = currentModalEntrepriseId;
+                    if (!eid || !window.EntreprisesAPI || !EntreprisesAPI.requestMetricRescan) return;
+                    const statusEl = document.getElementById('metric-evolution-rescan-status');
+                    btn.disabled = true;
+                    if (statusEl) statusEl.textContent = 'Lancement…';
+                    try {
+                        const res = await EntreprisesAPI.requestMetricRescan(eid, {});
+                        const parts = [];
+                        if (res.tasks && res.tasks.technical_task_id) parts.push('technique en file');
+                        if (res.tasks && res.tasks.seo_task_id) parts.push('SEO en file');
+                        if (statusEl) {
+                            statusEl.textContent = parts.length ? parts.join(' · ') : 'Demandé.';
+                        }
+                        Notifications.show('Re-scan lancé. Les métriques se mettront à jour à la fin des analyses.', 'success');
+                    } catch (err) {
+                        console.warn('[entreprises] metric rescan:', err);
+                        if (statusEl) statusEl.textContent = '';
+                        Notifications.show(err && err.message ? err.message : 'Impossible de lancer le re-scan', 'error');
+                    } finally {
+                        btn.disabled = false;
+                    }
+                });
+            }
         }
         
         document.addEventListener('keydown', (e) => {
@@ -3999,7 +4697,186 @@
                 }
             });
         }
+
+        const evolutionTab = document.querySelector('.tab-btn[data-tab="evolution-metrics"]');
+        if (evolutionTab) {
+            evolutionTab.addEventListener('click', () => {
+                if (currentModalEntrepriseId) {
+                    loadMetricEvolutionTab(currentModalEntrepriseId);
+                }
+            });
+        }
     }
+
+    function formatMetricSnapshotDate(iso) {
+        if (!iso) return '—';
+        try {
+            const d = new Date(iso);
+            if (Number.isNaN(d.getTime())) return Formatters.escapeHtml(String(iso));
+            return Formatters.escapeHtml(
+                d.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }),
+            );
+        } catch (e) {
+            return Formatters.escapeHtml(String(iso));
+        }
+    }
+
+    function renderMetricDiffRow(label, fromVal, toVal) {
+        const a = fromVal != null && fromVal !== '' ? String(fromVal) : '—';
+        const b = toVal != null && toVal !== '' ? String(toVal) : '—';
+        return (
+            '<tr><td>' +
+            Formatters.escapeHtml(label) +
+            '</td><td>' +
+            Formatters.escapeHtml(a) +
+            '</td><td>' +
+            Formatters.escapeHtml(b) +
+            '</td></tr>'
+        );
+    }
+
+    function buildMetricCompareBlock(title, data, sourceKey) {
+        if (!data || data.success === false) {
+            return (
+                '<div class="metric-evolution-block"><h4 class="metric-evolution-block-title">' +
+                Formatters.escapeHtml(title) +
+                '</h4><p class="empty-state subtle">Données indisponibles.</p></div>'
+            );
+        }
+        let html =
+            '<div class="metric-evolution-block"><h4 class="metric-evolution-block-title">' +
+            Formatters.escapeHtml(title) +
+            '</h4>';
+        if (!data.current) {
+            html += '<p class="empty-state subtle">Aucun snapshot pour cette source.</p></div>';
+            return html;
+        }
+        const alerts = data.alerts || [];
+        if (alerts.length) {
+            html += '<ul class="metric-evolution-alerts" role="list">';
+            alerts.forEach(function (a) {
+                const raw = (a.severity || 'medium').toLowerCase();
+                const sev = ['high', 'medium', 'low'].indexOf(raw) >= 0 ? raw : 'medium';
+                html +=
+                    '<li class="metric-alert metric-alert--' +
+                    sev +
+                    '"><span class="metric-alert-msg">' +
+                    Formatters.escapeHtml(a.message || a.code || '') +
+                    '</span></li>';
+            });
+            html += '</ul>';
+        }
+        if (!data.has_pair) {
+            html +=
+                '<p class="metric-evolution-hint">Un seul enregistrement : la comparaison détaillée apparaîtra après une nouvelle analyse.</p>';
+        } else {
+            const prev = data.previous && data.previous.metrics;
+            const cur = data.current && data.current.metrics;
+            html +=
+                '<table class="metric-evolution-table"><thead><tr><th>Indicateur</th><th>Avant</th><th>Après</th></tr></thead><tbody>';
+            const keys =
+                sourceKey === 'seo'
+                    ? ['seo_score', 'domain']
+                    : ['score_securite', 'performance_score', 'ssl_valid', 'ssl_expiry_date', 'cms', 'framework'];
+            const keyLabels = {
+                score_securite: 'Score sécurité',
+                performance_score: 'Score performance',
+                ssl_valid: 'SSL valide',
+                ssl_expiry_date: 'Expiration SSL',
+                cms: 'CMS',
+                framework: 'Framework',
+                seo_score: 'Score SEO',
+                domain: 'Domaine',
+            };
+            keys.forEach(function (k) {
+                const pv = prev ? prev[k] : undefined;
+                const cv = cur ? cur[k] : undefined;
+                if (pv !== undefined || cv !== undefined) {
+                    html += renderMetricDiffRow(keyLabels[k] || k, pv, cv);
+                }
+            });
+            html += '</tbody></table>';
+            html +=
+                '<p class="metric-evolution-meta">Dernier enregistrement : ' +
+                formatMetricSnapshotDate(data.current.captured_at) +
+                '</p>';
+        }
+        html += '</div>';
+        return html;
+    }
+
+    function buildMetricTimelineBlock(title, items) {
+        if (!items || !items.length) {
+            return (
+                '<div class="metric-evolution-block"><h4 class="metric-evolution-block-title">' +
+                Formatters.escapeHtml(title) +
+                '</h4><p class="empty-state subtle">Aucune entrée.</p></div>'
+            );
+        }
+        let html =
+            '<div class="metric-evolution-block"><h4 class="metric-evolution-block-title">' +
+            Formatters.escapeHtml(title) +
+            '</h4><ul class="metric-snapshot-timeline" role="list">';
+        items.forEach(function (it) {
+            const m = it.metrics || {};
+            const bits = [];
+            if (m.score_securite != null) bits.push('Sécu ' + m.score_securite);
+            if (m.performance_score != null) bits.push('Perf ' + m.performance_score);
+            if (m.seo_score != null) bits.push('SEO ' + m.seo_score);
+            const sub = bits.length ? bits.join(' · ') : '—';
+            html +=
+                '<li class="metric-snapshot-timeline-item"><span class="timeline-time">' +
+                formatMetricSnapshotDate(it.captured_at) +
+                '</span><span class="timeline-detail">' +
+                Formatters.escapeHtml(sub) +
+                '</span></li>';
+        });
+        html += '</ul></div>';
+        return html;
+    }
+
+    async function loadMetricEvolutionTab(entrepriseId) {
+        const root = document.getElementById('metric-evolution-root');
+        if (!root || !window.EntreprisesAPI) return;
+        root.innerHTML = '<p class="empty-state">Chargement de l\'évolution des métriques…</p>';
+        try {
+            const [cmpTech, cmpSeo, listTech, listSeo] = await Promise.all([
+                EntreprisesAPI.loadMetricSnapshotsCompare(entrepriseId, 'technical'),
+                EntreprisesAPI.loadMetricSnapshotsCompare(entrepriseId, 'seo'),
+                EntreprisesAPI.loadMetricSnapshots(entrepriseId, { limit: 8, source: 'technical' }).catch(function () {
+                    return { items: [] };
+                }),
+                EntreprisesAPI.loadMetricSnapshots(entrepriseId, { limit: 8, source: 'seo' }).catch(function () {
+                    return { items: [] };
+                }),
+            ]);
+            const techItems = listTech && listTech.items ? listTech.items : [];
+            const seoItems = listSeo && listSeo.items ? listSeo.items : [];
+            root.innerHTML =
+                '<div class="metric-evolution-toolbar">' +
+                '<button type="button" class="btn btn-outline btn-small" id="btn-metric-evolution-rescan" title="Relancer les analyses pour mettre à jour les métriques">' +
+                '<i class="fas fa-sync-alt" aria-hidden="true"></i> Re-scan technique + SEO</button>' +
+                '<span id="metric-evolution-rescan-status" class="metric-evolution-rescan-status" aria-live="polite"></span>' +
+                '</div>' +
+                '<div class="metric-evolution-intro">' +
+                '<p>Historique enregistré à chaque analyse <strong>technique</strong> ou <strong>SEO</strong>. ' +
+                'Les alertes comparent le dernier passage au précédent (même source).</p>' +
+                '</div>' +
+                '<div class="metric-evolution-grid">' +
+                buildMetricCompareBlock('Comparaison — analyse technique', cmpTech, 'technical') +
+                buildMetricCompareBlock('Comparaison — analyse SEO', cmpSeo, 'seo') +
+                '</div>' +
+                '<div class="metric-evolution-grid metric-evolution-grid--timeline">' +
+                buildMetricTimelineBlock('Derniers snapshots techniques', techItems) +
+                buildMetricTimelineBlock('Derniers snapshots SEO', seoItems) +
+                '</div>';
+        } catch (e) {
+            console.warn('[entreprises] metric evolution:', e);
+            root.innerHTML =
+                '<p class="empty-state error">Impossible de charger l\'évolution des métriques.</p>';
+        }
+    }
+
     async function loadTechnicalAnalysis(entrepriseId, opts) {
         const resultsContent = document.getElementById('technique-results-content');
         if (!resultsContent) return;
@@ -4506,9 +5383,19 @@
             console.error('[entreprises] Erreur init secteurs:', e);
         }
         try {
+            await loadOpportunites();
+        } catch (e) {
+            console.error('[entreprises] Erreur init opportunites:', e);
+        }
+        try {
             await loadGroupFilter();
         } catch (e) {
             console.error('[entreprises] Erreur init groupes filtre:', e);
+        }
+        try {
+            await populateCommercialProfileSelect();
+        } catch (e) {
+            console.warn('[entreprises] init profils priorité:', e);
         }
         // Restaurer la recherche + filtres avancés depuis le memento (si disponible),
         // avant d'appliquer les filtres éventuellement présents dans l'URL.
@@ -4517,8 +5404,18 @@
         } catch (e) {
             // ignore
         }
+        try {
+            updateCommercialProfileWeightsVisual();
+        } catch (e) {
+            /* ignore */
+        }
         // Lire les filtres depuis l'URL (secteur, statut, tags_any, analyse_id...)
         applyInitialFiltersFromUrl();
+        try {
+            updateCommercialProfileWeightsVisual();
+        } catch (e) {
+            /* ignore */
+        }
         try {
             await loadEntreprises();
         } catch (e) {

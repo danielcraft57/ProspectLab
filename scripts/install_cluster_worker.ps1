@@ -1,12 +1,18 @@
 param(
     [Parameter(Mandatory=$false)]
-    [string]$Server = 'node13.lan',
+    [string]$Server = 'worker1.lan',
 
     [Parameter(Mandatory=$false)]
-    [string]$User = 'pi',
+    [string]$User = 'deploy',
 
     [Parameter(Mandatory=$false)]
     [string]$RemotePath = '/opt/prospectlab'
+    ,
+
+    # Si true : synchronise uniquement le code (tasks, utils, scripts linux, etc.)
+    # mais ne relance pas le script d'installation distant (install_cluster_worker.sh).
+    [Parameter(Mandatory=$false)]
+    [switch]$SkipRemoteInstallScript
 )
 
 $ErrorActionPreference = 'Stop'
@@ -156,8 +162,8 @@ foreach ($relPath in $linuxScriptsToCopy) {
 Write-Host "✅ Scripts Linux mis à jour sur $Server" -ForegroundColor Green
 Write-Host ""
 
-# 4) Rendre les scripts exécutables et lancer le script d'installation Linux
-Write-Host "[4/5] Execution du script d'installation du worker sur le Raspberry..." -ForegroundColor Yellow
+# 4) Rendre les scripts exécutables et (optionnel) lancer le script d'installation Linux
+Write-Host "[4/5] (optionnel) Execution du script d'installation du worker sur le Raspberry..." -ForegroundColor Yellow
 
 $remoteScriptPath = "$RemotePath/scripts/linux/install_cluster_worker.sh"
 
@@ -174,35 +180,50 @@ if (-not (Test-Path $localInstallScript)) {
     exit 1
 }
 
-Write-Host "   Copie de install_cluster_worker.sh vers le Raspberry via scp..." -ForegroundColor Gray
+Write-Host "   Copie des scripts linux (*.sh) vers le Raspberry via scp..." -ForegroundColor Gray
+ssh "$User@$Server" "mkdir -p $RemotePath/scripts/linux" 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "❌ Impossible de créer $RemotePath/scripts/linux sur $Server" -ForegroundColor Red
+    exit 1
+}
+
 scp $localInstallScript "$User@$Server`:$RemotePath/scripts/linux/" 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "❌ Impossible de copier install_cluster_worker.sh sur $Server" -ForegroundColor Red
-    exit 1
+    Write-Host "⚠️  Impossible de copier install_cluster_worker.sh sur $Server (mais on continue si SkipRemoteInstallScript). " -ForegroundColor Yellow
+    if (-not $SkipRemoteInstallScript) {
+        exit 1
+    }
 }
 
-# Donner les droits d'exécution puis lancer le script côté Raspberry
-ssh "$User@$Server" "cd $RemotePath; chmod +x scripts/linux/*.sh 2>/dev/null || true; bash scripts/linux/install_cluster_worker.sh" 2>&1
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "❌ Erreur lors de l'exécution de install_cluster_worker.sh sur $Server" -ForegroundColor Red
-    Write-Host "   Vérifie les logs affichés ci-dessus." -ForegroundColor Yellow
-    exit 1
-}
+# Donner les droits d'exécution (utile même en copie-only)
+ssh "$User@$Server" "cd $RemotePath; chmod +x scripts/linux/*.sh 2>/dev/null || true" 2>&1 | Out-Null
 
-Write-Host "✅ Script d'installation du worker exécuté avec succès" -ForegroundColor Green
-Write-Host ""
+if (-not $SkipRemoteInstallScript) {
+    # Lancer le script côté Raspberry
+    ssh "$User@$Server" "cd $RemotePath; bash scripts/linux/install_cluster_worker.sh" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "❌ Erreur lors de l'exécution de install_cluster_worker.sh sur $Server" -ForegroundColor Red
+        Write-Host "   Vérifie les logs affichés ci-dessus." -ForegroundColor Yellow
+        exit 1
+    }
+    Write-Host "✅ Script d'installation du worker exécuté avec succès" -ForegroundColor Green
+    Write-Host ""
+} else {
+    Write-Host "✅ Copie du code OK (SkipRemoteInstallScript=true), pas d'installation distante." -ForegroundColor Green
+    Write-Host ""
+}
 
 # 5) Rappel pour le .env et le démarrage du service
 Write-Host "[5/5] Étapes restantes manuelles importantes" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "1. Sur le master (node15.lan), copie ton .env vers le worker :" -ForegroundColor Cyan
-Write-Host "   ssh pi@node15.lan 'cat /opt/prospectlab/.env' > .env.master" -ForegroundColor Gray
+Write-Host "1. Sur le master, copie ton .env vers le worker :" -ForegroundColor Cyan
+Write-Host "   ssh <user>@<master-host> 'cat /opt/prospectlab/.env' > .env.master" -ForegroundColor Gray
 Write-Host "   scp .env.master $User@$Server`:$RemotePath/.env" -ForegroundColor Gray
 Write-Host ""
 Write-Host "2. Sur le worker ($Server), adapte au minimum dans $RemotePath/.env :" -ForegroundColor Cyan
-Write-Host "   - CELERY_BROKER_URL=redis://node15.lan:6379/1" -ForegroundColor Gray
-Write-Host "   - CELERY_RESULT_BACKEND=redis://node15.lan:6379/1" -ForegroundColor Gray
-Write-Host "   - DATABASE_URL=postgresql://prospectlab:TON_MDP@node15.lan:5432/prospectlab" -ForegroundColor Gray
+Write-Host "   - CELERY_BROKER_URL=redis://<master-host>:6379/1" -ForegroundColor Gray
+Write-Host "   - CELERY_RESULT_BACKEND=redis://<master-host>:6379/1" -ForegroundColor Gray
+Write-Host "   - DATABASE_URL=postgresql://<db_user>:<db_password>@<master-host>:5432/<db_name>" -ForegroundColor Gray
 Write-Host ""
 Write-Host "3. Ensuite démarre le service worker sur le Raspberry :" -ForegroundColor Cyan
 Write-Host "   ssh $User@$Server 'sudo systemctl enable prospectlab-celery && sudo systemctl start prospectlab-celery && sudo systemctl status prospectlab-celery'" -ForegroundColor Gray

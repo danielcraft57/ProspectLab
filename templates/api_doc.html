@@ -221,7 +221,7 @@
 <div class="api-doc-page">
     <div class="page-header">
         <h1><i class="fas fa-book"></i> Documentation des endpoints API</h1>
-        <p>Référence des endpoints API, découpée en sous-catégories via le menu à gauche (tokens, API publique, API étendue, intégration et API principale).</p>
+        <p>Référence interactive réservée à l’<strong>API publique</strong> (<code>/api/public</code>), alignée sur <code>docs/guides/API_PUBLIQUE.md</code> (auth, permissions, cache GET, exemples) et sur <code>static/js/api_doc_data.js</code>. Les <strong>entreprises</strong> : liste, détail, recherches, statuts — <strong>suppression</strong> (<code>DELETE …/entreprises/&lt;id&gt;</code>) exige en plus du droit « lire les entreprises » le droit token dédié <strong>suppression entreprises</strong> (<code>can_delete_entreprises</code>, configurable dans Gestion des tokens API). Mobile : <code>docs/mobile/API_INTEGRATION.md</code>. Menu à gauche : rubriques.</p>
     </div>
     <div class="api-doc-page-body">
         <nav class="api-doc-page-nav" id="apiDocPageNav" role="tablist">

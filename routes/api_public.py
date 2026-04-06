@@ -5,10 +5,15 @@ Authentification par token API
 """
 
 from flask import Blueprint, request, jsonify
+from config import SEO_USE_LIGHTHOUSE_DEFAULT
 from services.database import Database
 from services.api_auth import api_token_required, require_api_permission
 import json
+import re
 from urllib.parse import urlparse
+
+from utils.url_utils import canonical_website_https_url
+from services.public_api_response_cache import public_response_cache
 
 api_public_bp = Blueprint('api_public', __name__, url_prefix='/api/public')
 
@@ -22,6 +27,232 @@ def _normalize_email(raw: str) -> str | None:
     if not s or '@' not in s:
         return None
     return s
+
+
+def _digits_only_phone(raw: str) -> str:
+    return re.sub(r'\D', '', raw or '')
+
+
+def _phone_digit_equivalence_keys(d: str) -> set[str]:
+    """Clés numériques pour comparer FR (+33 / 0…) et formats internationaux."""
+    if not d:
+        return set()
+    keys = {d}
+    # France métropolitaine : 0X XX XX XX XX ↔ 33X…
+    if len(d) == 10 and d.startswith('0'):
+        keys.add('33' + d[1:])
+    if len(d) == 11 and d.startswith('33') and d[2] in '123456789':
+        keys.add('0' + d[2:])
+    # Appel international depuis l'étranger : 00… → même suite qu'avec +
+    if d.startswith('00') and len(d) >= 12:
+        keys.add(d[2:])
+    return keys
+
+
+def _phone_lookup_variants(raw: str) -> list[str]:
+    """
+    Variantes de chaînes susceptibles d'être stockées telles quelles en base
+    (scrapers, saisie utilisateur, formats +33, 06…, 00…).
+    """
+    s = (raw or '').strip()
+    if not s:
+        return []
+    variants: set[str] = set()
+    d = _digits_only_phone(s)
+    if not d:
+        return []
+
+    def add(v: str | None):
+        if v and v.strip():
+            variants.add(v.strip())
+
+    add(s)
+    add(d)
+    # Éviter "+0612…" (invalide) : le cas FR est couvert plus bas (+33…).
+    if not (len(d) == 10 and d.startswith('0')):
+        add('+' + d)
+    if s.startswith('+'):
+        add(s[1:])
+    if d.startswith('00') and len(d) >= 10:
+        add('+' + d[2:])
+        add(d[2:])
+    # France
+    if len(d) == 10 and d.startswith('0'):
+        intl = '33' + d[1:]
+        add(intl)
+        add('+' + intl)
+        add('00' + intl)
+    if len(d) == 11 and d.startswith('33'):
+        add(d)
+        add('+' + d)
+        add('0' + d[2:])
+        add('00' + d)
+    # International (hors cas FR ci-dessus)
+    if len(d) >= 10 and not (len(d) == 10 and d.startswith('0')):
+        add(d)
+        add('+' + d)
+        if not d.startswith('00'):
+            add('00' + d)
+
+    return list(variants)
+
+
+def _sql_phone_digits_expr(alias: str = 'phone') -> str:
+    """Expression SQL (SQLite / PG) : ne garde que les chiffres pour comparaison."""
+    # PostgreSQL et SQLite acceptent || pour concaténer des REPLACE imbriqués.
+    e = f"COALESCE({alias}, '')" if alias else "COALESCE(phone, '')"
+    for ch in (' ', '-', '.', '(', ')', '+'):
+        e = f"REPLACE({e}, '{ch}', '')"
+    return e
+
+
+def _find_entreprise_row_by_phone(db: Database, phone_raw: str) -> tuple[int | None, dict | None]:
+    """
+    Cherche une entreprise par numéro : scraper_phones puis entreprises.telephone.
+    Retourne (entreprise_id, match_info) ou (None, None).
+    """
+    variants = _phone_lookup_variants(phone_raw)
+    d = _digits_only_phone(phone_raw)
+    digit_keys = _phone_digit_equivalence_keys(d)
+    if not d:
+        return None, None
+
+    conn = db.get_connection()
+    cursor = conn.cursor()
+    row = None
+    row2 = None
+    match: dict | None = None
+
+    vlist = [v for v in variants if v][:64]
+    if vlist:
+        ph = ','.join(['?'] * len(vlist))
+        db.execute_sql(cursor, f'''
+            SELECT entreprise_id, phone, page_url, date_found, phone_e164, osint_json
+            FROM scraper_phones
+            WHERE phone IN ({ph}) OR phone_e164 IN ({ph})
+            ORDER BY date_found DESC
+            LIMIT 1
+        ''', tuple(vlist) + tuple(vlist))
+        row = cursor.fetchone()
+
+    if not row and digit_keys:
+        klist = list(digit_keys)[:16]
+        if klist:
+            expr = _sql_phone_digits_expr('phone')
+            expr164 = _sql_phone_digits_expr('phone_e164')
+            ph2 = ','.join(['?'] * len(klist))
+            db.execute_sql(cursor, f'''
+                SELECT entreprise_id, phone, page_url, date_found, phone_e164, osint_json
+                FROM scraper_phones
+                WHERE {expr} IN ({ph2}) OR (phone_e164 IS NOT NULL AND phone_e164 != '' AND {expr164} IN ({ph2}))
+                ORDER BY date_found DESC
+                LIMIT 1
+            ''', tuple(klist) + tuple(klist))
+            row = cursor.fetchone()
+
+    if row:
+        r = dict(row) if not isinstance(row, dict) else row
+        eid = r.get('entreprise_id')
+        match = {
+            'source': 'scraper',
+            'phone': r.get('phone'),
+            'page_url': r.get('page_url'),
+            'date_found': r.get('date_found'),
+            'phone_e164': r.get('phone_e164'),
+        }
+        raw_oj = r.get('osint_json')
+        if raw_oj:
+            try:
+                match['osint'] = json.loads(raw_oj)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        conn.close()
+        return int(eid), match
+
+    if vlist:
+        ph = ','.join(['?'] * len(vlist))
+        db.execute_sql(cursor, f'''
+            SELECT id
+            FROM entreprises
+            WHERE telephone IN ({ph})
+            LIMIT 1
+        ''', tuple(vlist))
+        row2 = cursor.fetchone()
+
+    if not row2 and digit_keys:
+        klist = list(digit_keys)[:16]
+        expr = _sql_phone_digits_expr('telephone')
+        ph2 = ','.join(['?'] * len(klist))
+        db.execute_sql(cursor, f'''
+            SELECT id
+            FROM entreprises
+            WHERE {expr} IN ({ph2})
+            LIMIT 1
+        ''', tuple(klist))
+        row2 = cursor.fetchone()
+
+    conn.close()
+
+    if row2:
+        eid = row2.get('id') if isinstance(row2, dict) else row2[0]
+        return int(eid), {
+            'source': 'principal',
+            'phone': d,
+            'page_url': None,
+            'date_found': None,
+        }
+
+    return None, None
+
+
+def _get_entreprise_phones_list(entreprise_id: int, include_primary: bool = True) -> list[dict]:
+    """Téléphones scrapés + optionnellement telephone de l'entreprise."""
+    out: list[dict] = []
+    conn = database.get_connection()
+    cursor = conn.cursor()
+    database.execute_sql(cursor, '''
+        SELECT phone, page_url, date_found, phone_e164, carrier, location, line_type, phone_valid,
+               osint_json, analyzed_at
+        FROM scraper_phones
+        WHERE entreprise_id = ?
+        ORDER BY date_found DESC
+    ''', (entreprise_id,))
+    for row in cursor.fetchall() or []:
+        r = dict(row) if not isinstance(row, dict) else row
+        pv = r.get('phone_valid')
+        item = {
+            'source': 'scraper',
+            'phone': r.get('phone'),
+            'page_url': r.get('page_url'),
+            'date_found': r.get('date_found'),
+            'phone_e164': r.get('phone_e164'),
+            'carrier': r.get('carrier'),
+            'location': r.get('location'),
+            'line_type': r.get('line_type'),
+            'valid': bool(pv) if pv is not None else None,
+            'analyzed_at': r.get('analyzed_at'),
+        }
+        raw_oj = r.get('osint_json')
+        if raw_oj:
+            try:
+                item['osint'] = json.loads(raw_oj)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        out.append(item)
+    conn.close()
+
+    if include_primary:
+        ent = database.get_entreprise(entreprise_id)
+        if ent and (ent.get('telephone') or '').strip():
+            tel = (ent.get('telephone') or '').strip()
+            if not any((x.get('phone') or '').strip() == tel for x in out):
+                out.insert(0, {
+                    'source': 'principal',
+                    'phone': tel,
+                    'page_url': None,
+                    'date_found': None,
+                })
+    return out
 
 
 def _extract_person_from_name_info(name_info) -> dict | None:
@@ -207,20 +438,10 @@ def _get_allowed_entreprise_statuses() -> list[str]:
         ]
 
 def _normalize_url_for_analysis(raw: str) -> str | None:
-    if not raw:
+    """URL HTTPS canonique (sans www.) — alignée sur la dédup domaine en base."""
+    if raw is None:
         return None
-    s = str(raw).strip()
-    if not s:
-        return None
-    if not s.startswith(('http://', 'https://')):
-        s = f'https://{s}'
-    try:
-        parsed = urlparse(s)
-        if not parsed.scheme or not parsed.netloc:
-            return None
-    except Exception:
-        return None
-    return s
+    return canonical_website_https_url(str(raw).strip() or None)
 
 
 def _get_entreprise_id_for_website(database: Database, website: str) -> int | None:
@@ -299,6 +520,7 @@ def _build_website_analysis_report(database: Database, entreprise_id: int, full:
 @api_public_bp.route('/entreprises', methods=['GET'])
 @api_token_required
 @require_api_permission('entreprises')
+@public_response_cache(25)
 def get_entreprises():
     """
     API publique : Liste des entreprises
@@ -308,6 +530,7 @@ def get_entreprises():
         offset (int): Offset pour la pagination (défaut: 0)
         secteur (str): Filtrer par secteur
         statut (str): Filtrer par statut
+        opportunite (str): Filtrer par opportunite / score d'opportunite affiche
         search (str): Recherche textuelle (nom, website)
         
     Returns:
@@ -322,22 +545,33 @@ def get_entreprises():
             filters['secteur'] = request.args.get('secteur')
         if request.args.get('statut'):
             filters['statut'] = _maybe_expand_statut_filter(request.args.get('statut'))
+        if request.args.get('opportunite'):
+            filters['opportunite'] = request.args.get('opportunite')
         if request.args.get('search'):
             filters['search'] = request.args.get('search')
         
         entreprises = database.get_entreprises(filters=filters if filters else None, limit=limit, offset=offset)
-        
+
+        # Total correspondant aux mêmes filtres (liste + recherche) : une seule requête COUNT
+        # sur la première page pour limiter le coût lors du « load more ».
+        total = None
+        if offset == 0:
+            total = database.count_entreprises(filters=filters if filters else None)
+
         # Nettoyer les valeurs NaN pour la sérialisation JSON
         from utils.helpers import clean_json_dict
         entreprises = clean_json_dict(entreprises)
-        
-        return jsonify({
+
+        payload = {
             'success': True,
             'count': len(entreprises),
             'limit': limit,
             'offset': offset,
-            'data': entreprises
-        })
+            'data': entreprises,
+        }
+        if total is not None:
+            payload['total'] = int(total)
+        return jsonify(payload)
     except Exception as e:
         return jsonify({
             'success': False,
@@ -345,9 +579,66 @@ def get_entreprises():
         }), 500
 
 
+@api_public_bp.route('/entreprises/proches', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+@public_response_cache(15)
+def get_entreprises_proches():
+    """
+    API publique : entreprises proches d'un point GPS (données ProspectLab, pas OSM).
+
+    Query params:
+        latitude (float, requis)
+        longitude (float, requis)
+        rayon_km | radius_km (float, optionnel, défaut 10, max 100)
+        limit (int, optionnel, défaut 80, max 250)
+        secteur (str, optionnel)
+    """
+    try:
+        latitude_raw = request.args.get('latitude')
+        longitude_raw = request.args.get('longitude')
+        if latitude_raw in (None, '') or longitude_raw in (None, ''):
+            return jsonify({'success': False, 'error': 'Paramètres "latitude" et "longitude" requis.'}), 400
+
+        latitude = float(latitude_raw)
+        longitude = float(longitude_raw)
+        radius_raw = request.args.get('rayon_km', request.args.get('radius_km', '10'))
+        limit_raw = request.args.get('limit', '80')
+        secteur = (request.args.get('secteur') or '').strip() or None
+
+        rayon_km = max(0.2, min(float(radius_raw), 100.0))
+        limit = max(1, min(int(limit_raw), 250))
+
+        entreprises = database.get_nearby_entreprises(
+            latitude=latitude,
+            longitude=longitude,
+            radius_km=rayon_km,
+            secteur=secteur,
+            limit=limit,
+        ) or []
+
+        from utils.helpers import clean_json_dict
+        entreprises = clean_json_dict(entreprises)
+        return jsonify({
+            'success': True,
+            'count': len(entreprises),
+            'latitude': latitude,
+            'longitude': longitude,
+            'rayon_km': rayon_km,
+            'limit': limit,
+            'secteur': secteur,
+            'data': entreprises,
+        })
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Coordonnées invalides.'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @api_public_bp.route('/entreprises/statuses', methods=['GET'])
 @api_token_required
 @require_api_permission('entreprises')
+@public_response_cache(300)
 def get_entreprise_statuses():
     """
     API publique : Liste des statuts d'entreprise supportés.
@@ -481,32 +772,69 @@ def entreprise_callback_public(entreprise_id: int):
     return _update_entreprise_status(entreprise_id, statut='À rappeler', note=payload.get('note'))
 
 
+def _delete_entreprise_public(entreprise_id: int):
+    """
+    Supprime l'entreprise et les lignes liées (CASCADE côté schéma SQLite / FK PostgreSQL).
+    """
+    try:
+        conn = database.get_connection()
+        cursor = conn.cursor()
+        database.execute_sql(cursor, 'SELECT id, nom FROM entreprises WHERE id = ?', (entreprise_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Entreprise introuvable'}), 404
+
+        try:
+            nom = row['nom']
+        except (TypeError, KeyError, IndexError):
+            nom = row[1] if len(row) > 1 else None
+        database.execute_sql(cursor, 'DELETE FROM entreprises WHERE id = ?', (entreprise_id,))
+        conn.commit()
+        conn.close()
+
+        label = (nom or '').strip() or f'#{entreprise_id}'
+        return jsonify({
+            'success': True,
+            'deleted_id': entreprise_id,
+            'message': f'Entreprise « {label} » supprimée',
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@api_public_bp.route('/entreprises/<int:entreprise_id>', methods=['DELETE'])
+@api_token_required
+@require_api_permission('entreprises')
+@require_api_permission('entreprises_delete')
+def delete_entreprise_public(entreprise_id: int):
+    """
+    API publique : suppression définitive d'une fiche entreprise.
+    Nécessite la permission token « suppression entreprises » (can_delete_entreprises), en plus de la lecture entreprises.
+    """
+    return _delete_entreprise_public(entreprise_id)
+
+
 @api_public_bp.route('/entreprises/<int:entreprise_id>', methods=['GET'])
 @api_token_required
 @require_api_permission('entreprises')
+@public_response_cache(35)
 def get_entreprise(entreprise_id):
     """
-    API publique : Détails d'une entreprise
-    
-    Args:
-        entreprise_id (int): ID de l'entreprise
-        
-    Returns:
-        JSON: Détails complets de l'entreprise
+    API publique : Détails d'une entreprise.
     """
     try:
         entreprise = database.get_entreprise(entreprise_id)
-        
+
         if not entreprise:
             return jsonify({
                 'success': False,
                 'error': 'Entreprise introuvable'
             }), 404
-        
-        # Nettoyer les valeurs NaN pour la sérialisation JSON
+
         from utils.helpers import clean_json_dict
         entreprise = clean_json_dict(entreprise)
-        
+
         return jsonify({
             'success': True,
             'data': entreprise
@@ -518,10 +846,63 @@ def get_entreprise(entreprise_id):
         }), 500
 
 
+@api_public_bp.route('/entreprises/<int:entreprise_id>/gallery', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+@public_response_cache(45)
+def get_entreprise_gallery_public(entreprise_id: int):
+    """
+    API publique : images liées à la fiche (scraping + OpenGraph + champs og_image/logo).
+
+    Utile pour la galerie mobile (carte, fiche légère) sans charger tout le rapport website-analysis.
+    """
+    try:
+        entreprise = database.get_entreprise(entreprise_id)
+        if not entreprise:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable'}), 404
+
+        raw = database.get_images_by_entreprise(entreprise_id) or []
+        seen: set[str] = set()
+        items: list[dict] = []
+
+        def push(url: str | None, alt_text: str | None = None, source: str | None = None, page_url: str | None = None):
+            if not url or not isinstance(url, str):
+                return
+            u = url.strip()
+            if not u or u in seen:
+                return
+            seen.add(u)
+            items.append({
+                'url': u,
+                'alt_text': alt_text,
+                'source': source,
+                'page_url': page_url,
+            })
+
+        for img in raw[:80]:
+            if not isinstance(img, dict):
+                continue
+            push(
+                img.get('url') or img.get('secure_url'),
+                img.get('alt_text'),
+                img.get('source'),
+                img.get('page_url'),
+            )
+
+        from utils.helpers import clean_json_dict
+        return jsonify({
+            'success': True,
+            'data': clean_json_dict({'images': items, 'count': len(items)}),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @api_public_bp.route('/entreprises/by-email', methods=['GET'])
 @api_token_required
 @require_api_permission('entreprises')
 @require_api_permission('emails')
+@public_response_cache(35)
 def get_entreprise_by_email():
     """
     API publique : retrouver une entreprise à partir d'un email.
@@ -614,6 +995,7 @@ def get_entreprise_by_email():
 @api_public_bp.route('/entreprises/by-website', methods=['GET'])
 @api_token_required
 @require_api_permission('entreprises')
+@public_response_cache(35)
 def get_entreprise_by_website():
     """
     API publique : retrouver l'entreprise via son URL/domaine.
@@ -649,10 +1031,57 @@ def get_entreprise_by_website():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@api_public_bp.route('/entreprises/by-phone', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+@public_response_cache(35)
+def get_entreprise_by_phone():
+    """
+    API publique : retrouver une entreprise à partir d'un numéro de téléphone.
+
+    Query params:
+        phone (str, requis) : numéro tel quel (ex. +33 6 12 34 56 78, 06 12 34 56 78, 0033…, numéros étrangers).
+        include_phones (bool, optionnel) : si true, liste les téléphones connus (scraping + téléphone principal).
+    """
+    try:
+        phone_raw = request.args.get('phone', '')
+        if not (phone_raw or '').strip():
+            return jsonify({'success': False, 'error': 'Paramètre "phone" requis.'}), 400
+
+        include_phones = str(request.args.get('include_phones', '')).lower() in ('1', 'true', 'yes')
+
+        entreprise_id, match = _find_entreprise_row_by_phone(database, phone_raw)
+        if not entreprise_id:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable pour ce numéro.'}), 404
+
+        entreprise = database.get_entreprise(int(entreprise_id))
+        if not entreprise:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable.'}), 404
+
+        from utils.helpers import clean_json_dict
+        entreprise = clean_json_dict(entreprise)
+
+        payload = {
+            'success': True,
+            'data': {
+                'entreprise': entreprise,
+                'match': match,
+            },
+        }
+        if include_phones:
+            payload['data']['phones'] = _get_entreprise_phones_list(int(entreprise_id), include_primary=True)
+            payload['data']['phones_count'] = len(payload['data']['phones'])
+
+        return jsonify(payload)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @api_public_bp.route('/entreprises/<int:entreprise_id>/emails', methods=['GET'])
 @api_token_required
 @require_api_permission('entreprises')
 @require_api_permission('emails')
+@public_response_cache(20)
 def get_entreprise_emails(entreprise_id):
     """
     API publique : Emails d'une entreprise
@@ -718,6 +1147,7 @@ def get_entreprise_emails(entreprise_id):
 @api_token_required
 @require_api_permission('entreprises')
 @require_api_permission('emails')
+@public_response_cache(20)
 def get_entreprise_emails_all(entreprise_id: int):
     """
     API publique : Tous les emails d'une entreprise (email_principal + emails scrapés),
@@ -743,9 +1173,39 @@ def get_entreprise_emails_all(entreprise_id: int):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@api_public_bp.route('/entreprises/<int:entreprise_id>/phones', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+@public_response_cache(20)
+def get_entreprise_phones_public(entreprise_id: int):
+    """
+    API publique : telephones connus pour une entreprise (scraping + telephone principal).
+
+    Query params:
+        include_primary (bool, optionnel): inclure telephone principal (defaut: true)
+    """
+    try:
+        entreprise = database.get_entreprise(entreprise_id)
+        if not entreprise:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable'}), 404
+        include_primary = str(request.args.get('include_primary', '1')).lower() in ('1', 'true', 'yes')
+        items = _get_entreprise_phones_list(entreprise_id, include_primary=include_primary)
+        from utils.helpers import clean_json_dict
+        items = clean_json_dict(items)
+        return jsonify({
+            'success': True,
+            'entreprise_id': entreprise_id,
+            'count': len(items),
+            'data': items,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @api_public_bp.route('/emails', methods=['GET'])
 @api_token_required
 @require_api_permission('emails')
+@public_response_cache(20)
 def get_all_emails():
     """
     API publique : Liste de tous les emails
@@ -824,9 +1284,43 @@ def get_all_emails():
         }), 500
 
 
+@api_public_bp.route('/token/info', methods=['GET'])
+@api_token_required
+@public_response_cache(15)
+def public_api_token_info():
+    """
+    API publique : metadonnees du token courant (sans exposer la valeur complete).
+
+    Permet au client mobile de verifier la validite du token et les permissions.
+    """
+    td = getattr(request, 'api_token', None) or {}
+    raw = (td.get('token') or '') or ''
+    preview = (raw[:10] + '…') if len(raw) > 10 else ('***' if raw else None)
+    return jsonify({
+        'success': True,
+        'data': {
+            'id': td.get('id'),
+            'name': td.get('name'),
+            'token_preview': preview,
+            'app_url': td.get('app_url'),
+            'user_id': td.get('user_id'),
+            'permissions': {
+                'entreprises': bool(td.get('can_read_entreprises')),
+                'entreprises_delete': bool(td.get('can_read_entreprises')) and bool(td.get('can_delete_entreprises')),
+                'emails': bool(td.get('can_read_emails')),
+                'statistics': bool(td.get('can_read_statistics')),
+                'campagnes': bool(td.get('can_read_campagnes')),
+            },
+            'last_used': str(td.get('last_used')) if td.get('last_used') is not None else None,
+            'date_creation': str(td.get('date_creation')) if td.get('date_creation') is not None else None,
+        },
+    })
+
+
 @api_public_bp.route('/statistics', methods=['GET'])
 @api_token_required
 @require_api_permission('statistics')
+@public_response_cache(45)
 def get_statistics():
     """
     API publique : Statistiques globales
@@ -848,12 +1342,124 @@ def get_statistics():
         }), 500
 
 
+@api_public_bp.route('/statistics/overview', methods=['GET'])
+@api_token_required
+@require_api_permission('statistics')
+@public_response_cache(45)
+def get_statistics_overview():
+    """
+    API publique : vue compacte pour mobile (KPI + tendance journaliere des entreprises).
+
+    Query params:
+        days (int, optionnel): fenetere pour la serie (defaut: 7, max: 90).
+    """
+    try:
+        raw_days = request.args.get('days', '')
+        try:
+            days = int(raw_days) if raw_days not in (None, '') else 7
+        except Exception:
+            days = 7
+        days = max(1, min(days, 90))
+        data = database.get_mobile_dashboard_overview(trend_days=days)
+        from utils.helpers import clean_json_dict
+        return jsonify({'success': True, 'data': clean_json_dict(data)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@api_public_bp.route('/reference/ciblage', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+@public_response_cache(120)
+def public_reference_ciblage():
+    """
+    API publique : listes de valeurs distinctes pour filtres (secteur, opportunite, statut entreprise, tags).
+    """
+    try:
+        data = database.get_ciblage_suggestions()
+        from utils.helpers import clean_json_dict
+        return jsonify({'success': True, 'data': clean_json_dict(data)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@api_public_bp.route('/reference/ciblage/counts', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+@public_response_cache(120)
+def public_reference_ciblage_counts():
+    """
+    API publique : meme chose que /reference/ciblage avec effectifs par valeur (pour pickers / facettes).
+    """
+    try:
+        data = database.get_ciblage_suggestions_with_counts()
+        from utils.helpers import clean_json_dict
+        return jsonify({'success': True, 'data': clean_json_dict(data)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@api_public_bp.route('/reference/carte-villes', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+@public_response_cache(120)
+def public_reference_carte_villes():
+    """
+    API publique : villes (presets Grand Est / scripts) avec nombre d'entreprises géolocalisées dans un rayon.
+
+    Query params:
+        rayon_km (float, optionnel) : rayon autour du centre-ville pour compter les fiches (defaut 25, max 80).
+    """
+    try:
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+        path = root / 'scripts' / 'google_maps_tools' / 'presets_grand_est.json'
+        with open(path, encoding='utf-8') as f:
+            raw = json.load(f)
+        presets = raw.get('presets') or []
+        try:
+            radius = float(request.args.get('rayon_km', '25'))
+        except ValueError:
+            radius = 25.0
+        radius = max(5.0, min(radius, 80.0))
+
+        out: list[dict] = []
+        for p in presets:
+            if not isinstance(p, dict):
+                continue
+            city = (p.get('city') or '').strip()
+            if not city:
+                continue
+            try:
+                lat = float(p['lat'])
+                lng = float(p['lng'])
+            except (TypeError, ValueError, KeyError):
+                continue
+            n = database.count_nearby_entreprises(lat, lng, radius_km=radius)
+            out.append({
+                'label': city,
+                'region': p.get('region'),
+                'department': p.get('department'),
+                'latitude': lat,
+                'longitude': lng,
+                'count': n,
+            })
+
+        out.sort(key=lambda x: (-int(x.get('count') or 0), str(x.get('label') or '').lower()))
+        return jsonify({'success': True, 'rayon_km': radius, 'count': len(out), 'data': out})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @api_public_bp.route('/website-analysis', methods=['GET', 'POST'])
 @api_token_required
 @require_api_permission('entreprises')
 def public_website_analysis():
     """
     API publique (token) : Analyse d'un site web (par URL).
+
+    Pas de cache GET (public_response_cache) : le rapport évolue pendant le traitement Celery ;
+    une entrée 200 figée 90 s bloquerait le polling mobile (l’UI web utilise /api/website-analysis).
 
     GET:
         Query params:
@@ -913,7 +1519,7 @@ def public_website_analysis():
     max_time = int(payload.get('max_time', 180) or 180)
     max_pages = int(payload.get('max_pages', 30) or 30)
     enable_nmap = bool(payload.get('enable_nmap', False))
-    use_lighthouse = bool(payload.get('use_lighthouse', False))
+    use_lighthouse = bool(payload.get('use_lighthouse', SEO_USE_LIGHTHOUSE_DEFAULT))
 
     from tasks.scraping_tasks import scrape_emails_task
     from tasks.technical_analysis_tasks import technical_analysis_task
@@ -935,7 +1541,7 @@ def public_website_analysis():
                 entreprise_id=entreprise_id,
             ),
             countdown=_st.next_countdown(),
-            queue='heavy',
+            queue='scraping',
         )
         tasks_launched['scraping_task_id'] = scraping_task.id
     except Exception as e:
@@ -945,7 +1551,7 @@ def public_website_analysis():
         tech_task = technical_analysis_task.apply_async(
             kwargs=dict(url=website, entreprise_id=entreprise_id, enable_nmap=enable_nmap),
             countdown=_st.next_countdown(),
-            queue='heavy',
+            queue='technical',
         )
         tasks_launched['technical_task_id'] = tech_task.id
     except Exception as e:
@@ -964,7 +1570,7 @@ def public_website_analysis():
         osint_task = osint_analysis_task.apply_async(
             kwargs=dict(url=website, entreprise_id=entreprise_id),
             countdown=_st.next_countdown(),
-            queue='heavy',
+            queue='osint',
         )
         tasks_launched['osint_task_id'] = osint_task.id
     except Exception as e:
@@ -990,9 +1596,24 @@ def public_website_analysis():
     }), 202
 
 
+@api_public_bp.route('/campagnes/statuses', methods=['GET'])
+@api_token_required
+@require_api_permission('campagnes')
+@public_response_cache(600)
+def public_campagne_statuses():
+    """
+    API publique : statuts possibles pour une campagne email (filtrage / UI).
+    """
+    return jsonify({
+        'success': True,
+        'data': ['draft', 'scheduled', 'running', 'completed', 'failed'],
+    })
+
+
 @api_public_bp.route('/campagnes', methods=['GET'])
 @api_token_required
 @require_api_permission('campagnes')
+@public_response_cache(25)
 def get_campagnes():
     """
     API publique : Liste des campagnes email
@@ -1001,6 +1622,8 @@ def get_campagnes():
         limit (int): Nombre maximum de résultats (défaut: 100, max: 1000)
         offset (int): Offset pour la pagination (défaut: 0)
         statut (str): Filtrer par statut (draft, running, completed, failed)
+        entreprise_id (int, optionnel): Ne retourner que les campagnes associées à cette entreprise
+            (envois enregistrés et campagnes programmées dont les destinataires incluent l'entreprise).
         
     Returns:
         JSON: Liste des campagnes avec leurs informations
@@ -1011,15 +1634,22 @@ def get_campagnes():
         limit = min(int(request.args.get('limit', 100)), 1000)
         offset = int(request.args.get('offset', 0))
         statut = request.args.get('statut')
+        entreprise_id = request.args.get('entreprise_id', type=int)
         
         campagne_manager = CampagneManager()
-        campagnes = campagne_manager.list_campagnes(statut=statut, limit=limit, offset=offset)
+        campagnes = campagne_manager.list_campagnes(
+            statut=statut,
+            limit=limit,
+            offset=offset,
+            entreprise_id=entreprise_id,
+        )
         
         return jsonify({
             'success': True,
             'count': len(campagnes),
             'limit': limit,
             'offset': offset,
+            'entreprise_id': entreprise_id,
             'data': campagnes
         })
     except Exception as e:
@@ -1029,9 +1659,48 @@ def get_campagnes():
         }), 500
 
 
+@api_public_bp.route('/entreprises/<int:entreprise_id>/campagnes', methods=['GET'])
+@api_token_required
+@require_api_permission('campagnes')
+@public_response_cache(25)
+def get_campagnes_by_entreprise(entreprise_id: int):
+    """
+    API publique : campagnes liées à une entreprise (même filtre que GET /campagnes?entreprise_id=).
+    """
+    try:
+        from services.database.campagnes import CampagneManager
+
+        ent = database.get_entreprise(entreprise_id)
+        if not ent:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable'}), 404
+
+        limit = min(int(request.args.get('limit', 100)), 1000)
+        offset = int(request.args.get('offset', 0))
+        statut = request.args.get('statut')
+
+        campagne_manager = CampagneManager()
+        campagnes = campagne_manager.list_campagnes(
+            statut=statut,
+            limit=limit,
+            offset=offset,
+            entreprise_id=entreprise_id,
+        )
+        return jsonify({
+            'success': True,
+            'count': len(campagnes),
+            'limit': limit,
+            'offset': offset,
+            'entreprise_id': entreprise_id,
+            'data': campagnes,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @api_public_bp.route('/campagnes/<int:campagne_id>', methods=['GET'])
 @api_token_required
 @require_api_permission('campagnes')
+@public_response_cache(25)
 def get_campagne(campagne_id):
     """
     API publique : Détails d'une campagne email
@@ -1068,6 +1737,7 @@ def get_campagne(campagne_id):
 @api_public_bp.route('/campagnes/<int:campagne_id>/emails', methods=['GET'])
 @api_token_required
 @require_api_permission('campagnes')
+@public_response_cache(25)
 def get_campagne_emails(campagne_id):
     """
     API publique : Emails envoyés d'une campagne
@@ -1130,6 +1800,7 @@ def get_campagne_emails(campagne_id):
 @api_public_bp.route('/campagnes/<int:campagne_id>/statistics', methods=['GET'])
 @api_token_required
 @require_api_permission('campagnes')
+@public_response_cache(25)
 def get_campagne_statistics(campagne_id):
     """
     API publique : Statistiques de tracking d'une campagne
@@ -1166,4 +1837,53 @@ def get_campagne_statistics(campagne_id):
             'success': False,
             'error': str(e)
         }), 500
+
+
+@api_public_bp.route('/push/register', methods=['POST', 'DELETE'])
+@api_token_required
+def expo_push_register():
+    """
+    POST: enregistre un jeton Expo Push pour ce token API.
+    DELETE: retire un jeton Expo Push pour ce token API.
+
+    Body JSON:
+        expo_push_token (str): ExponentPushToken[...]
+        platform (str, POST seulement): android | ios (défaut android)
+        installation_id (str, optionnel): identifiant stable d'installation.
+    """
+    try:
+        from services.mobile_expo_push import register_device, unregister_device
+
+        if not request.is_json:
+            return jsonify({'success': False, 'error': 'Content-Type application/json requis'}), 400
+
+        token_row = getattr(request, 'api_token', None) or {}
+        api_token_id = token_row.get('id')
+        if not api_token_id:
+            return jsonify({'success': False, 'error': 'Token API invalide'}), 401
+
+        body = request.get_json(silent=True) or {}
+        expo_push_token = (body.get('expo_push_token') or '').strip()
+
+        if request.method == 'DELETE':
+            ok = unregister_device(int(api_token_id), expo_push_token)
+            return jsonify({'success': True, 'removed': ok})
+
+        platform = (body.get('platform') or 'android').strip()
+        installation_id = body.get('installation_id')
+        if installation_id is not None:
+            installation_id = str(installation_id).strip() or None
+
+        register_device(
+            int(api_token_id),
+            expo_push_token,
+            platform=platform,
+            installation_id=installation_id,
+        )
+
+        return jsonify({'success': True})
+    except ValueError as ve:
+        return jsonify({'success': False, 'error': str(ve)}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 

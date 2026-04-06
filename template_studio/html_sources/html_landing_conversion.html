@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conversion — {entreprise}</title>
+</head>
+<body style="margin:0;padding:0;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:#f9fafb;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        Plus de demandes depuis votre page : message, CTA, friction, mobile.
+    </div>
+    <table role="presentation" style="width:100%;border-collapse:collapse;background:#f9fafb;">
+        <tr>
+            <td style="padding:32px 16px;">
+                <table role="presentation" style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.07);">
+                    <tr>
+                        <td style="padding:26px 28px;background:linear-gradient(135deg,#4da9d6 0%,#184c70 100%);text-align:center;">
+                            <p style="margin:0 0 10px 0;color:rgba(255,255,255,0.92);font-size:11px;letter-spacing:0.12em;text-transform:uppercase;font-weight:700;">Conversion</p>
+                            <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;line-height:1.3;">Votre page doit “convertir”</h1>
+                            <p style="margin:12px 0 0 0;color:rgba(255,255,255,0.92);font-size:14px;">{entreprise}</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:32px 28px;">
+                            <p style="margin:0 0 14px 0;color:#1f2937;font-size:16px;line-height:1.65;">Bonjour <strong>{nom}</strong>,</p>
+                            <p style="margin:0 0 16px 0;color:#1f2937;font-size:16px;line-height:1.65;">
+                                La conversion dépend de 3 leviers : <strong>message clair</strong>, <strong>CTA visibles</strong> et <strong>friction maîtrisée</strong> (mobile d'abord).
+                            </p>
+
+                            {#if_total_emails}
+                            <div style="background:#dff8f8;padding:18px;border-radius:10px;margin:0 0 18px 0;border-left:4px solid #4da9d6;">
+                                <p style="margin:0 0 8px 0;color:#2f78a6;font-size:14px;font-weight:700;">Contexte</p>
+                                <p style="margin:0;color:#4b5563;font-size:14px;line-height:1.6;">
+                                    J’ai détecté <strong style="color:#1f2937;">{total_emails}</strong> contacts / emails liés à votre présence web.
+                                </p>
+                            </div>
+                            {#endif}
+
+                            <div style="background:#f9fafb;padding:18px;border-radius:10px;margin:0 0 18px 0;border:1px solid #e5e7eb;">
+                                <p style="margin:0 0 10px 0;color:#1f2937;font-size:14px;font-weight:700;">Priorités de conversion</p>
+                                <ul style="margin:0;padding-left:18px;color:#4b5563;font-size:14px;line-height:1.8;">
+                                    <li><strong style="color:#4da9d6;">Message</strong> : promesse + bénéfices concrets</li>
+                                    <li><strong style="color:#4da9d6;">CTA</strong> : boutons lisibles, micro-texte</li>
+                                    <li><strong style="color:#4da9d6;">Friction</strong> : formulaire plus court, vitesse</li>
+                                </ul>
+                            </div>
+                            <p style="margin:0 0 18px 0;color:#4b5563;font-size:14px;line-height:1.6;">
+                                Petite question : aujourd’hui, vous voulez surtout <strong>plus de demandes</strong> (volume) ou <strong>des demandes plus qualifiées</strong> ?
+                            </p>
+
+                            {#if_performance_score}
+                            <p style="margin:0 0 18px 0;color:#4b5563;font-size:14px;line-height:1.6;">
+                                Performance actuelle : <strong style="color:#1f2937;">{performance_score}/100</strong>.
+                            </p>
+                            {#endif}
+
+                            {#include:cta_primary_15min}
+                            {#include:cta_secondary_analysis}
+
+                            {#include:signature_standard}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:18px 28px 24px;background:#f9fafb;text-align:center;">
+                            {#include:footer_standard}
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

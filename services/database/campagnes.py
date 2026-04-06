@@ -160,7 +160,7 @@ class CampagneManager(DatabaseBase):
             return dict(row)
         return None
 
-    def list_campagnes(self, statut=None, limit=100, offset=0):
+    def list_campagnes(self, statut=None, limit=100, offset=0, entreprise_id=None):
         """
         Liste les campagnes.
 
@@ -168,13 +168,78 @@ class CampagneManager(DatabaseBase):
             statut (str|None): Filtrer par statut (optionnel)
             limit (int): Nombre maximum de résultats
             offset (int): Offset pour la pagination
+            entreprise_id (int|None): Si renseigné, uniquement les campagnes liées à cette entreprise
+                (emails envoyés et/ou destinataires dans campaign_params_json pour les brouillons programmés).
 
         Returns:
             list[dict]: Liste des campagnes
         """
         conn = self.get_connection()
-        # row_factory est déjà configuré dans get_connection() (SQLite) ou via RealDictCursor (PostgreSQL)
         cursor = conn.cursor()
+
+        if entreprise_id is not None:
+            eid = int(entreprise_id)
+            if self.is_postgresql():
+                subq = '''
+                    SELECT campagne_id FROM emails_envoyes WHERE entreprise_id = ?
+                    UNION
+                    SELECT c.id FROM campagnes_email c
+                    WHERE c.campaign_params_json IS NOT NULL AND TRIM(c.campaign_params_json) <> ''
+                    AND EXISTS (
+                        SELECT 1
+                        FROM jsonb_array_elements(COALESCE(c.campaign_params_json::jsonb->'recipients', '[]'::jsonb)) AS r
+                        WHERE (r->>'entreprise_id') IS NOT NULL
+                        AND (r->>'entreprise_id')::integer = ?
+                    )
+                '''
+            else:
+                subq = '''
+                    SELECT campagne_id FROM emails_envoyes WHERE entreprise_id = ?
+                    UNION
+                    SELECT c.id FROM campagnes_email c
+                    WHERE c.campaign_params_json IS NOT NULL AND TRIM(c.campaign_params_json) <> ''
+                    AND EXISTS (
+                        SELECT 1 FROM json_each(json_extract(c.campaign_params_json, '$.recipients')) AS j
+                        WHERE json_extract(j.value, '$.entreprise_id') IS NOT NULL
+                        AND CAST(json_extract(j.value, '$.entreprise_id') AS INTEGER) = ?
+                    )
+                '''
+
+            params = [eid, eid]
+            where_sql = f'id IN ({subq})'
+            if statut:
+                where_sql += ' AND statut = ?'
+                params.append(statut)
+            params.extend([limit, offset])
+            sql = f'''
+                SELECT * FROM campagnes_email
+                WHERE {where_sql}
+                ORDER BY date_creation DESC
+                LIMIT ? OFFSET ?
+            '''
+            try:
+                self.execute_sql(cursor, sql, tuple(params))
+            except Exception:
+                # JSON invalide ou fonction JSON indisponible : restreindre aux campagnes avec emails envoyés
+                conn.close()
+                conn = self.get_connection()
+                cursor = conn.cursor()
+                params2 = [eid]
+                where2 = 'id IN (SELECT DISTINCT campagne_id FROM emails_envoyes WHERE entreprise_id = ?)'
+                if statut:
+                    where2 += ' AND statut = ?'
+                    params2.append(statut)
+                params2.extend([limit, offset])
+                self.execute_sql(cursor, f'''
+                    SELECT * FROM campagnes_email
+                    WHERE {where2}
+                    ORDER BY date_creation DESC
+                    LIMIT ? OFFSET ?
+                ''', tuple(params2))
+
+            rows = cursor.fetchall()
+            conn.close()
+            return [dict(row) for row in rows]
 
         if statut:
             self.execute_sql(cursor,
@@ -280,7 +345,8 @@ class CampagneManager(DatabaseBase):
         sujet=None,
         statut='sent',
         erreur=None,
-        tracking_token=None
+        tracking_token=None,
+        contenu_envoye=None
     ):
         """
         Sauvegarde un email envoyé dans la base.
@@ -295,6 +361,7 @@ class CampagneManager(DatabaseBase):
             statut (str): Statut ('pending', 'sent', 'failed', 'bounced')
             erreur (str|None): Message d'erreur si échec (optionnel)
             tracking_token (str|None): Token de tracking unique (optionnel)
+            contenu_envoye (str|None): Snapshot du contenu envoyé (HTML ou texte)
 
         Returns:
             int: ID de l'email enregistré
@@ -314,61 +381,45 @@ class CampagneManager(DatabaseBase):
             self.execute_sql(cursor, "PRAGMA table_info(emails_envoyes)")
             cols = {row[1] for row in cursor.fetchall()}
 
-        # Préparer les paramètres pour INSERT
+        insert_columns = ['campagne_id', 'entreprise_id', 'email', 'nom_destinataire', 'entreprise', 'sujet', 'statut', 'erreur']
+        insert_values = [campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur]
         if 'tracking_token' in cols:
-            params = (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur, tracking_token)
-            if self.is_postgresql():
-                self.execute_sql(cursor,
-                    '''
-                    INSERT INTO emails_envoyes
-                    (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur, tracking_token)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    RETURNING id
-                    ''',
-                    params
-                )
-                row = cursor.fetchone()
-                if isinstance(row, dict):
-                    email_id = row.get('id')
-                else:
-                    email_id = row[0] if row else None
+            insert_columns.append('tracking_token')
+            insert_values.append(tracking_token)
+        if 'contenu_envoye' in cols:
+            insert_columns.append('contenu_envoye')
+            insert_values.append(contenu_envoye)
+
+        columns_sql = ', '.join(insert_columns)
+        placeholders = ', '.join(['?'] * len(insert_columns))
+        params = tuple(insert_values)
+        if self.is_postgresql():
+            self.execute_sql(
+                cursor,
+                f'''
+                INSERT INTO emails_envoyes
+                ({columns_sql})
+                VALUES ({placeholders})
+                RETURNING id
+                ''',
+                params
+            )
+            row = cursor.fetchone()
+            if isinstance(row, dict):
+                email_id = row.get('id')
             else:
-                self.execute_sql(cursor,
-                    '''
-                    INSERT INTO emails_envoyes
-                    (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur, tracking_token)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''',
-                    params
-                )
-                email_id = cursor.lastrowid
+                email_id = row[0] if row else None
         else:
-            params = (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur)
-            if self.is_postgresql():
-                self.execute_sql(cursor,
-                    '''
-                    INSERT INTO emails_envoyes
-                    (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    RETURNING id
-                    ''',
-                    params
-                )
-                row = cursor.fetchone()
-                if isinstance(row, dict):
-                    email_id = row.get('id')
-                else:
-                    email_id = row[0] if row else None
-            else:
-                self.execute_sql(cursor,
-                    '''
-                    INSERT INTO emails_envoyes
-                    (campagne_id, entreprise_id, email, nom_destinataire, entreprise, sujet, statut, erreur)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ''',
-                    params
-                )
-                email_id = cursor.lastrowid
+            self.execute_sql(
+                cursor,
+                f'''
+                INSERT INTO emails_envoyes
+                ({columns_sql})
+                VALUES ({placeholders})
+                ''',
+                params
+            )
+            email_id = cursor.lastrowid
 
         conn.commit()
         conn.close()
@@ -382,11 +433,181 @@ class CampagneManager(DatabaseBase):
                     new_statut='À qualifier',
                     allowed_previous={None, '', 'Nouveau'}
                 )
+                # Tags CRM email utiles pour filtrage
+                if statut == 'sent':
+                    self._add_entreprise_tag_safe(entreprise_id, 'email_envoye')
+                elif statut == 'failed':
+                    self._add_entreprise_tag_safe(entreprise_id, 'email_echec_envoi')
         except Exception:
             # Ne jamais casser l'envoi d'emails pour un problème de statut
             pass
 
         return email_id
+
+    def _add_entreprise_tag_safe(self, entreprise_id, tag):
+        """
+        Ajoute un tag d'entreprise sans jamais casser le flux appelant.
+        """
+        try:
+            if not entreprise_id or not tag:
+                return False
+            from services.database.entreprises import EntrepriseManager
+            em = EntrepriseManager()
+            return em.add_entreprise_tag(int(entreprise_id), str(tag))
+        except Exception:
+            return False
+
+    def mark_email_bounced(self, email_id: int, reason: str | None = None) -> bool:
+        """
+        Marque un email envoyé comme bounced (retour NDR).
+
+        Effets:
+        - emails_envoyes.statut -> 'bounced'
+        - emails_envoyes.erreur -> reason (si fourni)
+        - entreprises.statut -> 'Bounce' (si entreprise_id présent)
+        - ajoute le tag 'bounce' sur l'entreprise
+        """
+        if not email_id:
+            return False
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        self.execute_sql(cursor, 'SELECT entreprise_id FROM emails_envoyes WHERE id = ?', (email_id,))
+        row = cursor.fetchone()
+        entreprise_id = None
+        if row:
+            try:
+                entreprise_id = row.get('entreprise_id') if isinstance(row, dict) else row[0]
+            except Exception:
+                entreprise_id = None
+
+        if reason is not None:
+            self.execute_sql(
+                cursor,
+                'UPDATE emails_envoyes SET statut = ?, erreur = ? WHERE id = ?',
+                ('bounced', str(reason), email_id),
+            )
+        else:
+            self.execute_sql(
+                cursor,
+                'UPDATE emails_envoyes SET statut = ? WHERE id = ?',
+                ('bounced', email_id),
+            )
+
+        conn.commit()
+        updated = int(getattr(cursor, 'rowcount', 0) or 0) > 0
+        # Certains drivers / configs peuvent renvoyer rowcount=0 même si la ligne existe
+        # (ou si la valeur était déjà identique). Si la ligne existe, on considère l'opération ok.
+        if not updated:
+            try:
+                self.execute_sql(cursor, 'SELECT 1 FROM emails_envoyes WHERE id = ? LIMIT 1', (email_id,))
+                exists = cursor.fetchone() is not None
+                updated = bool(exists)
+            except Exception:
+                pass
+        conn.close()
+
+        # Mise à jour entreprise (statut + tag) hors transaction email
+        try:
+            if entreprise_id:
+                from services.database.entreprises import EntrepriseManager
+                em = EntrepriseManager()
+                em.update_entreprise_statut(int(entreprise_id), 'Bounce')
+                em.add_entreprise_tag(int(entreprise_id), 'bounce')
+                em.add_entreprise_tag(int(entreprise_id), 'email_invalide')
+        except Exception:
+            pass
+
+        return updated
+
+    def mark_latest_email_bounced_for_recipient(
+        self,
+        recipient_email: str,
+        campagne_id: int | None = None,
+        reason: str | None = None,
+    ) -> int | None:
+        """
+        Cherche le dernier email_envoye correspondant à un destinataire et le marque bounced.
+
+        Args:
+            recipient_email: adresse du destinataire
+            campagne_id: optionnel, pour restreindre à une campagne
+            reason: texte stocké dans emails_envoyes.erreur
+
+        Returns:
+            int|None: email_id marqué bounced, ou None si aucun match
+        """
+        email = (recipient_email or '').strip()
+        if not email or '@' not in email:
+            return None
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        if campagne_id:
+            self.execute_sql(
+                cursor,
+                '''
+                SELECT id
+                FROM emails_envoyes
+                WHERE LOWER(email) = LOWER(?) AND campagne_id = ?
+                ORDER BY date_envoi DESC
+                LIMIT 1
+                ''',
+                (email, int(campagne_id)),
+            )
+        else:
+            self.execute_sql(
+                cursor,
+                '''
+                SELECT id
+                FROM emails_envoyes
+                WHERE LOWER(email) = LOWER(?)
+                ORDER BY date_envoi DESC
+                LIMIT 1
+                ''',
+                (email,),
+            )
+
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return None
+
+        email_id = row.get('id') if isinstance(row, dict) else row[0]
+        try:
+            email_id_int = int(email_id)
+        except Exception:
+            return None
+
+        ok = self.mark_email_bounced(email_id_int, reason=reason)
+        return email_id_int if ok else None
+
+    def get_email_envoye(self, email_id):
+        """
+        Récupère le détail d'un email envoyé.
+
+        Args:
+            email_id (int): ID de l'email envoyé
+
+        Returns:
+            dict|None: Détails de l'email ou None
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self.execute_sql(
+            cursor,
+            '''
+            SELECT * FROM emails_envoyes
+            WHERE id = ?
+            ''',
+            (email_id,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
 
     def update_email_tracking_token(self, email_id, tracking_token):
         """
@@ -544,16 +765,23 @@ class CampagneManager(DatabaseBase):
         try:
             if entreprise_id:
                 if event_type == 'open':
-                    # Dès qu'un email est ouvert, passer en "Relance"
+                    # Un "open" = intérêt détecté, mais sans intention forte.
+                    # On passe en "À qualifier" (tiède), sans dégrader un statut déjà plus chaud.
+                    self._update_entreprise_statut(
+                        entreprise_id,
+                        new_statut='À qualifier',
+                        allowed_previous={'Nouveau', 'À qualifier'}
+                    )
+                    self._add_entreprise_tag_safe(entreprise_id, 'email_ouvert')
+                elif event_type == 'click':
+                    # Un clic est un signal d'intention très fort:
+                    # on passe en "Relance" pour traiter le prospect comme chaud.
                     self._update_entreprise_statut(
                         entreprise_id,
                         new_statut='Relance',
-                        allowed_previous={'Nouveau', 'À qualifier'}
+                        allowed_previous={'Nouveau', 'À qualifier', 'Relance', 'À rappeler'}
                     )
-                # Option 1 (prudente) : on ne passe pas automatiquement à Gagné sur clic.
-                # L'utilisateur marque manuellement "Marquer comme gagné" dans la fiche entreprise.
-                # elif event_type == 'click':
-                #     ...
+                    self._add_entreprise_tag_safe(entreprise_id, 'email_clique')
         except Exception:
             # Ne pas impacter le tracking en cas de souci
             pass
@@ -791,6 +1019,14 @@ class CampagneManager(DatabaseBase):
         # row_factory est déjà configuré dans get_connection() (SQLite) ou via RealDictCursor (PostgreSQL)
         cursor = conn.cursor()
 
+        # Charger aussi les compteurs campagne pour aligner les KPI avec la vue cartes
+        campagne_row = None
+        try:
+            self.execute_sql(cursor, 'SELECT total_destinataires, total_envoyes, total_reussis FROM campagnes_email WHERE id = ?', (campagne_id,))
+            campagne_row = cursor.fetchone()
+        except Exception:
+            campagne_row = None
+
         self.execute_sql(cursor,
             '''
             SELECT
@@ -814,6 +1050,7 @@ class CampagneManager(DatabaseBase):
 
         emails = [dict(row) for row in cursor.fetchall()]
         email_ids = [e['id'] for e in emails]
+        total_bounced = sum(1 for e in emails if (e.get('statut') == 'bounced'))
 
         # Pas d'emails => stats vides
         if not email_ids:
@@ -825,6 +1062,11 @@ class CampagneManager(DatabaseBase):
                 'total_clicks': 0,
                 'open_rate': 0,
                 'click_rate': 0,
+                'total_bounced': 0,
+                'total_destinataires': 0,
+                'total_reussis': 0,
+                'total_delivered_strict': 0,
+                'deliverability_rate_strict': 0.0,
                 'avg_read_time': None,
                 'emails': []
             }
@@ -833,6 +1075,21 @@ class CampagneManager(DatabaseBase):
         try:
             self.execute_sql(cursor,"SELECT 1 FROM email_tracking_events LIMIT 1")
         except Exception:
+            # Calculs campagne (sans tracking)
+            td = 0
+            tr = 0
+            try:
+                if campagne_row:
+                    if isinstance(campagne_row, dict):
+                        td = int(campagne_row.get('total_destinataires') or 0)
+                        tr = int(campagne_row.get('total_reussis') or 0)
+                    else:
+                        td = int(campagne_row[0] or 0)
+                        tr = int(campagne_row[2] or 0)
+            except Exception:
+                td = 0
+                tr = 0
+            delivered_strict = max(0, int(tr) - int(total_bounced))
             conn.close()
             return {
                 'campagne_id': campagne_id,
@@ -841,6 +1098,11 @@ class CampagneManager(DatabaseBase):
                 'total_clicks': 0,
                 'open_rate': 0,
                 'click_rate': 0,
+                'total_bounced': int(total_bounced),
+                'total_destinataires': int(td),
+                'total_reussis': int(tr),
+                'total_delivered_strict': int(delivered_strict),
+                'deliverability_rate_strict': (delivered_strict / td * 100.0) if td > 0 else 0.0,
                 'avg_read_time': None,
                 'emails': emails
             }
@@ -930,6 +1192,22 @@ class CampagneManager(DatabaseBase):
         total_opens = stats_by_type.get('open', {}).get('unique_emails', 0)
         total_clicks = stats_by_type.get('click', {}).get('unique_emails', 0)
 
+        # Compteurs campagne (pour délivrabilité stricte)
+        td = 0
+        tr = 0
+        try:
+            if campagne_row:
+                if isinstance(campagne_row, dict):
+                    td = int(campagne_row.get('total_destinataires') or 0)
+                    tr = int(campagne_row.get('total_reussis') or 0)
+                else:
+                    td = int(campagne_row[0] or 0)
+                    tr = int(campagne_row[2] or 0)
+        except Exception:
+            td = 0
+            tr = 0
+        delivered_strict = max(0, int(tr) - int(total_bounced))
+
         return {
             'campagne_id': campagne_id,
             'total_emails': total_emails,
@@ -937,6 +1215,11 @@ class CampagneManager(DatabaseBase):
             'total_clicks': total_clicks,
             'open_rate': (total_opens / total_emails * 100) if total_emails > 0 else 0,
             'click_rate': (total_clicks / total_emails * 100) if total_emails > 0 else 0,
+            'total_bounced': int(total_bounced),
+            'total_destinataires': int(td),
+            'total_reussis': int(tr),
+            'total_delivered_strict': int(delivered_strict),
+            'deliverability_rate_strict': (delivered_strict / td * 100.0) if td > 0 else 0.0,
             'avg_read_time': avg_read_time,
             'stats_by_type': stats_by_type,
             'emails': emails

@@ -6,6 +6,19 @@ Contient la création de toutes les tables et migrations
 from .base import DatabaseBase
 
 
+def schema_commercial_priority_profile_seeds():
+    """Profils par défaut (insertion idempotente par nom). Poids SEO / sécu / perf / opportunité."""
+    return [
+        ('Équilibré', {'w_seo': 0.25, 'w_secu': 0.25, 'w_perf': 0.25, 'w_opp': 0.25}),
+        ('SEO prioritaire', {'w_seo': 0.5, 'w_secu': 0.2, 'w_perf': 0.15, 'w_opp': 0.15}),
+        ('Sécurité prioritaire', {'w_seo': 0.15, 'w_secu': 0.5, 'w_perf': 0.2, 'w_opp': 0.15}),
+        ('Performance prioritaire', {'w_seo': 0.15, 'w_secu': 0.2, 'w_perf': 0.5, 'w_opp': 0.15}),
+        ('Opportunité prioritaire', {'w_seo': 0.15, 'w_secu': 0.15, 'w_perf': 0.2, 'w_opp': 0.5}),
+        ('Tech & perf (refonte)', {'w_seo': 0.2, 'w_secu': 0.25, 'w_perf': 0.45, 'w_opp': 0.1}),
+        ('Audit sécu & conformité', {'w_seo': 0.1, 'w_secu': 0.55, 'w_perf': 0.2, 'w_opp': 0.15}),
+    ]
+
+
 class DatabaseSchema(DatabaseBase):
     """
     Gère la création du schéma de base de données
@@ -15,7 +28,78 @@ class DatabaseSchema(DatabaseBase):
     def __init__(self, *args, **kwargs):
         """Initialise le module de schéma"""
         super().__init__(*args, **kwargs)
-    
+
+    def ensure_commercial_priority_profiles_table(self):
+        """
+        Migration idempotente : profils de pondération priorité commerciale (Sprint 2).
+        Appelée à chaque instanciation Database pour les bases créées avant cette table.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS commercial_priority_profiles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    nom TEXT NOT NULL UNIQUE,
+                    poids_json TEXT NOT NULL,
+                    date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                ''',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_commercial_priority_profiles_nom ON commercial_priority_profiles(nom)',
+            )
+            import json as _json
+
+            _seeds = schema_commercial_priority_profile_seeds()
+            for _nom, _poids in _seeds:
+                self.execute_sql(
+                    cursor,
+                    'SELECT id FROM commercial_priority_profiles WHERE nom = ?',
+                    (_nom,),
+                )
+                if not cursor.fetchone():
+                    self.execute_sql(
+                        cursor,
+                        'INSERT INTO commercial_priority_profiles (nom, poids_json) VALUES (?, ?)',
+                        (_nom, _json.dumps(_poids)),
+                    )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def ensure_entreprise_metric_snapshots_table(self):
+        """
+        Migration idempotente : snapshots de métriques pour suivi avant/après (Sprint 3).
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS entreprise_metric_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entreprise_id INTEGER NOT NULL,
+                    source TEXT NOT NULL,
+                    analysis_id INTEGER,
+                    captured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    metrics_json TEXT NOT NULL,
+                    FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE
+                )
+                ''',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_metric_snapshots_ent_captured ON entreprise_metric_snapshots (entreprise_id, captured_at DESC)',
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def init_database(self):
         """
         Initialise les tables de la base de données
@@ -116,6 +200,28 @@ class DatabaseSchema(DatabaseBase):
         for col_name, col_type in icon_columns:
             self.safe_execute_sql(cursor, f'ALTER TABLE entreprises ADD COLUMN {col_name} {col_type}')
 
+        # Étapes pipeline CRM (Sprint 1) — distinct du champ statut (campagnes / délivrabilité)
+        self.safe_execute_sql(cursor, 'ALTER TABLE entreprises ADD COLUMN etape_prospection TEXT')
+        try:
+            self.execute_sql(
+                cursor,
+                '''
+                UPDATE entreprises SET etape_prospection = CASE
+                    WHEN statut IN ('Gagné', 'Réponse positive') THEN 'Gagné'
+                    WHEN statut IN ('Perdu', 'Réponse négative', 'Bounce', 'Désabonné', 'Plainte spam', 'Ne pas contacter') THEN 'Perdu'
+                    WHEN statut IN ('Relance', 'À rappeler') THEN 'Contacté'
+                    ELSE 'À prospecter'
+                END
+                WHERE etape_prospection IS NULL OR TRIM(COALESCE(etape_prospection, '')) = ''
+                ''',
+            )
+        except Exception:
+            pass
+        self.execute_sql(
+            cursor,
+            'CREATE INDEX IF NOT EXISTS idx_entreprises_etape_prospection ON entreprises(etape_prospection)',
+        )
+
         # Table des groupes d'entreprises
         self.execute_sql(cursor, '''
             CREATE TABLE IF NOT EXISTS groupes_entreprises (
@@ -141,6 +247,26 @@ class DatabaseSchema(DatabaseBase):
         ''')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_entreprise_groupes_entreprise ON entreprise_groupes(entreprise_id)')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_entreprise_groupes_groupe ON entreprise_groupes(groupe_id)')
+
+        # Journal des interactions commerciales (touchpoints) par entreprise
+        self.execute_sql(cursor, '''
+            CREATE TABLE IF NOT EXISTS entreprise_touchpoints (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entreprise_id INTEGER NOT NULL,
+                canal TEXT NOT NULL,
+                sujet TEXT NOT NULL,
+                note TEXT,
+                happened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_by INTEGER,
+                FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE
+            )
+        ''')
+        # Migrations légères (si la table existe déjà sans certains champs)
+        self.safe_execute_sql(cursor, 'ALTER TABLE entreprise_touchpoints ADD COLUMN note TEXT')
+        self.safe_execute_sql(cursor, 'ALTER TABLE entreprise_touchpoints ADD COLUMN created_by INTEGER')
+        self.execute_sql(cursor, 'CREATE INDEX IF NOT EXISTS idx_touchpoints_entreprise_id ON entreprise_touchpoints(entreprise_id)')
+        self.execute_sql(cursor, 'CREATE INDEX IF NOT EXISTS idx_touchpoints_happened_at ON entreprise_touchpoints(happened_at)')
         
         # Table des données OpenGraph (normalisée selon ogp.me)
         self.execute_sql(cursor, '''
@@ -297,6 +423,8 @@ class DatabaseSchema(DatabaseBase):
         
         # Migration : ajouter la colonne tracking_token si elle n'existe pas
         self.safe_execute_sql(cursor, 'ALTER TABLE emails_envoyes ADD COLUMN tracking_token TEXT')
+        # Migration : conserver le contenu réellement envoyé pour prévisualisation future
+        self.safe_execute_sql(cursor, 'ALTER TABLE emails_envoyes ADD COLUMN contenu_envoye TEXT')
         
         # Table des utilisateurs (authentification)
         self.execute_sql(cursor,'''
@@ -327,6 +455,7 @@ class DatabaseSchema(DatabaseBase):
                 can_read_emails INTEGER DEFAULT 1,
                 can_read_statistics INTEGER DEFAULT 1,
                 can_read_campagnes INTEGER DEFAULT 1,
+                can_delete_entreprises INTEGER DEFAULT 0,
                 date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_used TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
@@ -341,6 +470,26 @@ class DatabaseSchema(DatabaseBase):
         self.safe_execute_sql(cursor, 'ALTER TABLE api_tokens ADD COLUMN can_read_emails INTEGER DEFAULT 1')
         self.safe_execute_sql(cursor, 'ALTER TABLE api_tokens ADD COLUMN can_read_statistics INTEGER DEFAULT 1')
         self.safe_execute_sql(cursor, 'ALTER TABLE api_tokens ADD COLUMN can_read_campagnes INTEGER DEFAULT 1')
+        self.safe_execute_sql(cursor, 'ALTER TABLE api_tokens ADD COLUMN can_delete_entreprises INTEGER DEFAULT 0')
+
+        # Enregistrements push Expo (app mobile) liés au token API — supprimés en cascade si le token API est effacé.
+        self.execute_sql(cursor, '''
+            CREATE TABLE IF NOT EXISTS mobile_expo_push_registrations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                api_token_id INTEGER NOT NULL,
+                expo_push_token TEXT NOT NULL UNIQUE,
+                platform TEXT NOT NULL DEFAULT 'android',
+                installation_id TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (api_token_id) REFERENCES api_tokens(id) ON DELETE CASCADE
+            )
+        ''')
+
+        self.execute_sql(
+            cursor,
+            'CREATE INDEX IF NOT EXISTS idx_mobile_expo_push_api_token ON mobile_expo_push_registrations(api_token_id)',
+        )
 
         # Table des applications clientes internes (Facturio, MailPilot, VocalGuard, etc.)
         self.execute_sql(cursor, '''
@@ -391,7 +540,57 @@ class DatabaseSchema(DatabaseBase):
             )
         ''')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_segments_ciblage_nom ON segments_ciblage(nom)')
-        
+
+        # Profils de pondération — priorité commerciale (Sprint 2)
+        self.execute_sql(cursor, '''
+            CREATE TABLE IF NOT EXISTS commercial_priority_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nom TEXT NOT NULL UNIQUE,
+                poids_json TEXT NOT NULL,
+                date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        self.execute_sql(
+            cursor,
+            'CREATE INDEX IF NOT EXISTS idx_commercial_priority_profiles_nom ON commercial_priority_profiles(nom)',
+        )
+        try:
+            import json as _json
+            _seeds = schema_commercial_priority_profile_seeds()
+            for _nom, _poids in _seeds:
+                self.execute_sql(
+                    cursor,
+                    'SELECT id FROM commercial_priority_profiles WHERE nom = ?',
+                    (_nom,),
+                )
+                if not cursor.fetchone():
+                    self.execute_sql(
+                        cursor,
+                        'INSERT INTO commercial_priority_profiles (nom, poids_json) VALUES (?, ?)',
+                        (_nom, _json.dumps(_poids)),
+                    )
+        except Exception:
+            pass
+
+        self.execute_sql(
+            cursor,
+            '''
+            CREATE TABLE IF NOT EXISTS entreprise_metric_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entreprise_id INTEGER NOT NULL,
+                source TEXT NOT NULL,
+                analysis_id INTEGER,
+                captured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                metrics_json TEXT NOT NULL,
+                FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE
+            )
+            ''',
+        )
+        self.execute_sql(
+            cursor,
+            'CREATE INDEX IF NOT EXISTS idx_metric_snapshots_ent_captured ON entreprise_metric_snapshots (entreprise_id, captured_at DESC)',
+        )
+
         # Table des analyses techniques
         self.execute_sql(cursor,'''
             CREATE TABLE IF NOT EXISTS analyses_techniques (
@@ -987,6 +1186,7 @@ class DatabaseSchema(DatabaseBase):
                 domain TEXT,
                 name_info TEXT,
                 is_person INTEGER DEFAULT 0,
+                analysis_extras TEXT,
                 analyzed_at TIMESTAMP,
                 date_found TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (scraper_id) REFERENCES scrapers(id) ON DELETE CASCADE,
@@ -1002,6 +1202,13 @@ class DatabaseSchema(DatabaseBase):
                 entreprise_id INTEGER NOT NULL,
                 phone TEXT NOT NULL,
                 page_url TEXT,
+                phone_e164 TEXT,
+                carrier TEXT,
+                location TEXT,
+                line_type TEXT,
+                phone_valid INTEGER,
+                osint_json TEXT,
+                analyzed_at TIMESTAMP,
                 date_found TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (scraper_id) REFERENCES scrapers(id) ON DELETE CASCADE,
                 FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE,
@@ -1275,6 +1482,34 @@ class DatabaseSchema(DatabaseBase):
             conn.commit()
         except Exception:
             # La colonne existe déjà, ignorer l'erreur
+            conn.rollback()
+        
+        # Migration : JSON Hunter / Abstract / erreurs API (enrichissement email)
+        try:
+            self.execute_sql(cursor,'ALTER TABLE scraper_emails ADD COLUMN analysis_extras TEXT')
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        
+        # Migrations scraper_phones : OSINT complet (libphonenumber, PhoneInfoga, Numverify, Abstract, etc.)
+        for _sql in (
+            'ALTER TABLE scraper_phones ADD COLUMN phone_e164 TEXT',
+            'ALTER TABLE scraper_phones ADD COLUMN carrier TEXT',
+            'ALTER TABLE scraper_phones ADD COLUMN location TEXT',
+            'ALTER TABLE scraper_phones ADD COLUMN line_type TEXT',
+            'ALTER TABLE scraper_phones ADD COLUMN phone_valid INTEGER',
+            'ALTER TABLE scraper_phones ADD COLUMN osint_json TEXT',
+            'ALTER TABLE scraper_phones ADD COLUMN analyzed_at TIMESTAMP',
+        ):
+            try:
+                self.execute_sql(cursor, _sql)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+        try:
+            self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_scraper_phones_e164 ON scraper_phones(phone_e164)')
+            conn.commit()
+        except Exception:
             conn.rollback()
         
         # Créer l'index pour is_person après la migration

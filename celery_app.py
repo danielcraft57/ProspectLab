@@ -50,17 +50,42 @@ celery.conf.update(
     task_default_queue='celery',
     task_queues=(
         Queue('celery', routing_key='celery'),
+        Queue('scraping', routing_key='scraping'),
+        # Relances UI / API unitaires : ne pas se faire bloquer derrière un bulk multi-sites
+        Queue('scraping_interactive', routing_key='scraping_interactive'),
+        Queue('technical', routing_key='technical'),
+        Queue('seo', routing_key='seo'),
+        Queue('osint', routing_key='osint'),
+        Queue('pentest', routing_key='pentest'),
+        # Queue legacy conservée (compat). A terme, tout doit être routé ailleurs.
         Queue('heavy', routing_key='heavy'),
+        # Pack « analyse site complet » : file dédiée pour éviter qu’un vieux worker (file celery
+        # seule) vole le job et renvoie NotRegistered alors qu’un autre nœud a le code à jour.
+        Queue('website_full', routing_key='website_full'),
     ),
     # Dict pattern -> route (Celery 5 / kombu : une *liste* de tuples casse MapRoute qui itère
     # chaque entrée en « k, v » — le 1er élément est une str → too many values to unpack).
     task_routes={
-        'tasks.technical_analysis_tasks.*': {'queue': 'heavy'},
-        'tasks.seo_tasks.*': {'queue': 'heavy'},
-        'tasks.osint_tasks.*': {'queue': 'heavy'},
-        'tasks.pentest_tasks.*': {'queue': 'heavy'},
-        'tasks.scraping_tasks.*': {'queue': 'heavy'},
-        'tasks.analysis_tasks.*': {'queue': 'heavy'},
+        # scrape_emails sans queue explicite → relances UI ; le bulk API garde apply_async(..., queue='scraping')
+        'tasks.scraping_tasks.scrape_emails_task': {'queue': 'scraping_interactive'},
+        # Bulk "analyse site" : isoler sur la queue heavy (utile pour donner plus de temps au node rapide).
+        'tasks.scraping_tasks.scrape_analysis_orchestrator_task': {'queue': 'heavy'},
+        'tasks.scraping_tasks.scrape_analysis_task': {'queue': 'heavy'},
+        # Pentest dédié sur heavy (évite qu’un worker plus lent prenne trop de tâches).
+        'tasks.pentest_tasks.pentest_analysis_task': {'queue': 'heavy'},
+        'tasks.scraping_tasks.*': {'queue': 'scraping'},
+        'tasks.technical_analysis_tasks.*': {'queue': 'technical'},
+        'tasks.seo_tasks.*': {'queue': 'seo'},
+        'tasks.osint_tasks.*': {'queue': 'osint'},
+        'tasks.phone_tasks.*': {'queue': 'osint'},
+        'tasks.pentest_tasks.*': {'queue': 'pentest'},
+        # Analyse Excel "pack" : plutôt côté technique (inclut notamment génération des sous-tâches).
+        'tasks.analysis_tasks.*': {'queue': 'technical'},
+        # Pack site unique : même file que les analyses techniques par défaut (voir CELERY_FULL_ANALYSIS_QUEUE).
+        # La queue « website_full » reste disponible pour un worker dédié (isolation / charge).
+        'tasks.full_website_analysis.*': {'queue': 'technical'},
+        # Orchestrateur léger : enqueue technique + SEO (snapshots métriques)
+        'tasks.metric_rescan_tasks.*': {'queue': 'celery'},
     },
     task_create_missing_queues=True,
     worker_prefetch_multiplier=CELERY_WORKER_PREFETCH_MULTIPLIER,
@@ -73,10 +98,12 @@ celery.conf.update(
         'tasks.scraping_tasks',
         'tasks.technical_analysis_tasks',
         'tasks.osint_tasks',
+        'tasks.phone_tasks',
         'tasks.pentest_tasks',
         'tasks.seo_tasks',
         'tasks.email_tasks',
         'tasks.cleanup_tasks',
+        'tasks.metric_rescan_tasks',
     ),
     # Configuration pour Windows : utiliser solo au lieu de prefork
     # Le mode prefork n'est pas supporté sur Windows
@@ -115,6 +142,15 @@ celery.conf.update(
             'task': 'tasks.email_tasks.check_campaigns_significant_changes_task',
             'schedule': 1800.0,  # Toutes les 30 minutes
         },
+        # Scan IMAP des bounces: 2 fois par jour (sans limite de messages par défaut)
+        'bounce-scan-morning': {
+            'task': 'tasks.email_tasks.run_bounce_scan_task',
+            'schedule': crontab(hour=8, minute=10),
+        },
+        'bounce-scan-evening': {
+            'task': 'tasks.email_tasks.run_bounce_scan_task',
+            'schedule': crontab(hour=20, minute=10),
+        },
     },
 )
 
@@ -152,4 +188,5 @@ except ImportError as e:
     # C'est normal si on importe celery_app avant que les tâches soient définies
     import logging
     logging.warning(f"Impossible d'importer les tâches Celery: {e}")
+
 

@@ -1,0 +1,71 @@
+{
+  "expo": {
+    "name": "ProspectLab",
+    "slug": "prospectlab",
+    "owner": "danielcraft-org",
+    "scheme": "prospectlab",
+    "extra": {
+      "eas": {
+        "projectId": "dd080f89-9f4a-4c3f-a8cb-86bba1415abb"
+      }
+    },
+    "version": "1.4.3",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": false,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0B1021"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0B1021"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ],
+      "package": "com.danielcraft.prospectlab",
+      "googleServicesFile": "./google-services.json"
+    },
+    "plugins": [
+      "@maplibre/maplibre-react-native",
+      "expo-sqlite",
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "ProspectLab a besoin d'accéder à tes photos pour lire une capture d'écran du token API.",
+          "cameraPermission": "ProspectLab a besoin de la caméra pour photographier l'écran affichant le token API."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "ProspectLab utilise ta position pour afficher les entreprises proches sur la carte."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#0B1021"
+        }
+      ]
+    ],
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}

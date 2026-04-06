@@ -12,7 +12,9 @@ from . import osint_tasks
 from . import pentest_tasks
 from . import seo_tasks
 from . import email_tasks
+from . import phone_tasks
 from . import debug_tasks
+from . import metric_rescan_tasks
 
 __all__ = [
     'analysis_tasks',
@@ -22,5 +24,7 @@ __all__ = [
     'pentest_tasks',
     'seo_tasks',
     'email_tasks',
+    'phone_tasks',
     'debug_tasks',
+    'metric_rescan_tasks',
 ]

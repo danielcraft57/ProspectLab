@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conversions — {entreprise}</title>
+</head>
+<body style="margin:0;padding:0;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:#f9fafb;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        Moins de friction sur le site = plus de demandes qualifiées. 2 actions prioritaires.
+    </div>
+    <table role="presentation" style="width:100%;border-collapse:collapse;background:#f9fafb;">
+        <tr>
+            <td style="padding:32px 16px;">
+                <table role="presentation" style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.07);">
+                    <tr>
+                        <td style="padding:26px 28px;background:linear-gradient(135deg,#4da9d6 0%,#184c70 100%);text-align:center;">
+                            <p style="margin:0 0 10px 0;color:rgba(255,255,255,0.92);font-size:11px;letter-spacing:0.12em;text-transform:uppercase;font-weight:700;">Conversion</p>
+                            <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;line-height:1.3;">Le site attire-t-il assez de demandes ?</h1>
+                            <p style="margin:12px 0 0 0;color:rgba(255,255,255,0.92);font-size:14px;">{entreprise}</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:32px 28px;">
+                            <p style="margin:0 0 18px 0;color:#1f2937;font-size:16px;line-height:1.65;">Bonjour <strong>{nom}</strong>,</p>
+                            <p style="margin:0 0 18px 0;color:#1f2937;font-size:16px;line-height:1.65;">
+                                Beaucoup de sites « font le job » visuellement mais <strong>perdent des contacts</strong> : formulaire trop long, CTA peu visible, parcours mobile fragile.
+                            </p>
+                            {#if_website}
+                            <p style="margin:0 0 20px 0;padding:14px 16px;background:#f3f4f6;border-radius:8px;border-left:4px solid #4da9d6;color:#4b5563;font-size:14px;line-height:1.55;">
+                                <strong style="color:#1f2937;">Contexte</strong> — aperçu lié à votre site :
+                                <a href="{analysis_url}" style="display:inline-block;background:#f3f4f6;color:#4da9d6;text-decoration:none;font-size:13px;font-weight:600;padding:10px 16px;border-radius:999px;line-height:1.2;">Voir l'analyse du site</a>
+                            </p>
+                            {#endif}
+                            <p style="margin:0 0 14px 0;color:#1f2937;font-size:15px;font-weight:600;">Ce qu'on peut viser ensemble :</p>
+                            <table role="presentation" style="width:100%;margin:0 0 24px 0;border-collapse:collapse;">
+                                <tr>
+                                    <td style="padding:14px 16px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
+                                        <p style="margin:0 0 6px 0;color:#4da9d6;font-size:13px;font-weight:700;">1 · CTA &amp; hiérarchie</p>
+                                        <p style="margin:0;color:#4b5563;font-size:14px;line-height:1.55;">Un objectif par écran, boutons lisibles, texte d'aide court.</p>
+                                    </td>
+                                </tr>
+                                <tr><td style="height:10px;"></td></tr>
+                                <tr>
+                                    <td style="padding:14px 16px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
+                                        <p style="margin:0 0 6px 0;color:#4da9d6;font-size:13px;font-weight:700;">2 · Mobile d'abord</p>
+                                        <p style="margin:0;color:#4b5563;font-size:14px;line-height:1.55;">Taps faciles, champs essentiels, chargement rapide.</p>
+                                    </td>
+                                </tr>
+                            </table>
+                            <table role="presentation" style="width:100%;margin:8px 0 0 0;">
+                                <tr>
+                                    <td style="text-align:center;padding:8px 0;">
+                                        {#include:cta_primary_15min}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="text-align:center;padding:6px 0 0 0;">
+                                        <a href="{dc_contact_url}" style="color:#4b5563;font-size:13px;">Préférer un lien texte ? <span style="color:#4da9d6;font-weight:600;">Prendre contact</span></a>
+                                    </td>
+                                </tr>
+                            </table>
+                            <p style="margin:18px 0 10px 0;color:#4b5563;font-size:14px;line-height:1.6;">
+                                P.S. Si ce n’est pas vous la bonne personne, dites-moi juste à qui je dois m’adresser et je m’arrête là.
+                            </p>
+                            {#include:signature_standard}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:18px 28px 24px;background:#f9fafb;text-align:center;">
+                            {#include:footer_standard}
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

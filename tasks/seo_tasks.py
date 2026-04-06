@@ -6,6 +6,7 @@ avec sauvegarde automatique dans la base de données et logs dédiés.
 """
 
 from celery_app import celery
+from config import SEO_USE_LIGHTHOUSE_DEFAULT
 from services.seo_analyzer import SEOAnalyzer
 from services.database import Database
 from services.logging_config import setup_logger
@@ -16,7 +17,7 @@ logger = setup_logger(__name__, 'seo_tasks.log', level=logging.INFO)
 
 
 @celery.task(bind=True)
-def seo_analysis_task(self, url, entreprise_id=None, use_lighthouse=False):
+def seo_analysis_task(self, url, entreprise_id=None, use_lighthouse=None):
     """
     Tâche Celery pour effectuer une analyse SEO d'un site web
     
@@ -24,7 +25,7 @@ def seo_analysis_task(self, url, entreprise_id=None, use_lighthouse=False):
         self: Instance de la tâche Celery (bind=True)
         url (str): URL du site à analyser
         entreprise_id (int, optional): ID de l'entreprise associée
-        use_lighthouse (bool): Si True, exécute Lighthouse (défaut False)
+        use_lighthouse (bool): Si True, exécute Lighthouse (défaut via SEO_USE_LIGHTHOUSE_DEFAULT)
         
     Returns:
         dict: Résultats de l'analyse SEO avec analysis_id
@@ -33,7 +34,12 @@ def seo_analysis_task(self, url, entreprise_id=None, use_lighthouse=False):
         >>> result = seo_analysis_task.delay('https://example.com', entreprise_id=1)
     """
     try:
-        logger.info(f'Démarrage analyse SEO pour {url} (entreprise_id={entreprise_id})')
+        if use_lighthouse is None:
+            use_lighthouse = SEO_USE_LIGHTHOUSE_DEFAULT
+        logger.info(
+            f'Démarrage analyse SEO pour {url} (entreprise_id={entreprise_id}, '
+            f'use_lighthouse={bool(use_lighthouse)})'
+        )
         
         database = Database()
         
@@ -59,6 +65,7 @@ def seo_analysis_task(self, url, entreprise_id=None, use_lighthouse=False):
         try:
             diag = analyzer.get_diagnostic()
             logger.info(f'Diagnostic SEO: {diag.get("message", "")} (outils={len(diag.get("tools_available", []))})')
+            logger.info(f'Outils SEO disponibles: {", ".join(diag.get("tools_available", [])) or "aucun"}')
         except Exception as e:
             logger.debug(f'Diagnostic SEO: {e}')
         

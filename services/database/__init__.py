@@ -30,6 +30,9 @@ from .technical import TechnicalManager
 from .pentest import PentestManager
 from .seo import SEOManager
 from .email_templates import EmailTemplateManager
+import os
+import threading
+import logging
 
 
 class Database(
@@ -61,6 +64,12 @@ class Database(
         entreprises = db.get_entreprises()
     """
     
+    # Initialisation schéma "once" par process Python (web/worker).
+    # Évite que chaque tâche Celery relance init_database() et ses ALTER TABLE,
+    # source de locks/timeouts sous charge.
+    _schema_init_lock = threading.Lock()
+    _schema_initialized = False
+
     def __init__(self, db_path=None):
         """
         Initialise la base de données
@@ -71,9 +80,38 @@ class Database(
         # Initialiser toutes les classes parentes via super()
         # Cela résout automatiquement le MRO
         super().__init__(db_path)
-        
-        # Initialiser la base de données (créer les tables)
-        self.init_database()
+
+        try:
+            self.ensure_commercial_priority_profiles_table()
+        except Exception:
+            logging.getLogger(__name__).warning(
+                'Migration commercial_priority_profiles non appliquée', exc_info=True
+            )
+
+        try:
+            self.ensure_entreprise_metric_snapshots_table()
+        except Exception:
+            logging.getLogger(__name__).warning(
+                'Migration entreprise_metric_snapshots non appliquée', exc_info=True
+            )
+
+        # Initialiser la base de données (créer les tables) une seule fois par process.
+        # Permet un contournement explicite via env pour debug/migration forcée.
+        force_each_instance = str(os.environ.get('DB_INIT_EACH_INSTANCE', '')).strip().lower() in (
+            '1', 'true', 'yes', 'on'
+        )
+        if force_each_instance:
+            self.init_database()
+            return
+
+        if not Database._schema_initialized:
+            with Database._schema_init_lock:
+                if not Database._schema_initialized:
+                    self.init_database()
+                    Database._schema_initialized = True
+                    logging.getLogger(__name__).info(
+                        'Schéma DB initialisé (once par process).'
+                    )
 
 
 # Exposer Database pour compatibilité avec l'import existant
