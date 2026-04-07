@@ -38,6 +38,21 @@ Installation (pour couleurs + tableaux):
 pip install rich
 ```
 
+### Environnement Conda local (autre PC)
+
+Depuis la racine du projet (PowerShell):
+
+```powershell
+conda env create -p .\scripts\google_maps_tools\.conda-env -f .\scripts\google_maps_tools\environment.yml
+conda activate .\scripts\google_maps_tools\.conda-env
+```
+
+Mise a jour de l'env si `environment.yml` change:
+
+```powershell
+conda env update -p .\scripts\google_maps_tools\.conda-env -f .\scripts\google_maps_tools\environment.yml --prune
+```
+
 Lancer:
 
 ```bash

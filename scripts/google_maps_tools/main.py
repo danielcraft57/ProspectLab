@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import requests
+
 
 @dataclass(frozen=True)
 class Preset:
@@ -15,6 +17,9 @@ class Preset:
     lat: float
     lng: float
     levels: Dict[str, Dict[str, Any]]
+
+
+PLACES_TEXTSEARCH_URL = "https://maps.googleapis.com/maps/api/place/textsearch/json"
 
 
 def _safe_filename(name: str) -> str:
@@ -59,16 +64,121 @@ def _city_global_xlsx(out_root: Path, city: str) -> Path:
 
 
 def _status_for_city(out_root: Path, city: str) -> Tuple[str, str]:
+    now_ts = __import__("time").time()
+    recent_window_s = 20 * 60
     xlsx = _city_global_xlsx(out_root, city)
+    city_dir = out_root / city
+    if not city_dir.exists():
+        return "PAS FAIT", "red"
+
+    cache_file = city_dir / "places_details_cache.jsonl"
+    sector_xlsx = [p for p in city_dir.glob("*.xlsx") if p.name.lower() != xlsx.name.lower()]
+
+    def _is_recent(path: Path) -> bool:
+        try:
+            return (now_ts - path.stat().st_mtime) <= recent_window_s
+        except Exception:
+            return False
+
+    recent_activity = False
+    if cache_file.exists() and _is_recent(cache_file):
+        recent_activity = True
+    if xlsx.exists() and _is_recent(xlsx):
+        recent_activity = True
+    if not recent_activity:
+        recent_activity = any(_is_recent(p) for p in sector_xlsx[:10])
+
     if not xlsx.exists():
+        if sector_xlsx or cache_file.exists():
+            return ("EN COURS", "cyan") if recent_activity else ("INCOMPLET", "yellow")
         return "PAS FAIT", "red"
     try:
         sz = xlsx.stat().st_size
     except Exception:
-        return "FAIT", "green"
+        return ("EN COURS", "cyan") if recent_activity else ("FAIT", "green")
     if sz < 5_000:
-        return "FAIT (petit)", "yellow"
+        return ("EN COURS", "cyan") if recent_activity else ("INCOMPLET", "yellow")
+    if recent_activity:
+        return "EN COURS", "cyan"
     return "FAIT", "green"
+
+
+def _api_key_file(here: Path) -> Path:
+    return here / ".google_maps_api_key"
+
+
+def _read_file_api_key(here: Path) -> str:
+    path = _api_key_file(here)
+    if not path.exists():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except Exception:
+        return ""
+
+
+def _write_file_api_key(here: Path, api_key: str) -> None:
+    path = _api_key_file(here)
+    path.write_text(api_key.strip() + "\n", encoding="utf-8")
+
+
+def _resolve_api_key(here: Path) -> Tuple[str, str]:
+    file_key = _read_file_api_key(here)
+    if file_key:
+        return file_key, str(_api_key_file(here))
+    return "", "aucune"
+
+
+def _validate_api_key(api_key: str, timeout_s: int = 8) -> Tuple[bool, str]:
+    params = {"key": api_key, "query": "boulangerie Metz", "language": "fr", "region": "fr"}
+    try:
+        response = requests.get(PLACES_TEXTSEARCH_URL, params=params, timeout=timeout_s)
+        response.raise_for_status()
+        data = response.json()
+    except Exception as exc:
+        return False, f"Erreur reseau: {exc}"
+
+    status = str(data.get("status") or "")
+    if status in {"OK", "ZERO_RESULTS"}:
+        return True, "Cle API valide."
+    message = str(data.get("error_message") or "Aucun detail fourni par Google.")
+    return False, f"Cle invalide ({status}): {message}"
+
+
+def _ensure_valid_api_key(console, here: Path) -> str:
+    from rich.panel import Panel
+
+    while True:
+        api_key, source = _resolve_api_key(here)
+        if not api_key:
+            console.print(
+                Panel.fit(
+                    "Aucune cle Google Maps detectee.\n"
+                    "Colle une cle API Places pour continuer.",
+                    style="bold yellow",
+                )
+            )
+            new_key = console.input("Nouvelle cle API: ").strip()
+            if not new_key:
+                raise SystemExit("Cle vide. Arret.")
+            _write_file_api_key(here, new_key)
+            continue
+
+        console.print(f"[dim]Cle API chargee depuis: {source}[/]")
+        ok, msg = _validate_api_key(api_key=api_key)
+        if ok:
+            console.print(f"[green]{msg}[/]")
+            return api_key
+
+        console.print(Panel.fit(msg, style="bold red"))
+        choice = console.input("Modifier la cle maintenant ? (o/n) [o] ").strip().lower() or "o"
+        if choice not in {"o", "oui", "y", "yes"}:
+            raise SystemExit("Cle API invalide. Arret.")
+        new_key = console.input("Nouvelle cle API: ").strip()
+        if not new_key:
+            console.print("Cle vide, reessaie.", style="yellow")
+            continue
+        _write_file_api_key(here, new_key)
 
 
 def _require_rich():
@@ -104,6 +214,15 @@ def _build_command(
         raise SystemExit(f"Script introuvable: {script}")
 
     lvl = preset.levels.get(level)
+    if level == "tres_large":
+        base = preset.levels.get("large") or preset.levels.get("agglo") or preset.levels.get("centre")
+        if not isinstance(base, dict):
+            raise SystemExit("Aucun level de base disponible pour calculer 'tres_large'.")
+        lvl = {
+            "radius": int(base.get("radius", 4000)) * 2,
+            "grid_step_m": int(base.get("grid_step_m", 4000)) * 2,
+            "grid_rings": max(4, int(base.get("grid_rings", 3)) + 1),
+        }
     if not isinstance(lvl, dict):
         raise SystemExit(f"Level inconnu: {level}")
 
@@ -199,7 +318,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--groups-file", default=str(default_groups), help="JSON de groupes")
     p.add_argument("--no-groups", action="store_true", help="Ne pas utiliser les groupes")
     p.add_argument("--mode", default="nearby-grid", choices=["nearby-grid", "text"], help="Mode de recherche")
-    p.add_argument("--level", default="agglo", choices=["centre", "agglo", "large"], help="Level par défaut")
+    p.add_argument(
+        "--level",
+        default="agglo",
+        choices=["centre", "agglo", "large", "tres_large"],
+        help="Level par défaut",
+    )
     p.add_argument("--language", default="fr", help="Langue Places")
     p.add_argument("--region-code", default="fr", help="Code region Places")
     p.add_argument("--timeout", type=int, default=25, help="Timeout reseau (s)")
@@ -218,6 +342,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     console = Console()
     console.print(Panel.fit("ProspectLab - Export Google Maps", style="bold white on blue"))
+    _ensure_valid_api_key(console, here)
 
     presets_path = Path(str(args.presets)).expanduser().resolve()
     if not presets_path.exists():
@@ -248,14 +373,32 @@ def main(argv: Optional[List[str]] = None) -> int:
         presets_by_region[r] = sorted(presets_by_region[r], key=lambda x: x.city.lower())
 
     regions = sorted(presets_by_region.keys(), key=str.lower)
-    region_labels = [f"[bold]{r}[/]  [dim]({len(presets_by_region[r])} villes)[/]" for r in regions]
+    region_labels: List[str] = []
+    for r in regions:
+        deps = sorted({(x.department or "-").strip() for x in presets_by_region[r]}, key=str.lower)
+        region_labels.append(f"[bold]{r}[/]  [dim]({len(presets_by_region[r])} villes, {len(deps)} departements)[/]")
     ridx = _pick_index_numbered(console, "1) Choisis une région", region_labels, allow_back=False)
     if ridx is None:
         return 0
     region = regions[ridx]
 
-    city_presets = presets_by_region[region]
-    table = Table(title=f"2) Villes - {region}", show_lines=False, header_style="bold magenta")
+    region_presets = presets_by_region[region]
+    presets_by_department: Dict[str, List[Preset]] = {}
+    for pr in region_presets:
+        dep = (pr.department or "-").strip()
+        presets_by_department.setdefault(dep, []).append(pr)
+    for d in presets_by_department:
+        presets_by_department[d] = sorted(presets_by_department[d], key=lambda x: x.city.lower())
+
+    departments = sorted(presets_by_department.keys(), key=str.lower)
+    department_labels = [f"[bold]{d}[/]  [dim]({len(presets_by_department[d])} villes)[/]" for d in departments]
+    didx = _pick_index_numbered(console, f"2) Choisis un departement - {region}", department_labels, allow_back=True)
+    if didx is None:
+        return main(argv)
+    department = departments[didx]
+
+    city_presets = presets_by_department[department]
+    table = Table(title=f"3) Villes - {region} / {department}", show_lines=False, header_style="bold magenta")
     table.add_column("#", justify="right", style="bold")
     table.add_column("Statut", justify="left")
     table.add_column("Ville", style="bold")
@@ -307,8 +450,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             break
         console.print("Hors plage.", style="yellow")
 
-    levels = ["centre", "agglo", "large"]
-    lvl_table = Table(title=f"3) Level - {preset.city}", header_style="bold magenta")
+    levels = ["centre", "agglo", "large", "tres_large"]
+    lvl_table = Table(title=f"4) Level - {preset.city}", header_style="bold magenta")
     lvl_table.add_column("#", justify="right", style="bold")
     lvl_table.add_column("Level", style="bold")
     lvl_table.add_column("radius (m)", justify="right")
@@ -316,6 +459,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     lvl_table.add_column("rings", justify="right")
     for i, lv in enumerate(levels, start=1):
         v = preset.levels.get(lv) or {}
+        if lv == "tres_large":
+            base = preset.levels.get("large") or preset.levels.get("agglo") or preset.levels.get("centre") or {}
+            v = {
+                "radius": int(base.get("radius", 4000)) * 2,
+                "grid_step_m": int(base.get("grid_step_m", 4000)) * 2,
+                "grid_rings": max(4, int(base.get("grid_rings", 3)) + 1),
+            }
         lvl_table.add_row(
             str(i),
             lv + ("  [dim](defaut)[/]" if lv == args.level else ""),
@@ -325,7 +475,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
     console.print(lvl_table)
     while True:
-        raw = console.input("Choix level (1/2/3, Entrée=defaut, q=quitter): ").strip().lower()
+        raw = console.input("Choix level (1/2/3/4, Entree=defaut, q=quitter): ").strip().lower()
         if raw == "q":
             return 0
         if raw == "":
@@ -336,11 +486,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         except Exception:
             console.print("Entrée invalide.", style="yellow")
             continue
-        if 1 <= n <= 3:
+        if 1 <= n <= len(levels):
             level = levels[n - 1]
             break
         console.print("Hors plage.", style="yellow")
-    if level not in preset.levels:
+    if level not in preset.levels and level != "tres_large":
         raise SystemExit(f"Level '{level}' non défini pour {preset.city}.")
 
     cache_path = (
@@ -365,7 +515,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         category_translate=str(args.category_translate),
     )
 
-    console.print(Panel.fit("4) Récap & lancement", style="bold cyan"))
+    console.print(Panel.fit("5) Récap & lancement", style="bold cyan"))
     console.print(f"[bold]Ville[/]: {preset.city}  [dim]({preset.department})[/]")
     console.print(f"[bold]Level[/]: {level}   [bold]Mode[/]: {args.mode}")
     console.print(f"[bold]Cat translate[/]: {args.category_translate}")

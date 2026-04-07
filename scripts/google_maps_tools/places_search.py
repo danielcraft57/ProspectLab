@@ -1,9 +1,9 @@
 import argparse
 import json
-import os
 import sys
 import math
 import time
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import requests
@@ -151,15 +151,15 @@ TYPE_FR_MAP: Dict[str, str] = {
 
 
 def _require_api_key() -> str:
-    try:
-        from dotenv import load_dotenv  # type: ignore
-
-        load_dotenv()
-    except Exception:
-        pass
-    api_key = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
+    api_key = ""
+    key_path = Path(__file__).resolve().parent / ".google_maps_api_key"
+    if key_path.exists():
+        try:
+            api_key = key_path.read_text(encoding="utf-8").strip()
+        except Exception:
+            api_key = ""
     if not api_key:
-        raise SystemExit("Il manque GOOGLE_MAPS_API_KEY dans tes variables d'environnement.")
+        raise SystemExit("Le fichier scripts/google_maps_tools/.google_maps_api_key est vide ou introuvable.")
     return api_key
 
 

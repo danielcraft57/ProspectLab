@@ -1,0 +1,9 @@
+name: google_maps_tools
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - requests
+  - openpyxl
+  - rich
