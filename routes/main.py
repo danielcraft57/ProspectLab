@@ -38,6 +38,16 @@ def dashboard():
     return render_page('dashboard.html')
 
 
+@main_bp.route('/analyse-concurrence-marche')
+@login_required
+def analyse_concurrence_marche():
+    """
+    Vision produit : analyse concurrence et marché, fiche d’idées à activer
+    (battlecards, radar gagnable, alertes, A/B commercial).
+    """
+    return render_page('analyse_concurrence_marche.html')
+
+
 @main_bp.route('/entreprises')
 @login_required
 def liste_entreprises():

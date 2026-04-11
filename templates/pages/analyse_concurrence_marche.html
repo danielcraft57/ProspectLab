@@ -1,0 +1,580 @@
+{% extends "base.html" %}
+
+{% block title %}Analyse concurrence &amp; marché - ProspectLab{% endblock %}
+
+{% block content %}
+<div class="acm-page">
+    <nav class="acm-breadcrumb" aria-label="Fil d'Ariane">
+        <a href="{{ url_for('main.dashboard') }}">Accueil</a>
+        <span class="acm-bc-sep" aria-hidden="true">›</span>
+        <span>Analyse concurrence &amp; marché</span>
+        <span class="acm-bc-sep" aria-hidden="true">›</span>
+        <span class="acm-bc-current">Vue chiffres-clés</span>
+    </nav>
+
+    <header class="acm-de-header">
+        <div class="acm-de-header-main">
+            <p class="acm-de-territoire"><i class="fa-solid fa-database" aria-hidden="true"></i> Périmètre : <strong>base ProspectLab</strong> (vos entreprises et campagnes)</p>
+            <h1 class="acm-de-title">Données pour : <span>votre marché &amp; pipeline</span></h1>
+            <p class="acm-de-sub">Présentation inspirée des <a href="https://dataemploi.francetravail.fr/emploi/metier/chiffres-cles/NAT/FR/M1855" rel="noopener noreferrer" target="_blank">chiffres-clés Data Emploi</a> — indicateurs réels issus de <code>/api/statistics</code>.</p>
+        </div>
+        <div class="acm-de-header-actions">
+            <button type="button" class="acm-btn acm-btn--ghost" data-acm-modal-open="guide"><i class="fa-solid fa-compass" aria-hidden="true"></i> Guide</button>
+            <a class="acm-btn acm-btn--ghost" id="acm-export-xlsx" href="{{ url_for('api.market_concurrence_export') }}"><i class="fa-solid fa-file-excel" aria-hidden="true"></i> Excel</a>
+            <button type="button" class="acm-btn acm-btn--ghost" id="acm-export-print" title="Imprimer ou enregistrer en PDF"><i class="fa-solid fa-file-pdf" aria-hidden="true"></i> PDF</button>
+            <button type="button" class="acm-btn" id="acm-refresh"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Actualiser</button>
+        </div>
+    </header>
+
+    <section class="acm-material-quickstart" aria-labelledby="acm-quickstart-title">
+        <h2 id="acm-quickstart-title">Comment utiliser cette page en 3 étapes</h2>
+        <div class="acm-material-steps">
+            <button type="button" class="acm-step-card" data-acm-modal-open="step1">
+                <span class="acm-step-index">1</span>
+                <span class="acm-step-title">Comprendre le marché</span>
+                <span class="acm-step-desc">Lire tendance trimestrielle, géographie et densité secteur.</span>
+            </button>
+            <button type="button" class="acm-step-card" data-acm-modal-open="step2">
+                <span class="acm-step-index">2</span>
+                <span class="acm-step-title">Prioriser l’action</span>
+                <span class="acm-step-desc">Exploiter le top 20 « gagnable maintenant » et les KPIs.</span>
+            </button>
+            <button type="button" class="acm-step-card" data-acm-modal-open="step3">
+                <span class="acm-step-index">3</span>
+                <span class="acm-step-title">Exécuter la roadmap</span>
+                <span class="acm-step-desc">Créer des actions Battlecards / Radar / Alertes / A-B.</span>
+            </button>
+        </div>
+    </section>
+
+    <div class="acm-kpi-toolbar">
+        <span class="acm-kpi-toolbar-label">Période (emails &amp; campagnes)</span>
+        <div class="acm-period-switch" role="group" aria-label="Fenêtre temporelle">
+            <button type="button" class="acm-period-btn active" data-days="">Tout</button>
+            <button type="button" class="acm-period-btn" data-days="7">7 jours</button>
+            <button type="button" class="acm-period-btn" data-days="30">30 jours</button>
+            <button type="button" class="acm-period-btn" data-days="90">90 jours</button>
+        </div>
+    </div>
+    <p class="acm-src-note" id="acm-src-label">Chargement…</p>
+
+    <section class="acm-de-section" aria-labelledby="acm-kpi-strip-title">
+        <h2 id="acm-kpi-strip-title" class="acm-sr-only">Indicateurs synthèse</h2>
+        <div class="acm-kpi-strip">
+            <div class="acm-kpi-mini">
+                <span class="acm-kpi-mini-label">Prospects en base</span>
+                <span class="acm-kpi-mini-val" id="acm-kpi-total">—</span>
+            </div>
+            <div class="acm-kpi-mini">
+                <span class="acm-kpi-mini-label">Taux de conversion (gagnés / base)</span>
+                <span class="acm-kpi-mini-val" id="acm-kpi-conv">—</span>
+            </div>
+            <div class="acm-kpi-mini">
+                <span class="acm-kpi-mini-label">Opportunité élevée + très élevée</span>
+                <span class="acm-kpi-mini-val" id="acm-kpi-highopp">—</span>
+            </div>
+            <div class="acm-kpi-mini acm-kpi-mini--accent">
+                <span class="acm-kpi-mini-label">Friction pipeline <span class="acm-kpi-hint">(perdus / terminés)</span></span>
+                <span class="acm-kpi-mini-val"><span id="acm-kpi-friction">—</span> <small id="acm-kpi-friction-label"></small></span>
+            </div>
+        </div>
+    </section>
+
+    <section class="acm-de-section" aria-labelledby="acm-dual-title">
+        <h2 id="acm-dual-title" class="acm-sr-only">Volume pipeline et enrichissement</h2>
+        <div class="acm-de-dual">
+            <div class="acm-de-card acm-de-card--stat">
+                <div class="acm-de-card-icon" aria-hidden="true"><i class="fa-solid fa-users-line"></i></div>
+                <div>
+                    <h3>Prospects actifs</h3>
+                    <p class="acm-de-card-desc">Hors statut « Perdu » (même logique que le dashboard).</p>
+                    <p class="acm-de-card-number" id="acm-card-pipeline">—</p>
+                </div>
+            </div>
+            <div class="acm-de-card acm-de-card--stat">
+                <div class="acm-de-card-icon acm-de-card-icon--alt" aria-hidden="true"><i class="fa-solid fa-envelope"></i></div>
+                <div>
+                    <h3>Fiches avec email</h3>
+                    <p class="acm-de-card-desc">Email principal, scraping ou contacts liés.</p>
+                    <p class="acm-de-card-number" id="acm-card-email">—</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="acm-de-section acm-chart-card" aria-labelledby="acm-geo-title">
+        <h2 id="acm-geo-title" class="acm-de-block-title">Géographie &amp; localisation</h2>
+        <p class="acm-de-block-intro">Répartition par pays renseigné sur la fiche entreprise ; synthèse des coordonnées GPS (latitude / longitude). L’encadrement « France métropole » est une approximation par boîte géographique (hors DOM, hors pays limitrophes).</p>
+        <div class="acm-geo-kpis">
+            <div class="acm-geo-kpi">
+                <span class="acm-geo-kpi-label">Avec coordonnées GPS</span>
+                <span class="acm-geo-kpi-val" id="acm-geo-avec">—</span>
+            </div>
+            <div class="acm-geo-kpi">
+                <span class="acm-geo-kpi-label">Sans GPS</span>
+                <span class="acm-geo-kpi-val" id="acm-geo-sans">—</span>
+            </div>
+            <div class="acm-geo-kpi acm-geo-kpi--accent">
+                <span class="acm-geo-kpi-label">GPS ≈ France métropole</span>
+                <span class="acm-geo-kpi-val" id="acm-geo-fr">—</span>
+            </div>
+        </div>
+        <h3 class="acm-de-subtitle">Top pays (effectifs)</h3>
+        <div id="acm-pays-motifs"></div>
+        <div class="acm-table-wrap acm-table-wrap--top">
+            <table class="acm-data-table" id="acm-pays-table">
+                <thead>
+                    <tr>
+                        <th>Pays</th>
+                        <th>Effectifs</th>
+                        <th>% de la base</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="acm-de-section acm-chart-card" aria-labelledby="acm-opp-title">
+        <h2 id="acm-opp-title" class="acm-de-block-title">Répartition par niveau d’opportunité</h2>
+        <p class="acm-de-block-intro">Vue agrégée de votre base (équivalent « salaires / fourchette » sur Data Emploi).</p>
+        <p class="acm-band-caption" id="acm-opp-band-caption"></p>
+        <div class="acm-stack-bar" id="acm-opp-band" role="img" aria-label="Répartition des niveaux d’opportunité"></div>
+        <div class="acm-legend-row" id="acm-opp-band-legend"></div>
+        <div class="acm-table-wrap">
+            <table class="acm-data-table" id="acm-opp-table">
+                <thead>
+                    <tr>
+                        <th>Niveau d’opportunité</th>
+                        <th>Effectifs</th>
+                        <th>% de la base</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="acm-de-section acm-chart-card" aria-labelledby="acm-evo-title">
+        <h2 id="acm-evo-title" class="acm-de-block-title">Évolution trimestrielle</h2>
+        <p class="acm-de-block-intro">Volume de fiches dont la <strong>date d’analyse</strong> tombe dans chaque trimestre, et nombre marquées <strong>gagnées</strong> sur la même période (indicateur de conversion inscrit dans le trimestre d’entrée en base).</p>
+        <div class="acm-bar-wrap acm-bar-wrap--tall">
+            <canvas id="chart-acm-trimestres" aria-label="Graphique par trimestre"></canvas>
+        </div>
+    </section>
+
+    <section class="acm-de-section acm-grid-2" aria-labelledby="acm-tension-title">
+        <div class="acm-chart-card">
+            <h2 id="acm-tension-title" class="acm-de-block-title">Friction &amp; tension commerciale</h2>
+            <p class="acm-de-block-intro">Part des « Perdu » parmi les dossiers terminés (gagné + perdu). Indicateur interne, à lire comme un niveau de difficulté.</p>
+            <div class="acm-gauge-wrap">
+                <canvas id="chart-acm-gauge" width="280" height="160" aria-label="Jauge friction"></canvas>
+            </div>
+            <ul class="acm-kpi-inline">
+                <li><strong>Emails envoyés</strong> <span id="acm-inline-emails">—</span></li>
+                <li><strong>Taux d’ouverture</strong> <span id="acm-inline-open">—</span></li>
+                <li><strong>Taux de clic</strong> <span id="acm-inline-click">—</span></li>
+            </ul>
+        </div>
+        <div class="acm-chart-card">
+            <h2 class="acm-de-block-title">Motifs de densité par secteur</h2>
+            <p class="acm-de-block-intro">Secteurs les plus représentés (équivalent « motifs de recrutement »).</p>
+            <div id="acm-secteur-motifs"></div>
+        </div>
+    </section>
+
+    <section class="acm-de-section acm-grid-2" aria-labelledby="acm-repart-title">
+        <div class="acm-chart-card">
+            <h2 id="acm-repart-title" class="acm-de-block-title">Répartition par statut pipeline</h2>
+            <div class="acm-donut-wrap">
+                <canvas id="chart-acm-statuts" aria-label="Graphique statuts"></canvas>
+            </div>
+        </div>
+        <div class="acm-chart-card">
+            <h2 class="acm-de-block-title">Répartition par étape de prospection</h2>
+            <p class="acm-de-block-intro">Barres empilées lorsque le champ est renseigné.</p>
+            <p class="acm-chart-fallback acm-muted" data-acm-etapes-fallback hidden>Aucune étape de prospection renseignée.</p>
+            <div class="acm-bar-wrap">
+                <canvas id="chart-acm-etapes"></canvas>
+            </div>
+        </div>
+    </section>
+
+    <section class="acm-de-section" aria-labelledby="acm-triple-title">
+        <h2 id="acm-triple-title" class="acm-de-block-title">Comparaisons par dimension</h2>
+        <p class="acm-de-block-intro">Trois vues du même univers : cliquez sur une barre pour ouvrir la liste filtrée.</p>
+        <div class="acm-chart-triple">
+            <div class="acm-chart-card acm-chart-noshadow">
+                <h3>Top secteurs</h3>
+                <div class="acm-bar-wrap acm-bar-wrap--tall">
+                    <canvas id="chart-acm-secteurs"></canvas>
+                </div>
+            </div>
+            <div class="acm-chart-card acm-chart-noshadow">
+                <h3>Par opportunité</h3>
+                <div class="acm-bar-wrap acm-bar-wrap--tall">
+                    <canvas id="chart-acm-opportunites"></canvas>
+                </div>
+            </div>
+            <div class="acm-chart-card acm-chart-noshadow">
+                <h3>Emails campagne</h3>
+                <div class="acm-bar-wrap acm-bar-wrap--tall">
+                    <canvas id="chart-acm-emails"></canvas>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="acm-de-section acm-chart-card" aria-labelledby="acm-tabs-title">
+        <h2 id="acm-tabs-title" class="acm-de-block-title">Classements (tags vs secteurs)</h2>
+        <p class="acm-de-block-intro">Comme l’onglet « compétences » sur Data Emploi : deux angles de lecture.</p>
+        <div class="acm-tabs" role="tablist">
+            <button type="button" class="acm-tab active" role="tab" aria-selected="true" data-tab="tags">Tags les plus fréquents</button>
+            <button type="button" class="acm-tab" role="tab" aria-selected="false" data-tab="secteurs">Secteurs (volume)</button>
+        </div>
+        <div class="acm-tab-panel" data-tab-panel="tags" role="tabpanel">
+            <ol class="acm-ranked-list" id="acm-list-tags"></ol>
+        </div>
+        <div class="acm-tab-panel" data-tab-panel="secteurs" role="tabpanel" hidden>
+            <ol class="acm-ranked-list" id="acm-list-secteurs"></ol>
+        </div>
+    </section>
+
+    <section class="acm-de-section acm-chart-card" aria-labelledby="acm-prio-title">
+        <h2 id="acm-prio-title" class="acm-de-block-title">Top 20 « gagnable maintenant »</h2>
+        <p class="acm-de-block-intro">Prospects en opportunité « Élevée » ou « Très élevée », hors gagné/perdu — prochaine étape : relance directe depuis la fiche.</p>
+        <div class="acm-table-wrap">
+            <table class="acm-data-table" id="acm-priority-table">
+                <thead>
+                    <tr>
+                        <th>Nom</th>
+                        <th>Secteur</th>
+                        <th>Opportunité</th>
+                        <th>Statut</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="acm-de-footer-links" aria-labelledby="acm-more-title">
+        <h2 id="acm-more-title" class="acm-de-block-title">Pour aller plus loin</h2>
+        <div class="acm-footer-cols">
+            <div>
+                <h3>Dans ProspectLab</h3>
+                <ul>
+                    <li><a href="{{ url_for('main.liste_entreprises') }}">Liste des entreprises</a></li>
+                    <li><a href="{{ url_for('main.carte_entreprises') }}">Carte des entreprises</a></li>
+                    <li><a href="{{ url_for('main.dashboard') }}">Dashboard complet</a></li>
+                </ul>
+            </div>
+            <div>
+                <h3>Référence visuelle</h3>
+                <ul>
+                    <li><a href="https://dataemploi.francetravail.fr/emploi/metier/chiffres-cles/NAT/FR/M1855" rel="noopener noreferrer" target="_blank">Exemple Data Emploi (métier web)</a></li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <details class="acm-roadmap" open>
+        <summary>Feuille de route &amp; idées produit (battlecards, radar, alertes, A/B)</summary>
+        <div class="acm-roadmap-inner">
+            <div class="acm-intro-grid" aria-label="Cadrage">
+                <div class="acm-intro-card">
+                    <h3>Objectifs métier</h3>
+                    <p>Réduire le temps de préparation avant contact, concentrer les relances sur le top potentiel et standardiser les messages qui convertissent.</p>
+                </div>
+                <div class="acm-intro-card">
+                    <h3>Périmètre données</h3>
+                    <p>Base entreprises, opportunités, statuts pipeline, tags, analyses techniques/SEO, campagnes email et historiques d’action.</p>
+                </div>
+                <div class="acm-intro-card">
+                    <h3>Livrables opérationnels</h3>
+                    <p>Battlecards activables en rendez-vous, radar quotidien d’action, alertes prioritaires et laboratoire A/B avec décisions go/no-go.</p>
+                </div>
+            </div>
+
+            <div class="acm-roadmap-kpis">
+                <div class="acm-roadmap-kpi">
+                    <span class="acm-roadmap-kpi-label">Top opportunités détectées</span>
+                    <strong id="acm-roadmap-kpi-opps">—</strong>
+                </div>
+                <div class="acm-roadmap-kpi">
+                    <span class="acm-roadmap-kpi-label">Contacts priorisés (radar)</span>
+                    <strong id="acm-roadmap-kpi-priority">—</strong>
+                </div>
+                <div class="acm-roadmap-kpi">
+                    <span class="acm-roadmap-kpi-label">Maturité A/B (emails envoyés)</span>
+                    <strong id="acm-roadmap-kpi-ab">—</strong>
+                </div>
+            </div>
+
+            <div class="acm-roadmap-grid">
+                <article class="acm-roadmap-card">
+                    <header>
+                        <h3>1. Battlecards concurrentes automatiques</h3>
+                        <span class="acm-roadmap-state" id="acm-roadmap-state-battlecards">À cadrer</span>
+                    </header>
+                    <p>Créer une fiche par concurrent + segment pour préparer un appel en moins de 2 minutes.</p>
+                    <ul>
+                        <li>Forces/faiblesses auto à partir des signaux web + historique terrain</li>
+                        <li>Objections types et réponses recommandées par segment</li>
+                        <li>Pitch « angle d’attaque » copiable en 1 clic</li>
+                    </ul>
+                    <p class="acm-roadmap-next">Prochaine étape : générer un MVP sur les 5 secteurs les plus présents.</p>
+                    <button type="button" class="acm-roadmap-btn" data-roadmap-create="battlecards">Créer action</button>
+                </article>
+
+                <article class="acm-roadmap-card">
+                    <header>
+                        <h3>2. Radar « gagnable maintenant »</h3>
+                        <span class="acm-roadmap-state" id="acm-roadmap-state-radar">En préparation</span>
+                    </header>
+                    <p>Prioriser le top actionnable des 7 jours avec une logique explicable pour l’équipe.</p>
+                    <ul>
+                        <li>Score combiné : attractivité business + concurrence + urgence</li>
+                        <li>Top 20 avec bouton d’accès rapide à la fiche prospect</li>
+                        <li>Répartition équipe : éviter les doublons et piloter la charge</li>
+                    </ul>
+                    <p class="acm-roadmap-next">Prochaine étape : versionner la formule de scoring dans l’UI.</p>
+                    <button type="button" class="acm-roadmap-btn" data-roadmap-create="radar">Créer action</button>
+                </article>
+
+                <article class="acm-roadmap-card">
+                    <header>
+                        <h3>3. Alertes intelligentes marché</h3>
+                        <span class="acm-roadmap-state" id="acm-roadmap-state-alerts">Prototype</span>
+                    </header>
+                    <p>Déclencher des actions sur les signaux faibles utiles, sans bruit inutile.</p>
+                    <ul>
+                        <li>Nouveau concurrent détecté par zone/secteur</li>
+                        <li>Prospect à forte opportunité sans action récente</li>
+                        <li>Baisse de présence web (technique/SEO) à exploiter commercialement</li>
+                    </ul>
+                    <p class="acm-roadmap-next">Prochaine étape : règles d’alerte prioritaires + digest quotidien.</p>
+                    <button type="button" class="acm-roadmap-btn" data-roadmap-create="alerts">Créer action</button>
+                </article>
+
+                <article class="acm-roadmap-card">
+                    <header>
+                        <h3>4. Expériences A/B commerciales</h3>
+                        <span class="acm-roadmap-state" id="acm-roadmap-state-ab">À lancer</span>
+                    </header>
+                    <p>Mesurer objectivement ce qui convertit selon segment et proposition de valeur.</p>
+                    <ul>
+                        <li>2 scripts d’approche par segment avec randomisation</li>
+                        <li>2 offres packagées testées sur des cohortes comparables</li>
+                        <li>Comparaison auto : réponse, RDV, gain et recommandation finale</li>
+                    </ul>
+                    <p class="acm-roadmap-next">Prochaine étape : démarrer 1 test pilote sur un segment prioritaire.</p>
+                    <button type="button" class="acm-roadmap-btn" data-roadmap-create="ab">Créer action</button>
+                </article>
+            </div>
+
+            <div class="acm-roadmap-actions">
+                <div class="acm-roadmap-actions-head">
+                    <h3>Backlog roadmap</h3>
+                    <button type="button" class="acm-roadmap-btn acm-roadmap-btn--ghost" id="acm-roadmap-refresh">Rafraîchir</button>
+                </div>
+                <p class="acm-muted">Passe une action en « En cours », « Fait » ou « Annulée » directement depuis cette liste.</p>
+                <div id="acm-roadmap-counters" class="acm-roadmap-counters">
+                    <span class="acm-roadmap-chip">Commercial <strong data-roadmap-count="commercial">0</strong></span>
+                    <span class="acm-roadmap-chip">Marketing <strong data-roadmap-count="marketing">0</strong></span>
+                    <span class="acm-roadmap-chip">Produit <strong data-roadmap-count="produit">0</strong></span>
+                    <span class="acm-roadmap-chip">Ops <strong data-roadmap-count="ops">0</strong></span>
+                    <span class="acm-roadmap-chip">Data <strong data-roadmap-count="data">0</strong></span>
+                </div>
+                <div class="acm-roadmap-filters" role="group" aria-label="Filtrer les actions par statut">
+                    <button type="button" class="acm-roadmap-chip acm-roadmap-chip-filter active" data-roadmap-filter-status="">Tous statuts</button>
+                    <button type="button" class="acm-roadmap-chip acm-roadmap-chip-filter" data-roadmap-filter-status="todo">À faire</button>
+                    <button type="button" class="acm-roadmap-chip acm-roadmap-chip-filter" data-roadmap-filter-status="in_progress">En cours</button>
+                    <button type="button" class="acm-roadmap-chip acm-roadmap-chip-filter" data-roadmap-filter-status="done">Fait</button>
+                    <button type="button" class="acm-roadmap-chip acm-roadmap-chip-filter" data-roadmap-filter-status="cancelled">Annulée</button>
+                </div>
+                <div class="acm-roadmap-filters" role="group" aria-label="Filtrer les actions par priorité">
+                    <button type="button" class="acm-roadmap-chip acm-roadmap-chip-filter active" data-roadmap-filter-priority="">Toutes priorités</button>
+                    <button type="button" class="acm-roadmap-chip acm-roadmap-chip-filter" data-roadmap-filter-priority="high">High</button>
+                    <button type="button" class="acm-roadmap-chip acm-roadmap-chip-filter" data-roadmap-filter-priority="medium">Medium</button>
+                    <button type="button" class="acm-roadmap-chip acm-roadmap-chip-filter" data-roadmap-filter-priority="low">Low</button>
+                </div>
+                <div class="acm-roadmap-filters" role="group" aria-label="Filtrer les actions par catégorie">
+                    <button type="button" class="acm-roadmap-chip acm-roadmap-chip-filter active" data-roadmap-filter-category="">Toutes</button>
+                    <button type="button" class="acm-roadmap-chip acm-roadmap-chip-filter" data-roadmap-filter-category="commercial">Commercial</button>
+                    <button type="button" class="acm-roadmap-chip acm-roadmap-chip-filter" data-roadmap-filter-category="marketing">Marketing</button>
+                    <button type="button" class="acm-roadmap-chip acm-roadmap-chip-filter" data-roadmap-filter-category="produit">Produit</button>
+                    <button type="button" class="acm-roadmap-chip acm-roadmap-chip-filter" data-roadmap-filter-category="ops">Ops</button>
+                    <button type="button" class="acm-roadmap-chip acm-roadmap-chip-filter" data-roadmap-filter-category="data">Data</button>
+                </div>
+                <div class="acm-roadmap-search-row">
+                    <label class="acm-roadmap-search-label" for="acm-roadmap-search">Rechercher dans le backlog</label>
+                    <input type="search" id="acm-roadmap-search" class="acm-input acm-roadmap-search-input" placeholder="Titre, description, pilier, statut…" autocomplete="off" />
+                </div>
+                <div id="acm-roadmap-actions-list" class="acm-roadmap-actions-list">
+                    <p class="acm-muted">Chargement du backlog...</p>
+                </div>
+            </div>
+
+            <div class="acm-roadmap-phases">
+                <h3>Plan d’exécution 30 / 60 / 90 jours</h3>
+                <div class="acm-roadmap-phase-grid">
+                    <div class="acm-roadmap-phase">
+                        <h4>J+30 — Fondations</h4>
+                        <ul>
+                            <li>Score radar explicable + export</li>
+                            <li>Top 20 quotidien + ownership équipe</li>
+                            <li>Alertes « forte opportunité sans action »</li>
+                        </ul>
+                    </div>
+                    <div class="acm-roadmap-phase">
+                        <h4>J+60 — Industrialisation</h4>
+                        <ul>
+                            <li>Battlecards par concurrent/segment sur 5 secteurs</li>
+                            <li>Digest alertes et priorisation dynamique</li>
+                            <li>Instrumentation complète des relances</li>
+                        </ul>
+                    </div>
+                    <div class="acm-roadmap-phase">
+                        <h4>J+90 — Optimisation</h4>
+                        <ul>
+                            <li>A/B scripts + offres avec dashboard décision</li>
+                            <li>Recommandations automatiques « script gagnant »</li>
+                            <li>Boucle continue data → action → apprentissage</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </details>
+
+    <button type="button" class="acm-fab" data-acm-modal-open="quick-actions" aria-label="Actions rapides roadmap">
+        <i class="fa-solid fa-bolt" aria-hidden="true"></i>
+    </button>
+
+    <div class="acm-modal-backdrop" data-acm-modal-close hidden></div>
+    <div class="acm-modal" data-acm-modal="guide" hidden>
+        <div class="acm-modal-card">
+            <div class="acm-modal-head">
+                <h3>Utilité de cette page</h3>
+                <button type="button" class="acm-modal-close" data-acm-modal-close>&times;</button>
+            </div>
+            <p>Cette vue sert à convertir la donnée en décisions commerciales quotidiennes. Tu combines : signaux marché, priorisation prospects et backlog d’exécution.</p>
+            <ul>
+                <li><strong>Bloc chiffres-clés :</strong> où est la pression commerciale.</li>
+                <li><strong>Bloc top 20 :</strong> qui contacter en premier.</li>
+                <li><strong>Bloc roadmap :</strong> quoi industrialiser cette semaine.</li>
+            </ul>
+            <div class="acm-modal-actions">
+                <button type="button" class="acm-btn" data-acm-modal-open="quick-actions">Ouvrir actions rapides</button>
+                <button type="button" class="acm-btn acm-btn--ghost" data-acm-modal-close>Fermer</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="acm-modal" data-acm-modal="step1" hidden>
+        <div class="acm-modal-card">
+            <div class="acm-modal-head">
+                <h3>Étape 1 — Lecture marché</h3>
+                <button type="button" class="acm-modal-close" data-acm-modal-close>&times;</button>
+            </div>
+            <p>Commence par identifier les poches d’opportunité : secteurs denses, pays concentrés, évolution trimestrielle.</p>
+            <p class="acm-muted">Objectif : repérer où la base est la plus exploitable avant de passer à l’action.</p>
+        </div>
+    </div>
+
+    <div class="acm-modal" data-acm-modal="step2" hidden>
+        <div class="acm-modal-card">
+            <div class="acm-modal-head">
+                <h3>Étape 2 — Priorisation</h3>
+                <button type="button" class="acm-modal-close" data-acm-modal-close>&times;</button>
+            </div>
+            <p>Utilise le score d’opportunité + friction + top 20 pour décider l’ordre des relances sur 7 jours.</p>
+            <p class="acm-muted">Objectif : réduire le temps perdu sur les comptes peu gagnables.</p>
+        </div>
+    </div>
+
+    <div class="acm-modal" data-acm-modal="step3" hidden>
+        <div class="acm-modal-card">
+            <div class="acm-modal-head">
+                <h3>Étape 3 — Exécution roadmap</h3>
+                <button type="button" class="acm-modal-close" data-acm-modal-close>&times;</button>
+            </div>
+            <p>Crée des actions par pilier (Battlecards, Radar, Alertes, A/B), puis passe-les en “En cours” ou “Fait”.</p>
+            <p class="acm-muted">Objectif : transformer la page en routine d’équipe hebdomadaire.</p>
+        </div>
+    </div>
+
+    <div class="acm-modal" data-acm-modal="quick-actions" hidden>
+        <div class="acm-modal-card">
+            <div class="acm-modal-head">
+                <h3>Actions rapides</h3>
+                <button type="button" class="acm-modal-close" data-acm-modal-close>&times;</button>
+            </div>
+            <div class="acm-quick-actions-grid">
+                <button type="button" class="acm-roadmap-btn" data-roadmap-create="battlecards">Créer action Battlecards</button>
+                <button type="button" class="acm-roadmap-btn" data-roadmap-create="radar">Créer action Radar</button>
+                <button type="button" class="acm-roadmap-btn" data-roadmap-create="alerts">Créer action Alertes</button>
+                <button type="button" class="acm-roadmap-btn" data-roadmap-create="ab">Créer action A/B</button>
+                <button type="button" class="acm-roadmap-btn acm-roadmap-btn--ghost" data-roadmap-create="commercial_outreach">Action commerciale</button>
+                <button type="button" class="acm-roadmap-btn acm-roadmap-btn--ghost" data-roadmap-create="marketing_campaign">Action marketing</button>
+                <button type="button" class="acm-roadmap-btn acm-roadmap-btn--ghost" data-roadmap-create="product_packaging">Action produit</button>
+                <button type="button" class="acm-roadmap-btn acm-roadmap-btn--ghost" data-roadmap-create="ops_process">Action ops</button>
+                <button type="button" class="acm-roadmap-btn acm-roadmap-btn--ghost" data-roadmap-create="data_quality">Action data</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="acm-modal" data-acm-modal="action-editor" hidden>
+        <div class="acm-modal-card">
+            <div class="acm-modal-head">
+                <h3>Éditer une action roadmap</h3>
+                <button type="button" class="acm-modal-close" data-acm-modal-close>&times;</button>
+            </div>
+            <input type="hidden" id="acm-edit-action-id" value="">
+            <div class="acm-form-grid">
+                <label>Titre
+                    <input id="acm-edit-title" type="text" class="acm-input" />
+                </label>
+                <label>Catégorie
+                    <select id="acm-edit-category" class="acm-input">
+                        <option value="commercial">Commercial</option>
+                        <option value="marketing">Marketing</option>
+                        <option value="produit">Produit</option>
+                        <option value="ops">Ops</option>
+                        <option value="data">Data</option>
+                    </select>
+                </label>
+                <label>Priorité
+                    <select id="acm-edit-priority" class="acm-input">
+                        <option value="high">Haute</option>
+                        <option value="medium">Moyenne</option>
+                        <option value="low">Basse</option>
+                    </select>
+                </label>
+                <label>Statut
+                    <select id="acm-edit-status" class="acm-input">
+                        <option value="todo">À faire</option>
+                        <option value="in_progress">En cours</option>
+                        <option value="done">Fait</option>
+                        <option value="blocked">Bloqué</option>
+                        <option value="cancelled">Annulée</option>
+                    </select>
+                </label>
+            </div>
+            <div class="acm-modal-actions">
+                <button type="button" class="acm-btn" id="acm-save-action-edit">Enregistrer</button>
+                <button type="button" class="acm-btn acm-btn--ghost" data-acm-modal-close>Fermer</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="acm-snackbar" id="acm-snackbar" aria-live="polite" hidden></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/analyse_concurrence_marche.js') }}" defer></script>
+{% endblock %}

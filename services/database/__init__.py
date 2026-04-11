@@ -95,6 +95,13 @@ class Database(
                 'Migration entreprise_metric_snapshots non appliquée', exc_info=True
             )
 
+        try:
+            self.ensure_market_roadmap_actions_table()
+        except Exception:
+            logging.getLogger(__name__).warning(
+                'Migration market_roadmap_actions non appliquée', exc_info=True
+            )
+
         # Initialiser la base de données (créer les tables) une seule fois par process.
         # Permet un contournement explicite via env pour debug/migration forcée.
         force_each_instance = str(os.environ.get('DB_INIT_EACH_INSTANCE', '')).strip().lower() in (

@@ -4,7 +4,7 @@ Blueprint pour les routes API principales
 Contient toutes les routes API REST pour les entreprises, analyses, etc.
 """
 
-from flask import Blueprint, request, jsonify, session
+from flask import Blueprint, request, jsonify, session, send_file
 from services.database import Database
 from services.database.entreprises import ENTERPRISE_STATUSES, CRM_PIPELINE_ETAPES, EntrepriseManager
 from services.auth import login_required
@@ -187,6 +187,131 @@ def statistics():
 
         stats = database.get_statistics(days=days, offset_days=offset_days)
         return jsonify(stats)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/market-concurrence/export')
+@login_required
+def market_concurrence_export():
+    """
+    Export Excel multi-feuilles (synthèse marché / concurrence) aligné sur get_statistics().
+    Query params optionnels : days, offset_days (même sémantique que GET /api/statistics).
+    """
+    try:
+        from services.market_concurrence_export import build_market_concurrence_xlsx
+    except ImportError as e:
+        return jsonify({'error': str(e)}), 500
+
+    try:
+        days_param = request.args.get('days')
+        offset_days_param = request.args.get('offset_days')
+        days = None
+        offset_days = 0
+        if days_param:
+            try:
+                days_val = int(days_param)
+                if days_val > 0:
+                    days = days_val
+            except ValueError:
+                days = None
+        if offset_days_param:
+            try:
+                offset_val = int(offset_days_param)
+                if offset_val > 0:
+                    offset_days = offset_val
+            except ValueError:
+                offset_days = 0
+
+        stats = database.get_statistics(days=days, offset_days=offset_days)
+        buf = build_market_concurrence_xlsx(stats)
+        return send_file(
+            buf,
+            as_attachment=True,
+            download_name='prospectlab_marche_concurrence.xlsx',
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/market-concurrence/roadmap-actions', methods=['GET', 'POST'])
+@login_required
+def market_concurrence_roadmap_actions():
+    """
+    Backlog actionnable pour la feuille de route marché/concurrence.
+    - GET: liste des actions
+    - POST: création d'une action
+    """
+    if request.method == 'GET':
+        try:
+            try:
+                database.ensure_market_roadmap_actions_table()
+            except Exception:
+                pass
+            limit = int(request.args.get('limit', 50))
+        except Exception:
+            limit = 50
+        status = request.args.get('status')
+        category = request.args.get('category')
+        priority = request.args.get('priority')
+        try:
+            rows = database.list_market_roadmap_actions(limit=limit, status=status, category=category, priority=priority)
+            return jsonify(rows)
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    # POST
+    try:
+        try:
+            database.ensure_market_roadmap_actions_table()
+        except Exception:
+            pass
+        data = request.get_json(silent=True) or {}
+        item = database.create_market_roadmap_action(
+            pillar=data.get('pillar'),
+            title=data.get('title'),
+            description=data.get('description'),
+            priority=data.get('priority', 'medium'),
+            category=data.get('category', 'commercial'),
+            entreprise_id=data.get('entreprise_id'),
+            due_date=data.get('due_date'),
+            owner=data.get('owner'),
+        )
+        return jsonify(item), 201
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/market-concurrence/roadmap-actions/<int:action_id>', methods=['PATCH'])
+@login_required
+def market_concurrence_roadmap_action_update(action_id):
+    """
+    Mise à jour partielle d'une action roadmap (status / priority / owner / due_date).
+    """
+    try:
+        try:
+            database.ensure_market_roadmap_actions_table()
+        except Exception:
+            pass
+        data = request.get_json(silent=True) or {}
+        item = database.update_market_roadmap_action(
+            action_id=action_id,
+            title=data.get('title'),
+            description=data.get('description'),
+            status=data.get('status'),
+            priority=data.get('priority'),
+            category=data.get('category'),
+            owner=data.get('owner'),
+            due_date=data.get('due_date'),
+        )
+        if not item:
+            return jsonify({'error': 'Action introuvable'}), 404
+        return jsonify(item)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

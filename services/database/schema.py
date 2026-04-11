@@ -100,6 +100,50 @@ class DatabaseSchema(DatabaseBase):
         finally:
             conn.close()
 
+    def ensure_market_roadmap_actions_table(self):
+        """
+        Migration idempotente : backlog actionnable de la roadmap marché/concurrence.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS market_roadmap_actions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pillar TEXT NOT NULL,
+                    category TEXT DEFAULT 'commercial',
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    status TEXT DEFAULT 'todo',
+                    priority TEXT DEFAULT 'medium',
+                    entreprise_id INTEGER,
+                    due_date TEXT,
+                    owner TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE SET NULL
+                )
+                ''',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_market_actions_status_priority ON market_roadmap_actions(status, priority)',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_market_actions_pillar_created ON market_roadmap_actions(pillar, created_at DESC)',
+            )
+            self.safe_execute_sql(cursor, "ALTER TABLE market_roadmap_actions ADD COLUMN category TEXT DEFAULT 'commercial'")
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_market_actions_category_status ON market_roadmap_actions(category, status)',
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def init_database(self):
         """
         Initialise les tables de la base de données
@@ -267,6 +311,26 @@ class DatabaseSchema(DatabaseBase):
         self.safe_execute_sql(cursor, 'ALTER TABLE entreprise_touchpoints ADD COLUMN created_by INTEGER')
         self.execute_sql(cursor, 'CREATE INDEX IF NOT EXISTS idx_touchpoints_entreprise_id ON entreprise_touchpoints(entreprise_id)')
         self.execute_sql(cursor, 'CREATE INDEX IF NOT EXISTS idx_touchpoints_happened_at ON entreprise_touchpoints(happened_at)')
+
+        # Backlog opérationnel : actions issues de la roadmap marché/concurrence
+        self.execute_sql(cursor, '''
+            CREATE TABLE IF NOT EXISTS market_roadmap_actions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pillar TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT,
+                status TEXT DEFAULT 'todo',
+                priority TEXT DEFAULT 'medium',
+                entreprise_id INTEGER,
+                due_date TEXT,
+                owner TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE SET NULL
+            )
+        ''')
+        self.execute_sql(cursor, 'CREATE INDEX IF NOT EXISTS idx_market_actions_status_priority ON market_roadmap_actions(status, priority)')
+        self.execute_sql(cursor, 'CREATE INDEX IF NOT EXISTS idx_market_actions_pillar_created ON market_roadmap_actions(pillar, created_at DESC)')
         
         # Table des données OpenGraph (normalisée selon ogp.me)
         self.execute_sql(cursor, '''

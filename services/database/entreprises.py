@@ -1800,6 +1800,202 @@ class EntrepriseManager(DatabaseBase):
         conn.close()
         return dict(row) if row else None
 
+    def list_market_roadmap_actions(self, limit=50, status=None, category=None, priority=None):
+        """
+        Liste le backlog des actions roadmap marché/concurrence.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        limit = max(1, min(int(limit or 50), 500))
+        status_s = (status or '').strip()
+        category_s = (category or '').strip().lower()
+        priority_s = (priority or '').strip().lower()
+        params: list[object] = []
+        sql = '''
+            SELECT id, pillar, category, title, description, status, priority, entreprise_id, due_date, owner, created_at, updated_at
+            FROM market_roadmap_actions
+        '''
+        where_parts = []
+        if status_s:
+            where_parts.append('status = ?')
+            params.append(status_s)
+        if category_s:
+            where_parts.append('LOWER(COALESCE(category, \'commercial\')) = ?')
+            params.append(category_s)
+        if priority_s:
+            where_parts.append('LOWER(COALESCE(priority, \'medium\')) = ?')
+            params.append(priority_s)
+        if where_parts:
+            sql += ' WHERE ' + ' AND '.join(where_parts)
+        sql += '''
+            ORDER BY
+              CASE status
+                WHEN 'in_progress' THEN 0
+                WHEN 'todo' THEN 1
+                WHEN 'blocked' THEN 2
+                WHEN 'done' THEN 3
+                ELSE 4
+              END,
+              CASE priority
+                WHEN 'high' THEN 0
+                WHEN 'medium' THEN 1
+                ELSE 2
+              END,
+              created_at DESC,
+              id DESC
+            LIMIT ?
+        '''
+        params.append(limit)
+        self.execute_sql(cursor, sql, params)
+        rows = cursor.fetchall() or []
+        conn.close()
+        return [dict(r) for r in rows]
+
+    def create_market_roadmap_action(
+        self,
+        pillar,
+        title,
+        description=None,
+        priority='medium',
+        category='commercial',
+        entreprise_id=None,
+        due_date=None,
+        owner=None,
+    ):
+        """
+        Crée une action roadmap.
+        """
+        pillar_s = (pillar or '').strip()
+        title_s = (title or '').strip()
+        priority_s = (priority or 'medium').strip().lower()
+        category_s = (category or 'commercial').strip().lower()
+        if pillar_s not in ('battlecards', 'radar', 'alerts', 'ab'):
+            raise ValueError('pillar invalide')
+        if not title_s:
+            raise ValueError('title requis')
+        if priority_s not in ('low', 'medium', 'high'):
+            priority_s = 'medium'
+        if category_s not in ('commercial', 'marketing', 'produit', 'ops', 'data'):
+            category_s = 'commercial'
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        if self.is_postgresql():
+            self.execute_sql(
+                cursor,
+                '''
+                INSERT INTO market_roadmap_actions
+                (pillar, category, title, description, status, priority, entreprise_id, due_date, owner)
+                VALUES (?, ?, ?, ?, 'todo', ?, ?, ?, ?)
+                RETURNING id
+                ''',
+                (pillar_s, category_s, title_s, description, priority_s, entreprise_id, due_date, owner),
+            )
+            inserted = cursor.fetchone()
+            action_id = inserted['id'] if isinstance(inserted, dict) else inserted[0]
+        else:
+            self.execute_sql(
+                cursor,
+                '''
+                INSERT INTO market_roadmap_actions
+                (pillar, category, title, description, status, priority, entreprise_id, due_date, owner)
+                VALUES (?, ?, ?, ?, 'todo', ?, ?, ?, ?)
+                ''',
+                (pillar_s, category_s, title_s, description, priority_s, entreprise_id, due_date, owner),
+            )
+            action_id = cursor.lastrowid
+        conn.commit()
+
+        self.execute_sql(
+            cursor,
+            '''
+            SELECT id, pillar, category, title, description, status, priority, entreprise_id, due_date, owner, created_at, updated_at
+            FROM market_roadmap_actions
+            WHERE id = ?
+            ''',
+            (action_id,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def update_market_roadmap_action(
+        self,
+        action_id,
+        title=None,
+        description=None,
+        status=None,
+        priority=None,
+        category=None,
+        owner=None,
+        due_date=None,
+    ):
+        """
+        Mise à jour partielle d'une action roadmap.
+        """
+        fields: list[str] = []
+        params: list[object] = []
+
+        if title is not None:
+            title_s = (title or '').strip()
+            if not title_s:
+                raise ValueError('title invalide')
+            fields.append('title = ?')
+            params.append(title_s)
+        if description is not None:
+            fields.append('description = ?')
+            params.append(description)
+        if status is not None:
+            status_s = (status or '').strip().lower()
+            if status_s not in ('todo', 'in_progress', 'done', 'blocked', 'cancelled'):
+                raise ValueError('status invalide')
+            fields.append('status = ?')
+            params.append(status_s)
+        if priority is not None:
+            priority_s = (priority or '').strip().lower()
+            if priority_s not in ('low', 'medium', 'high'):
+                raise ValueError('priority invalide')
+            fields.append('priority = ?')
+            params.append(priority_s)
+        if category is not None:
+            category_s = (category or '').strip().lower()
+            if category_s not in ('commercial', 'marketing', 'produit', 'ops', 'data'):
+                raise ValueError('category invalide')
+            fields.append('category = ?')
+            params.append(category_s)
+        if owner is not None:
+            fields.append('owner = ?')
+            params.append(owner)
+        if due_date is not None:
+            fields.append('due_date = ?')
+            params.append(due_date)
+
+        if not fields:
+            raise ValueError('aucun champ à mettre à jour')
+
+        fields.append('updated_at = CURRENT_TIMESTAMP')
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self.execute_sql(
+            cursor,
+            f"UPDATE market_roadmap_actions SET {', '.join(fields)} WHERE id = ?",
+            tuple(params + [action_id]),
+        )
+        conn.commit()
+        self.execute_sql(
+            cursor,
+            '''
+            SELECT id, pillar, category, title, description, status, priority, entreprise_id, due_date, owner, created_at, updated_at
+            FROM market_roadmap_actions
+            WHERE id = ?
+            ''',
+            (action_id,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
     def get_pipeline_kanban_snapshot(self, analyse_id=None, filters=None):
         """
         Agrège les effectifs par statut pour une vue Kanban pipeline.
@@ -2980,7 +3176,151 @@ class EntrepriseManager(DatabaseBase):
             stats['recent_gagnes'] = recent_gagnes
         except Exception:
             stats['recent_gagnes'] = []
-        
+
+        # Étapes de prospection (vue « funnel » type répartition Data Emploi)
+        try:
+            self.execute_sql(cursor, '''
+                SELECT etape_prospection, COUNT(*) as count
+                FROM entreprises
+                WHERE etape_prospection IS NOT NULL
+                  AND TRIM(COALESCE(etape_prospection, '')) != ''
+                GROUP BY etape_prospection
+                ORDER BY count DESC
+            ''')
+            stats['par_etape_prospection'] = {
+                row['etape_prospection']: row['count']
+                for row in cursor.fetchall()
+                if row.get('etape_prospection')
+            }
+        except Exception:
+            stats['par_etape_prospection'] = {}
+
+        # Priorités « gagnables » : forte opportunité, pas encore gagné/perdu
+        try:
+            self.execute_sql(cursor, '''
+                SELECT id, nom, secteur, opportunite, statut, website
+                FROM entreprises
+                WHERE opportunite IN ('Très élevée', 'Élevée')
+                  AND COALESCE(statut, '') NOT IN ('Perdu', 'Gagné')
+                ORDER BY
+                    CASE opportunite WHEN 'Très élevée' THEN 0 ELSE 1 END,
+                    date_analyse DESC
+                LIMIT 20
+            ''')
+            priority_rows = cursor.fetchall()
+        except Exception:
+            priority_rows = []
+
+        try:
+            stats['priority_prospects'] = []
+            for row in priority_rows or []:
+                d = dict(row)
+                stats['priority_prospects'].append({
+                    'id': d.get('id'),
+                    'nom': d.get('nom'),
+                    'secteur': d.get('secteur'),
+                    'opportunite': d.get('opportunite'),
+                    'statut': d.get('statut'),
+                    'website': d.get('website'),
+                })
+        except Exception:
+            stats['priority_prospects'] = []
+
+        # Répartition pays (champ entreprises.pays)
+        try:
+            self.execute_sql(cursor, '''
+                SELECT TRIM(pays) AS pays, COUNT(*) AS count
+                FROM entreprises
+                WHERE pays IS NOT NULL AND TRIM(pays) != ''
+                GROUP BY TRIM(pays)
+                ORDER BY count DESC
+                LIMIT 40
+            ''')
+            stats['par_pays'] = {
+                row['pays']: row['count']
+                for row in cursor.fetchall()
+                if row.get('pays')
+            }
+        except Exception:
+            stats['par_pays'] = {}
+
+        # Synthèse géolocalisation (GPS entreprise + approximation France métropole)
+        try:
+            self.execute_sql(cursor, '''
+                SELECT
+                    SUM(CASE WHEN latitude IS NOT NULL AND longitude IS NOT NULL THEN 1 ELSE 0 END) AS avec_coords,
+                    SUM(CASE WHEN latitude IS NULL OR longitude IS NULL THEN 1 ELSE 0 END) AS sans_coords,
+                    SUM(CASE
+                        WHEN latitude IS NOT NULL AND longitude IS NOT NULL
+                         AND latitude BETWEEN 41.0 AND 51.5
+                         AND longitude BETWEEN -5.5 AND 10.0
+                        THEN 1 ELSE 0 END) AS fr_metropole_gps
+                FROM entreprises
+            ''')
+            gr = cursor.fetchone()
+            gd = dict(gr) if gr else {}
+            stats['geo_resume'] = {
+                'avec_coords': int(gd.get('avec_coords') or 0),
+                'sans_coords': int(gd.get('sans_coords') or 0),
+                'france_metropole_approx': int(gd.get('fr_metropole_gps') or 0),
+            }
+        except Exception:
+            stats['geo_resume'] = {
+                'avec_coords': 0,
+                'sans_coords': 0,
+                'france_metropole_approx': 0,
+            }
+
+        # Évolution trimestrielle (entrées en base via date_analyse + gagnés sur la période)
+        stats['evolution_trimestrielle'] = []
+        try:
+            if self.is_postgresql():
+                self.execute_sql(cursor, '''
+                    SELECT
+                        (EXTRACT(YEAR FROM date_analyse::timestamp)::int || '-T'
+                         || EXTRACT(QUARTER FROM date_analyse::timestamp)::int) AS periode,
+                        COUNT(*)::bigint AS nouvelles,
+                        SUM(CASE WHEN statut = 'Gagné' THEN 1 ELSE 0 END)::bigint AS gagnes
+                    FROM entreprises
+                    WHERE date_analyse IS NOT NULL
+                    GROUP BY
+                        EXTRACT(YEAR FROM date_analyse::timestamp),
+                        EXTRACT(QUARTER FROM date_analyse::timestamp)
+                    ORDER BY
+                        EXTRACT(YEAR FROM date_analyse::timestamp) DESC,
+                        EXTRACT(QUARTER FROM date_analyse::timestamp) DESC
+                    LIMIT 16
+                ''')
+            else:
+                self.execute_sql(cursor, '''
+                    SELECT
+                        strftime('%Y', date(date_analyse)) || '-T' || CAST(
+                            (CAST(strftime('%m', date(date_analyse)) AS INTEGER) + 2) / 3 AS INTEGER
+                        ) AS periode,
+                        COUNT(*) AS nouvelles,
+                        SUM(CASE WHEN statut = 'Gagné' THEN 1 ELSE 0 END) AS gagnes
+                    FROM entreprises
+                    WHERE date_analyse IS NOT NULL
+                    GROUP BY
+                        strftime('%Y', date(date_analyse)),
+                        (CAST(strftime('%m', date(date_analyse)) AS INTEGER) + 2) / 3
+                    ORDER BY
+                        strftime('%Y', date(date_analyse)) DESC,
+                        (CAST(strftime('%m', date(date_analyse)) AS INTEGER) + 2) / 3 DESC
+                    LIMIT 16
+                ''')
+            evo = []
+            for row in cursor.fetchall() or []:
+                d = dict(row)
+                evo.append({
+                    'periode': d.get('periode'),
+                    'nouvelles': int(d.get('nouvelles') or 0),
+                    'gagnes': int(d.get('gagnes') or 0),
+                })
+            stats['evolution_trimestrielle'] = evo
+        except Exception:
+            stats['evolution_trimestrielle'] = []
+
         conn.close()
         return stats
 
