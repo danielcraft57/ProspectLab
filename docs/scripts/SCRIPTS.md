@@ -176,6 +176,16 @@ python scripts/clear_db.py --clear --tables entreprises analyses
 
 **Note :** Le script PowerShell active automatiquement l'environnement conda `prospectlab` et exécute le script Python directement.
 
+#### `clear_external_graph.py` - Données du graphe « liens externes »
+
+Vide uniquement les tables du **graphe externe** (`external_domains`, `entreprise_external_links`, `external_link_pages` et tables filles associées). N’affecte pas les fiches entreprises ni les scrapers.
+
+**Emplacement :** `scripts/clear_external_graph.py`
+
+```bash
+python scripts/clear_external_graph.py
+```
+
 #### `clear_redis.py` - Nettoyage de Redis
 
 Script Python pour vider toutes les données Celery dans Redis (broker et backend).

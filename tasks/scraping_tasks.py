@@ -8,14 +8,14 @@ Ces tâches permettent d'exécuter le scraping de manière asynchrone,
 import time
 
 from celery_app import celery
-from services.unified_scraper import UnifiedScraper
+from services.unified_scraper import UnifiedScraper, merge_scraper_metadata_for_storage
 from services.database import Database
 from services.logging_config import setup_logger
 from services.name_validator import is_valid_human_name, validate_name_pair
 import logging
 import os
 import json
-from typing import Dict
+from typing import Callable, Dict, Optional
 
 # Configurer le logger pour cette tâche (niveau INFO pour limiter le bruit)
 logger = setup_logger(__name__, 'scraping_tasks.log', level=logging.INFO)
@@ -253,6 +253,234 @@ def _persist_personnes_from_email_analyses(db, entreprise_id: int, email_analyse
     return people_saved
 
 
+@celery.task(
+    name='tasks.scraping_tasks.enrich_external_links_mini_scrape_task',
+    queue='scraping',
+)
+def enrich_external_links_mini_scrape_task(entreprise_id: int, scraper_id: int):
+    """
+    Mini-scrape asynchrone (Celery, file « scraping ») des domaines externes après sauvegarde du scraper.
+    Met à jour ``metadata.external_links`` puis ``web_external_links``.
+    """
+    from services.external_mini_scraper import enrich_external_links_in_place
+
+    logger.info(
+        '[enrich_external_links_mini_scrape] démarrage entreprise_id=%s scraper_id=%s',
+        entreprise_id,
+        scraper_id,
+    )
+
+    if not entreprise_id or not scraper_id:
+        logger.warning('[enrich_external_links_mini_scrape] paramètres manquants')
+        return {'ok': False, 'error': 'paramètres manquants'}
+
+    db = Database()
+    row = db.get_scraper_by_id(scraper_id)
+    if not row:
+        logger.warning('[enrich_external_links_mini_scrape] scraper_id=%s introuvable', scraper_id)
+        return {'ok': False, 'error': 'scraper introuvable'}
+    if int(row.get('entreprise_id') or 0) != int(entreprise_id):
+        logger.warning(
+            '[enrich_external_links_mini_scrape] entreprise_id incohérent (attendu %s, scraper %s)',
+            entreprise_id,
+            row.get('entreprise_id'),
+        )
+        return {'ok': False, 'error': 'entreprise_id incohérent'}
+
+    md = row.get('metadata')
+    if not isinstance(md, dict):
+        logger.info('[enrich_external_links_mini_scrape] ignoré: metadata absente scraper_id=%s', scraper_id)
+        return {'ok': True, 'skipped': True, 'reason': 'metadata absente'}
+
+    ext = md.get('external_links')
+    if not ext or not isinstance(ext, list):
+        logger.info('[enrich_external_links_mini_scrape] ignoré: pas de external_links scraper_id=%s', scraper_id)
+        return {'ok': True, 'skipped': True, 'reason': 'pas de external_links'}
+
+    co = (
+        os.environ.get('EXTERNAL_MINI_SCRAPE_CREDIT_ONLY')
+        or os.environ.get('AGENCY_MINI_SCRAPE_CREDIT_ONLY')
+        or ''
+    )
+    credit_only = str(co).strip().lower() in ('1', 'true', 'yes', 'on')
+    if credit_only and not any(isinstance(x, dict) and x.get('likely_credit') for x in ext):
+        logger.info(
+            '[enrich_external_links_mini_scrape] ignoré: CREDIT_ONLY sans lien likely_credit scraper_id=%s',
+            scraper_id,
+        )
+        return {'ok': True, 'skipped': True, 'reason': 'pas de crédit à enrichir (CREDIT_ONLY)'}
+
+    n_links = len([x for x in ext if isinstance(x, dict)])
+    logger.info(
+        '[enrich_external_links_mini_scrape] mini-scrape sur %s entrée(s) external_links scraper_id=%s',
+        n_links,
+        scraper_id,
+    )
+
+    n_dom = enrich_external_links_in_place(ext)
+    md['external_links'] = ext
+
+    try:
+        db.update_scraper_metadata_json(scraper_id, md)
+    except Exception as e:
+        logger.error('[enrich_external_links_mini_scrape] metadata %s', e, exc_info=True)
+        return {'ok': False, 'error': str(e)}
+
+    client_url = row.get('url') or ''
+    try:
+        db.replace_web_external_links_for_scraper(
+            entreprise_id, scraper_id, client_url, ext
+        )
+    except Exception as e:
+        logger.warning('[enrich_external_links_mini_scrape] web_external_links %s', e)
+
+    logger.info(
+        '[enrich_external_links_mini_scrape] terminé entreprise_id=%s scraper_id=%s domaines_scannés=%s',
+        entreprise_id,
+        scraper_id,
+        n_dom,
+    )
+    return {'ok': True, 'domains_scanned': n_dom}
+
+
+def schedule_enrich_external_links_mini_scrape(entreprise_id: int, scraper_id: int) -> None:
+    """Enfile la tâche Celery (désactivable via EXTERNAL_MINI_SCRAPE_DISABLE_CELERY=1)."""
+    if _env_bool('EXTERNAL_MINI_SCRAPE_DISABLE_CELERY', False) or _env_bool(
+        'AGENCY_MINI_SCRAPE_DISABLE_CELERY', False
+    ):
+        return
+    if not entreprise_id or not scraper_id:
+        return
+    try:
+        enrich_external_links_mini_scrape_task.delay(int(entreprise_id), int(scraper_id))
+    except Exception as e:
+        logger.warning('Impossible d\'enfiler enrich_external_links_mini_scrape: %s', e)
+
+
+def run_scrape_emails_inline(
+    url: str,
+    max_depth: int = 3,
+    max_workers: int = 5,
+    max_time: int = 300,
+    max_pages: int = 50,
+    on_email_found=None,
+    on_person_found=None,
+    on_phone_found=None,
+    on_social_found=None,
+    entreprise_id=None,
+    progress_callback: Optional[Callable[[str], None]] = None,
+) -> Dict:
+    """
+    Corps du scraping (UnifiedScraper + persistance BDD), utilisable sans broker Celery
+    (fallback Socket.IO en développement).
+    """
+    logger.info(f'Démarrage du scraping pour {url}')
+
+    scraper = UnifiedScraper(
+        base_url=url,
+        max_workers=max_workers,
+        max_depth=max_depth,
+        max_time=max_time,
+        max_pages=max_pages,
+        progress_callback=progress_callback,
+        on_email_found=on_email_found,
+        on_person_found=on_person_found,
+        on_phone_found=on_phone_found,
+        on_social_found=on_social_found,
+    )
+
+    results = scraper.scrape()
+
+    if entreprise_id:
+        try:
+            db = Database()
+            social_profiles = results.get('social_links')
+            visited_urls = results.get('visited_urls', 0)
+            if isinstance(visited_urls, list):
+                visited_urls_count = len(visited_urls)
+            else:
+                visited_urls_count = visited_urls or 0
+
+            metadata_value = merge_scraper_metadata_for_storage(
+                results.get('metadata'),
+                results.get('external_links'),
+                results.get('scraped_location'),
+            )
+            metadata_total = len(metadata_value) if isinstance(metadata_value, dict) else 0
+
+            emails_found = results.get('emails') or []
+            email_analyses = _build_email_analyses_dict(
+                emails_found,
+                url,
+                log_prefix=f'[Relance scraping entreprise_id={entreprise_id}]',
+            )
+
+            phone_analyses = {}
+            phones_found = results.get('phones') or []
+            if phones_found:
+                phone_analyses = analyze_phones_dict_for_storage(phones_found, source_url=url)
+
+            scraper_id = db.save_scraper(
+                entreprise_id=entreprise_id,
+                url=url,
+                scraper_type='unified_scraper',
+                emails=results.get('emails'),
+                people=results.get('people'),
+                phones=results.get('phones'),
+                social_profiles=social_profiles,
+                technologies=results.get('technologies'),
+                metadata=metadata_value,
+                images=results.get('images'),
+                forms=results.get('forms'),
+                visited_urls=visited_urls_count,
+                total_emails=results.get('total_emails', 0),
+                total_people=results.get('total_people', 0),
+                total_phones=results.get('total_phones', 0),
+                total_social_profiles=results.get('total_social_platforms', 0),
+                total_technologies=results.get('total_technologies', 0),
+                total_metadata=metadata_total,
+                total_images=results.get('total_images', 0),
+                total_forms=results.get('total_forms', 0),
+                duration=results.get('duration', 0),
+                email_analyses=email_analyses if email_analyses else None,
+                phone_analyses=phone_analyses if phone_analyses else None,
+            )
+            try:
+                db.replace_web_external_links_for_scraper(
+                    entreprise_id=entreprise_id,
+                    scraper_id=scraper_id,
+                    client_site_url=url,
+                    external_links=results.get('external_links'),
+                )
+            except Exception as wce:
+                logger.warning('web_external_links (relance scrape): %s', wce)
+            schedule_enrich_external_links_mini_scrape(entreprise_id, scraper_id)
+            _persist_personnes_from_email_analyses(
+                db,
+                entreprise_id,
+                email_analyses,
+                f'[Relance scraping entreprise_id={entreprise_id}]',
+            )
+            try:
+                if db.patch_entreprise_location_from_scrape(entreprise_id, results.get('scraped_location')):
+                    logger.info(
+                        f'[Relance scraping entreprise_id={entreprise_id}] Fiche : adresse / lieu complétés depuis le scraping'
+                    )
+            except Exception as loc_e:
+                logger.warning('patch_entreprise_location (relance scrape): %s', loc_e)
+        except Exception as e:
+            logger.warning(f'Erreur lors de la sauvegarde du scraper pour {url}: {e}')
+
+    logger.info(f'Scraping terminé pour {url}: {len(results.get("emails", []))} emails trouvés')
+
+    return {
+        'success': True,
+        'url': url,
+        'results': results,
+        'entreprise_id': entreprise_id,
+    }
+
+
 @celery.task(bind=True)
 def scrape_emails_task(self, url, max_depth=3, max_workers=5, max_time=300, 
                        max_pages=50, on_email_found=None, on_person_found=None,
@@ -280,12 +508,9 @@ def scrape_emails_task(self, url, max_depth=3, max_workers=5, max_time=300,
         >>> result = scrape_emails_task.delay('https://example.com')
         >>> result.get()  # Attendre le résultat
     """
+    lock_value = str(getattr(self.request, "id", None) or id(self))
+    lock_acquired = False
     try:
-        logger.info(f'Démarrage du scraping pour {url}')
-
-        # Verrou global optionnel (SCRAPING_GLOBAL_LOCK_ENABLED=1) : sinon parallèle selon le worker Celery.
-        lock_value = str(getattr(self.request, "id", None) or id(self))
-        lock_acquired = False
         if _SCRAPING_GLOBAL_LOCK_ENABLED:
             if not _wait_acquire_scraping_lock(lock_value, task_self=self, wait_label='Scraping'):
                 return {
@@ -296,106 +521,29 @@ def scrape_emails_task(self, url, max_depth=3, max_workers=5, max_time=300,
                     'results': {},
                 }
             lock_acquired = True
-        
+
         def progress_callback(message):
-            """Callback pour mettre à jour la progression de la tâche"""
-            self.update_state(
-                state='PROGRESS',
-                meta={'message': message}
-            )
-        
-        scraper = UnifiedScraper(
-            base_url=url,
-            max_workers=max_workers,
+            self.update_state(state='PROGRESS', meta={'message': message})
+
+        return run_scrape_emails_inline(
+            url=url,
             max_depth=max_depth,
+            max_workers=max_workers,
             max_time=max_time,
             max_pages=max_pages,
-            progress_callback=progress_callback,
             on_email_found=on_email_found,
             on_person_found=on_person_found,
             on_phone_found=on_phone_found,
-            on_social_found=on_social_found
+            on_social_found=on_social_found,
+            entreprise_id=entreprise_id,
+            progress_callback=progress_callback,
         )
-        
-        results = scraper.scrape()
-        
-        # Sauvegarder en BDD si une entreprise est fournie
-        if entreprise_id:
-            try:
-                db = Database()
-                social_profiles = results.get('social_links')
-                visited_urls = results.get('visited_urls', 0)
-                if isinstance(visited_urls, list):
-                    visited_urls_count = len(visited_urls)
-                else:
-                    visited_urls_count = visited_urls or 0
-                
-                metadata_value = results.get('metadata', {})
-                metadata_total = len(metadata_value) if isinstance(metadata_value, dict) else 0
-
-                emails_found = results.get('emails') or []
-                email_analyses = _build_email_analyses_dict(
-                    emails_found,
-                    url,
-                    log_prefix=f'[Relance scraping entreprise_id={entreprise_id}]',
-                )
-
-                phone_analyses = {}
-                phones_found = results.get('phones') or []
-                if phones_found:
-                    phone_analyses = analyze_phones_dict_for_storage(phones_found, source_url=url)
-
-                db.save_scraper(
-                    entreprise_id=entreprise_id,
-                    url=url,
-                    scraper_type='unified_scraper',
-                    emails=results.get('emails'),
-                    people=results.get('people'),
-                    phones=results.get('phones'),
-                    social_profiles=social_profiles,
-                    technologies=results.get('technologies'),
-                    metadata=metadata_value,
-                    images=results.get('images'),
-                    forms=results.get('forms'),
-                    visited_urls=visited_urls_count,
-                    total_emails=results.get('total_emails', 0),
-                    total_people=results.get('total_people', 0),
-                    total_phones=results.get('total_phones', 0),
-                    total_social_profiles=results.get('total_social_platforms', 0),
-                    total_technologies=results.get('total_technologies', 0),
-                    total_metadata=metadata_total,
-                    total_images=results.get('total_images', 0),
-                    total_forms=results.get('total_forms', 0),
-                    duration=results.get('duration', 0),
-                    email_analyses=email_analyses if email_analyses else None,
-                    phone_analyses=phone_analyses if phone_analyses else None,
-                )
-                _persist_personnes_from_email_analyses(
-                    db,
-                    entreprise_id,
-                    email_analyses,
-                    f'[Relance scraping entreprise_id={entreprise_id}]',
-                )
-            except Exception as e:
-                logger.warning(f'Erreur lors de la sauvegarde du scraper pour {url}: {e}')
-        
-        if lock_acquired:
-            _release_scraping_lock(lock_value)
-
-        logger.info(f'Scraping terminé pour {url}: {len(results.get("emails", []))} emails trouvés')
-        
-        return {
-            'success': True,
-            'url': url,
-            'results': results,
-            'entreprise_id': entreprise_id
-        }
-        
     except Exception as e:
-        if lock_acquired:
-            _release_scraping_lock(lock_value)
         logger.error(f'Erreur lors du scraping de {url}: {e}', exc_info=True)
         raise
+    finally:
+        if lock_acquired:
+            _release_scraping_lock(lock_value)
 
 
 @celery.task(bind=True)
@@ -727,7 +875,11 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                 else:
                     visited_urls_count = visited_urls or 0
                 
-                metadata_value = results.get('metadata', {})
+                metadata_value = merge_scraper_metadata_for_storage(
+                    results.get('metadata'),
+                    results.get('external_links'),
+                    results.get('scraped_location'),
+                )
                 metadata_total = len(metadata_value) if isinstance(metadata_value, dict) else 0
                 
                 
@@ -756,6 +908,16 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                     email_analyses=email_analyses if email_analyses else None,
                     phone_analyses=phone_analyses if phone_analyses else None,
                 )
+                try:
+                    db.replace_web_external_links_for_scraper(
+                        entreprise_id=entreprise_id,
+                        scraper_id=scraper_id,
+                        client_site_url=website_str,
+                        external_links=results.get('external_links'),
+                    )
+                except Exception as wce:
+                    logger.warning('web_external_links (analyse scrape): %s', wce)
+                schedule_enrich_external_links_mini_scrape(entreprise_id, scraper_id)
                 
                 _persist_personnes_from_email_analyses(
                     db,
@@ -763,6 +925,13 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                     email_analyses,
                     f'[Scraping Analyse {analysis_id}] {entreprise_name}',
                 )
+                try:
+                    if db.patch_entreprise_location_from_scrape(entreprise_id, results.get('scraped_location')):
+                        logger.info(
+                            f'[Scraping Analyse {analysis_id}] Fiche entreprise {entreprise_id} : adresse / lieu complétés depuis le scraping'
+                        )
+                except Exception as loc_e:
+                    logger.warning('patch_entreprise_location (analyse scrape save): %s', loc_e)
                 
                 # Enregistrer les personnes trouvées dans les textes des pages
                 scraper_people = results.get('people', [])

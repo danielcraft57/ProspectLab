@@ -19,6 +19,7 @@ Application Flask professionnelle pour la prospection et l'analyse approfondie d
 - **Nettoyage automatique** : Suppression automatique des fichiers uploads/exports anciens (via Celery Beat)
 - **Logs centralisés** : Système de logs détaillés avec rotation automatique pour chaque type de tâche
 - **Accès restreint au réseau local (optionnel)** : possibilité de limiter complètement l'interface à ton LAN/VPN tout en gardant les routes de tracking/API publiques accessibles
+- **Graph entreprises** : visualisation des liens externes (fiches ↔ domaines tiers), mini-scrape des sites liés, API dédiée ; documentation dans `docs/guides/GRAPH_ENTREPRISES.md`
 
 ## Installation
 

@@ -25,6 +25,7 @@ Bienvenue dans la documentation de ProspectLab. Cette documentation est organis�
 ## Guides d'utilisation
 
 - [Interface utilisateur](guides/INTERFACE_UTILISATEUR.md) - Guide complet de l'interface utilisateur
+- [**Graph entreprises (liens externes)**](guides/GRAPH_ENTREPRISES.md) - Vue graphe fiches ↔ domaines tiers, API, mini-scrape, BDD
 - [Authentification](guides/AUTHENTIFICATION.md) - Guide du système d'authentification et de sécurité
 - [Campagnes Email](guides/CAMPAGNES_EMAIL.md) - Guide complet du système de campagnes email avec tracking
 - [Profil de pondération (priorité commerciale)](guides/PROFIL_PONDERATION_PRIORITE_COMMERCIALE.md) - À quoi sert le profil de pondération et la vue Top commercial
@@ -96,6 +97,9 @@ Bienvenue dans la documentation de ProspectLab. Cette documentation est organis�
 - **email_tracking_events** : Evenements de tracking (ouvertures, clics)
 - **users** : Utilisateurs avec authentification (username, email, password_hash, is_admin)
 - **api_tokens** : Tokens API pour l'acces a l'API publique (token, name, user_id, is_active)
+- **external_domains** : Metadonnees par domaine externe (titre, vignette, groupe graphe, mini-scrape)
+- **entreprise_external_links** : Liens sortants par entreprise / run de scraper vers un domaine externe
+- **external_link_pages** : Pages mini-scrapees liees a un lien ; details en tables filles (OG, images, lieu, telephones)
 
 Toutes les relations utilisent `ON DELETE CASCADE` pour maintenir l'integrite referentielle.
 

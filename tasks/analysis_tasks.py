@@ -18,6 +18,8 @@ from pathlib import Path
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tasks.phone_tasks import analyze_phones_dict_for_storage
+from tasks.scraping_tasks import schedule_enrich_external_links_mini_scrape
+from services.unified_scraper import merge_scraper_metadata_for_storage
 from config import EXPORT_FOLDER, UPLOAD_FOLDER
 
 # Configurer le logger pour cette tâche
@@ -309,7 +311,11 @@ def analyze_entreprise_batch_task(
                                 else:
                                     visited_urls_count = visited_urls or 0
 
-                                metadata_value = scraper_data.get('metadata', {})
+                                metadata_value = merge_scraper_metadata_for_storage(
+                                    scraper_data.get('metadata'),
+                                    scraper_data.get('external_links'),
+                                    scraper_data.get('scraped_location'),
+                                )
                                 metadata_total = len(metadata_value) if isinstance(metadata_value, dict) else 0
 
                                 phone_analyses = {}
@@ -323,7 +329,7 @@ def analyze_entreprise_batch_task(
                                     except Exception as pe:
                                         logger.warning('Analyse téléphones pour scraper BDD: %s', pe)
 
-                                database.save_scraper(
+                                sid = database.save_scraper(
                                     entreprise_id=entreprise_id,
                                     url=row_dict_merged.get('website') or scraper_data.get('url'),
                                     scraper_type='unified_scraper',
@@ -345,6 +351,23 @@ def analyze_entreprise_batch_task(
                                     duration=scraper_data.get('duration', 0),
                                     phone_analyses=phone_analyses if phone_analyses else None,
                                 )
+                                try:
+                                    cw_url = row_dict_merged.get('website') or scraper_data.get('url')
+                                    database.replace_web_external_links_for_scraper(
+                                        entreprise_id=entreprise_id,
+                                        scraper_id=sid,
+                                        client_site_url=cw_url,
+                                        external_links=scraper_data.get('external_links'),
+                                    )
+                                except Exception as cle:
+                                    logger.warning('web_external_links (batch): %s', cle)
+                                schedule_enrich_external_links_mini_scrape(entreprise_id, sid)
+                                try:
+                                    database.patch_entreprise_location_from_scrape(
+                                        entreprise_id, scraper_data.get('scraped_location')
+                                    )
+                                except Exception as le:
+                                    logger.warning('patch_entreprise_location (batch): %s', le)
                             except Exception as se:
                                 logger.warning('Erreur sauvegarde scraper: %s', se)
                 except Exception as se:
@@ -901,7 +924,11 @@ def analyze_entreprise_task(self, filepath, output_path, max_workers=4, delay=0.
                                         else:
                                             visited_urls_count = visited_urls or 0
                                         
-                                        metadata_value = scraper_data.get('metadata', {})
+                                        metadata_value = merge_scraper_metadata_for_storage(
+                                            scraper_data.get('metadata'),
+                                            scraper_data.get('external_links'),
+                                            scraper_data.get('scraped_location'),
+                                        )
                                         metadata_total = len(metadata_value) if isinstance(metadata_value, dict) else 0
                                         
                                         phone_analyses = {}
@@ -917,7 +944,7 @@ def analyze_entreprise_task(self, filepath, output_path, max_workers=4, delay=0.
                                                     'Analyse téléphones pour scraper BDD: %s', pe
                                                 )
                                         
-                                        database.save_scraper(
+                                        sid = database.save_scraper(
                                             entreprise_id=entreprise_id,
                                             url=row_dict.get('website') or scraper_data.get('url'),
                                             scraper_type='unified_scraper',
@@ -939,6 +966,23 @@ def analyze_entreprise_task(self, filepath, output_path, max_workers=4, delay=0.
                                             duration=scraper_data.get('duration', 0),
                                             phone_analyses=phone_analyses if phone_analyses else None,
                                         )
+                                        try:
+                                            cw_url = row_dict.get('website') or scraper_data.get('url')
+                                            database.replace_web_external_links_for_scraper(
+                                                entreprise_id=entreprise_id,
+                                                scraper_id=sid,
+                                                client_site_url=cw_url,
+                                                external_links=scraper_data.get('external_links'),
+                                            )
+                                        except Exception as cle:
+                                            logger.warning('web_external_links (analyse): %s', cle)
+                                        schedule_enrich_external_links_mini_scrape(entreprise_id, sid)
+                                        try:
+                                            database.patch_entreprise_location_from_scrape(
+                                                entreprise_id, scraper_data.get('scraped_location')
+                                            )
+                                        except Exception as le:
+                                            logger.warning('patch_entreprise_location (analyse): %s', le)
                                     except Exception as e:
                                         logger.warning(f'Erreur lors de la sauvegarde du scraper pour {row.get("name", "inconnu")}: {e}')
                     except Exception as e:

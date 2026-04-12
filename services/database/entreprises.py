@@ -1304,6 +1304,93 @@ class EntrepriseManager(DatabaseBase):
         
         conn.close()
         return entreprise
+
+    def patch_entreprise_location_from_scrape(self, entreprise_id: int, loc: Optional[dict]) -> bool:
+        """
+        Complète les champs d'adresse / téléphone / geo sur la fiche entreprise
+        uniquement lorsqu'ils sont encore vides (ne remplace pas une saisie manuelle).
+        """
+        if not entreprise_id or not isinstance(loc, dict):
+            return False
+        if not any(loc.get(k) for k in ('street_address', 'postal_code', 'locality', 'country', 'telephone', 'latitude')):
+            return False
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            self.execute_sql(
+                cursor,
+                '''
+                SELECT address_1, ville, code_postal, pays, telephone, latitude, longitude
+                FROM entreprises WHERE id = ?
+                ''',
+                (entreprise_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return False
+            ent = self.clean_row_dict(dict(row))
+
+            updates: list[str] = []
+            params: list = []
+
+            def _empty(v) -> bool:
+                return v is None or (isinstance(v, str) and not v.strip())
+
+            if loc.get('street_address') and _empty(ent.get('address_1')):
+                updates.append('address_1 = ?')
+                params.append(str(loc['street_address'])[:500])
+
+            if loc.get('postal_code') and _empty(ent.get('code_postal')):
+                updates.append('code_postal = ?')
+                params.append(str(loc['postal_code'])[:16])
+
+            if loc.get('locality') and _empty(ent.get('ville')):
+                updates.append('ville = ?')
+                params.append(str(loc['locality'])[:120])
+
+            if loc.get('country') and _empty(ent.get('pays')):
+                updates.append('pays = ?')
+                params.append(str(loc['country'])[:120])
+
+            if loc.get('telephone') and _empty(ent.get('telephone')):
+                updates.append('telephone = ?')
+                params.append(str(loc['telephone'])[:80])
+
+            lat, lng = loc.get('latitude'), loc.get('longitude')
+            if lat is not None and lng is not None and ent.get('latitude') is None and ent.get('longitude') is None:
+                try:
+                    la, lo = float(lat), float(lng)
+                    if -90 <= la <= 90 and -180 <= lo <= 180:
+                        updates.append('latitude = ?')
+                        updates.append('longitude = ?')
+                        params.extend([la, lo])
+                except (TypeError, ValueError):
+                    pass
+
+            if not updates:
+                return False
+
+            params.append(entreprise_id)
+            self.execute_sql(
+                cursor,
+                f'UPDATE entreprises SET {", ".join(updates)} WHERE id = ?',
+                tuple(params),
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.warning('patch_entreprise_location_from_scrape %s: %s', entreprise_id, e)
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            return False
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
     
     def update_opportunity_score(self, entreprise_id):
         """

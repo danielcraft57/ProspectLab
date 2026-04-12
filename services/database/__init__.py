@@ -30,6 +30,8 @@ from .technical import TechnicalManager
 from .pentest import PentestManager
 from .seo import SEOManager
 from .email_templates import EmailTemplateManager
+from .external_links import ExternalLinksManager
+from .postgresql_tune import apply_postgresql_tuning
 import os
 import threading
 import logging
@@ -48,6 +50,7 @@ class Database(
     TechnicalManager,
     PentestManager,
     SEOManager,
+    ExternalLinksManager,
     DatabaseBase  # DatabaseBase en dernier pour résoudre le MRO
 ):
     """
@@ -109,9 +112,7 @@ class Database(
         )
         if force_each_instance:
             self.init_database()
-            return
-
-        if not Database._schema_initialized:
+        elif not Database._schema_initialized:
             with Database._schema_init_lock:
                 if not Database._schema_initialized:
                     self.init_database()
@@ -119,6 +120,25 @@ class Database(
                     logging.getLogger(__name__).info(
                         'Schéma DB initialisé (once par process).'
                     )
+
+        try:
+            self.ensure_web_external_links_table()
+        except Exception:
+            logging.getLogger(__name__).warning(
+                'Schéma graphe externe (external_domains / entreprise_external_links) non appliqué',
+                exc_info=True,
+            )
+
+        try:
+            apply_postgresql_tuning(self)
+        except Exception:
+            logging.getLogger(__name__).warning(
+                'Optimisations PostgreSQL (index / extensions) non appliquées',
+                exc_info=True,
+            )
+
+        if force_each_instance:
+            return
 
 
 # Exposer Database pour compatibilité avec l'import existant

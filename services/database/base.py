@@ -295,8 +295,12 @@ class DatabaseBase:
         error_str = str(error).lower()
         
         if self.db_type == 'sqlite':
-            # SQLite: "duplicate column name" ou "already exists"
-            return 'duplicate column' in error_str or 'already exists' in error_str
+            # SQLite: migrations idempotentes (ADD duplicate, DROP colonne absente, etc.)
+            return (
+                'duplicate column' in error_str
+                or 'already exists' in error_str
+                or 'no such column' in error_str
+            )
         else:
             # PostgreSQL: "column ... already exists" ou "relation ... already exists" ou "does not exist" (table pas encore créée)
             return 'already exists' in error_str or 'duplicate' in error_str or 'does not exist' in error_str

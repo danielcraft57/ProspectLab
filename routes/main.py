@@ -144,6 +144,22 @@ def analyse_site_complet():
     return render_page('analyse_site_complet.html')
 
 
+@main_bp.route('/graph-entreprises')
+@login_required
+def graph_entreprises():
+    """
+    Graphe des liens entre fiches entreprises et domaines externes (crédits, liens, portfolio).
+    """
+    return render_page('graph_entreprises.html')
+
+
+@main_bp.route('/agences-reseau')
+@login_required
+def agences_reseau_redirect():
+    """Ancienne URL « Réseau agences » : redirection vers Graph entreprises."""
+    return redirect(url_for('main.graph_entreprises'), code=301)
+
+
 @main_bp.route('/carte-entreprises')
 @login_required
 def carte_entreprises():

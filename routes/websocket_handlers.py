@@ -10,7 +10,11 @@ from flask_socketio import emit
 from utils.helpers import safe_emit
 from celery_app import celery
 from tasks.analysis_tasks import analyze_entreprise_orchestrator_task
-from tasks.scraping_tasks import scrape_emails_task, scrape_analysis_orchestrator_task
+from tasks.scraping_tasks import (
+    scrape_emails_task,
+    scrape_analysis_orchestrator_task,
+    run_scrape_emails_inline,
+)
 from tasks.technical_analysis_tasks import technical_analysis_task
 from tasks.pentest_tasks import pentest_analysis_task
 from tasks.osint_tasks import osint_analysis_task
@@ -31,10 +35,51 @@ logger = logging.getLogger(__name__)
 _WS_MONITOR_POLL_SEC = max(0.3, float(os.environ.get('CELERY_WS_MONITOR_POLL_SEC', '1.0')))
 
 _CELERY_BROKER_UNREACHABLE_MSG = (
-    'Redis / broker Celery injoignable. Vérifie que Redis tourne, puis le worker avec la file « heavy » : '
-    'celery -A celery_app worker -Q celery,heavy --loglevel=info '
-    '(Windows : .\\scripts\\windows\\start-celery.ps1).'
+    'Redis / broker Celery injoignable (souvent : CELERY_BROKER_URL pointe vers un hôte LAN, ex. node13.lan, '
+    'injognable depuis ta machine). En local : mets dans .env '
+    'CELERY_BROKER_URL=redis://127.0.0.1:6379/0 et CELERY_RESULT_BACKEND identique, lance Redis puis '
+    'celery -A celery_app worker -Q celery,scraping,scraping_interactive --loglevel=info. '
+    'Si APP_ENV=development, un repli exécute le scraping sans Redis (plus lent, même process).'
 )
+
+
+def _scraping_dev_fallback_enabled() -> bool:
+    """Scraping in-process quand le broker est down (uniquement en dev, désactivable)."""
+    if str(os.environ.get('SCRAPING_DISABLE_LOCAL_FALLBACK', '')).strip().lower() in ('1', 'true', 'yes', 'on'):
+        return False
+    return str(os.environ.get('APP_ENV', '')).strip().lower() == 'development'
+
+
+def _flatten_scrape_socket_payload(results, entreprise_id=None):
+    """
+    Aplatit le dict « results » du scraper pour l’UI (totaux + listes attendues par displayAllScrapingResults).
+    """
+    if not isinstance(results, dict):
+        results = {}
+    r = results
+    emails_raw = r.get('emails') or []
+    emails_list = []
+    for e in emails_raw:
+        if isinstance(e, dict) and e.get('email'):
+            emails_list.append(e['email'])
+        elif isinstance(e, str):
+            emails_list.append(e)
+    return {
+        'success': True,
+        'entreprise_id': entreprise_id,
+        'total_emails': r.get('total_emails', len(emails_raw)),
+        'total_people': r.get('total_people', 0),
+        'total_phones': r.get('total_phones', 0),
+        'emails': emails_list,
+        'people': r.get('people') or [],
+        'phones': r.get('phones') or [],
+        'social_links': r.get('social_links') or {},
+        'technologies': r.get('technologies') or {},
+        'metadata': r.get('metadata') or {},
+        'images': r.get('images') or [],
+        'scraped_location': r.get('scraped_location'),
+        'results': r,
+    }
 
 # Initialiser les services
 database = Database()
@@ -1270,6 +1315,64 @@ def register_websocket_handlers(socketio, app):
                 return
             
             if not broker_ping_ok():
+                if _scraping_dev_fallback_enabled():
+                    logger.info(
+                        '[Socket.IO] start_scraping: broker injoignable, repli in-process (APP_ENV=development) '
+                        'sid=%s entreprise_id=%s',
+                        session_id,
+                        entreprise_id,
+                    )
+                    with tasks_lock:
+                        active_tasks[session_id] = {'task_id': 'local-scraping', 'type': 'scraping'}
+                    safe_emit(
+                        socketio,
+                        'scraping_started',
+                        {
+                            'message': 'Scraping local (sans broker Redis)…',
+                            'task_id': 'local-scraping',
+                            'entreprise_id': entreprise_id,
+                        },
+                        room=session_id,
+                    )
+
+                    def monitor_local_scrape():
+                        try:
+                            out = run_scrape_emails_inline(
+                                url=url,
+                                max_depth=max_depth,
+                                max_workers=max_workers,
+                                max_time=max_time,
+                                max_pages=max_pages,
+                                entreprise_id=entreprise_id,
+                                progress_callback=lambda m: safe_emit(
+                                    socketio,
+                                    'scraping_progress',
+                                    {'message': m, 'entreprise_id': entreprise_id},
+                                    room=session_id,
+                                ),
+                            )
+                            res_block = (out or {}).get('results') or {}
+                            payload = _flatten_scrape_socket_payload(res_block, entreprise_id)
+                            safe_emit(socketio, 'scraping_complete', payload, room=session_id)
+                        except Exception as ex:
+                            logger.exception(
+                                '[Socket.IO] scraping local in-process échoué sid=%s',
+                                session_id,
+                            )
+                            safe_emit(
+                                socketio,
+                                'scraping_error',
+                                {'error': str(ex), 'entreprise_id': entreprise_id},
+                                room=session_id,
+                            )
+                        finally:
+                            with tasks_lock:
+                                if session_id in active_tasks:
+                                    del active_tasks[session_id]
+
+                    _start_monitor_background(socketio, monitor_local_scrape)
+                    return
+
                 logger.warning(
                     '[Socket.IO] start_scraping: broker Redis injoignable sid=%s entreprise_id=%s',
                     session_id,
@@ -1334,11 +1437,9 @@ def register_websocket_handlers(socketio, app):
                                 }, room=session_id)
                             elif task_result.state == 'SUCCESS':
                                 result = _celery_success_result_as_dict(task_result.result)
-                                safe_emit(socketio, 'scraping_complete', {
-                                    'success': True,
-                                    'results': result.get('results', {}) if result else {},
-                                    'entreprise_id': entreprise_id
-                                }, room=session_id)
+                                res_block = (result or {}).get('results') or {}
+                                payload = _flatten_scrape_socket_payload(res_block, entreprise_id)
+                                safe_emit(socketio, 'scraping_complete', payload, room=session_id)
                                 with tasks_lock:
                                     if session_id in active_tasks:
                                         del active_tasks[session_id]

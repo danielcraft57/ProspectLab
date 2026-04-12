@@ -3,6 +3,7 @@ Service de scraping qui combine toutes les fonctionnalités
 Extrait emails, personnes, téléphones, réseaux sociaux, technologies et métadonnées en une seule passe
 """
 
+import os
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
@@ -12,13 +13,55 @@ import queue
 import time
 import json
 import logging
-from typing import Dict, List, Optional, Callable, Set
+from typing import Dict, List, Optional, Callable, Set, Any
 from datetime import datetime
 from functools import lru_cache
 from services.logging_config import setup_logger
 
 # Configurer le logger pour écrire dans scraping_tasks.log
 logger = setup_logger(__name__, 'scraping_tasks.log', level=logging.INFO)
+
+# Hébergements / plateformes « site builder » souvent crédités en pied de page
+_CREDIT_PLATFORM_HOST_SUFFIXES = frozenset({
+    'wix.com', 'wixsite.com', 'squarespace.com', 'shopify.com', 'myshopify.com',
+    'webflow.com', 'framer.com', 'wordpress.com', 'jimdo.com', 'weebly.com',
+    'strikingly.com', 'godaddy.com', 'site123.com', 'elementor.com', 'hubspot.com',
+})
+
+# Liens externes à ignorer (tracking, CDN globaux, réseaux déjà couverts ailleurs)
+_EXTERNAL_HREF_BLOCKLIST_SUFFIXES = frozenset({
+    'google.com', 'google.fr', 'gstatic.com', 'googleusercontent.com', 'googleapis.com',
+    'googletagmanager.com', 'google-analytics.com', 'doubleclick.net', 'googleadservices.com',
+    'facebook.com', 'fb.com', 'fb.me', 'instagram.com', 'linkedin.com', 'twitter.com', 'x.com',
+    'youtube.com', 'youtu.be', 'tiktok.com', 'pinterest.com', 'pin.it', 'reddit.com',
+    'schema.org', 'w3.org', 'creativecommons.org', 'mozilla.org',
+    'goo.gl', 'bit.ly', 't.co', 'ow.ly', 'tinyurl.com',
+})
+
+# Texte autour du lien (footer, crédits) — FR/EN
+_CREDIT_TEXT_PATTERN = re.compile(
+    r'realis[ée]\s+par|conception\s+par|cr[ée]ation\s+du\s+site|site\s+(?:internet\s+)?par|'
+    r'agence\s+web|propuls[ée]\s+par|h[ée]berg[ée]\s+par|'
+    r'partenaire\s+web|cr[ée]ateur\s+du\s+site|cr[ée]ation\s+graphique|'
+    r'mandataire|prestataire\s+web|int[ée]grateur|maintenance\s+du\s+site|'
+    r'designed\s+by|web\s+design\s+by|built\s+by|powered\s+by|website\s+by|site\s+by|'
+    r'credit(?:s)?\s*[:\-]|made\s+by',
+    re.I,
+)
+
+
+def merge_scraper_metadata_for_storage(
+    metadata: Optional[Dict[str, Any]],
+    external_links: Optional[List[Dict[str, Any]]],
+    scraped_location: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Fusionne les liens externes et l'indice de localisation dans le JSON `metadata` en base."""
+    md = dict(metadata) if isinstance(metadata, dict) else {}
+    if external_links:
+        md['external_links'] = external_links
+    if scraped_location:
+        md['scraped_location'] = scraped_location
+    return md
 
 
 class UnifiedScraper:
@@ -76,6 +119,8 @@ class UnifiedScraper:
         self.images: List[Dict] = []  # Liste des images trouvées avec {url, alt, page_url, width, height}
         self.forms: List[Dict] = []  # Points d'entrée (formulaires) trouvés sur les pages
         self._seen_form_keys: Set[str] = set()  # Clés (action_url|method) pour dédupliquer les formulaires entre pages
+        self.external_links_by_url: Dict[str, Dict] = {}  # url normalisée -> détail (liens hors site)
+        self._location_hits: List[Dict[str, Any]] = []  # indices d'adresse / geo (toutes pages)
         
         # État du scraping
         self.visited_urls: Set[str] = set()
@@ -589,6 +634,203 @@ class UnifiedScraper:
                 if domain in url_lower:
                     return platform
         return None
+
+    def _host_key(self, netloc: str) -> str:
+        h = (netloc or '').lower().split(':')[0]
+        if h.startswith('www.'):
+            h = h[4:]
+        return h
+
+    def _is_blocked_external_host(self, host_key: str) -> bool:
+        if not host_key:
+            return True
+        for suf in _EXTERNAL_HREF_BLOCKLIST_SUFFIXES:
+            if host_key == suf or host_key.endswith('.' + suf):
+                return True
+        return False
+
+    def _is_credit_platform_host(self, host_key: str) -> bool:
+        for suf in _CREDIT_PLATFORM_HOST_SUFFIXES:
+            if host_key == suf or host_key.endswith('.' + suf):
+                return True
+        return False
+
+    def _credit_link_heuristic(self, combined_lower: str) -> bool:
+        if _CREDIT_TEXT_PATTERN.search(combined_lower):
+            return True
+        return False
+
+    def _max_external_links_cap(self) -> int:
+        try:
+            return max(80, int(os.environ.get('SCRAPER_MAX_EXTERNAL_LINKS', '450')))
+        except ValueError:
+            return 450
+
+    def _register_external_link(
+        self,
+        full_url: str,
+        page_url: str,
+        anchor_text: str = '',
+        link_source: str = 'anchor',
+        context_hints: Optional[List[str]] = None,
+    ) -> None:
+        """Enregistre ou fusionne un lien hors-domaine (dédoublonnage par URL normalisée)."""
+        if not full_url or not full_url.startswith(('http://', 'https://')):
+            return
+        try:
+            parsed = urlparse(full_url)
+        except Exception:
+            return
+        if parsed.scheme not in ('http', 'https'):
+            return
+        base_key = self._host_key(self.domain)
+        host_key = self._host_key(parsed.netloc)
+        if not host_key or host_key == base_key:
+            return
+        if self.detect_social_platform(full_url):
+            return
+        if self._is_blocked_external_host(host_key):
+            return
+
+        ctx = list(context_hints or [])
+        atext = (anchor_text or '')[:500]
+        combined_lower = f'{atext} {" ".join(ctx)} {link_source}'.lower()
+        likely_credit = (
+            self._credit_link_heuristic(combined_lower)
+            or self._is_credit_platform_host(host_key)
+        )
+
+        entry = {
+            'url': full_url,
+            'domain': host_key,
+            'text': atext,
+            'page_url': page_url,
+            'likely_credit': likely_credit,
+            'link_source': link_source,
+            'link_sources': [link_source],
+        }
+        if likely_credit and ctx:
+            entry['context_snippet'] = ctx[0][:220]
+
+        max_unique = self._max_external_links_cap()
+        with self.lock:
+            if len(self.external_links_by_url) >= max_unique and full_url not in self.external_links_by_url:
+                return
+            if full_url not in self.external_links_by_url:
+                self.external_links_by_url[full_url] = entry
+                return
+            ex = self.external_links_by_url[full_url]
+            srcs = ex.get('link_sources') or []
+            if link_source and link_source not in srcs:
+                srcs.append(link_source)
+                ex['link_sources'] = srcs
+            if likely_credit and not ex.get('likely_credit'):
+                ex['likely_credit'] = True
+                if ctx:
+                    ex['context_snippet'] = ctx[0][:220]
+            if atext and len(atext) > len(ex.get('text') or ''):
+                ex['text'] = atext
+
+    def _collect_external_links_from_page(self, soup: BeautifulSoup, page_url: str) -> None:
+        """Collecte les liens http(s) vers d'autres domaines (agence, hébergeur, etc.)."""
+        for link in soup.find_all('a', href=True):
+            href = (link.get('href') or '').strip()
+            if not href or href.startswith(('javascript:', 'mailto:', 'tel:', '#', 'data:')):
+                continue
+            full_url = self.normalize_url(href, page_url)
+            if not full_url:
+                continue
+            anchor_text = link.get_text(separator=' ', strip=True)[:500]
+            context_parts: List[str] = []
+            try:
+                parent = link.parent
+                if parent:
+                    context_parts.append(parent.get_text(separator=' ', strip=True)[:400])
+                foot = link.find_parent('footer')
+                if foot:
+                    context_parts.append(foot.get_text(separator=' ', strip=True)[:500])
+            except Exception:
+                pass
+            self._register_external_link(
+                full_url, page_url, anchor_text, 'anchor', context_parts,
+            )
+
+    def _collect_external_links_extras(self, soup: BeautifulSoup, page_url: str) -> None:
+        """JSON-LD (sameAs, publisher…), <link rel=me|author|publisher>, <area href>."""
+        from services.location_harvest import _flatten_jsonld_nodes
+
+        for script in soup.find_all('script', attrs={'type': lambda x: x and 'ld+json' in x.lower()}):
+            raw = (script.string or script.get_text() or '').strip()
+            if not raw:
+                continue
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            for node in _flatten_jsonld_nodes(data):
+                if not isinstance(node, dict):
+                    continue
+                for key in ('sameAs', 'isBasedOnUrl'):
+                    vals = node.get(key)
+                    if isinstance(vals, str):
+                        vals = [vals]
+                    if not isinstance(vals, list):
+                        continue
+                    for u in vals:
+                        if isinstance(u, str) and u.startswith(('http://', 'https://')):
+                            fu = self.normalize_url(u, page_url) or u
+                            label = f'JSON-LD {key}'
+                            self._register_external_link(
+                                fu, page_url, label, f'jsonld_{key.lower()}',
+                            )
+                pub = node.get('publisher')
+                if isinstance(pub, dict):
+                    for k in ('@id', 'url', 'sameAs'):
+                        u = pub.get(k)
+                        if isinstance(u, str) and u.startswith(('http://', 'https://')):
+                            fu = self.normalize_url(u, page_url) or u
+                            self._register_external_link(
+                                fu, page_url, 'JSON-LD publisher', 'jsonld_publisher',
+                            )
+                elif isinstance(pub, str) and pub.startswith(('http://', 'https://')):
+                    fu = self.normalize_url(pub, page_url) or pub
+                    self._register_external_link(fu, page_url, 'JSON-LD publisher', 'jsonld_publisher')
+                maker = node.get('creator')
+                if isinstance(maker, dict):
+                    u = maker.get('@id') or maker.get('url')
+                    if isinstance(u, str) and u.startswith(('http://', 'https://')):
+                        fu = self.normalize_url(u, page_url) or u
+                        self._register_external_link(
+                            fu, page_url, 'JSON-LD creator', 'jsonld_creator',
+                        )
+
+        for link in soup.find_all('link', href=True):
+            rel_list = link.get('rel')
+            if isinstance(rel_list, str):
+                rel_list = [rel_list]
+            rel = ' '.join(rel_list or []).lower()
+            if 'canonical' in rel:
+                continue
+            if not any(r in rel for r in ('me', 'author', 'publisher')):
+                continue
+            href = (link.get('href') or '').strip()
+            if not href:
+                continue
+            full_url = self.normalize_url(href, page_url)
+            if not full_url:
+                continue
+            src = 'link_rel_me' if 'me' in rel else 'link_rel_author'
+            self._register_external_link(full_url, page_url, f'<link {rel}>', src)
+
+        for area in soup.find_all('area', href=True):
+            href = (area.get('href') or '').strip()
+            if not href or href.startswith('#'):
+                continue
+            full_url = self.normalize_url(href, page_url)
+            if not full_url:
+                continue
+            alt = (area.get('alt') or 'carte')[:200]
+            self._register_external_link(full_url, page_url, alt, 'image_map_area')
     
     def extract_images_from_page(self, soup: BeautifulSoup, page_url: str) -> List[Dict]:
         """
@@ -1064,6 +1306,16 @@ class UnifiedScraper:
             
             soup = BeautifulSoup(response.text, 'html.parser')
             text = response.text
+
+            try:
+                from services.location_harvest import harvest_locations_from_page
+
+                page_loc = harvest_locations_from_page(soup, url, depth)
+                if page_loc:
+                    with self.lock:
+                        self._location_hits.extend(page_loc)
+            except Exception:
+                logger.debug('[UnifiedScraper] location_harvest page skip', exc_info=True)
             
             # 1. Extraire les emails
             page_emails = self.extract_emails(text)
@@ -1262,7 +1514,10 @@ class UnifiedScraper:
                                         pass
             if new_social_links:
                 logger.info(f'[UnifiedScraper] Page {url}: {len(new_social_links)} nouveaux réseaux sociaux trouvés: {[p for p, _ in new_social_links]}')
-            
+
+            self._collect_external_links_from_page(soup, url)
+            self._collect_external_links_extras(soup, url)
+
             # 6. Détecter les technologies (seulement sur la page d'accueil)
             if depth == 0:
                 logger.info(f'[UnifiedScraper] Page {url}: Détection des technologies')
@@ -1507,6 +1762,14 @@ class UnifiedScraper:
                 f'{len(phones_list)} téléphones, {total_social} réseaux sociaux'
             )
         
+        scraped_location = None
+        try:
+            from services.location_harvest import finalize_scraped_location
+
+            scraped_location = finalize_scraped_location(self._location_hits)
+        except Exception:
+            logger.debug('[UnifiedScraper] finalize_scraped_location skip', exc_info=True)
+
         # Générer le résumé de l'entreprise
         resume = self.generate_company_summary()
         
@@ -1514,10 +1777,17 @@ class UnifiedScraper:
         logger.info(f'[UnifiedScraper] Scraping terminé pour {self.base_url}: {len(self.og_data_by_page)} page(s) avec OG collectées sur {len(self.visited_urls)} page(s) visitées')
         
         # Log détaillé des résultats
+        external_links_list = list(self.external_links_by_url.values())
+        external_links_list.sort(
+            key=lambda x: (not x.get('likely_credit', False), (x.get('domain') or ''))
+        )
+        n_credit = sum(1 for x in external_links_list if x.get('likely_credit'))
+
         logger.info(f'[UnifiedScraper] Résultats finaux: {len(self.emails)} emails, {len(self.people)} personnes, {len(phones_list)} téléphones, '
                    f'{sum(len(v) if isinstance(v, list) else 1 for v in self.social_links.values()) if self.social_links else 0} réseaux sociaux, '
                    f'{sum(len(v) if isinstance(v, list) else 1 for v in self.technologies.values()) if self.technologies else 0} technologies, '
-                   f'{len(self.images)} images, {len(self.forms)} formulaires')
+                   f'{len(self.images)} images, {len(self.forms)} formulaires, '
+                   f'{len(external_links_list)} liens externes ({n_credit} crédits probables)')
         
         # Formater les emails avec leur page_url
         emails_list = []
@@ -1548,9 +1818,13 @@ class UnifiedScraper:
             'total_images': len(self.images),
             'total_forms': len(self.forms),  # Nombre de formulaires trouvés
             'total_og_pages': len(self.og_data_by_page),  # Nombre de pages avec OG
+            'external_links': external_links_list,
+            'total_external_links': len(external_links_list),
+            'total_likely_credit_links': n_credit,
             'people_with_email': len([p for p in self.people if p.get('email')]),
             'people_with_linkedin': len([p for p in self.people if p.get('linkedin_url')]),
             'people_with_title': len([p for p in self.people if p.get('title')]),
-            'resume': resume
+            'resume': resume,
+            'scraped_location': scraped_location,
         }
 

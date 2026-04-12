@@ -1256,3 +1256,86 @@ def celery_task_status(task_id):
         out['error'] = f"Tâche {async_res.state.lower()} (annulée ou refusée)."
     return jsonify(out)
 
+
+def _parse_graph_entreprise_ids(raw) -> set[int] | None:
+    """Liste d’IDs depuis une query string (virgules). ``None`` = pas de filtre ; ensemble vide = aucun résultat."""
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return set()
+    out: set[int] = set()
+    for part in s.split(','):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            out.add(int(part))
+        except ValueError:
+            continue
+        if len(out) >= 500:
+            break
+    return out
+
+
+@api_extended_bp.route('/entreprises/graph', methods=['GET'])
+@api_extended_bp.route('/agencies/graph', methods=['GET'])
+@login_required
+def api_entreprises_graph():
+    """
+    Graphe interactif : fiches entreprises ↔ domaines externes (crédits, liens, portfolio).
+
+    Query (optionnel) : ``search``, ``domain`` / ``agency_domain``, ``only_credit`` (1/true),
+    ``entreprise_ids`` (virgules), ``max_link_rows``, ``max_enterprises``, ``meta`` (1/true) pour métadonnées seules.
+
+    URL historique ``/api/agencies/graph`` conservée (redondante avec ``/api/entreprises/graph``).
+    """
+    if not session.get('user_id'):
+        return jsonify({'error': 'Authentification requise'}), 401
+    try:
+        search = (request.args.get('search') or request.args.get('q') or '').strip() or None
+        domain_contains = (
+            request.args.get('domain') or request.args.get('agency_domain') or ''
+        ).strip() or None
+        only_credit = str(request.args.get('only_credit', '')).strip().lower() in (
+            '1',
+            'true',
+            'yes',
+            'on',
+        )
+        meta_only = str(request.args.get('meta', '')).strip().lower() in ('1', 'true', 'yes', 'on')
+        max_link_rows = request.args.get('max_link_rows', type=int)
+        max_enterprises = request.args.get('max_enterprises', type=int)
+        entreprise_ids = _parse_graph_entreprise_ids(request.args.get('entreprise_ids'))
+
+        data = database.get_entreprises_link_graph(
+            search=search,
+            entreprise_ids=entreprise_ids,
+            domain_contains=domain_contains,
+            only_credit=only_credit,
+            max_link_rows=max_link_rows,
+            max_enterprises=max_enterprises,
+            meta_only=meta_only,
+        )
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@api_extended_bp.route('/entreprises/graph/entreprise-autocomplete', methods=['GET'])
+@api_extended_bp.route('/entreprises/graph/entreprise-suggest', methods=['GET'])
+@api_extended_bp.route('/agencies/graph/entreprise-autocomplete', methods=['GET'])
+@api_extended_bp.route('/agencies/graph/entreprise-suggest', methods=['GET'])
+@login_required
+def api_entreprises_graph_entreprise_autocomplete():
+    """Autocomplétion : entreprises ayant des liens ``entreprise_external_links``."""
+    if not session.get('user_id'):
+        return jsonify({'error': 'Authentification requise'}), 401
+    q = (request.args.get('q') or '').strip()
+    limit = request.args.get('limit', default=15, type=int) or 15
+    try:
+        items = database.suggest_entreprises_for_link_graph(q, limit)
+        return jsonify({'success': True, 'items': items})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+

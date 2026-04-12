@@ -58,6 +58,10 @@ Affiche toutes les entreprises importees avec leurs informations principales.
 - **Clic sur une carte / ligne** : Ouvre la fiche detaillee dans une modal
 - **Etoile** : Marquer / demarquer comme favori (mise a jour temps reel)
 - **Bouton de scraping** : Lancer un scraping pour une entreprise specifique
+
+### Graph entreprises (liens externes)
+
+Page dediee listant les **relations entre fiches et domaines tiers** (liens sortants detectes au scraping). Filtres, carte detail au clic, infobulles enrichies, export PNG. Voir le guide detaille : [GRAPH_ENTREPRISES.md](GRAPH_ENTREPRISES.md).
 - **Boutons de relance sur les indicateurs** :
   - un petit bouton `↻` sous la jauge **Securite** relance l'**analyse technique** pour l'entreprise courante,
   - un bouton `↻` sous la jauge **SEO** relance l'**analyse SEO**,

@@ -670,8 +670,16 @@
                             ${createInfoRow('Taille estimée', entreprise.taille_estimee)}
                             ${createInfoRow('Adresse 1', entreprise.address_1)}
                             ${createInfoRow('Adresse 2', entreprise.address_2)}
+                            ${createInfoRow('Code postal', entreprise.code_postal)}
+                            ${createInfoRow('Ville', entreprise.ville)}
                             ${createInfoRow('Pays', entreprise.pays)}
                             ${createInfoRow('Téléphone', entreprise.telephone)}
+                            ${entreprise.latitude != null && entreprise.longitude != null ? createInfoRow(
+                                'Coordonnées',
+                                ' ',
+                                false,
+                                `<span>${Number(entreprise.latitude).toFixed(5)}, ${Number(entreprise.longitude).toFixed(5)}</span> · <a href="https://www.openstreetmap.org/?mlat=${encodeURIComponent(entreprise.latitude)}&mlon=${encodeURIComponent(entreprise.longitude)}#map=16/${entreprise.latitude}/${entreprise.longitude}" target="_blank" rel="noopener">OpenStreetMap</a>`
+                            ) : ''}
                             ${createInfoRow('Email principal', entreprise.email_principal, true)}
                             ${createInfoRow('Emails secondaires', entreprise.emails_secondaires)}
                             ${createInfoRow('Responsable', entreprise.responsable)}

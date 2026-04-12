@@ -244,6 +244,10 @@ class DatabaseSchema(DatabaseBase):
         for col_name, col_type in icon_columns:
             self.safe_execute_sql(cursor, f'ALTER TABLE entreprises ADD COLUMN {col_name} {col_type}')
 
+        # Localisation fine (scraping / imports)
+        self.safe_execute_sql(cursor, 'ALTER TABLE entreprises ADD COLUMN ville TEXT')
+        self.safe_execute_sql(cursor, 'ALTER TABLE entreprises ADD COLUMN code_postal TEXT')
+
         # Étapes pipeline CRM (Sprint 1) — distinct du champ statut (campagnes / délivrabilité)
         self.safe_execute_sql(cursor, 'ALTER TABLE entreprises ADD COLUMN etape_prospection TEXT')
         try:

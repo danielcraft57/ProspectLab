@@ -1325,6 +1325,53 @@ class ScraperManager(DatabaseBase):
             return scraper
         
         return None
+
+    def get_scraper_by_id(self, scraper_id):
+        """
+        Charge un scraper par id (léger : pas de tables normalisées), metadata parsée en dict si JSON.
+        """
+        if not scraper_id:
+            return None
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self.execute_sql(
+            cursor,
+            'SELECT id, entreprise_id, url, metadata FROM scrapers WHERE id = ?',
+            (scraper_id,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        scraper = dict(row)
+        if scraper.get('metadata') and isinstance(scraper['metadata'], str):
+            try:
+                scraper['metadata'] = json.loads(scraper['metadata'])
+            except (TypeError, ValueError):
+                scraper['metadata'] = {}
+        elif scraper.get('metadata') is None:
+            scraper['metadata'] = {}
+        return scraper
+
+    def update_scraper_metadata_json(self, scraper_id, metadata_dict):
+        """Met à jour uniquement la colonne metadata (JSON) et total_metadata."""
+        if not scraper_id:
+            return
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        md_json = json.dumps(metadata_dict, ensure_ascii=False) if metadata_dict is not None else None
+        total_md = len(metadata_dict) if isinstance(metadata_dict, dict) else 0
+        self.execute_sql(
+            cursor,
+            '''
+            UPDATE scrapers
+            SET metadata = ?, total_metadata = ?, date_modification = CURRENT_TIMESTAMP
+            WHERE id = ?
+            ''',
+            (md_json, total_md, scraper_id),
+        )
+        conn.commit()
+        conn.close()
     
     def update_scraper(self, scraper_id, emails=None, people=None, visited_urls=None, total_emails=None, total_people=None, duration=None):
         """

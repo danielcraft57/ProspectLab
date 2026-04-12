@@ -88,10 +88,22 @@
                 </div>
                 
                 <div class="detail-section">
-                    <h2>Contact</h2>
+                    <h2>Contact & lieu</h2>
                     <div class="info-grid">
                         ${createInfoRow('Email principal', entrepriseData.email_principal, true)}
+                        ${createInfoRow('Téléphone', entrepriseData.telephone)}
                         ${createInfoRow('Responsable', entrepriseData.responsable)}
+                        ${createInfoRow('Adresse', entrepriseData.address_1)}
+                        ${createInfoRow('Complément', entrepriseData.address_2)}
+                        ${createInfoRow('Code postal', entrepriseData.code_postal)}
+                        ${createInfoRow('Ville', entrepriseData.ville)}
+                        ${createInfoRow('Pays', entrepriseData.pays)}
+                        ${entrepriseData.latitude != null && entrepriseData.longitude != null ? createInfoRow(
+                            'Coordonnées',
+                            ' ',
+                            false,
+                            `<span>${Number(entrepriseData.latitude).toFixed(5)}, ${Number(entrepriseData.longitude).toFixed(5)}</span> · <a href="https://www.openstreetmap.org/?mlat=${encodeURIComponent(entrepriseData.latitude)}&mlon=${encodeURIComponent(entrepriseData.longitude)}#map=16/${entrepriseData.latitude}/${entrepriseData.longitude}" target="_blank" rel="noopener">OpenStreetMap</a>`
+                        ) : ''}
                     </div>
                 </div>
                 

@@ -66,6 +66,8 @@ celery.conf.update(
     # Dict pattern -> route (Celery 5 / kombu : une *liste* de tuples casse MapRoute qui itère
     # chaque entrée en « k, v » — le 1er élément est une str → too many values to unpack).
     task_routes={
+        # Mini-scrape des liens externes (HTTP par domaine) : même file que le scraping lourd.
+        'tasks.scraping_tasks.enrich_external_links_mini_scrape_task': {'queue': 'scraping'},
         # scrape_emails sans queue explicite → relances UI ; le bulk API garde apply_async(..., queue='scraping')
         'tasks.scraping_tasks.scrape_emails_task': {'queue': 'scraping_interactive'},
         # Bulk "analyse site" : isoler sur la queue heavy (utile pour donner plus de temps au node rapide).
