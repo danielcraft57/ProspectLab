@@ -18,69 +18,27 @@
 
     <div class="agences-layout">
         <div class="agences-layout__main">
-            <div class="agences-toolbar">
-                <div class="agences-toolbar__actions">
-                    <button type="button" class="md-btn md-btn--filled" id="agences-graph-reload" title="Recharger les données">
-                        <span class="material-symbols-rounded" aria-hidden="true">refresh</span>
-                        Actualiser
-                    </button>
-                    <button type="button" class="md-btn md-btn--tonal" id="agences-graph-fit" title="Tout voir (animation)">
-                        <span class="material-symbols-rounded" aria-hidden="true">fit_screen</span>
-                        Cadrer
-                    </button>
-                    <button type="button" class="md-btn md-btn--outlined md-btn--icon" id="agences-graph-zoom-in" title="Zoom +">
-                        <span class="material-symbols-rounded" aria-hidden="true">add</span>
-                    </button>
-                    <button type="button" class="md-btn md-btn--outlined md-btn--icon" id="agences-graph-zoom-out" title="Zoom −">
-                        <span class="material-symbols-rounded" aria-hidden="true">remove</span>
-                    </button>
-                    <button type="button" class="md-btn md-btn--outlined" id="agences-graph-physics" title="Activer la physique pour réorganiser les nœuds">
-                        <span class="material-symbols-rounded" aria-hidden="true">bubble_chart</span>
-                        Physique
-                    </button>
-                    <button type="button" class="md-btn md-btn--outlined" id="agences-graph-export" title="Exporter le canvas en PNG">
-                        <span class="material-symbols-rounded" aria-hidden="true">download</span>
-                        PNG
-                    </button>
-                    <button type="button" class="md-btn md-btn--outlined md-btn--icon" id="agences-graph-view-back" title="Vue précédente">
-                        <span class="material-symbols-rounded" aria-hidden="true">arrow_back</span>
-                    </button>
-                    <button type="button" class="md-btn md-btn--outlined md-btn--icon" id="agences-graph-view-fwd" title="Vue suivante">
-                        <span class="material-symbols-rounded" aria-hidden="true">arrow_forward</span>
-                    </button>
-                    <button type="button" class="md-btn md-btn--outlined" id="agences-graph-cluster-leaves" title="Regrouper les domaines externes à une seule connexion">
-                        <span class="material-symbols-rounded" aria-hidden="true">account_tree</span>
-                        Feuilles
-                    </button>
-                    <button type="button" class="md-btn md-btn--outlined" id="agences-graph-cluster-open" title="Ouvrir tous les regroupements">
-                        <span class="material-symbols-rounded" aria-hidden="true">expand_content</span>
-                        Déplier
-                    </button>
-                    <button type="button" class="md-btn md-btn--outlined" id="agences-theme-toggle" title="Thème : Auto → Sombre → Clair">
-                        <span class="material-symbols-rounded" aria-hidden="true">routine</span>
-                        <span class="agences-theme-label">Auto</span>
-                    </button>
-                </div>
-                <div class="agences-toolbar__stats" id="agences-graph-stats-wrap" aria-live="polite"></div>
-            </div>
+            <div id="graph-entreprises-scope-hint" class="agences-scope-hint" style="display:none;" role="status"></div>
 
-            <div id="agences-graph-scope-hint" class="agences-scope-hint" style="display:none;" role="status"></div>
-
-            <div class="agences-filters" id="agences-filters-panel">
-                <div class="agences-filters__title">
-                    <span class="material-symbols-rounded" aria-hidden="true">tune</span>
-                    Filtres &amp; affichage
-                </div>
-
-                <div class="agences-filter-deck">
-                    <section class="agences-panel agences-panel--scope" aria-labelledby="agences-panel-scope-title">
-                        <header class="agences-panel__head">
+            <div class="agences-filters agences-filters--collapsed" id="agences-filters-panel">
+                <button type="button" class="agences-filters__head" id="agences-filters-collapse-toggle" aria-expanded="false" aria-controls="agences-filters-body">
+                    <span class="material-symbols-rounded agences-filters__head-ic" aria-hidden="true">tune</span>
+                    <span class="agences-filters__head-text">Filtres &amp; affichage</span>
+                    <span class="material-symbols-rounded agences-filters__head-chev" aria-hidden="true">expand_more</span>
+                </button>
+                <div class="agences-filters__body" id="agences-filters-body">
+                    <div class="agences-filters__body-inner">
+                <div class="agences-filter-deck agences-filter-deck--accordion">
+                    <details class="agences-panel agences-panel--scope agences-accordion" name="agences-filters-acc" id="agences-accordion-scope" open>
+                        <summary class="agences-panel__summary">
                             <span class="material-symbols-rounded agences-panel__head-icon" aria-hidden="true">cloud_download</span>
-                            <div>
+                            <div class="agences-panel__summary-text">
                                 <h2 class="agences-panel__title" id="agences-panel-scope-title">Périmètre serveur</h2>
                                 <p class="agences-panel__subtitle">Requête vers l’API avant rendu — utile sur de gros volumes.</p>
                             </div>
-                        </header>
+                            <span class="material-symbols-rounded agences-panel__summary-chev" aria-hidden="true">expand_more</span>
+                        </summary>
+                        <div class="agences-panel__accordion-body">
                         <div class="agences-scope-form">
                             <div class="agences-tf agences-tf--span-6">
                                 <label class="agences-tf__label" for="agences-scope-search">Nom ou site contient</label>
@@ -146,16 +104,19 @@
                                 Charger ce périmètre
                             </button>
                         </footer>
-                    </section>
+                        </div>
+                    </details>
 
-                    <section class="agences-panel agences-panel--local" aria-labelledby="agences-panel-local-title">
-                        <header class="agences-panel__head agences-panel__head--compact">
+                    <details class="agences-panel agences-panel--local agences-accordion" name="agences-filters-acc" id="agences-accordion-local">
+                        <summary class="agences-panel__summary agences-panel__summary--compact">
                             <span class="material-symbols-rounded agences-panel__head-icon" aria-hidden="true">visibility</span>
-                            <div>
+                            <div class="agences-panel__summary-text">
                                 <h2 class="agences-panel__title" id="agences-panel-local-title">Affichage local</h2>
                                 <p class="agences-panel__subtitle">S’applique au graphe déjà chargé, sans nouvelle requête.</p>
                             </div>
-                        </header>
+                            <span class="material-symbols-rounded agences-panel__summary-chev" aria-hidden="true">expand_more</span>
+                        </summary>
+                        <div class="agences-panel__accordion-body">
                         <div class="agences-local-rows">
                             <div class="agences-local-row">
                                 <span class="agences-local-row__label">Nœuds</span>
@@ -182,39 +143,112 @@
                                 </label>
                             </div>
                             <div class="agences-local-row agences-local-row--search">
-                                <label class="agences-local-row__label" for="agences-graph-search">Sur le graphe</label>
+                                <label class="agences-local-row__label" for="graph-entreprises-search">Sur le graphe</label>
                                 <div class="agences-tf agences-tf--grow">
                                     <div class="agences-tf__box">
                                         <span class="material-symbols-rounded agences-tf__leading" aria-hidden="true">filter_alt</span>
-                                        <input type="search" class="agences-tf__input" id="agences-graph-search" placeholder="Filtrer nœuds visibles par texte…" autocomplete="off" />
+                                        <input type="search" class="agences-tf__input" id="graph-entreprises-search" placeholder="Filtrer nœuds visibles par texte…" autocomplete="off" />
                                     </div>
                                 </div>
                             </div>
                         </div>
-                    </section>
+                        </div>
+                    </details>
+                </div>
+                    </div>
                 </div>
             </div>
 
-            <div id="agences-graph-wrap">
-                <div id="agences-graph" role="img" aria-label="Graphe interactif entreprises et domaines"></div>
-                <div class="agences-graph-loading" id="agences-graph-loading" aria-hidden="true">
-                    <div class="agences-spinner" aria-hidden="true"></div>
-                    <span class="agences-graph-loading__text" style="color:#a9afbc;font-size:0.9rem;">Chargement du graphe…</span>
-                </div>
-                <div id="agences-graph-empty" class="agences-graph-empty" style="display:none;">
-                    Aucun lien en base. Lancez un scraping sur des sites avec crédits ou liens externes.
-                </div>
-                <div id="agences-graph-error" class="agences-graph-error" style="display:none;"></div>
-
-                <aside id="agences-node-card" class="agences-node-card" hidden aria-label="Détail du nœud">
-                    <div class="agences-node-card__head">
-                        <span class="agences-node-card__eyebrow" id="agences-node-card-eyebrow">—</span>
-                        <button type="button" class="agences-node-card__close" id="agences-node-card-close" aria-label="Fermer">
-                            <span class="material-symbols-rounded" aria-hidden="true">close</span>
+            <div id="graph-entreprises-wrap">
+                <header class="graph-entreprises-rail" aria-label="Indicateurs du graphe">
+                    <div class="graph-entreprises-rail__stats graph-entreprises-rail__stats--solo" id="graph-entreprises-stats-wrap" aria-live="polite"></div>
+                </header>
+                <div class="agences-fs-chrome" id="agences-fs-chrome" hidden>
+                    <div class="agences-fs-tab-host">
+                        <div id="agences-fs-filters-dropdown" class="agences-fs-dropdown" hidden role="region" aria-label="Filtres du graphe" aria-hidden="true">
+                            <div class="agences-fs-dropdown__inner" id="agences-fs-filters-mount"></div>
+                        </div>
+                        <button type="button" class="agences-fs-tab" id="agences-fs-filters-toggle" aria-expanded="false" aria-controls="agences-fs-filters-dropdown" aria-haspopup="dialog">
+                            <span class="material-symbols-rounded agences-fs-tab__ic" aria-hidden="true">tune</span>
+                            <span class="agences-fs-tab__label">Filtres &amp; périmètre</span>
+                            <span class="material-symbols-rounded agences-fs-tab__chev" aria-hidden="true">expand_more</span>
                         </button>
                     </div>
-                    <div class="agences-node-card__scroll" id="agences-node-card-body"></div>
-                </aside>
+                </div>
+                <div class="graph-entreprises-canvas-stack" id="graph-entreprises-canvas-stack">
+                    <nav class="graph-entreprises-dock" id="graph-entreprises-dock" aria-label="Actions du graphe">
+                        <button type="button" class="graph-entreprises-dock__btn graph-entreprises-fs-btn" id="graph-entreprises-fullscreen" title="Plein écran" aria-label="Afficher le graphe en plein écran">
+                            <span class="material-symbols-rounded" aria-hidden="true">fullscreen</span>
+                        </button>
+                        <div class="graph-entreprises-dock__group" role="group" aria-label="Vue et zoom">
+                            <button type="button" class="graph-entreprises-dock__btn md-btn md-btn--tonal" id="graph-entreprises-fit" title="Tout voir (animation)">
+                                <span class="material-symbols-rounded" aria-hidden="true">fit_screen</span>
+                                Cadrer
+                            </button>
+                            <button type="button" class="graph-entreprises-dock__btn md-btn md-btn--outlined md-btn--icon" id="graph-entreprises-zoom-in" title="Zoom +">
+                                <span class="material-symbols-rounded" aria-hidden="true">add</span>
+                            </button>
+                            <button type="button" class="graph-entreprises-dock__btn md-btn md-btn--outlined md-btn--icon" id="graph-entreprises-zoom-out" title="Zoom −">
+                                <span class="material-symbols-rounded" aria-hidden="true">remove</span>
+                            </button>
+                            <button type="button" class="graph-entreprises-dock__btn md-btn md-btn--outlined md-btn--icon" id="graph-entreprises-view-back" title="Vue précédente">
+                                <span class="material-symbols-rounded" aria-hidden="true">arrow_back</span>
+                            </button>
+                            <button type="button" class="graph-entreprises-dock__btn md-btn md-btn--outlined md-btn--icon" id="graph-entreprises-view-fwd" title="Vue suivante">
+                                <span class="material-symbols-rounded" aria-hidden="true">arrow_forward</span>
+                            </button>
+                        </div>
+                        <div class="graph-entreprises-dock__group" role="group" aria-label="Données et export">
+                            <button type="button" class="graph-entreprises-dock__btn md-btn md-btn--filled" id="graph-entreprises-reload" title="Recharger les données">
+                                <span class="material-symbols-rounded" aria-hidden="true">refresh</span>
+                                Actualiser
+                            </button>
+                            <button type="button" class="graph-entreprises-dock__btn md-btn md-btn--outlined" id="graph-entreprises-physics" title="Activer la physique pour réorganiser les nœuds">
+                                <span class="material-symbols-rounded" aria-hidden="true">bubble_chart</span>
+                                Physique
+                            </button>
+                            <button type="button" class="graph-entreprises-dock__btn md-btn md-btn--outlined" id="graph-entreprises-export" title="Exporter le canvas en PNG">
+                                <span class="material-symbols-rounded" aria-hidden="true">download</span>
+                                PNG
+                            </button>
+                        </div>
+                        <div class="graph-entreprises-dock__group" role="group" aria-label="Regroupements">
+                            <button type="button" class="graph-entreprises-dock__btn md-btn md-btn--outlined" id="graph-entreprises-cluster-leaves" title="Regrouper les domaines externes à une seule connexion">
+                                <span class="material-symbols-rounded" aria-hidden="true">account_tree</span>
+                                Feuilles
+                            </button>
+                            <button type="button" class="graph-entreprises-dock__btn md-btn md-btn--outlined" id="graph-entreprises-cluster-open" title="Ouvrir tous les regroupements">
+                                <span class="material-symbols-rounded" aria-hidden="true">expand_content</span>
+                                Déplier
+                            </button>
+                        </div>
+                        <div class="graph-entreprises-dock__group" role="group" aria-label="Affichage">
+                            <button type="button" class="graph-entreprises-dock__btn md-btn md-btn--outlined" id="agences-theme-toggle" title="Thème : Auto → Sombre → Clair">
+                                <span class="material-symbols-rounded" aria-hidden="true">routine</span>
+                                <span class="agences-theme-label">Auto</span>
+                            </button>
+                        </div>
+                    </nav>
+                    <div id="graph-entreprises-canvas" role="img" aria-label="Graphe interactif entreprises et domaines"></div>
+                    <div class="graph-entreprises-loading" id="graph-entreprises-loading" aria-hidden="true">
+                        <div class="agences-spinner" aria-hidden="true"></div>
+                        <span class="graph-entreprises-loading__text" style="color:#a9afbc;font-size:0.9rem;">Chargement du graphe…</span>
+                    </div>
+                    <div id="graph-entreprises-empty" class="graph-entreprises-empty" style="display:none;">
+                        Aucun lien en base. Lancez un scraping sur des sites avec crédits ou liens externes.
+                    </div>
+                    <div id="graph-entreprises-error" class="graph-entreprises-error" style="display:none;"></div>
+
+                    <aside id="agences-node-card" class="agences-node-card" hidden aria-label="Détail du nœud">
+                        <div class="agences-node-card__head">
+                            <span class="agences-node-card__eyebrow" id="agences-node-card-eyebrow">—</span>
+                            <button type="button" class="agences-node-card__close" id="agences-node-card-close" aria-label="Fermer">
+                                <span class="material-symbols-rounded" aria-hidden="true">close</span>
+                            </button>
+                        </div>
+                        <div class="agences-node-card__scroll" id="agences-node-card-body"></div>
+                    </aside>
+                </div>
             </div>
 
             <div class="agences-legend">

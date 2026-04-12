@@ -9,12 +9,20 @@ Vue interactive **entreprises ↔ domaines tiers** découverts lors du scraping 
 
 ## Fonctionnalités côté interface
 
-- Graphe **vis-network** : zoom, cadrage, physique on/off, export **PNG**, historique de vues (précédent / suivant).
+- Graphe **vis-network** : zoom, cadrage, physique on/off, export **PNG**, historique de vues (précédent / suivant), regroupement des feuilles / ouverture des clusters.
+- **Rail du haut** : puces de synthèse (agences, entreprises, domaines, nœuds, liens, etc.) centrées sous la barre du cadre graphe.
+- **Dock d’actions** (colonne à droite sur la zone graphe) : plein écran, vue/zoom, rechargement périmètre, physique, export, regroupements, thème. Le dock est ancré en **haut et bas** de la zone canvas (`top` / `bottom`) pour que la hauteur suive celle du conteneur et que le défilement interne (`overflow-y: auto`) reste fiable (évite les coupures dues à un `max-height: 100%` mal résolu). Variable CSS **`--graph-entreprises-dock-slot`** : marge réservée pour la carte détail et le positionnement du panneau.
+- **Plein écran** : le bloc `#graph-entreprises-wrap` passe en plein navigateur ou pseudo-plein écran ; languette **Filtres & périmètre** et panneau associé ; les filtres hors plein écran restent dans la page au-dessus du cadre.
+- **Conteneur graphe** : canvas vis-network dans `#graph-entreprises-canvas` (pile `#graph-entreprises-canvas-stack`).
 - **Filtres locaux** : types de nœuds (fiche, agence, autres domaines), types d’arêtes (crédit, lien, réf. site, fiche en base), libellés compacts, recherche sur le graphe chargé.
 - **Périmètre serveur** : recherche texte, filtre par domaine, plafonds lignes / entreprises, IDs entreprises, option « crédits seuls » ; rechargement via **Actualiser**.
 - **Thème** : bouton **Auto → Sombre → Clair** (préférence stockée dans `localStorage` ; les infobulles synchronisent des variables CSS sur `:root` car le conteneur `vis-tooltip` est hors de la page).
 - **Infobulles (survol)** : contenu riche en **HTML injecté comme nœud DOM** (exigence vis-network ≥ 9 : les chaînes HTML dans `title` ne sont plus interprétées). Cartes avec icônes Material, stats **libellé + valeur sur une même ligne**, blocs schémas / JSON-LD, liens cliquables vers le site fiche.
 - **Carte détail** (clic nœud) : panneau latéral avec sections icônées, puces catégories / JSON-LD différenciées, lien vers la fiche entreprise si applicable.
+
+### Ancienne URL
+
+- La route **`/agences-reseau`** (ancien libellé « Réseau agences ») redirige en **301** vers **`/graph-entreprises`** (favoris et liens profonds).
 
 ## API
 
@@ -56,6 +64,10 @@ Préfixe **`EXTERNAL_MINI_SCRAPE_`** (certaines clés ont un repli `AGENCY_MINI_
 
 ## Fichiers front principaux
 
-- `templates/pages/graph_entreprises.html`
-- `static/js/graph_entreprises.js`
-- `static/css/graph_entreprises.css`
+- `templates/pages/graph_entreprises.html` — gabarit, `window.GRAPH_ENTREPRISES_PAGE` (ex. URL fiche entreprise).
+- `static/js/graph_entreprises.js` — chargement API, vis-network, physique, plein écran, dock, infobulles DOM, carte détail.
+- `static/css/graph_entreprises.css` — thème M3, rail, dock, plein écran, légende, carte détail.
+
+### Backend
+
+- Route page : `routes/main.py` (`graph_entreprises`) ; redirection depuis `agences_reseau_redirect` (`/agences-reseau`).

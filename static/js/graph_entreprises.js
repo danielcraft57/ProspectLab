@@ -5,33 +5,39 @@
 (function () {
     'use strict';
 
-    const graphEl = document.getElementById('agences-graph');
-    const wrapEl = document.getElementById('agences-graph-wrap');
-    const emptyEl = document.getElementById('agences-graph-empty');
-    const errEl = document.getElementById('agences-graph-error');
-    const statsWrap = document.getElementById('agences-graph-stats-wrap');
-    const loadingEl = document.getElementById('agences-graph-loading');
-    const btnReload = document.getElementById('agences-graph-reload');
-    const btnFit = document.getElementById('agences-graph-fit');
-    const btnZoomIn = document.getElementById('agences-graph-zoom-in');
-    const btnZoomOut = document.getElementById('agences-graph-zoom-out');
-    const btnPhysics = document.getElementById('agences-graph-physics');
-    const btnExport = document.getElementById('agences-graph-export');
+    const graphEl = document.getElementById('graph-entreprises-canvas');
+    const wrapEl = document.getElementById('graph-entreprises-wrap');
+    const canvasStackEl = document.getElementById('graph-entreprises-canvas-stack');
+    const btnFullscreen = document.getElementById('graph-entreprises-fullscreen');
+    const fsChrome = document.getElementById('agences-fs-chrome');
+    const fsFiltersToggle = document.getElementById('agences-fs-filters-toggle');
+    const fsFiltersDropdown = document.getElementById('agences-fs-filters-dropdown');
+    const fsFiltersMount = document.getElementById('agences-fs-filters-mount');
+    const emptyEl = document.getElementById('graph-entreprises-empty');
+    const errEl = document.getElementById('graph-entreprises-error');
+    const statsWrap = document.getElementById('graph-entreprises-stats-wrap');
+    const loadingEl = document.getElementById('graph-entreprises-loading');
+    const btnReload = document.getElementById('graph-entreprises-reload');
+    const btnFit = document.getElementById('graph-entreprises-fit');
+    const btnZoomIn = document.getElementById('graph-entreprises-zoom-in');
+    const btnZoomOut = document.getElementById('graph-entreprises-zoom-out');
+    const btnPhysics = document.getElementById('graph-entreprises-physics');
+    const btnExport = document.getElementById('graph-entreprises-export');
     const nodeCard = document.getElementById('agences-node-card');
     const nodeCardClose = document.getElementById('agences-node-card-close');
     const nodeCardEyebrow = document.getElementById('agences-node-card-eyebrow');
     const nodeCardBody = document.getElementById('agences-node-card-body');
-    const btnViewBack = document.getElementById('agences-graph-view-back');
-    const btnViewFwd = document.getElementById('agences-graph-view-fwd');
-    const btnClusterLeaves = document.getElementById('agences-graph-cluster-leaves');
-    const btnClusterOpen = document.getElementById('agences-graph-cluster-open');
+    const btnViewBack = document.getElementById('graph-entreprises-view-back');
+    const btnViewFwd = document.getElementById('graph-entreprises-view-fwd');
+    const btnClusterLeaves = document.getElementById('graph-entreprises-cluster-leaves');
+    const btnClusterOpen = document.getElementById('graph-entreprises-cluster-open');
 
     if (!graphEl) return;
 
     const emptyElDefaultText =
         emptyEl && emptyEl.textContent ? emptyEl.textContent.trim() : '';
 
-    const scopeHintEl = document.getElementById('agences-graph-scope-hint');
+    const scopeHintEl = document.getElementById('graph-entreprises-scope-hint');
     const scopeSearchEl = document.getElementById('agences-scope-search');
     const scopeDomainEl = document.getElementById('agences-scope-domain');
     const scopeMaxRowsEl = document.getElementById('agences-scope-max-rows');
@@ -46,6 +52,226 @@
     let scopeAutocompleteActiveIdx = -1;
     let graphResizeObserver = null;
     let graphResizeHandler = null;
+
+    let graphFsPseudo = false;
+    let graphFsFiltersDock = { parent: null, next: null };
+    let graphFsDropdownOpen = false;
+    var fsDropCloseTimer = null;
+
+    var FILTERS_COLLAPSED_KEY = 'prospectlab_graph_filters_collapsed';
+    var filtersPanelEl = document.getElementById('agences-filters-panel');
+    var filtersCollapseToggleEl = document.getElementById('agences-filters-collapse-toggle');
+
+    function graphSizeHost() {
+        return canvasStackEl || wrapEl;
+    }
+
+    function readFiltersCollapsedPref() {
+        var v = localStorage.getItem(FILTERS_COLLAPSED_KEY);
+        if (v === null) return true;
+        return v === 'true';
+    }
+
+    function applyFiltersCollapsed(collapsed) {
+        if (!filtersPanelEl || !filtersCollapseToggleEl) return;
+        filtersPanelEl.classList.toggle('agences-filters--collapsed', collapsed);
+        filtersCollapseToggleEl.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    }
+
+    function syncFiltersCollapsedFromStorage() {
+        applyFiltersCollapsed(readFiltersCollapsedPref());
+    }
+
+    function bindFiltersAccordion() {
+        var root = document.getElementById('agences-filters-panel');
+        if (!root) return;
+        var acc = root.querySelectorAll('details.agences-accordion');
+        if (!acc.length) return;
+        acc.forEach(function (d) {
+            d.addEventListener('toggle', function () {
+                if (!d.open) return;
+                acc.forEach(function (other) {
+                    if (other !== d) other.removeAttribute('open');
+                });
+            });
+        });
+    }
+
+    function graphFsActive() {
+        if (!wrapEl) return false;
+        if (graphFsPseudo) return wrapEl.classList.contains('graph-entreprises-wrap--fs');
+        var el =
+            document.fullscreenElement ||
+            document.webkitFullscreenElement ||
+            document.msFullscreenElement;
+        return el === wrapEl;
+    }
+
+    function graphRequestFullscreen(el) {
+        if (!el) return Promise.reject();
+        if (el.requestFullscreen) return el.requestFullscreen();
+        if (el.webkitRequestFullscreen) return el.webkitRequestFullscreen();
+        if (el.msRequestFullscreen) return el.msRequestFullscreen();
+        return Promise.reject();
+    }
+
+    function graphExitFullscreen() {
+        if (document.exitFullscreen) return document.exitFullscreen();
+        if (document.webkitExitFullscreen) return document.webkitExitFullscreen();
+        if (document.msExitFullscreen) return document.msExitFullscreen();
+        return Promise.reject();
+    }
+
+    function graphFsSupportsNative() {
+        return !!(wrapEl && (wrapEl.requestFullscreen || wrapEl.webkitRequestFullscreen || wrapEl.msRequestFullscreen));
+    }
+
+    function graphFsUpdateBtnIcon() {
+        if (!btnFullscreen) return;
+        var ic = btnFullscreen.querySelector('.material-symbols-rounded');
+        if (!ic) return;
+        ic.textContent = graphFsActive() ? 'fullscreen_exit' : 'fullscreen';
+        btnFullscreen.setAttribute(
+            'title',
+            graphFsActive() ? 'Quitter le plein écran' : 'Plein écran'
+        );
+        btnFullscreen.setAttribute(
+            'aria-label',
+            graphFsActive() ? 'Quitter le plein écran' : 'Afficher le graphe en plein écran'
+        );
+    }
+
+    /** @param {boolean} [immediate] true = fermeture instantanée (sortie plein écran, etc.) */
+    function graphFsCloseDropdown(immediate) {
+        if (!fsFiltersDropdown || !fsFiltersToggle) return;
+        graphFsDropdownOpen = false;
+        fsFiltersToggle.setAttribute('aria-expanded', 'false');
+        fsFiltersDropdown.classList.remove('agences-fs-dropdown--open');
+        fsFiltersDropdown.setAttribute('aria-hidden', 'true');
+        if (fsDropCloseTimer) {
+            clearTimeout(fsDropCloseTimer);
+            fsDropCloseTimer = null;
+        }
+        if (immediate) {
+            fsFiltersDropdown.setAttribute('hidden', '');
+            return;
+        }
+        fsDropCloseTimer = window.setTimeout(function () {
+            fsDropCloseTimer = null;
+            fsFiltersDropdown.setAttribute('hidden', '');
+        }, 400);
+    }
+
+    function graphFsToggleDropdown() {
+        if (!fsFiltersDropdown || !fsFiltersToggle || !graphFsActive()) return;
+        if (graphFsDropdownOpen) {
+            graphFsCloseDropdown(false);
+            return;
+        }
+        graphFsDropdownOpen = true;
+        fsFiltersToggle.setAttribute('aria-expanded', 'true');
+        if (fsDropCloseTimer) {
+            clearTimeout(fsDropCloseTimer);
+            fsDropCloseTimer = null;
+        }
+        fsFiltersDropdown.removeAttribute('hidden');
+        fsFiltersDropdown.setAttribute('aria-hidden', 'false');
+        window.requestAnimationFrame(function () {
+            window.requestAnimationFrame(function () {
+                fsFiltersDropdown.classList.add('agences-fs-dropdown--open');
+            });
+        });
+    }
+
+    function graphFsMoveFiltersIntoOverlay() {
+        var panel = document.getElementById('agences-filters-panel');
+        if (!panel || !fsFiltersMount) return;
+        if (panel.parentNode === fsFiltersMount) return;
+        graphFsFiltersDock.parent = panel.parentNode;
+        graphFsFiltersDock.next = panel.nextSibling;
+        panel.classList.add('agences-filters--in-overlay');
+        fsFiltersMount.appendChild(panel);
+    }
+
+    function graphFsRestoreFilters() {
+        var panel = document.getElementById('agences-filters-panel');
+        if (!panel || !graphFsFiltersDock.parent) return;
+        panel.classList.remove('agences-filters--in-overlay');
+        graphFsFiltersDock.parent.insertBefore(panel, graphFsFiltersDock.next);
+        graphFsFiltersDock.parent = null;
+        graphFsFiltersDock.next = null;
+        syncFiltersCollapsedFromStorage();
+    }
+
+    function graphFsOnEnter() {
+        if (!wrapEl) return;
+        wrapEl.classList.add('graph-entreprises-wrap--fs');
+        if (fsChrome) fsChrome.hidden = false;
+        graphFsMoveFiltersIntoOverlay();
+        graphFsUpdateBtnIcon();
+        graphFsCloseDropdown(true);
+        window.setTimeout(function () {
+            if (typeof graphResizeHandler === 'function') graphResizeHandler();
+        }, 120);
+    }
+
+    function graphFsOnLeave() {
+        if (!wrapEl) return;
+        wrapEl.classList.remove('graph-entreprises-wrap--fs', 'graph-entreprises-wrap--pseudo-fs');
+        graphFsPseudo = false;
+        document.body.classList.remove('graph-entreprises-fs-body-lock');
+        if (fsChrome) fsChrome.hidden = true;
+        graphFsCloseDropdown(true);
+        graphFsRestoreFilters();
+        graphFsUpdateBtnIcon();
+        window.setTimeout(function () {
+            if (typeof graphResizeHandler === 'function') graphResizeHandler();
+        }, 120);
+    }
+
+    function graphFsEnter() {
+        if (graphFsActive()) return;
+        if (graphFsSupportsNative()) {
+            graphRequestFullscreen(wrapEl).catch(function () {
+                graphFsPseudo = true;
+                document.body.classList.add('graph-entreprises-fs-body-lock');
+                wrapEl.classList.add('graph-entreprises-wrap--pseudo-fs');
+                graphFsOnEnter();
+            });
+        } else {
+            graphFsPseudo = true;
+            document.body.classList.add('graph-entreprises-fs-body-lock');
+            wrapEl.classList.add('graph-entreprises-wrap--pseudo-fs');
+            graphFsOnEnter();
+        }
+    }
+
+    function graphFsLeave() {
+        if (!graphFsActive()) return;
+        graphFsCloseDropdown(true);
+        if (graphFsPseudo) {
+            graphFsOnLeave();
+            return;
+        }
+        graphExitFullscreen().catch(function () {
+            graphFsOnLeave();
+        });
+    }
+
+    function graphFsSyncFromDocument() {
+        var el =
+            document.fullscreenElement ||
+            document.webkitFullscreenElement ||
+            document.msFullscreenElement;
+        var nativeOn = !!(wrapEl && el === wrapEl);
+        if (nativeOn) {
+            graphFsPseudo = false;
+            graphFsOnEnter();
+        } else if (wrapEl && wrapEl.classList.contains('graph-entreprises-wrap--fs') && !graphFsPseudo) {
+            graphFsOnLeave();
+        }
+        graphFsUpdateBtnIcon();
+    }
 
     let network = null;
     let nodesDS = null;
@@ -535,7 +761,7 @@
         const q = state.search;
         if (!q) return base;
         const matching = new Set();
-        rawNodes.forEach(function (n) {
+        (rawNodes || []).forEach(function (n) {
             if (!base.has(n.id)) return;
             if (nodeMatchesQuery(n, q)) matching.add(n.id);
         });
@@ -563,7 +789,7 @@
             const el = document.getElementById(id);
             return el ? el.checked : def;
         }
-        const searchEl = document.getElementById('agences-graph-search');
+        const searchEl = document.getElementById('graph-entreprises-search');
         return {
             showEnt: chk('flt-nodes-ent', true),
             showAgency: chk('flt-nodes-agency', true),
@@ -1294,7 +1520,7 @@
         return {
             physics: {
                 enabled: !!physicsOn,
-                stabilization: { iterations: physicsOn ? 400 : 80 },
+                stabilization: { iterations: physicsOn ? 520 : 80 },
                 forceAtlas2Based: fa2,
                 solver: 'forceAtlas2Based',
             },
@@ -1636,13 +1862,14 @@
             const el = document.getElementById(id);
             if (el) el.addEventListener('change', scheduleApplyFilters);
         });
-        const searchEl = document.getElementById('agences-graph-search');
+        const searchEl = document.getElementById('graph-entreprises-search');
         if (searchEl) {
             searchEl.addEventListener('input', scheduleApplyFilters);
         }
     }
 
     function render(data) {
+        if (!graphEl) return;
         const st = data.stats || {};
         const scope = data.graph_scope || null;
         renderStats(st, scope);
@@ -1650,7 +1877,7 @@
 
         if (!data.nodes || data.nodes.length === 0) {
             graphEl.style.display = 'none';
-            emptyEl.style.display = 'block';
+            if (emptyEl) emptyEl.style.display = 'flex';
             const flt = (scope && scope.filters) || {};
             const hasFilter = !!(
                 flt.search ||
@@ -1663,13 +1890,15 @@
                 (scope &&
                     scope.sql_fetched_rows === 0 &&
                     (scope.total_link_rows_in_db || 0) > 0);
-            if (noMatchScope) {
-                emptyEl.textContent =
-                    'Aucun lien ne correspond à ce périmètre. Élargissez la recherche ou les plafonds.';
-            } else {
-                emptyEl.textContent = emptyElDefaultText;
+            if (emptyEl) {
+                if (noMatchScope) {
+                    emptyEl.textContent =
+                        'Aucun lien ne correspond à ce périmètre. Élargissez la recherche ou les plafonds.';
+                } else {
+                    emptyEl.textContent = emptyElDefaultText;
+                }
             }
-            if (graphResizeObserver && wrapEl) {
+            if (graphResizeObserver) {
                 try {
                     graphResizeObserver.disconnect();
                 } catch (e) {}
@@ -1692,7 +1921,7 @@
         }
 
         graphEl.style.display = 'block';
-        emptyEl.style.display = 'none';
+        if (emptyEl) emptyEl.style.display = 'none';
 
         lastRaw = { nodes: data.nodes || [], edges: data.edges || [] };
         thumbUrlDataUrl.clear();
@@ -1720,7 +1949,7 @@
         edgesDS = new vis.DataSet(vEdges);
 
         if (network) network.destroy();
-        if (graphResizeObserver && wrapEl) {
+        if (graphResizeObserver) {
             try {
                 graphResizeObserver.disconnect();
             } catch (e) {}
@@ -1731,13 +1960,22 @@
             graphResizeHandler = null;
         }
         physicsEnabled = true;
+        if (btnPhysics) btnPhysics.classList.add('md-btn--filled');
+
+        var postLoadPhysicsMinMs = 1300;
+        var postLoadPhysicsT0 = Date.now();
 
         network = new vis.Network(graphEl, { nodes: nodesDS, edges: edgesDS }, networkOptions(true));
+        try {
+            network.startSimulation();
+        } catch (eSim) {}
 
         function syncGraphSize() {
-            if (!network || !wrapEl || !graphEl) return;
-            const w = wrapEl.clientWidth;
-            const h = wrapEl.clientHeight;
+            if (!network || !graphEl) return;
+            const host = graphSizeHost();
+            if (!host) return;
+            const w = host.clientWidth;
+            const h = host.clientHeight;
             if (w < 48 || h < 48) return;
             try {
                 network.setSize(w + 'px', h + 'px');
@@ -1745,33 +1983,78 @@
             } catch (e) {}
         }
         syncGraphSize();
-        if (typeof ResizeObserver !== 'undefined' && wrapEl) {
-            graphResizeObserver = new ResizeObserver(function () {
-                syncGraphSize();
+        if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(function () {
+                requestAnimationFrame(function () {
+                    syncGraphSize();
+                });
             });
-            graphResizeObserver.observe(wrapEl);
+        }
+        if (typeof ResizeObserver !== 'undefined') {
+            const observeEl = graphSizeHost();
+            if (observeEl) {
+                graphResizeObserver = new ResizeObserver(function () {
+                    syncGraphSize();
+                });
+                graphResizeObserver.observe(observeEl);
+            }
         }
         graphResizeHandler = function () {
             syncGraphSize();
         };
         window.addEventListener('resize', graphResizeHandler);
 
-        let initialFitDone = false;
-        function doInitialFit() {
-            if (initialFitDone || !network) return;
-            initialFitDone = true;
+        let graphPostLoadLayoutDone = false;
+        var postLoadFinishTimer = null;
+        function finishPostLoadPhysicsAndFit() {
+            if (graphPostLoadLayoutDone || !network) return;
+            graphPostLoadLayoutDone = true;
+            if (postLoadFinishTimer) {
+                try {
+                    clearTimeout(postLoadFinishTimer);
+                } catch (eClr) {}
+                postLoadFinishTimer = null;
+            }
             physicsEnabled = false;
-            network.setOptions({ physics: { enabled: false } });
+            try {
+                network.setOptions({ physics: { enabled: false } });
+            } catch (e) {}
             if (btnPhysics) btnPhysics.classList.remove('md-btn--filled');
-            network.fit({
-                animation: {
-                    duration: 520,
-                    easingFunction: 'easeInOutQuad',
-                },
-            });
+            try {
+                network.fit({
+                    animation: {
+                        duration: 720,
+                        easingFunction: 'easeInOutQuad',
+                    },
+                    padding: 32,
+                });
+            } catch (e2) {}
         }
-        network.once('stabilizationIterationsDone', doInitialFit);
-        setTimeout(doInitialFit, 4000);
+        function scheduleFinishAfterMinDelay() {
+            if (graphPostLoadLayoutDone || !network) return;
+            var elapsed = Date.now() - postLoadPhysicsT0;
+            var wait = Math.max(0, postLoadPhysicsMinMs - elapsed);
+            if (postLoadFinishTimer) {
+                try {
+                    clearTimeout(postLoadFinishTimer);
+                } catch (eClr2) {}
+                postLoadFinishTimer = null;
+            }
+            postLoadFinishTimer = window.setTimeout(function () {
+                postLoadFinishTimer = null;
+                finishPostLoadPhysicsAndFit();
+            }, wait);
+        }
+        var stabilizationPhaseReported = false;
+        function onStabilizationPhaseDone() {
+            if (stabilizationPhaseReported) return;
+            stabilizationPhaseReported = true;
+            scheduleFinishAfterMinDelay();
+        }
+        network.on('stabilizationIterationsDone', onStabilizationPhaseDone);
+        window.setTimeout(function () {
+            if (!graphPostLoadLayoutDone) onStabilizationPhaseDone();
+        }, 4800);
 
         network.on('click', function (params) {
             if (params.nodes && params.nodes.length) {
@@ -1821,16 +2104,31 @@
     }
 
     function loadGraph() {
-        setLoading(true);
-        graphEl.style.display = 'block';
-        emptyEl.style.display = 'none';
-        errEl.style.display = 'none';
-        errEl.textContent = '';
-        if (statsWrap) statsWrap.innerHTML = '<span class="agences-chip">Chargement…</span>';
+        var url;
+        try {
+            setLoading(true);
+            if (graphEl) graphEl.style.display = 'block';
+            if (emptyEl) emptyEl.style.display = 'none';
+            if (errEl) {
+                errEl.style.display = 'none';
+                errEl.textContent = '';
+            }
+            if (statsWrap) statsWrap.innerHTML = '<span class="agences-chip">Chargement…</span>';
 
-        const qp = buildGraphQueryParams();
-        const qs = qp.toString();
-        const url = '/api/entreprises/graph' + (qs ? '?' + qs : '');
+            const qp = buildGraphQueryParams();
+            const qs = qp.toString();
+            url = '/api/entreprises/graph' + (qs ? '?' + qs : '');
+        } catch (e0) {
+            try {
+                if (errEl) {
+                    errEl.style.display = 'flex';
+                    errEl.textContent =
+                        'Erreur avant chargement : ' + (e0 && e0.message ? e0.message : String(e0));
+                }
+            } catch (e1) {}
+            setLoading(false);
+            return;
+        }
 
         fetch(url, { credentials: 'same-origin' })
             .then(function (r) {
@@ -1839,16 +2137,18 @@
             })
             .then(function (data) {
                 if (!data.success && data.error) throw new Error(data.error);
-                errEl.style.display = 'none';
+                if (errEl) errEl.style.display = 'none';
                 render(data);
             })
             .catch(function (err) {
-                graphEl.style.display = 'none';
-                emptyEl.style.display = 'none';
-                errEl.style.display = 'block';
-                errEl.textContent = 'Impossible de charger le graphe : ' + (err.message || err);
+                if (graphEl) graphEl.style.display = 'none';
+                if (emptyEl) emptyEl.style.display = 'none';
+                if (errEl) {
+                    errEl.style.display = 'flex';
+                    errEl.textContent = 'Impossible de charger le graphe : ' + (err.message || err);
+                }
                 if (statsWrap) statsWrap.innerHTML = '';
-                if (graphResizeObserver && wrapEl) {
+                if (graphResizeObserver) {
                     try {
                         graphResizeObserver.disconnect();
                     } catch (e) {}
@@ -2004,11 +2304,56 @@
     if (btnTheme) btnTheme.addEventListener('click', cycleThemePreference);
     syncThemeClasses();
     updateThemeToggleUi();
+    graphFsUpdateBtnIcon();
+    syncFiltersCollapsedFromStorage();
+    bindFiltersAccordion();
+    if (filtersCollapseToggleEl && filtersPanelEl) {
+        filtersCollapseToggleEl.addEventListener('click', function () {
+            var isCollapsed = filtersPanelEl.classList.contains('agences-filters--collapsed');
+            var next = !isCollapsed;
+            applyFiltersCollapsed(next);
+            try {
+                localStorage.setItem(FILTERS_COLLAPSED_KEY, next ? 'true' : 'false');
+            } catch (e) {}
+        });
+    }
     if (nodeCardClose) nodeCardClose.addEventListener('click', hideNodeCard);
+
+    if (btnFullscreen && wrapEl) {
+        btnFullscreen.addEventListener('click', function (e) {
+            e.stopPropagation();
+            if (graphFsActive()) graphFsLeave();
+            else graphFsEnter();
+        });
+    }
+    if (fsFiltersToggle) {
+        fsFiltersToggle.addEventListener('click', function (e) {
+            e.stopPropagation();
+            graphFsToggleDropdown();
+        });
+    }
+    document.addEventListener('click', function (ev) {
+        if (!graphFsDropdownOpen || !fsFiltersDropdown || !fsFiltersToggle) return;
+        var t = ev.target;
+        if (fsFiltersDropdown.contains(t) || fsFiltersToggle.contains(t)) return;
+        graphFsCloseDropdown(false);
+    });
+    document.addEventListener('fullscreenchange', graphFsSyncFromDocument);
+    document.addEventListener('webkitfullscreenchange', graphFsSyncFromDocument);
+    document.addEventListener('MSFullscreenChange', graphFsSyncFromDocument);
+
     document.addEventListener('keydown', function (ev) {
         if (ev.key !== 'Escape') return;
         if (scopeAutocompleteEl && scopeAutocompleteEl.classList.contains('is-open')) {
             hideScopeAutocomplete();
+            return;
+        }
+        if (graphFsDropdownOpen) {
+            graphFsCloseDropdown(false);
+            return;
+        }
+        if (graphFsPseudo) {
+            graphFsLeave();
             return;
         }
         hideNodeCard();

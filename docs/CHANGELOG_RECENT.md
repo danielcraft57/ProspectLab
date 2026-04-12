@@ -5,12 +5,13 @@ Ce document résume les changements techniques importants pour la maintenance et
 ## Graph entreprises & liens externes (avril 2026)
 
 - **Page `/graph-entreprises`** : graphe interactif (vis-network) entre fiches entreprise et domaines tiers ; filtres locaux, périmètre serveur (recherche, domaine, plafonds, IDs), export PNG, thème clair/sombre.
+- **UI graphe (refonte)** : surcouche type Material 3 ; rail de stats en tête du cadre ; **dock** d’actions en colonne à droite, hauteur alignée sur la zone canvas (`top` / `bottom` + scroll interne) pour corriger débordements / coupures ; plein écran avec languette **Filtres & périmètre** ; conteneur vis `#graph-entreprises-canvas` ; la page reste accessible via redirection **301** depuis **`/agences-reseau`** (ancienne URL).
 - **API `GET /api/entreprises/graph`** : échantillonnage paramétrable ; nœuds enrichis (`favicon` fiche, `thumb_url` domaine issu du mini-scrape, pas de favicons via services Google).
 - **Schéma BDD** : `external_domains`, `entreprise_external_links`, `external_link_pages` et tables filles (OG, images, lieux, téléphones) ; migration suppression des colonnes JSON obsolètes sur `external_link_pages` lorsque présentes.
 - **Mini-scrape** : `services/external_mini_scraper.py` (homepage + niveau 1), classification, extraction favicon / OG / lieux ; intégration au pipeline scraping / analyses via `ExternalLinksManager` et tâches Celery associées.
 - **UX infobulles** : titres vis-network passés en **éléments DOM** (HTML non interprété en chaîne depuis vis-network 9) ; cartes stat label/valeur **sur une seule ligne**, sections icônées, variables CSS sur `documentElement` pour le thème.
 - **Script** : `scripts/clear_external_graph.py` pour vider les données du graphe externe.
-- **Documentation** : [guides/GRAPH_ENTREPRISES.md](guides/GRAPH_ENTREPRISES.md), mises à jour INDEX, interface utilisateur, README, SCRIPTS.
+- **Documentation** : [guides/GRAPH_ENTREPRISES.md](guides/GRAPH_ENTREPRISES.md) (dock, plein écran, fichiers, redirect), INDEX, [INTERFACE_UTILISATEUR.md](guides/INTERFACE_UTILISATEUR.md), README, SCRIPTS.
 
 ## UI Entreprises, notifications et relance analyses (mars 2026)
 

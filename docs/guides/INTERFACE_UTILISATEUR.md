@@ -59,9 +59,8 @@ Affiche toutes les entreprises importees avec leurs informations principales.
 - **Etoile** : Marquer / demarquer comme favori (mise a jour temps reel)
 - **Bouton de scraping** : Lancer un scraping pour une entreprise specifique
 
-### Graph entreprises (liens externes)
+#### Relance des analyses (cartes et lignes)
 
-Page dediee listant les **relations entre fiches et domaines tiers** (liens sortants detectes au scraping). Filtres, carte detail au clic, infobulles enrichies, export PNG. Voir le guide detaille : [GRAPH_ENTREPRISES.md](GRAPH_ENTREPRISES.md).
 - **Boutons de relance sur les indicateurs** :
   - un petit bouton `↻` sous la jauge **Securite** relance l'**analyse technique** pour l'entreprise courante,
   - un bouton `↻` sous la jauge **SEO** relance l'**analyse SEO**,
@@ -70,6 +69,10 @@ Page dediee listant les **relations entre fiches et domaines tiers** (liens sort
   - un **loader circulaire** recouvre uniquement la jauge concernee,
   - a la fin de l'analyse, la jauge est mise a jour en temps reel (sans recharger la page),
   - une **notification** en haut de l'ecran affiche le resultat : `"NomEntreprise — Analyse technique/SEO terminee"` ou un message d'erreur.
+
+### Graph entreprises (liens externes)
+
+Page **`/graph-entreprises`** (l'ancienne URL **`/agences-reseau`** redirige en permanence vers celle-ci). Visualisation des **relations entre fiches et domaines tiers** (liens sortants au scraping) : graphe vis-network, rail de stats, dock d'actions a droite (plein ecran, zoom, export PNG, theme, etc.), filtres locaux et panneau de **perimetre serveur**, carte detail au clic, infobulles enrichies. Guide detaille : [GRAPH_ENTREPRISES.md](GRAPH_ENTREPRISES.md).
 
 ### Fiche entreprise detaillee
 
