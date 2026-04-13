@@ -44,6 +44,16 @@ Le package `python-dotenv` est inclus dans `requirements.txt` et sera installé 
 - **OSINT_TOOL_TIMEOUT** : Timeout pour les outils OSINT en secondes (défaut: 60)
 - **PENTEST_TOOL_TIMEOUT** : Timeout pour les outils Pentest en secondes (défaut: 120)
 
+#### Pentest — formulaires web (tâches Celery)
+Utilisées par `tasks/pentest_tasks.py` et `services/pentest_analyzer.py` pour les sondes sur les formulaires détectés au scraping.
+
+- **PENTEST_FORM_PARALLEL_WORKERS** : Nombre de threads HTTP en parallèle pour les tests « légers » par formulaire (défaut: **8**). Sur machine peu de cœurs (ex. worker cluster 2 vCPU), baisser à **2**. Avec **PENTEST_FORM_SQLMAP_PROBE** actif, le code force **1** fil (sqlmap / WSL).
+- **PENTEST_FORM_HTTP_TIMEOUT** : Timeout en secondes des requêtes HTTP de ces tests (défaut: **4**).
+- **PENTEST_FORM_SQLMAP_PROBE** : `1` / `true` / `yes` pour activer une sonde **sqlmap** par formulaire (lourd, souvent **WSL** sous Windows). Défaut: désactivé.
+- **PENTEST_SQLMAP_FORM_TIMEOUT** : Timeout en secondes pour l’exécution sqlmap par formulaire si la sonde est active (défaut: **90**).
+
+Les modèles locaux **`.env.prod`** / **`.env.cluster`** (souvent ignorés par Git, voir `.gitignore`) peuvent fixer des valeurs conservatrices selon le matériel (ex. Pi 5 en prod seule, worker 2 vCPU en cluster) ; à recopier en `.env` sur chaque machine et à ajuster.
+
 ## Configuration Email
 
 Pour pouvoir envoyer des emails, configurez les paramètres SMTP dans `config.py` ou via les variables d'environnement.

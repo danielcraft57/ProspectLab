@@ -2,6 +2,12 @@
 
 Ce document résume les changements techniques importants pour la maintenance et le déploiement.
 
+## Docs, env pentest formulaires, touchpoints BDD, cluster (avril 2026)
+
+- **Documentation** : variables `PENTEST_FORM_*` / `PENTEST_SQLMAP_FORM_TIMEOUT` dans `docs/configuration/CONFIGURATION.md`, `ENVIRONNEMENTS_ET_DEPLOIEMENT.md` (exemples `.env`, sections 1.3–1.6 réordonnées), `docs/CELERY.md`, `docs/techniques/PENTEST_TOOLS.md` ; `env.example` complété ; `docs/INDEX.md` (ménage doublon, table `entreprise_touchpoints`).
+- **Schéma SQLite** : `ensure_entreprise_touchpoints_table()` appelée depuis `services/database/__init__.py` pour les bases sans table `entreprise_touchpoints` (corrige l’API Prospection / touchpoints).
+- **Fichiers d’environnement locaux** (hors Git, `.gitignore`) : `.env` / `.env.prod` / `.env.cluster` — réglages Celery et `PENTEST_FORM_PARALLEL_WORKERS` calés sur le matériel mesuré (ex. Pi 5 quatre cœurs en prod, worker cluster deux vCPU).
+
 ## Graph entreprises & liens externes (avril 2026)
 
 - **Page `/graph-entreprises`** : graphe interactif (vis-network) entre fiches entreprise et domaines tiers ; filtres locaux, périmètre serveur (recherche, domaine, plafonds, IDs), export PNG, thème clair/sombre.

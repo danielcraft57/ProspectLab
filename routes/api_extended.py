@@ -1171,7 +1171,21 @@ def website_full_analysis_start():
 
     netloc = urlparse(website).netloc or website
     filename = f'full-scan:{netloc}'
-    parametres = {'source': 'website_full', 'url': website}
+    enable_technical = bool(payload.get('enable_technical', True))
+    enable_osint = bool(payload.get('enable_osint', True))
+    enable_pentest = bool(payload.get('enable_pentest', True))
+    # SEO toujours inclus dans ce pack (Lighthouse reste optionnel via use_lighthouse).
+    enable_seo = True
+    parametres = {
+        'source': 'website_full',
+        'url': website,
+        'modules': {
+            'technical': enable_technical,
+            'seo': True,
+            'osint': enable_osint,
+            'pentest': enable_pentest,
+        },
+    }
 
     analyse_id = database.create_pending_analysis(filename, parametres, total_entreprises=1)
     if not analyse_id:
@@ -1213,6 +1227,10 @@ def website_full_analysis_start():
                 max_pages=max_pages,
                 enable_nmap=enable_nmap,
                 use_lighthouse=use_lighthouse,
+                enable_technical=enable_technical,
+                enable_seo=enable_seo,
+                enable_osint=enable_osint,
+                enable_pentest=enable_pentest,
             ),
             queue=CELERY_FULL_ANALYSIS_QUEUE,
         )

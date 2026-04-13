@@ -5,7 +5,7 @@
 {% block content %}
 <div class="page-header full-analysis-page">
     <h1>Analyse complète depuis un site web</h1>
-    <p>Scraping (emails, images, formulaires), puis analyses technique, SEO, OSINT et pentest. Les résultats sont enregistrés pour l’entreprise associée dans la base.</p>
+    <p>Scraping (emails, images, formulaires) et analyse SEO toujours inclus ; cochez les modules optionnels (technique, OSINT, pentest). Les résultats sont enregistrés sur la fiche entreprise.</p>
 </div>
 
 <div class="new-analysis-section full-analysis-page">
@@ -41,16 +41,35 @@
                 </div>
 
                 <fieldset class="full-analysis-options">
-                    <legend class="full-analysis-options-legend">Options</legend>
-                    <div class="full-analysis-option-row">
+                    <legend class="full-analysis-options-legend">Modules d’analyse</legend>
+                    <div class="full-analysis-option-row full-analysis-option-row--modules">
                         <label class="form-checkbox full-analysis-checkbox">
-                            <input type="checkbox" id="full-analysis-nmap">
-                            <span>Nmap (analyse technique, plus long)</span>
+                            <input type="checkbox" id="full-analysis-enable-technical" checked>
+                            <span>Analyse technique</span>
                         </label>
                         <label class="form-checkbox full-analysis-checkbox">
-                            <input type="checkbox" id="full-analysis-lighthouse">
-                            <span>Lighthouse (SEO, plus lourd)</span>
+                            <input type="checkbox" id="full-analysis-enable-osint" checked>
+                            <span>OSINT</span>
                         </label>
+                        <label class="form-checkbox full-analysis-checkbox">
+                            <input type="checkbox" id="full-analysis-enable-pentest" checked>
+                            <span>Pentest</span>
+                        </label>
+                    </div>
+                    <p class="full-analysis-suboptions-intro" id="full-analysis-suboptions-intro">Options avancées</p>
+                    <div class="full-analysis-option-row full-analysis-option-row--advanced" id="full-analysis-advanced-row">
+                        <div class="full-analysis-suboption" id="full-analysis-nmap-wrap" hidden>
+                            <label class="form-checkbox full-analysis-checkbox">
+                                <input type="checkbox" id="full-analysis-nmap">
+                                <span>Nmap (analyse technique, plus long)</span>
+                            </label>
+                        </div>
+                        <div class="full-analysis-suboption" id="full-analysis-lighthouse-wrap">
+                            <label class="form-checkbox full-analysis-checkbox">
+                                <input type="checkbox" id="full-analysis-lighthouse">
+                                <span>Lighthouse (SEO, plus lourd)</span>
+                            </label>
+                        </div>
                     </div>
                 </fieldset>
             </form>

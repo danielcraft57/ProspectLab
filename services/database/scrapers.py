@@ -186,6 +186,27 @@ class ScraperManager(DatabaseBase):
         """
         conn = self.get_connection()
         cursor = conn.cursor()
+
+        # Dédupliquer les formulaires avant BDD (même méthode + action canonique, comme le pentest)
+        if forms is not None:
+            if isinstance(forms, str):
+                try:
+                    forms = json.loads(forms)
+                except Exception:
+                    forms = []
+            if isinstance(forms, list) and len(forms) > 0:
+                from services.pentest_analyzer import deduplicate_forms_for_storage
+
+                n_raw = len(forms)
+                forms = deduplicate_forms_for_storage(forms, url)
+                total_forms = len(forms)
+                if n_raw > len(forms):
+                    logger.info(
+                        f'Formulaires dédupliqués pour la BDD : {n_raw} -> {len(forms)} '
+                        f'(entreprise_id={entreprise_id}, url={url})'
+                    )
+            elif isinstance(forms, list):
+                total_forms = 0
         
         # Convertir en JSON si nécessaire
         emails_json = json.dumps(emails) if emails and not isinstance(emails, str) else (emails or None)
@@ -806,6 +827,26 @@ class ScraperManager(DatabaseBase):
         
         conn = self.get_connection()
         cursor = conn.cursor()
+        self.execute_sql(cursor, 'SELECT url FROM scrapers WHERE id = ?', (scraper_id,))
+        row = cursor.fetchone()
+        base_url = ''
+        if row:
+            base_url = row['url'] if isinstance(row, dict) else row[0]
+        if isinstance(forms, str):
+            try:
+                forms = json.loads(forms)
+            except Exception:
+                forms = []
+        if isinstance(forms, list) and len(forms) > 0 and base_url:
+            from services.pentest_analyzer import deduplicate_forms_for_storage
+
+            n_raw = len(forms)
+            forms = deduplicate_forms_for_storage(forms, base_url)
+            if n_raw > len(forms):
+                logger.info(
+                    f'Formulaires dédupliqués (save_scraper_forms) : {n_raw} -> {len(forms)} '
+                    f'(scraper_id={scraper_id})'
+                )
         self._save_scraper_forms_in_transaction(cursor, scraper_id, entreprise_id, forms)
         conn.commit()
         conn.close()
@@ -1267,6 +1308,7 @@ class ScraperManager(DatabaseBase):
             scraper['social_profiles'] = self.get_scraper_social_profiles(scraper_id)
             scraper['technologies'] = self.get_scraper_technologies(scraper_id)
             scraper['people'] = self.get_scraper_people(scraper_id)
+            scraper['forms'] = self.get_scraper_forms(scraper_id)
             
             # Charger les images depuis la table images
             scraper['images'] = self.get_images_by_scraper(scraper_id)
@@ -1314,6 +1356,7 @@ class ScraperManager(DatabaseBase):
             scraper['social_profiles'] = self.get_scraper_social_profiles(scraper_id)
             scraper['technologies'] = self.get_scraper_technologies(scraper_id)
             scraper['people'] = self.get_scraper_people(scraper_id)
+            scraper['forms'] = self.get_scraper_forms(scraper_id)
             
             # Metadata reste en JSON pour l'instant (structure complexe)
             if scraper.get('metadata'):

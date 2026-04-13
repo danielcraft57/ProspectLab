@@ -74,6 +74,8 @@ celery -A celery_app worker --pool=threads --concurrency=6 -Q celery,scraping,sc
 
 Variables utiles (`.env`) : `CELERY_WORKERS`, `CELERY_WORKER_QUEUES`, `CELERY_WORKER_QUEUE_PRESET` (Linux), `CELERY_FULL_ANALYSIS_QUEUE`, `CELERY_BULK_STAGGER_SEC`, `CELERY_WORKER_PREFETCH_MULTIPLIER`, `CELERY_TASK_ACKS_LATE`, ainsi que les timeouts SEO / OSINT / Pentest (section « Analyses lourdes » dans `.env`).
 
+**Pentest — tests sur formulaires** (file `pentest`, `tasks/pentest_tasks.py`) : le parallélisme des requêtes HTTP légères est régi par **`PENTEST_FORM_PARALLEL_WORKERS`** (défaut code **8** ; réduire sur petits workers, ex. **2** pour 2 vCPU). **`PENTEST_FORM_HTTP_TIMEOUT`** limite la durée d’une requête. **`PENTEST_FORM_SQLMAP_PROBE`** active sqlmap (lourd, souvent 1 fil) ; **`PENTEST_SQLMAP_FORM_TIMEOUT`** borne sqlmap. Détail : [CONFIGURATION.md](configuration/CONFIGURATION.md) (section *Pentest — formulaires web*).
+
 ## Tâches périodiques (Beat) - campagnes et bounces
 
 ProspectLab utilise Celery Beat pour plusieurs tâches de fond:

@@ -279,8 +279,11 @@ if __name__ == '__main__':
     """
     Point d'entrée principal de l'application
     
-    Pour démarrer l'application :
-        python app_new.py
+    Pour démarrer l'application (Socket.IO inclus — recommandé en dev) :
+        python app.py
+    
+    Éviter ``flask run`` pour le temps réel : sans ``socketio.run``, les WebSockets
+    / reconnexions Socket.IO peuvent échouer.
         
     Pour démarrer Celery (dans un terminal séparé) :
         celery -A celery_app worker --loglevel=info --pool=threads --concurrency=4

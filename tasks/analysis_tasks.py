@@ -1119,6 +1119,10 @@ def full_website_analysis_task(
     max_pages=40,
     enable_nmap=False,
     use_lighthouse=False,
+    enable_technical=True,
+    enable_seo=True,
+    enable_osint=True,
+    enable_pentest=True,
 ):
     from tasks.full_website_analysis import run_full_website_analysis_impl
 
@@ -1133,5 +1137,9 @@ def full_website_analysis_task(
         max_pages=max_pages,
         enable_nmap=enable_nmap,
         use_lighthouse=use_lighthouse,
+        enable_technical=enable_technical,
+        enable_seo=enable_seo,
+        enable_osint=enable_osint,
+        enable_pentest=enable_pentest,
     )
 

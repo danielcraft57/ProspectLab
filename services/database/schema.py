@@ -144,6 +144,100 @@ class DatabaseSchema(DatabaseBase):
         finally:
             conn.close()
 
+    def ensure_entreprise_touchpoints_table(self):
+        """
+        Migration idempotente : journal des interactions (Prospection / touchpoints).
+        Bases créées avant l’ajout de la table, ou processus ayant sauté init_database
+        partiellement : évite OperationalError sur les routes touchpoints.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS entreprise_touchpoints (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entreprise_id INTEGER NOT NULL,
+                    canal TEXT NOT NULL,
+                    sujet TEXT NOT NULL,
+                    note TEXT,
+                    happened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_by INTEGER,
+                    FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE
+                )
+                ''',
+            )
+            self.safe_execute_sql(cursor, 'ALTER TABLE entreprise_touchpoints ADD COLUMN note TEXT')
+            self.safe_execute_sql(cursor, 'ALTER TABLE entreprise_touchpoints ADD COLUMN created_by INTEGER')
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_touchpoints_entreprise_id ON entreprise_touchpoints(entreprise_id)',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_touchpoints_happened_at ON entreprise_touchpoints(happened_at)',
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def ensure_pentest_forms_normalized_tables(self):
+        """
+        Migration idempotente : tables normalisées des tests formulaires pentest.
+        Nécessaire pour les workers Celery démarrés avant l’ajout du schéma
+        (init_database() ne tourne qu’une fois par processus).
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS analysis_pentest_forms_summary (
+                    analysis_id INTEGER NOT NULL PRIMARY KEY,
+                    forms_detected_scraper INTEGER,
+                    forms_unique_targets INTEGER,
+                    forms_with_result_row INTEGER,
+                    date_found TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (analysis_id) REFERENCES analyses_pentest(id) ON DELETE CASCADE
+                )
+                ''',
+            )
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS analysis_pentest_form_checks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    analysis_id INTEGER NOT NULL,
+                    action_url TEXT NOT NULL,
+                    method TEXT,
+                    has_csrf INTEGER,
+                    has_password INTEGER,
+                    has_file_upload INTEGER,
+                    sql_injection INTEGER DEFAULT 0,
+                    xss INTEGER DEFAULT 0,
+                    csrf_missing INTEGER DEFAULT 0,
+                    password_plaintext INTEGER DEFAULT 0,
+                    file_upload_unsafe INTEGER DEFAULT 0,
+                    vuln_count INTEGER DEFAULT 0,
+                    error_message TEXT,
+                    details_json TEXT,
+                    date_found TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (analysis_id) REFERENCES analyses_pentest(id) ON DELETE CASCADE,
+                    UNIQUE(analysis_id, action_url, method)
+                )
+                ''',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_pentest_form_checks_analysis ON analysis_pentest_form_checks(analysis_id)',
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def init_database(self):
         """
         Initialise les tables de la base de données
@@ -1103,6 +1197,41 @@ class DatabaseSchema(DatabaseBase):
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_pentest_security_headers_analysis_id ON analysis_pentest_security_headers(analysis_id)')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_pentest_cms_vuln_analysis_id ON analysis_pentest_cms_vulnerabilities(analysis_id)')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_pentest_ports_analysis_id ON analysis_pentest_open_ports(analysis_id)')
+        
+        # Pentest formulaires : résumé dédup + une ligne par formulaire testé (requêtes / exports)
+        self.execute_sql(cursor,'''
+            CREATE TABLE IF NOT EXISTS analysis_pentest_forms_summary (
+                analysis_id INTEGER NOT NULL PRIMARY KEY,
+                forms_detected_scraper INTEGER,
+                forms_unique_targets INTEGER,
+                forms_with_result_row INTEGER,
+                date_found TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (analysis_id) REFERENCES analyses_pentest(id) ON DELETE CASCADE
+            )
+        ''')
+        self.execute_sql(cursor,'''
+            CREATE TABLE IF NOT EXISTS analysis_pentest_form_checks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                analysis_id INTEGER NOT NULL,
+                action_url TEXT NOT NULL,
+                method TEXT,
+                has_csrf INTEGER,
+                has_password INTEGER,
+                has_file_upload INTEGER,
+                sql_injection INTEGER DEFAULT 0,
+                xss INTEGER DEFAULT 0,
+                csrf_missing INTEGER DEFAULT 0,
+                password_plaintext INTEGER DEFAULT 0,
+                file_upload_unsafe INTEGER DEFAULT 0,
+                vuln_count INTEGER DEFAULT 0,
+                error_message TEXT,
+                details_json TEXT,
+                date_found TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (analysis_id) REFERENCES analyses_pentest(id) ON DELETE CASCADE,
+                UNIQUE(analysis_id, action_url, method)
+            )
+        ''')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_pentest_form_checks_analysis ON analysis_pentest_form_checks(analysis_id)')
         
         # Table des analyses SEO
         self.execute_sql(cursor,'''

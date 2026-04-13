@@ -105,6 +105,13 @@ class Database(
                 'Migration market_roadmap_actions non appliquée', exc_info=True
             )
 
+        try:
+            self.ensure_entreprise_touchpoints_table()
+        except Exception:
+            logging.getLogger(__name__).warning(
+                'Migration entreprise_touchpoints non appliquée', exc_info=True
+            )
+
         # Initialiser la base de données (créer les tables) une seule fois par process.
         # Permet un contournement explicite via env pour debug/migration forcée.
         force_each_instance = str(os.environ.get('DB_INIT_EACH_INSTANCE', '')).strip().lower() in (
@@ -120,6 +127,14 @@ class Database(
                     logging.getLogger(__name__).info(
                         'Schéma DB initialisé (once par process).'
                     )
+
+        try:
+            self.ensure_pentest_forms_normalized_tables()
+        except Exception:
+            logging.getLogger(__name__).warning(
+                'Migration analysis_pentest_forms_summary / analysis_pentest_form_checks non appliquée',
+                exc_info=True,
+            )
 
         try:
             self.ensure_web_external_links_table()

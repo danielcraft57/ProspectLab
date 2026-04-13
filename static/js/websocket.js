@@ -21,11 +21,29 @@ class ProspectLabWebSocket {
     _detectForcePollingOnly() {
         try {
             const host = (window.location.hostname || '').toLowerCase();
-            const path = (window.location.pathname || '').toLowerCase();
-            const looksLocal = host === '127.0.0.1' || host === 'localhost';
-            const looksPreview = path.includes('/preview');
-            // En dev, /preview a des "ping timeout" sur websocket -> polling-only stabilise.
-            return looksLocal && looksPreview;
+            const looksLocal =
+                host === '127.0.0.1' ||
+                host === 'localhost' ||
+                host === '[::1]';
+            if (!looksLocal) {
+                return false;
+            }
+            // Réactiver l’upgrade WebSocket : ?ws_upgrade=1 ou localStorage ws_force_websocket=1
+            try {
+                const qs = new URLSearchParams(window.location.search || '');
+                if (qs.get('ws_upgrade') === '1') {
+                    return false;
+                }
+            } catch (e) {}
+            try {
+                if (localStorage.getItem('ws_force_websocket') === '1') {
+                    return false;
+                }
+            } catch (e) {}
+            // Werkzeug + Flask-SocketIO (threading) : l’upgrade WS casse souvent sous Windows
+            // (« WebSocket is closed before the connection is established ») → polling HTTP stable.
+            // Ancien cas /preview : inchangé, mais tout l’hôte local en bénéficie en dev.
+            return true;
         } catch (e) {
             return false;
         }
@@ -86,6 +104,8 @@ class ProspectLabWebSocket {
         // En dev (notamment Windows + eventlet), le transport websocket peut être instable.
         // On bascule automatiquement en "polling only" si on détecte une rafale d'erreurs websocket.
         const base = {
+            path: '/socket.io/',
+            // Origine explicite (évite les résolutions bizarres selon le navigateur)
             reconnection: true,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
@@ -212,7 +232,12 @@ class ProspectLabWebSocket {
         this._connectSeq += 1;
         const opts = this._buildSocketOptions();
         this._dbg('connect() create new socket', { seq: this._connectSeq, opts });
-        this.socket = io(opts);
+        let origin = '';
+        try {
+            origin = window.location.origin || '';
+        } catch (e) {}
+        // io(origin, opts) : même origine que la page (obligatoire si path personnalisé)
+        this.socket = origin ? io(origin, opts) : io(opts);
 
         this.setupEventHandlers();
     }

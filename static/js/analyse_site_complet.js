@@ -92,6 +92,7 @@
             scraping: 'Scraping',
             technical: 'Analyse technique',
             seo: 'SEO',
+            phone_osint: 'OSINT téléphones',
             osint: 'OSINT',
             pentest: 'Pentest',
             init: 'Initialisation',
@@ -112,7 +113,14 @@
             const raw = steps[key];
             if (raw === undefined) return;
             const ok = raw === 'ok';
-            const cls = ok ? 'done' : raw && String(raw).toLowerCase().includes('erreur') ? 'err' : '';
+            const rawLower = raw && String(raw).toLowerCase();
+            const cls = ok
+                ? 'done'
+                : rawLower && rawLower.includes('erreur')
+                  ? 'err'
+                  : rawLower && rawLower.includes('désactiv')
+                    ? 'skip'
+                    : '';
             parts.push(`<li class="${cls}"><strong>${labels[key]} :</strong> ${raw}</li>`);
         });
         const html = parts.join('') || '<li>…</li>';
@@ -152,7 +160,9 @@
                 const result = data.result || {};
                 renderSteps({
                     step: 'done',
-                    message: 'Tous les modules ont été exécutés (voir le détail ci-dessous).',
+                    message:
+                        result.message ||
+                        'Tous les modules sélectionnés ont été exécutés (voir le détail ci-dessous).',
                     steps: result.steps,
                 });
                 return result;
@@ -369,6 +379,45 @@
         return `<h4 class="report-subtitle">${escapeHtml(title)}</h4>`;
     }
 
+    function scrapedLocationRows(loc) {
+        if (!loc || typeof loc !== 'object') return [];
+        const rows = [];
+        if (loc.street_address) rows.push(['Adresse', String(loc.street_address)]);
+        const cityLine = [loc.postal_code, loc.locality].filter(Boolean).join(' ').trim();
+        if (cityLine) rows.push(['Code postal / ville', cityLine]);
+        if (loc.country) rows.push(['Pays', String(loc.country)]);
+        if (loc.telephone) rows.push(['Téléphone (lieu)', String(loc.telephone)]);
+        if (loc.latitude != null && loc.longitude != null) {
+            rows.push(['Coordonnées', `${loc.latitude}, ${loc.longitude}`]);
+        }
+        if (loc.source) rows.push(['Source lieu', String(loc.source)]);
+        return rows;
+    }
+
+    function socialProfileEntries(social) {
+        if (!social || typeof social !== 'object') return [];
+        const out = [];
+        Object.keys(social).forEach((platform) => {
+            const urls = social[platform];
+            const arr = Array.isArray(urls) ? urls : urls ? [urls] : [];
+            arr.forEach((item) => {
+                const u = typeof item === 'object' && item ? item.url : item;
+                if (u) out.push({ platform: String(platform), url: String(u) });
+            });
+        });
+        return out;
+    }
+
+    function safeExternalLink(href, label) {
+        const h = String(href || '').trim();
+        if (!h) return '';
+        const schemeOk = /^https?:\/\//i.test(h);
+        if (!schemeOk) return escapeHtml(label || h);
+        return `<a href="${escapeHtml(h)}" target="_blank" rel="noopener noreferrer">${escapeHtml(
+            label || h
+        )}</a>`;
+    }
+
     function renderScrapingHuman(container, data) {
         if (!container) return;
         if (!data) {
@@ -380,21 +429,28 @@
         const people = data.people || [];
         const phones = data.phones || [];
         const imgs = data.images || [];
+        const forms = data.forms || [];
+        const meta = data.metadata && typeof data.metadata === 'object' ? data.metadata : {};
+        const scrapedLoc = meta.scraped_location;
+        const og = meta.open_graph && typeof meta.open_graph === 'object' ? meta.open_graph : {};
         const te = Number(data.total_emails != null ? data.total_emails : emails.length) || 0;
         const tp = Number(data.total_people != null ? data.total_people : people.length) || 0;
         const tph = Number(data.total_phones != null ? data.total_phones : phones.length) || 0;
         const tim = Number(data.total_images != null ? data.total_images : imgs.length) || 0;
+        const tf = Number(data.total_forms != null ? data.total_forms : forms.length) || 0;
         const dur = data.duration != null ? `${Math.round(Number(data.duration))} s` : null;
         const visited = data.visited_urls;
         const parts = [];
+        parts.push('<div class="report-block report-block--head">');
         parts.push('<div class="report-stats">');
         parts.push(statPill('emails', te));
         parts.push(statPill('personnes', tp));
         parts.push(statPill('téléphones', tph));
         parts.push(statPill('images', tim));
+        if (tf) parts.push(statPill('formulaires', tf));
         if (dur) parts.push(statPill('durée', dur));
         parts.push('</div>');
-        parts.push('<div class="report-kv-grid">');
+        parts.push('<div class="report-kv-grid report-kv-grid--stack">');
         if (data.url) parts.push(kv('URL scrapée', data.url));
         if (visited != null && visited !== '') {
             const disp = Array.isArray(visited) ? `${visited.length} URL collectée(s)` : String(visited);
@@ -402,30 +458,153 @@
         }
         if (data.date_modification || data.date_creation)
             parts.push(kv('Dernière mise à jour', data.date_modification || data.date_creation));
-        parts.push('</div>');
+        parts.push('</div></div>');
+
+        const locRows = scrapedLocationRows(scrapedLoc);
+        const socialEntries = socialProfileEntries(data.social_profiles);
+        const hasContactBlock =
+            locRows.length ||
+            og.site_name ||
+            og.title ||
+            socialEntries.length ||
+            forms.length ||
+            phones.length;
+
+        if (hasContactBlock) {
+            parts.push('<div class="report-block report-block--panel">');
+            parts.push(subtitle('Contact & lieu'));
+            parts.push('<div class="report-kv-grid report-kv-grid--stack">');
+            if (og.site_name) parts.push(kv('Site (meta)', og.site_name));
+            if (og.title && og.title !== og.site_name) parts.push(kv('Titre page', og.title));
+            if (og.description) {
+                const desc =
+                    String(og.description).length > 220
+                        ? `${String(og.description).slice(0, 217)}…`
+                        : og.description;
+                parts.push(kv('Description', desc));
+            }
+            locRows.forEach(([k, v]) => {
+                parts.push(kv(k, v));
+            });
+            parts.push('</div>');
+
+            if (socialEntries.length) {
+                parts.push('<div class="report-subsection">');
+                parts.push(subtitle('Réseaux sociaux'));
+                parts.push('<ul class="report-list report-list-compact">');
+                socialEntries.slice(0, 14).forEach(({ platform, url }) => {
+                    parts.push(
+                        `<li><span class="report-social-plat">${escapeHtml(platform)}</span> — ${safeExternalLink(
+                            url,
+                            url
+                        )}</li>`
+                    );
+                });
+                parts.push('</ul></div>');
+            }
+
+            if (phones.length) {
+                parts.push('<div class="report-subsection">');
+                parts.push(subtitle('Téléphones (détail)'));
+                parts.push('<ul class="report-list report-list-compact">');
+                phones.slice(0, 12).forEach((row) => {
+                    const ph =
+                        typeof row === 'object' && row
+                            ? row.phone || row.phone_e164 || row.value
+                            : String(row);
+                    const locHint =
+                        typeof row === 'object' && row && (row.location || row.carrier || row.line_type)
+                            ? [row.location, row.carrier, row.line_type].filter(Boolean).join(' · ')
+                            : '';
+                    const page =
+                        typeof row === 'object' && row && row.page_url ? String(row.page_url) : '';
+                    let line = ph ? `<strong>${escapeHtml(String(ph))}</strong>` : '—';
+                    if (locHint) line += ` <span class="report-phone-meta">${escapeHtml(locHint)}</span>`;
+                    if (page)
+                        line += `<div class="report-phone-page">${safeExternalLink(page, 'Page source')}</div>`;
+                    parts.push(`<li>${line}</li>`);
+                });
+                parts.push('</ul></div>');
+            }
+
+            if (forms.length) {
+                parts.push('<div class="report-subsection">');
+                parts.push(subtitle('Formulaires repérés'));
+                parts.push('<ul class="report-list report-list-compact">');
+                forms.slice(0, 10).forEach((f) => {
+                    if (!f || typeof f !== 'object') return;
+                    const method = (f.method || 'GET').toUpperCase();
+                    const fc = f.fields_count != null ? `${f.fields_count} champ(s)` : '';
+                    const bits = [method, fc].filter(Boolean).join(' · ');
+                    let line = bits ? `<strong>${escapeHtml(bits)}</strong>` : '';
+                    if (f.page_url) {
+                        line += `<div class="report-form-url">${safeExternalLink(
+                            f.page_url,
+                            f.page_url.length > 72 ? `${f.page_url.slice(0, 69)}…` : f.page_url
+                        )}</div>`;
+                    }
+                    if (f.action_url && f.action_url !== f.page_url) {
+                        line += `<div class="report-form-action">${escapeHtml(String(f.action_url))}</div>`;
+                    }
+                    parts.push(`<li>${line}</li>`);
+                });
+                parts.push('</ul></div>');
+            }
+            parts.push('</div>');
+        }
+
         if (emails.length) {
+            parts.push('<div class="report-block report-block--list">');
             parts.push(subtitle('Extraits d’emails'));
             parts.push('<ul class="report-list report-list-chips">');
             emails.slice(0, 12).forEach((row) => {
                 const addr = typeof row === 'object' && row ? row.email || row.adresse || '' : String(row);
                 if (addr) parts.push(`<li>${escapeHtml(addr)}</li>`);
             });
-            parts.push('</ul>');
+            parts.push('</ul></div>');
         }
         if (people.length) {
+            parts.push('<div class="report-block report-block--list">');
             parts.push(subtitle('Personnes repérées'));
             parts.push('<ul class="report-list">');
             people.slice(0, 10).forEach((p) => {
                 const name =
                     (p && (p.name || [p.prenom, p.nom].filter(Boolean).join(' '))) || '—';
-                parts.push(`<li>${escapeHtml(name)}</li>`);
+                const metaBits = [];
+                if (p && p.title) metaBits.push(escapeHtml(String(p.title)));
+                if (p && p.email) {
+                    const em = String(p.email).trim();
+                    metaBits.push(
+                        `<a href="mailto:${escapeHtml(em)}" class="report-inline-link">${escapeHtml(em)}</a>`
+                    );
+                }
+                if (p && p.linkedin_url) {
+                    metaBits.push(
+                        safeExternalLink(String(p.linkedin_url).trim(), 'LinkedIn')
+                    );
+                }
+                const sub =
+                    metaBits.length > 0
+                        ? `<div class="report-person-meta">${metaBits.join(' · ')}</div>`
+                        : '';
+                const pageLn =
+                    p && p.page_url
+                        ? `<div class="report-person-page">${safeExternalLink(
+                              String(p.page_url),
+                              'Page source'
+                          )}</div>`
+                        : '';
+                parts.push(
+                    `<li><span class="report-person-name">${escapeHtml(name)}</span>${sub}${pageLn}</li>`
+                );
             });
-            parts.push('</ul>');
+            parts.push('</ul></div>');
         }
         container.innerHTML = parts.join('');
         const bits = [];
         if (te) bits.push(`${te} email(s)`);
         if (tp) bits.push(`${tp} pers.`);
+        if (tf) bits.push(`${tf} formulaire${tf > 1 ? 's' : ''}`);
         setTextContent('full-analysis-badge-scraping', bits.length ? bits.join(' · ') : 'Données présentes');
     }
 
@@ -669,6 +848,28 @@
         const form = el('full-analysis-form');
         if (!form) return;
 
+        function syncFullAnalysisAdvancedOptions() {
+            const tech = el('full-analysis-enable-technical');
+            const nmapWrap = el('full-analysis-nmap-wrap');
+            const nmap = el('full-analysis-nmap');
+            const intro = el('full-analysis-suboptions-intro');
+            const lhWrap = el('full-analysis-lighthouse-wrap');
+            const showNmap = tech && tech.checked;
+            const showLh = lhWrap && !lhWrap.hidden;
+            if (nmapWrap) {
+                nmapWrap.hidden = !showNmap;
+                if (nmap) {
+                    nmap.disabled = !showNmap;
+                    if (!showNmap) nmap.checked = false;
+                }
+            }
+            if (intro) intro.hidden = !showNmap && !showLh;
+        }
+
+        const techCb = el('full-analysis-enable-technical');
+        if (techCb) techCb.addEventListener('change', syncFullAnalysisAdvancedOptions);
+        syncFullAnalysisAdvancedOptions();
+
         const urlInput = el('full-analysis-url');
         if (urlInput) {
             urlInput.addEventListener(
@@ -770,8 +971,17 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         website,
+                        enable_technical:
+                            el('full-analysis-enable-technical') &&
+                            el('full-analysis-enable-technical').checked,
+                        enable_osint:
+                            el('full-analysis-enable-osint') && el('full-analysis-enable-osint').checked,
+                        enable_pentest:
+                            el('full-analysis-enable-pentest') &&
+                            el('full-analysis-enable-pentest').checked,
                         enable_nmap: el('full-analysis-nmap') && el('full-analysis-nmap').checked,
-                        use_lighthouse: el('full-analysis-lighthouse') && el('full-analysis-lighthouse').checked,
+                        use_lighthouse:
+                            el('full-analysis-lighthouse') && el('full-analysis-lighthouse').checked,
                     }),
                 });
                 const startData = await startRes.json();

@@ -158,5 +158,5 @@ Avec `sort_commercial`, la réponse est triée par `priority_score` décroissant
 ## Schéma base de données
 
 - Colonne **`entreprises.etape_prospection`** : étape Kanban CRM (texte, défaut « À prospecter »), migrations dans `services/database/schema.py`.
-- Table **`entreprise_touchpoints`** : `entreprise_id`, `canal`, `sujet`, `note`, `happened_at`, `created_at`, `created_by`.
+- Table **`entreprise_touchpoints`** : `entreprise_id`, `canal`, `sujet`, `note`, `happened_at`, `created_at`, `created_by`. Sur une vieille base SQLite sans cette table, `ensure_entreprise_touchpoints_table()` (instanciation `Database`) la crée au prochain redémarrage app / worker.
 - Table **`commercial_priority_profiles`** : profils de pondération (`poids_json`), création / migration idempotente au démarrage (`ensure_commercial_priority_profiles_table`).

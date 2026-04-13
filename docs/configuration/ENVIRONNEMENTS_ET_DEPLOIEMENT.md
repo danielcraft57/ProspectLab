@@ -55,6 +55,11 @@ WSL_USER=loupix
 
 OSINT_TOOL_TIMEOUT=60
 PENTEST_TOOL_TIMEOUT=120
+# Pentest formulaires (voir docs/configuration/CONFIGURATION.md)
+PENTEST_FORM_PARALLEL_WORKERS=8
+PENTEST_FORM_HTTP_TIMEOUT=4
+PENTEST_FORM_SQLMAP_PROBE=0
+PENTEST_SQLMAP_FORM_TIMEOUT=90
 
 # Accès HTTP
 RESTRICT_TO_LOCAL_NETWORK=false
@@ -72,6 +77,10 @@ CELERY_RESULT_BACKEND=redis://localhost:6379/0
 
 OSINT_TOOL_TIMEOUT=60
 PENTEST_TOOL_TIMEOUT=120
+PENTEST_FORM_PARALLEL_WORKERS=8
+PENTEST_FORM_HTTP_TIMEOUT=4
+PENTEST_FORM_SQLMAP_PROBE=0
+PENTEST_SQLMAP_FORM_TIMEOUT=90
 
 # Accès HTTP
 RESTRICT_TO_LOCAL_NETWORK=true
@@ -91,6 +100,17 @@ cp .env.prod .env
 
 Le code ne change pas, seul le contenu du `.env` change selon l'environnement.
 
+### 1.3. Option : variable APP_ENV
+
+Si tu veux aller plus loin, tu peux ajouter une variable :
+
+- `APP_ENV=development`
+- `APP_ENV=production`
+
+Puis l'utiliser dans `config.py` pour ajuster certains paramètres (logs plus verbeux en dev, désactivation du debug en prod, etc.).
+
+Pour l'instant, c'est optionnel : le simple fait d'avoir deux `.env` séparés est déjà suffisant.
+
 ### 1.4. Restriction d'accès HTTP par réseau local
 
 ProspectLab peut être protégé non pas par un système de login classique, mais par une **restriction d'accès HTTP au réseau local/VPN**.
@@ -106,16 +126,18 @@ ProspectLab peut être protégé non pas par un système de login classique, mai
 La détection IP côté Flask utilise en priorité les en-têtes `X-Forwarded-For` / `X-Real-IP` envoyés par Nginx, puis `request.remote_addr`.  
 Assure-toi que ta conf Nginx sur le serveur proxy envoie bien ces en-têtes (voir `DEPLOIEMENT_PRODUCTION.md`).
 
-### 1.3. Option: variable APP_ENV
+### 1.5. Fichiers `.env.prod` / `.env.cluster`
 
-Si tu veux aller plus loin, tu peux ajouter une variable:
+Ces modèles (souvent **hors Git** via `.gitignore`) documentent des réglages **Celery** et **pentest formulaires** adaptés au matériel cible (ex. **Pi 5** pour la prod seule, worker **2 vCPU** pour un fichier cluster partagé). Les copier en `.env` sur chaque machine ; ajuster `CELERY_WORKERS`, `CELERY_WORKER_QUEUES` et `PENTEST_FORM_PARALLEL_WORKERS` si un nœud est plus puissant que le plancher du template.
 
-- `APP_ENV=development`
-- `APP_ENV=production`
+### 1.6. Migrations légères au démarrage (`Database`)
 
-Puis l'utiliser dans `config.py` pour ajuster certains paramètres (logs plus verbeux en dev, désactivation du debug en prod, etc.).
+Certaines tables ou colonnes sont assurées à chaque instanciation de `Database` (pas seulement lors du premier `init_database()` du processus), pour les bases créées avant l’ajout du schéma ou les workers démarrés sans passage complet d’`init_database()` :
 
-Pour l'instant, c'est optionnel: le simple fait d'avoir deux `.env` séparés est déjà suffisant.
+- **`entreprise_touchpoints`** : `ensure_entreprise_touchpoints_table()` — évite une erreur API sur l’onglet Prospection si la table manquait en SQLite.
+- Tables pentest formulaires normalisées : `ensure_pentest_forms_normalized_tables()` (voir `services/database/__init__.py`).
+
+Un **redémarrage** de l’app Flask ou des workers Celery suffit en général après mise à jour du code.
 
 ---
 

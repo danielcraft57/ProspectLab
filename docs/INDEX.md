@@ -38,7 +38,7 @@ Bienvenue dans la documentation de ProspectLab. Cette documentation est organis�
 - [**Guide API publique (référence serveur)**](guides/API_PUBLIQUE.md) - Sommaire, permissions, cache, tableau de tous les endpoints, exemples cURL
 - [**Intégration API mobile**](mobile/API_INTEGRATION.md) - Client Expo, résumé des routes, cache applicatif, variables d'environnement  
   → Menu complet mobile : [mobile/INDEX.md](mobile/INDEX.md)
- 
+
 ## Mobile
 
 - [Documentation mobile](mobile/INDEX.md) - Architecture, OCR, integration API, securite et workflow
@@ -48,7 +48,7 @@ Bienvenue dans la documentation de ProspectLab. Cette documentation est organis�
 
 - [Architecture](architecture/ARCHITECTURE.md) - Documentation de l'architecture modulaire backend
 - [Architecture JavaScript modulaire](../static/js/modules/README.md) - Documentation de l'architecture modulaire frontend JS
-- [Architecture distribuée (Raspberry Pi)](developpement/ARCHITECTURE_DISTRIBUEE_RASPBERRY.md) - Utilisation d'un cluster de Raspberry Pi comme workers Celery
+- [Architecture distribuée (cluster / Raspberry Pi)](developpement/ARCHITECTURE_DISTRIBUEE_RASPBERRY.md) - Workers Celery, broker, NFS
 - [Migration](architecture/MIGRATION.md) - Guide de migration vers la nouvelle architecture
 - [WebSocket](techniques/WEBSOCKET.md) - Documentation sur la communication WebSocket
 - [Outils OSINT](techniques/OSINT_TOOLS.md) - Guide des outils OSINT disponibles
@@ -59,7 +59,6 @@ Bienvenue dans la documentation de ProspectLab. Cette documentation est organis�
 - [Améliorations](developpement/AMELIORATIONS.md) - Liste des améliorations possibles
 - [Améliorations Temps Réel](developpement/AMELIORATIONS_TEMPS_REEL.md) - Améliorations du système de scraping et d'analyse technique en temps réel
 - [Séparation des Scripts](developpement/SEPARATION_SCRIPTS.md) - Refactorisation des scripts JavaScript inline vers des fichiers externes
-- [Architecture distribuée Raspberry Pi](developpement/ARCHITECTURE_DISTRIBUEE_RASPBERRY.md) - Notes de travail sur l'utilisation des Raspberry Pi comme workers Celery
 - [Analyse des emails pendant le scraping](developpement/ANALYSE_EMAILS_SCRAPING.md) - Implémentation de l'analyse automatique des emails et corrections associées
 
 ## Modifications récentes
@@ -100,6 +99,7 @@ Bienvenue dans la documentation de ProspectLab. Cette documentation est organis�
 - **external_domains** : Metadonnees par domaine externe (titre, vignette, groupe graphe, mini-scrape)
 - **entreprise_external_links** : Liens sortants par entreprise / run de scraper vers un domaine externe
 - **external_link_pages** : Pages mini-scrapees liees a un lien ; details en tables filles (OG, images, lieu, telephones)
+- **entreprise_touchpoints** : Journal d’interactions prospection (API `/api/entreprise/<id>/touchpoints`) ; création assurée au démarrage via `ensure_entreprise_touchpoints_table()` si la table manquait
 
 Toutes les relations utilisent `ON DELETE CASCADE` pour maintenir l'integrite referentielle.
 
