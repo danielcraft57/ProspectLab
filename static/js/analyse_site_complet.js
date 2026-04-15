@@ -133,9 +133,18 @@
         ul.innerHTML = html;
     }
 
-    async function pollTask(taskId) {
+    async function pollTask(taskId, opts = {}) {
         const intervalMs = 1500;
         const maxPolls = 4800;
+        const entrepriseName = String(opts.entrepriseName || '').trim() || 'Entreprise';
+        const announced = {
+            scraping: { started: false, done: false, skipped: false, error: false },
+            technical: { started: false, done: false, skipped: false, error: false },
+            seo: { started: false, done: false, skipped: false, error: false },
+            phone_osint: { started: false, done: false, skipped: false, error: false },
+            osint: { started: false, done: false, skipped: false, error: false },
+            pentest: { started: false, done: false, skipped: false, error: false },
+        };
         for (let i = 0; i < maxPolls; i++) {
             const res = await fetch(`/api/celery-task/${encodeURIComponent(taskId)}`, {
                 credentials: 'same-origin',
@@ -155,6 +164,30 @@
                 const m = data.meta;
                 setProgress(m.progress != null ? m.progress : 10);
                 renderSteps(m);
+                const currentStep = String(m.step || '').trim();
+                if (announced[currentStep] && !announced[currentStep].started) {
+                    announced[currentStep].started = true;
+                    notifyFullAnalysis(
+                        `${entrepriseName} : ${moduleLabel(currentStep)} en cours`,
+                        'info'
+                    );
+                }
+                const steps = (m && m.steps) || {};
+                Object.keys(announced).forEach((key) => {
+                    const raw = steps[key];
+                    if (raw == null) return;
+                    const st = parseStepStatus(raw);
+                    if (st === 'done' && !announced[key].done) {
+                        announced[key].done = true;
+                        notifyFullAnalysis(`${entrepriseName} : ${moduleLabel(key)} terminé`, 'success');
+                    } else if (st === 'skipped' && !announced[key].skipped) {
+                        announced[key].skipped = true;
+                        notifyFullAnalysis(`${entrepriseName} : ${moduleLabel(key)} désactivé`, 'warning');
+                    } else if (st === 'error' && !announced[key].error) {
+                        announced[key].error = true;
+                        notifyFullAnalysis(`${entrepriseName} : ${moduleLabel(key)} en erreur`, 'error');
+                    }
+                });
             } else if (data.state === 'SUCCESS') {
                 setProgress(100);
                 const result = data.result || {};
@@ -165,12 +198,14 @@
                         'Tous les modules sélectionnés ont été exécutés (voir le détail ci-dessous).',
                     steps: result.steps,
                 });
+                notifyFullAnalysis(`${entrepriseName} : analyse complète terminée`, 'success');
                 return result;
             } else if (
                 data.state === 'FAILURE' ||
                 data.state === 'REVOKED' ||
                 data.state === 'REJECTED'
             ) {
+                notifyFullAnalysis(`${entrepriseName} : analyse complète en erreur`, 'error');
                 throw new Error(data.error || 'La tâche a échoué ou a été annulée.');
             }
             await new Promise((r) => setTimeout(r, intervalMs));
@@ -349,6 +384,35 @@
     function setTextContent(id, text) {
         const node = el(id);
         if (node) node.textContent = text || '';
+    }
+
+    function notifyFullAnalysis(message, type = 'info') {
+        try {
+            if (window.Notifications && typeof window.Notifications.show === 'function') {
+                window.Notifications.show(message, type);
+            }
+        } catch (e) {}
+    }
+
+    function parseStepStatus(raw) {
+        const s = String(raw == null ? '' : raw).trim().toLowerCase();
+        if (!s) return 'unknown';
+        if (s === 'ok') return 'done';
+        if (s.includes('erreur')) return 'error';
+        if (s.includes('désactiv') || s.includes('desactiv')) return 'skipped';
+        return 'running';
+    }
+
+    function moduleLabel(stepKey) {
+        const map = {
+            scraping: 'scraping',
+            technical: 'analyse technique',
+            seo: 'analyse SEO',
+            phone_osint: 'OSINT téléphones',
+            osint: 'analyse OSINT',
+            pentest: 'analyse pentest',
+        };
+        return map[stepKey] || stepKey;
     }
 
     function initExclusiveReportAccordion() {
@@ -989,7 +1053,9 @@
                     throw new Error(startData.error || 'Impossible de démarrer');
                 }
 
-                const taskSummary = await pollTask(startData.task_id);
+                const entrepriseName = String(startData.entreprise_name || website).trim();
+                notifyFullAnalysis(`${entrepriseName} : analyse complète lancée`, 'info');
+                const taskSummary = await pollTask(startData.task_id, { entrepriseName });
 
                 const entrepriseId = (taskSummary && taskSummary.entreprise_id) || startData.entreprise_id;
 

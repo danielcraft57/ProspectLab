@@ -263,6 +263,7 @@ def enrich_external_links_mini_scrape_task(entreprise_id: int, scraper_id: int):
     Met à jour ``metadata.external_links`` puis ``web_external_links``.
     """
     from services.external_mini_scraper import enrich_external_links_in_place
+    from utils.celery_socketio_emit import emit_from_celery_worker
 
     logger.info(
         '[enrich_external_links_mini_scrape] démarrage entreprise_id=%s scraper_id=%s',
@@ -290,11 +291,29 @@ def enrich_external_links_mini_scrape_task(entreprise_id: int, scraper_id: int):
     md = row.get('metadata')
     if not isinstance(md, dict):
         logger.info('[enrich_external_links_mini_scrape] ignoré: metadata absente scraper_id=%s', scraper_id)
+        emit_from_celery_worker(
+            'external_mini_scrape_complete',
+            {
+                'entreprise_id': int(entreprise_id),
+                'scraper_id': int(scraper_id),
+                'skipped': True,
+                'reason': 'metadata absente',
+            },
+        )
         return {'ok': True, 'skipped': True, 'reason': 'metadata absente'}
 
     ext = md.get('external_links')
     if not ext or not isinstance(ext, list):
         logger.info('[enrich_external_links_mini_scrape] ignoré: pas de external_links scraper_id=%s', scraper_id)
+        emit_from_celery_worker(
+            'external_mini_scrape_complete',
+            {
+                'entreprise_id': int(entreprise_id),
+                'scraper_id': int(scraper_id),
+                'skipped': True,
+                'reason': 'pas de external_links',
+            },
+        )
         return {'ok': True, 'skipped': True, 'reason': 'pas de external_links'}
 
     co = (
@@ -308,6 +327,15 @@ def enrich_external_links_mini_scrape_task(entreprise_id: int, scraper_id: int):
             '[enrich_external_links_mini_scrape] ignoré: CREDIT_ONLY sans lien likely_credit scraper_id=%s',
             scraper_id,
         )
+        emit_from_celery_worker(
+            'external_mini_scrape_complete',
+            {
+                'entreprise_id': int(entreprise_id),
+                'scraper_id': int(scraper_id),
+                'skipped': True,
+                'reason': 'CREDIT_ONLY',
+            },
+        )
         return {'ok': True, 'skipped': True, 'reason': 'pas de crédit à enrichir (CREDIT_ONLY)'}
 
     n_links = len([x for x in ext if isinstance(x, dict)])
@@ -317,6 +345,15 @@ def enrich_external_links_mini_scrape_task(entreprise_id: int, scraper_id: int):
         scraper_id,
     )
 
+    emit_from_celery_worker(
+        'external_mini_scrape_started',
+        {
+            'entreprise_id': int(entreprise_id),
+            'scraper_id': int(scraper_id),
+            'external_links_count': n_links,
+        },
+    )
+
     n_dom = enrich_external_links_in_place(ext)
     md['external_links'] = ext
 
@@ -324,6 +361,15 @@ def enrich_external_links_mini_scrape_task(entreprise_id: int, scraper_id: int):
         db.update_scraper_metadata_json(scraper_id, md)
     except Exception as e:
         logger.error('[enrich_external_links_mini_scrape] metadata %s', e, exc_info=True)
+        emit_from_celery_worker(
+            'external_mini_scrape_complete',
+            {
+                'entreprise_id': int(entreprise_id),
+                'scraper_id': int(scraper_id),
+                'ok': False,
+                'error': str(e),
+            },
+        )
         return {'ok': False, 'error': str(e)}
 
     client_url = row.get('url') or ''
@@ -339,6 +385,53 @@ def enrich_external_links_mini_scrape_task(entreprise_id: int, scraper_id: int):
         entreprise_id,
         scraper_id,
         n_dom,
+    )
+    domains_payload = []
+    try:
+        seen_domains = set()
+        for it in ext:
+            if not isinstance(it, dict):
+                continue
+            dom = str(it.get('domain') or '').strip().lower()
+            if not dom or dom in seen_domains:
+                continue
+            seen_domains.add(dom)
+            snap = it.get('external_snapshot') if isinstance(it.get('external_snapshot'), dict) else {}
+            payload = {
+                'domain_host': dom,
+                'external_href': str(it.get('url') or '').strip(),
+                'target_entreprise_id': int(it.get('target_entreprise_id') or 0) or None,
+                'site_title': str(snap.get('title') or '').strip(),
+                'site_description': str(snap.get('description') or '').strip(),
+                'resolved_url': str(snap.get('final_url') or '').strip(),
+                'thumb_url': str(snap.get('favicon_url') or '').strip(),
+            }
+            domains_payload.append(payload)
+            # Un emit par domaine mini-scrapé terminé: sert de source unique
+            # pour créer nœud + lien en temps réel côté graphe.
+            try:
+                emit_from_celery_worker(
+                    'external_mini_scrape_domain_complete',
+                    {
+                        'entreprise_id': int(entreprise_id),
+                        'scraper_id': int(scraper_id),
+                        'domain': payload,
+                    },
+                )
+            except Exception:
+                pass
+    except Exception:
+        domains_payload = []
+
+    emit_from_celery_worker(
+        'external_mini_scrape_complete',
+        {
+            'entreprise_id': int(entreprise_id),
+            'scraper_id': int(scraper_id),
+            'ok': True,
+            'domains_scanned': int(n_dom or 0),
+            'domains': domains_payload[:120],
+        },
     )
     return {'ok': True, 'domains_scanned': n_dom}
 
@@ -367,6 +460,7 @@ def run_scrape_emails_inline(
     on_person_found=None,
     on_phone_found=None,
     on_social_found=None,
+    on_external_link_found=None,
     entreprise_id=None,
     progress_callback: Optional[Callable[[str], None]] = None,
 ) -> Dict:
@@ -387,10 +481,12 @@ def run_scrape_emails_inline(
         on_person_found=on_person_found,
         on_phone_found=on_phone_found,
         on_social_found=on_social_found,
+        on_external_link_found=on_external_link_found,
     )
 
     results = scraper.scrape()
 
+    scraper_id = None
     if entreprise_id:
         try:
             db = Database()
@@ -478,6 +574,7 @@ def run_scrape_emails_inline(
         'url': url,
         'results': results,
         'entreprise_id': entreprise_id,
+        'scraper_id': scraper_id,
     }
 
 

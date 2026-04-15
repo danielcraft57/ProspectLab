@@ -115,6 +115,9 @@ SIRENE_API_RATE_LIMIT = int(os.environ.get('SIRENE_API_RATE_LIMIT', '10'))  # re
 # Configuration Celery
 CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
 CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+# Redis pour que les workers Celery puissent émettre vers Socket.IO (voir Flask-SocketIO « external process »).
+# Par défaut : même URL que le broker. Désactiver : SOCKETIO_DISABLE_MESSAGE_QUEUE=1
+SOCKETIO_MESSAGE_QUEUE = (os.environ.get('SOCKETIO_MESSAGE_QUEUE') or '').strip() or CELERY_BROKER_URL
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_ACCEPT_CONTENT = ['json']

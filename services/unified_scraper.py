@@ -74,7 +74,8 @@ class UnifiedScraper:
                  on_email_found: Optional[Callable] = None,
                  on_person_found: Optional[Callable] = None,
                  on_phone_found: Optional[Callable] = None,
-                 on_social_found: Optional[Callable] = None):
+                 on_social_found: Optional[Callable] = None,
+                 on_external_link_found: Optional[Callable] = None):
         """
         Initialise le scraper unifié
         
@@ -101,6 +102,7 @@ class UnifiedScraper:
         self.on_person_found = on_person_found
         self.on_phone_found = on_phone_found
         self.on_social_found = on_social_found
+        self.on_external_link_found = on_external_link_found
         
         # Délai entre les requêtes pour éviter de surcharger les serveurs
         self.request_delay = 0.3  # 300ms entre chaque requête HTTP
@@ -713,23 +715,31 @@ class UnifiedScraper:
             entry['context_snippet'] = ctx[0][:220]
 
         max_unique = self._max_external_links_cap()
+        is_new = False
         with self.lock:
             if len(self.external_links_by_url) >= max_unique and full_url not in self.external_links_by_url:
                 return
             if full_url not in self.external_links_by_url:
                 self.external_links_by_url[full_url] = entry
-                return
-            ex = self.external_links_by_url[full_url]
-            srcs = ex.get('link_sources') or []
-            if link_source and link_source not in srcs:
-                srcs.append(link_source)
-                ex['link_sources'] = srcs
-            if likely_credit and not ex.get('likely_credit'):
-                ex['likely_credit'] = True
-                if ctx:
-                    ex['context_snippet'] = ctx[0][:220]
-            if atext and len(atext) > len(ex.get('text') or ''):
-                ex['text'] = atext
+                is_new = True
+            else:
+                ex = self.external_links_by_url[full_url]
+                srcs = ex.get('link_sources') or []
+                if link_source and link_source not in srcs:
+                    srcs.append(link_source)
+                    ex['link_sources'] = srcs
+                if likely_credit and not ex.get('likely_credit'):
+                    ex['likely_credit'] = True
+                    if ctx:
+                        ex['context_snippet'] = ctx[0][:220]
+                if atext and len(atext) > len(ex.get('text') or ''):
+                    ex['text'] = atext
+
+        if is_new and self.on_external_link_found:
+            try:
+                self.on_external_link_found(dict(entry))
+            except Exception:
+                pass
 
     def _collect_external_links_from_page(self, soup: BeautifulSoup, page_url: str) -> None:
         """Collecte les liens http(s) vers d'autres domaines (agence, hébergeur, etc.)."""

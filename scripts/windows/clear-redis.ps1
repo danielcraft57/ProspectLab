@@ -3,6 +3,52 @@
 
 Write-Host "Nettoyage de Redis..." -ForegroundColor Yellow
 
+$redisFlushed = $false
+
+function Invoke-RedisFlush {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Command,
+        [string[]]$Arguments = @()
+    )
+
+    try {
+        $output = & $Command @Arguments 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            return $true
+        }
+        if ($output) {
+            Write-Host ($output | Out-String).Trim() -ForegroundColor DarkYellow
+        }
+        return $false
+    } catch {
+        Write-Host ("Echec execution: " + $_.Exception.Message) -ForegroundColor DarkYellow
+        return $false
+    }
+}
+
+function Invoke-CondaPythonClear {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CondaEnv
+    )
+
+    try {
+        Write-Host "Tentative fallback via python conda..." -ForegroundColor Cyan
+        $output = conda run -n $CondaEnv python scripts/clear_redis.py 2>&1
+        if ($output) {
+            Write-Host ($output | Out-String).Trim()
+        }
+        if ($LASTEXITCODE -eq 0) {
+            return $true
+        }
+        return $false
+    } catch {
+        Write-Host ("Fallback python conda en echec: " + $_.Exception.Message) -ForegroundColor DarkYellow
+        return $false
+    }
+}
+
 # Activer l'environnement conda prospectlab
 $condaEnv = "prospectlab"
 Write-Host "Activation de l'environnement conda: $condaEnv" -ForegroundColor Cyan
@@ -19,7 +65,12 @@ if ($condaCmd) {
     $redisCliCmd = "conda run -n $condaEnv redis-cli FLUSHDB"
     try {
         Invoke-Expression $redisCliCmd | Out-Null
-        Write-Host "✓ Redis nettoyé avec succès" -ForegroundColor Green
+        if ($LASTEXITCODE -eq 0) {
+            $redisFlushed = $true
+            Write-Host "Redis nettoye avec succes" -ForegroundColor Green
+        } else {
+            throw "conda run redis-cli a retourne le code $LASTEXITCODE"
+        }
     } catch {
         # Si conda run ne fonctionne pas, essayer de trouver redis-cli dans l'environnement conda
         $condaPath = (conda info --envs | Select-String $condaEnv | ForEach-Object { $_.ToString().Split() | Select-Object -First 1 })
@@ -27,10 +78,12 @@ if ($condaCmd) {
             $redisCliPath = Join-Path $condaPath "Scripts\redis-cli.exe"
             if (Test-Path $redisCliPath) {
                 Write-Host "Trouvé redis-cli dans l'environnement conda: $redisCliPath" -ForegroundColor Cyan
-                & $redisCliPath FLUSHDB | Out-Null
-                Write-Host "✓ Redis nettoyé avec succès" -ForegroundColor Green
+                if (Invoke-RedisFlush -Command $redisCliPath -Arguments @("FLUSHDB")) {
+                    $redisFlushed = $true
+                    Write-Host "Redis nettoye avec succes" -ForegroundColor Green
+                }
             } else {
-                Write-Host "⚠ redis-cli non trouvé dans l'environnement conda" -ForegroundColor Yellow
+                Write-Host "redis-cli non trouve dans l'environnement conda" -ForegroundColor Yellow
                 Write-Host "Essaie de trouver redis-cli dans les emplacements courants..." -ForegroundColor Yellow
                 
                 $possiblePaths = @(
@@ -43,26 +96,28 @@ if ($condaCmd) {
                 foreach ($path in $possiblePaths) {
                     if (Test-Path $path) {
                         Write-Host "Trouvé redis-cli à: $path" -ForegroundColor Cyan
-                        & $path FLUSHDB | Out-Null
-                        Write-Host "✓ Redis nettoyé avec succès" -ForegroundColor Green
-                        $found = $true
+                        if (Invoke-RedisFlush -Command $path -Arguments @("FLUSHDB")) {
+                            Write-Host "Redis nettoye avec succes" -ForegroundColor Green
+                            $found = $true
+                            $redisFlushed = $true
+                        }
                         break
                     }
                 }
                 
                 if (-not $found) {
-                    Write-Host "❌ redis-cli non trouvé" -ForegroundColor Red
+                    Write-Host "redis-cli non trouve" -ForegroundColor Red
                     Write-Host "Tu peux nettoyer Redis manuellement avec: python scripts/clear_redis.py" -ForegroundColor Yellow
-                    Write-Host "Ou arrêter et redémarrer Redis" -ForegroundColor Yellow
+                    Write-Host "Ou arreter et redemarrer Redis" -ForegroundColor Yellow
                 }
             }
         } else {
-            Write-Host "⚠ Environnement conda $condaEnv non trouvé" -ForegroundColor Yellow
+            Write-Host "Environnement conda $condaEnv non trouve" -ForegroundColor Yellow
             Write-Host "Utilise: python scripts/clear_redis.py" -ForegroundColor Yellow
         }
     }
 } else {
-    Write-Host "⚠ conda non trouvé dans le PATH" -ForegroundColor Yellow
+    Write-Host "conda non trouve dans le PATH" -ForegroundColor Yellow
     Write-Host "Essaie de trouver redis-cli dans les emplacements courants..." -ForegroundColor Yellow
     
     $possiblePaths = @(
@@ -75,19 +130,35 @@ if ($condaCmd) {
     foreach ($path in $possiblePaths) {
         if (Test-Path $path) {
             Write-Host "Trouvé redis-cli à: $path" -ForegroundColor Cyan
-            & $path FLUSHDB | Out-Null
-            Write-Host "✓ Redis nettoyé avec succès" -ForegroundColor Green
-            $found = $true
+            if (Invoke-RedisFlush -Command $path -Arguments @("FLUSHDB")) {
+                Write-Host "Redis nettoye avec succes" -ForegroundColor Green
+                $found = $true
+                $redisFlushed = $true
+            }
             break
         }
     }
     
     if (-not $found) {
-        Write-Host "❌ redis-cli non trouvé" -ForegroundColor Red
+        Write-Host "redis-cli non trouve" -ForegroundColor Red
         Write-Host "Tu peux nettoyer Redis manuellement avec: python scripts/clear_redis.py" -ForegroundColor Yellow
-        Write-Host "Ou arrêter et redémarrer Redis" -ForegroundColor Yellow
+        Write-Host "Ou arreter et redemarrer Redis" -ForegroundColor Yellow
     }
 }
 
+if (-not $redisFlushed) {
+    if ($condaCmd) {
+        if (Invoke-CondaPythonClear -CondaEnv $condaEnv) {
+            $redisFlushed = $true
+            Write-Host "Redis nettoye avec succes (fallback python conda)." -ForegroundColor Green
+        }
+    }
+}
+
+if (-not $redisFlushed) {
+    Write-Host "Redis n'a pas ete nettoye automatiquement." -ForegroundColor Red
+    exit 1
+}
+
 Write-Host ""
-Write-Host "Pour arrêter Celery, utilise: .\scripts\windows\stop-celery.ps1" -ForegroundColor Cyan
+Write-Host "Pour arreter Celery, utilise: .\scripts\windows\stop-celery.ps1" -ForegroundColor Cyan

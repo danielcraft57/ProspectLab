@@ -13,10 +13,12 @@
     const fsFiltersToggle = document.getElementById('agences-fs-filters-toggle');
     const fsFiltersDropdown = document.getElementById('agences-fs-filters-dropdown');
     const fsFiltersMount = document.getElementById('agences-fs-filters-mount');
+    const fsTabHost = fsChrome && fsChrome.querySelector ? fsChrome.querySelector('.agences-fs-tab-host') : null;
     const emptyEl = document.getElementById('graph-entreprises-empty');
     const errEl = document.getElementById('graph-entreprises-error');
     const statsWrap = document.getElementById('graph-entreprises-stats-wrap');
     const loadingEl = document.getElementById('graph-entreprises-loading');
+    const legacyLivePanelEl = document.getElementById('graph-entreprises-live-panel');
     const btnReload = document.getElementById('graph-entreprises-reload');
     const btnFit = document.getElementById('graph-entreprises-fit');
     const btnZoomIn = document.getElementById('graph-entreprises-zoom-in');
@@ -29,10 +31,11 @@
     const nodeCardBody = document.getElementById('agences-node-card-body');
     const btnViewBack = document.getElementById('graph-entreprises-view-back');
     const btnViewFwd = document.getElementById('graph-entreprises-view-fwd');
-    const btnClusterLeaves = document.getElementById('graph-entreprises-cluster-leaves');
-    const btnClusterOpen = document.getElementById('graph-entreprises-cluster-open');
 
     if (!graphEl) return;
+    if (legacyLivePanelEl && legacyLivePanelEl.parentNode) {
+        legacyLivePanelEl.parentNode.removeChild(legacyLivePanelEl);
+    }
 
     const emptyElDefaultText =
         emptyEl && emptyEl.textContent ? emptyEl.textContent.trim() : '';
@@ -296,6 +299,284 @@
     var thumbProbeQueue = [];
     var thumbUrlQueued = new Set();
     var thumbProbeRunning = 0;
+    var deptZonesCache = [];
+    var deptZonesRebuildTimer = null;
+    /** Sync API rare (mini-scrape, etc.) — ne pas enchaîner à chaque lien temps réel. */
+    var graphCoalescedSyncTimer = null;
+    var graphExternalAnalysisRun = null;
+    var miniScrapeProgress = { active: false, shown: 0, total: 0 };
+    // Promotion d'un nœud domaine `a:host` vers une fiche entreprise `e:id` (évite le "détachement" / doublon).
+    // clé = a:host, valeur = e:id
+    var domainPromotions = new Map();
+
+    function entrepriseDisplayName(run) {
+        if (!run) return 'Entreprise';
+        var n = String(run.entrepriseName || '').trim();
+        if (n) return n;
+        var u = String(run.url || '').trim();
+        if (u) return u;
+        var eid = Number(run.entrepriseId || 0);
+        return eid > 0 ? 'Entreprise #' + String(eid) : 'Entreprise';
+    }
+
+    function entrepriseLabelFromRun(run, fallbackId) {
+        if (!run) return String(fallbackId || '').trim() || 'Entreprise';
+        var n = String(run.entrepriseName || '').trim();
+        if (n && !/^e:\d+$/i.test(n)) return n;
+        var u = String(run.url || '').trim();
+        if (u) {
+            try {
+                var parsed = new URL(u.indexOf('http') === 0 ? u : 'https://' + u);
+                var host = String(parsed.hostname || '').replace(/^www\./i, '').trim();
+                if (host) return host;
+            } catch (eUrl) {}
+            return u;
+        }
+        return String(fallbackId || '').trim() || 'Entreprise';
+    }
+
+    /** Activer : ?graph_analysis_debug=1 ou localStorage graph_analysis_debug=1 */
+    function graphAnalysisDebugEnabled() {
+        try {
+            if (new URLSearchParams(window.location.search || '').get('graph_analysis_debug') === '1') {
+                return true;
+            }
+            if (localStorage.getItem('graph_analysis_debug') === '1') return true;
+        } catch (e) {}
+        return false;
+    }
+
+    function graphAnalysisDbg() {
+        if (!graphAnalysisDebugEnabled() || typeof console === 'undefined' || !console.info) return;
+        try {
+            console.info.apply(console, ['[graph][analyse]'].concat([].slice.call(arguments)));
+        } catch (e) {}
+    }
+
+    function promoteDomainNodeToEntreprise(domainNodeId, entrepriseNodeId) {
+        if (!domainNodeId || !entrepriseNodeId || !nodesDS || !edgesDS) return false;
+        if (String(domainNodeId).slice(0, 2) !== 'a:') return false;
+        if (String(entrepriseNodeId).slice(0, 2) !== 'e:') return false;
+        var aNode = nodesDS.get(domainNodeId);
+        var eNode = nodesDS.get(entrepriseNodeId);
+        if (!aNode) return false;
+
+        // La fiche entreprise peut ne pas encore être présente dans le graphe courant.
+        // On l'injecte pour garantir la promotion immédiate après scraping.
+        if (!eNode) {
+            try {
+                var rawE =
+                    (apiNodeById && apiNodeById.get && apiNodeById.get(entrepriseNodeId)) || {
+                        id: entrepriseNodeId,
+                        label: String(entrepriseNodeId),
+                        title: String(entrepriseNodeId),
+                        group: 'entreprise',
+                    };
+                rawE.group = 'entreprise';
+                if (!rawE.label || /^e:\d+$/i.test(String(rawE.label))) {
+                    rawE.label = entrepriseLabelFromRun(graphExternalAnalysisRun, entrepriseNodeId);
+                }
+                if (!rawE.title || /^e:\d+$/i.test(String(rawE.title))) {
+                    rawE.title = rawE.label;
+                }
+                if (apiNodeById && apiNodeById.set) apiNodeById.set(entrepriseNodeId, rawE);
+                var stE = getFilterState();
+                var vsE = nodeVisualStyle(rawE);
+                var siE = vsE.si;
+                var ePatch = {
+                    id: rawE.id,
+                    label: displayLabel(rawE, stE),
+                    title: graphNodeTooltipEl(rawE),
+                    color: {
+                        background: vsE.st.color,
+                        border: visNodeOutline(),
+                        highlight: {
+                            background: vsE.st.color,
+                            border: isLightTheme() ? '#0f172a' : '#f8fafc',
+                        },
+                    },
+                    font: visNodeFontForGroup('entreprise'),
+                    shape: siE.shape,
+                    size: siE.size,
+                    value: siE.value,
+                    borderWidth: 4,
+                    hidden: false,
+                };
+                applyNodeImageFields(ePatch, siE, false);
+                nodesDS.update(ePatch);
+                eNode = nodesDS.get(entrepriseNodeId);
+            } catch (eIns) {}
+        }
+        if (!eNode) return false;
+
+        // Copier la position du domaine vers la fiche entreprise (getPositions plus fiable que le DataSet).
+        try {
+            var patch = { id: entrepriseNodeId };
+            var px = null;
+            var py = null;
+            try {
+                if (network && typeof network.getPositions === 'function') {
+                    var pm = network.getPositions([domainNodeId, entrepriseNodeId]);
+                    if (pm && pm[domainNodeId] && typeof pm[domainNodeId].x === 'number') {
+                        px = pm[domainNodeId].x;
+                        py = pm[domainNodeId].y;
+                    }
+                }
+            } catch (eG) {}
+            if (px == null && typeof aNode.x === 'number' && typeof aNode.y === 'number') {
+                px = aNode.x;
+                py = aNode.y;
+            }
+            if (px != null && py != null) {
+                patch.x = px;
+                patch.y = py;
+            }
+            if (Object.keys(patch).length > 1) nodesDS.update(patch);
+        } catch (e0) {}
+
+        // Réécrire les arêtes.
+        try {
+            var edges = edgesDS.get();
+            var updates = [];
+            for (var i = 0; i < edges.length; i++) {
+                var ed = edges[i];
+                if (!ed) continue;
+                var changed = false;
+                var next = Object.assign({}, ed);
+                if (next.from === domainNodeId) {
+                    next.from = entrepriseNodeId;
+                    changed = true;
+                }
+                if (next.to === domainNodeId) {
+                    next.to = entrepriseNodeId;
+                    changed = true;
+                }
+                if (changed) {
+                    // Recalcul id stable si possible (sinon update garde l'id actuel).
+                    try {
+                        var rid = edgeStableId(next);
+                        if (rid && rid !== next.id) next.id = rid;
+                    } catch (e1) {}
+                    updates.push(next);
+                }
+            }
+            if (updates.length) edgesDS.update(updates);
+        } catch (e2) {}
+
+        // Retirer le nœud domaine.
+        try {
+            nodesDS.remove([domainNodeId]);
+        } catch (e3) {}
+
+        return true;
+    }
+
+    /** Aligner lastRaw / apiNodeById après fusion domaine → entreprise (avant tout fetch API). */
+    function syncLastRawAfterDomainPromotion(domainNodeId, entrepriseNodeId, run) {
+        if (!lastRaw || !domainNodeId || !entrepriseNodeId) return;
+        if (String(domainNodeId).slice(0, 2) !== 'a:') return;
+        if (String(entrepriseNodeId).slice(0, 2) !== 'e:') return;
+        try {
+            domainPromotions.delete(domainNodeId);
+        } catch (e0) {}
+        lastRaw.nodes = (lastRaw.nodes || []).filter(function (n) {
+            return n && n.id !== domainNodeId;
+        });
+        try {
+            apiNodeById.delete(domainNodeId);
+        } catch (e1) {}
+        (lastRaw.edges || []).forEach(function (e) {
+            if (!e) return;
+            if (e.from === domainNodeId) e.from = entrepriseNodeId;
+            if (e.to === domainNodeId) e.to = entrepriseNodeId;
+        });
+        dedupeLastRawEdges();
+        var rawE = apiNodeById.get(entrepriseNodeId);
+        var bestLabel = entrepriseLabelFromRun(run, entrepriseNodeId);
+        if (!rawE) {
+            rawE = {
+                id: entrepriseNodeId,
+                group: 'entreprise',
+                label: bestLabel,
+                title: bestLabel,
+            };
+            apiNodeById.set(entrepriseNodeId, rawE);
+            lastRaw.nodes.push(rawE);
+        } else {
+            rawE.group = 'entreprise';
+            rawE.label = String(bestLabel).slice(0, 52);
+            rawE.title = String(bestLabel).slice(0, 300);
+            if (run && String(run.url || '').trim()) {
+                rawE.resolved_url = String(run.url).trim();
+            }
+            rawE.is_shared_external_hub = false;
+        }
+    }
+
+    function dedupeLastRawEdges() {
+        if (!lastRaw || !lastRaw.edges) return;
+        var seen = new Set();
+        var out = [];
+        lastRaw.edges.forEach(function (e) {
+            if (!e) return;
+            try {
+                var id = edgeStableId(e);
+                if (seen.has(id)) return;
+                seen.add(id);
+                out.push(e);
+            } catch (e2) {
+                out.push(e);
+            }
+        });
+        lastRaw.edges = out;
+    }
+
+    function seededOffsetForNewNode(nodeId) {
+        var h = 0;
+        var s = String(nodeId || '');
+        for (var i = 0; i < s.length; i++) {
+            h = (h * 31 + s.charCodeAt(i)) | 0;
+        }
+        var ang = (Math.abs(h) % 360) * (Math.PI / 180);
+        var dist = 200 + (Math.abs(h >> 3) % 140);
+        return { cos: Math.cos(ang), sin: Math.sin(ang), dist: dist };
+    }
+
+    /** Position initiale pour un nœud absent du graphe : près d'un voisin déjà placé. */
+    function layoutSeedPositionForNewVisNode(nodeId, edges, posMap) {
+        if (!nodeId || !edges || !posMap) return null;
+        var neighbors = [];
+        for (var i = 0; i < edges.length; i++) {
+            var e = edges[i];
+            if (!e) continue;
+            if (e.from === nodeId) neighbors.push(e.to);
+            else if (e.to === nodeId) neighbors.push(e.from);
+        }
+        var seed = null;
+        for (var j = 0; j < neighbors.length; j++) {
+            var p = posMap[neighbors[j]];
+            if (p && typeof p.x === 'number' && typeof p.y === 'number') {
+                seed = p;
+                break;
+            }
+        }
+        if (!seed) return null;
+        var off = seededOffsetForNewNode(nodeId);
+        return { x: seed.x + off.cos * off.dist, y: seed.y + off.sin * off.dist };
+    }
+
+    function applyPendingDomainPromotions() {
+        if (!domainPromotions || domainPromotions.size === 0) return;
+        var done = [];
+        domainPromotions.forEach(function (eId, aId) {
+            if (promoteDomainNodeToEntreprise(aId, eId)) done.push(aId);
+        });
+        done.forEach(function (aId) {
+            try {
+                domainPromotions.delete(aId);
+            } catch (e0) {}
+        });
+    }
 
     function imageToGraphThumbDataUrl(img) {
         var w = img.naturalWidth;
@@ -327,7 +608,9 @@
             target.shapeProperties = { useBorderWithImage: true, borderDashes: false };
         } else {
             if (isDataSetUpdate) {
-                target.image = null;
+                // vis-network 9 : image === null entre dans la branche « objet » puis lit null.unselected → TypeError.
+                // Chaîne vide repasse par la branche URL (comme une image manquante / fallback).
+                target.image = '';
             }
             target.shapeProperties = { useBorderWithImage: false, borderDashes: false };
         }
@@ -339,6 +622,14 @@
         if (!ids || !ids.length) return;
         var state = getFilterState();
         var visibleIds = computeVisibleNodeIds(lastRaw.nodes, lastRaw.edges, state);
+        var posMap = null;
+        try {
+            if (network && !physicsEnabled && typeof network.getPositions === 'function') {
+                posMap = network.getPositions(ids);
+            }
+        } catch (ePos) {
+            posMap = null;
+        }
         var updates = [];
         ids.forEach(function (nid) {
             var n = apiNodeById.get(nid);
@@ -367,6 +658,10 @@
                 },
             };
             applyNodeImageFields(upd, si, true);
+            if (posMap && posMap[n.id] && typeof posMap[n.id].x === 'number' && typeof posMap[n.id].y === 'number') {
+                upd.x = posMap[n.id].x;
+                upd.y = posMap[n.id].y;
+            }
             updates.push(upd);
         });
         if (updates.length) {
@@ -435,6 +730,414 @@
             return window.GRAPH_ENTREPRISES_PAGE.entrepriseUrl(id);
         }
         return '/entreprise/' + encodeURIComponent(id);
+    }
+
+    function clearGraphCoalescedSyncTimer() {
+        if (graphCoalescedSyncTimer) {
+            clearTimeout(graphCoalescedSyncTimer);
+            graphCoalescedSyncTimer = null;
+        }
+    }
+
+    /** Une seule fusion API après la fin d’activité (évite centaines de fetch pendant le crawl). */
+    function scheduleGraphCoalescedApiSync(delayMs) {
+        var d = delayMs == null ? 2400 : delayMs;
+        if (graphCoalescedSyncTimer) clearTimeout(graphCoalescedSyncTimer);
+        graphCoalescedSyncTimer = setTimeout(function () {
+            graphCoalescedSyncTimer = null;
+            refreshGraphIncremental();
+        }, d);
+    }
+
+    function miniScrapeProgressSuffix() {
+        if (!miniScrapeProgress.active) return '';
+        var shown = Number(miniScrapeProgress.shown || 0);
+        var total = Number(miniScrapeProgress.total || 0);
+        if (total > 0) {
+            return '  mini-scrape: ' + String(shown) + '/' + String(total);
+        }
+        return '  mini-scrape: ' + String(shown) + ' domaine(s)';
+    }
+
+    function renderExternalAnalysisStatus() {
+        var box = document.getElementById('graph-external-analysis-status');
+        if (!box) return;
+        var base = String((box.dataset && box.dataset.baseMessage) || '').trim();
+        var isError = !!(box.dataset && box.dataset.isError === '1');
+        var msg = base;
+        if (!isError && msg) {
+            msg += miniScrapeProgressSuffix();
+        }
+        box.textContent = msg;
+        box.hidden = !msg;
+    }
+
+    function startMiniScrapeProgress(totalHint) {
+        miniScrapeProgress.active = true;
+        miniScrapeProgress.shown = 0;
+        miniScrapeProgress.total = Math.max(0, Number(totalHint || 0) || 0);
+        renderExternalAnalysisStatus();
+    }
+
+    function bumpMiniScrapeProgress() {
+        if (!miniScrapeProgress.active) miniScrapeProgress.active = true;
+        miniScrapeProgress.shown = Math.max(0, Number(miniScrapeProgress.shown || 0) + 1);
+        renderExternalAnalysisStatus();
+    }
+
+    function finishMiniScrapeProgress(finalTotal) {
+        var t = Math.max(0, Number(finalTotal || 0) || 0);
+        if (t > 0) {
+            miniScrapeProgress.total = t;
+            if (miniScrapeProgress.shown < t) miniScrapeProgress.shown = t;
+        }
+        miniScrapeProgress.active = false;
+        renderExternalAnalysisStatus();
+    }
+
+    function setExternalAnalysisStatus(message, isError) {
+        var box = document.getElementById('graph-external-analysis-status');
+        if (!box) return;
+        box.dataset.baseMessage = message || '';
+        box.dataset.isError = isError ? '1' : '0';
+        renderExternalAnalysisStatus();
+        box.style.color = isError ? '#f87171' : '';
+    }
+
+    function setExternalAnalyzeButtonBusy(isBusy) {
+        var btn = document.getElementById('graph-external-analyze-btn');
+        if (!btn) return;
+        btn.disabled = !!isBusy;
+    }
+
+    function upsertExternalLinkRealtime(link, sourceEntrepriseId) {
+        if (!link || !sourceEntrepriseId || !lastRaw || !nodesDS || !edgesDS) return;
+        var host = String(link.domain_host || '').trim();
+        if (!host) return;
+
+        var sourceNodeId = 'e:' + String(sourceEntrepriseId);
+        var domainNodeId = 'a:' + host;
+
+        // Assurer la présence de la fiche entreprise source dans le graphe, sinon
+        // les events "domain_complete" ne peuvent pas créer le lien immédiatement.
+        if (!apiNodeById.has(sourceNodeId)) {
+            try {
+                var rawSrc = {
+                    id: sourceNodeId,
+                    group: 'entreprise',
+                    label: entrepriseLabelFromRun(graphExternalAnalysisRun, sourceNodeId),
+                    title: entrepriseLabelFromRun(graphExternalAnalysisRun, sourceNodeId),
+                };
+                lastRaw.nodes.push(rawSrc);
+                apiNodeById.set(sourceNodeId, rawSrc);
+
+                var stSrc = getFilterState();
+                var vsSrc = nodeVisualStyle(rawSrc);
+                var siSrc = vsSrc.si;
+                var srcPos = null;
+                try {
+                    if (network && typeof network.getViewPosition === 'function') {
+                        srcPos = network.getViewPosition();
+                    }
+                } catch (eVP) {}
+                var nodeForDsSrc = {
+                    id: rawSrc.id,
+                    label: displayLabel(rawSrc, stSrc),
+                    title: graphNodeTooltipEl(rawSrc),
+                    color: {
+                        background: vsSrc.st.color,
+                        border: visNodeOutline(),
+                        highlight: {
+                            background: vsSrc.st.color,
+                            border: isLightTheme() ? '#0f172a' : '#f8fafc',
+                        },
+                    },
+                    font: visNodeFontForGroup('entreprise'),
+                    shape: siSrc.shape,
+                    size: siSrc.size,
+                    value: siSrc.value,
+                    borderWidth: 4,
+                    hidden: false,
+                };
+                if (srcPos && typeof srcPos.x === 'number' && typeof srcPos.y === 'number') {
+                    nodeForDsSrc.x = srcPos.x;
+                    nodeForDsSrc.y = srcPos.y;
+                }
+                applyNodeImageFields(nodeForDsSrc, siSrc, false);
+                nodesDS.update(nodeForDsSrc);
+            } catch (eSrc) {
+                return;
+            }
+        }
+
+        var linkTitle = String(link.site_title || '').trim();
+        var linkDesc = String(link.site_description || '').trim();
+        var linkResolved = String(link.resolved_url || link.external_href || '').trim();
+        var linkThumb = String(link.thumb_url || '').trim();
+
+        // 1) Upsert node domaine externe.
+        if (!apiNodeById.has(domainNodeId)) {
+            var rawNode = {
+                id: domainNodeId,
+                label: linkTitle || host,
+                group: 'external',
+                title: linkTitle || host,
+                domain: host,
+            };
+            if (linkResolved) rawNode.resolved_url = linkResolved;
+            if (linkDesc) rawNode.site_description = linkDesc;
+            if (linkThumb) {
+                rawNode.thumb_url = linkThumb;
+                rawNode.thumbnail_url = linkThumb;
+            }
+            var seedPos = null;
+            try {
+                var off = seededOffsetForNewNode(domainNodeId);
+                // Couronne "molécule" plus large autour de l'entreprise.
+                var dist = 170 + (Math.abs(Math.round((off.dist || 200) * 0.57)) % 130);
+                var srcPos = null;
+                if (network && typeof network.getPositions === 'function') {
+                    var pm = network.getPositions([sourceNodeId]);
+                    if (pm && pm[sourceNodeId] && typeof pm[sourceNodeId].x === 'number') {
+                        srcPos = pm[sourceNodeId];
+                    }
+                }
+                if (!srcPos && network && typeof network.getViewPosition === 'function') {
+                    srcPos = network.getViewPosition();
+                }
+                if (srcPos && typeof srcPos.x === 'number' && typeof srcPos.y === 'number') {
+                    seedPos = {
+                        x: srcPos.x + off.cos * dist,
+                        y: srcPos.y + off.sin * dist,
+                    };
+                    rawNode.x = seedPos.x;
+                    rawNode.y = seedPos.y;
+                }
+            } catch (eSeed) {}
+            lastRaw.nodes.push(rawNode);
+            apiNodeById.set(domainNodeId, rawNode);
+
+            var st = getFilterState();
+            var vs = nodeVisualStyle(rawNode);
+            var si = vs.si;
+            var nodeForDs = {
+                id: rawNode.id,
+                label: displayLabel(rawNode, st),
+                title: graphNodeTooltipEl(rawNode),
+                color: {
+                    background: vs.st.color,
+                    border: visNodeOutline(),
+                    highlight: {
+                        background: vs.st.color,
+                        border: isLightTheme() ? '#0f172a' : '#f8fafc',
+                    },
+                },
+                font: visNodeFontForGroup(rawNode.group || 'external'),
+                shape: si.shape,
+                size: si.size,
+                value: si.value,
+                borderWidth: 2,
+                hidden: false,
+            };
+            if (seedPos && typeof seedPos.x === 'number' && typeof seedPos.y === 'number') {
+                nodeForDs.x = seedPos.x;
+                nodeForDs.y = seedPos.y;
+            }
+            applyNodeImageFields(nodeForDs, si, false);
+            nodesDS.update(nodeForDs);
+        } else {
+            // Si le mini-scrape apporte de nouvelles infos, on patch le nœud existant immédiatement.
+            var curNode = apiNodeById.get(domainNodeId) || {};
+            if (linkTitle) {
+                curNode.label = linkTitle;
+                curNode.title = linkTitle;
+            }
+            if (linkResolved) curNode.resolved_url = linkResolved;
+            if (linkDesc) curNode.site_description = linkDesc;
+            if (linkThumb) {
+                curNode.thumb_url = linkThumb;
+                curNode.thumbnail_url = linkThumb;
+            }
+            apiNodeById.set(domainNodeId, curNode);
+            try {
+                var st2 = getFilterState();
+                var vs2 = nodeVisualStyle(curNode);
+                var si2 = vs2.si;
+                var upd2 = {
+                    id: domainNodeId,
+                    label: displayLabel(curNode, st2),
+                    title: graphNodeTooltipEl(curNode),
+                    color: {
+                        background: vs2.st.color,
+                        border: visNodeOutline(),
+                        highlight: {
+                            background: vs2.st.color,
+                            border: isLightTheme() ? '#0f172a' : '#f8fafc',
+                        },
+                    },
+                    font: visNodeFontForGroup(curNode.group || 'external'),
+                    shape: si2.shape,
+                    size: si2.size,
+                    value: si2.value,
+                    borderWidth: 2,
+                    hidden: false,
+                };
+                applyNodeImageFields(upd2, si2, true);
+                nodesDS.update(upd2);
+            } catch (ePatchNode) {}
+        }
+
+        // 2) Upsert edge entreprise -> domaine (lien externe).
+        var rawEdgeExt = {
+            from: sourceNodeId,
+            to: domainNodeId,
+            label: 'lien',
+            arrows: 'to',
+            dashes: false,
+            color: { color: '#a78bfa' },
+        };
+        var extId = edgeStableId(rawEdgeExt);
+        var hasExt = !!edgesDS.get(extId);
+        if (!hasExt) {
+            lastRaw.edges.push(rawEdgeExt);
+            edgesDS.update(
+                Object.assign(
+                    {
+                        id: extId,
+                        title: graphEdgeTooltipEl(rawEdgeExt),
+                        font: visEdgeFont(),
+                        hidden: false,
+                        smooth: { type: 'continuous', roundness: 0.35 },
+                        width: 1.9,
+                    },
+                    rawEdgeExt
+                )
+            );
+        }
+
+        // 3) Si la fiche cible existe déjà DANS LE GRAPHE, relier vers elle.
+        var tid = Number(link.target_entreprise_id || 0);
+        if (tid > 0) {
+            var targetNodeId = 'e:' + String(tid);
+            if (apiNodeById.has(targetNodeId)) {
+                var rawEdgeToFiche = {
+                    from: domainNodeId,
+                    to: targetNodeId,
+                    label: 'fiche en base',
+                    arrows: 'to',
+                    dashes: true,
+                    color: { color: '#22c55e' },
+                };
+                var toFicheId = edgeStableId(rawEdgeToFiche);
+                if (!edgesDS.get(toFicheId)) {
+                    lastRaw.edges.push(rawEdgeToFiche);
+                    edgesDS.update(
+                        Object.assign(
+                            {
+                                id: toFicheId,
+                                title: graphEdgeTooltipEl(rawEdgeToFiche),
+                                font: visEdgeFont(),
+                                hidden: false,
+                                smooth: { type: 'continuous', roundness: 0.35 },
+                                width: 2.0,
+                            },
+                            rawEdgeToFiche
+                        )
+                    );
+                }
+            }
+        }
+
+        // Recalcule les hidden/labels selon filtres actifs.
+        scheduleApplyFilters();
+        scheduleDeptZonesRebuild(40);
+    }
+
+    function showGraphNotification(message, type) {
+        var t = type || 'info';
+        try {
+            if (window.Notifications && typeof window.Notifications.show === 'function') {
+                window.Notifications.show(String(message || ''), t);
+                return;
+            }
+        } catch (e) {}
+        // Fallback minimal si le module global n'est pas chargé
+        var n = document.createElement('div');
+        n.className = 'notification notification-' + t;
+        n.textContent = message;
+        n.style.cssText =
+            'position:fixed;top:20px;right:20px;padding:12px 16px;border-radius:8px;' +
+            'box-shadow:0 4px 14px rgba(0,0,0,.25);z-index:10000;font-size:.9rem;' +
+            'background:' + (t === 'success' ? '#d4edda' : t === 'error' ? '#f8d7da' : '#d1ecf1') + ';' +
+            'color:' + (t === 'success' ? '#155724' : t === 'error' ? '#721c24' : '#0c5460') + ';';
+        document.body.appendChild(n);
+        setTimeout(function () {
+            if (n && n.parentNode) n.parentNode.removeChild(n);
+        }, 2600);
+    }
+
+    function ensureRealtimeFeedHost() {
+        if (!wrapEl) return null;
+        var host = document.getElementById('graph-realtime-feed');
+        if (host) return host;
+        host = document.createElement('div');
+        host.id = 'graph-realtime-feed';
+        host.style.cssText =
+            'position:absolute;left:12px;bottom:12px;z-index:11;display:flex;flex-direction:column;' +
+            'gap:6px;max-width:min(44rem,calc(100% - 7rem));pointer-events:none;';
+        wrapEl.appendChild(host);
+        return host;
+    }
+
+    function pushRealtimeFeedLine(message, isError) {
+        var host = ensureRealtimeFeedHost();
+        if (!host) return;
+        var row = document.createElement('div');
+        row.style.cssText =
+            'padding:6px 9px;border-radius:8px;font-size:.78rem;line-height:1.3;' +
+            'background:' + (isError ? 'rgba(127,29,29,.88)' : 'rgba(15,23,42,.86)') + ';' +
+            'color:' + (isError ? '#fecaca' : '#cbd5e1') + ';' +
+            'border:1px solid ' + (isError ? 'rgba(248,113,113,.45)' : 'rgba(148,163,184,.25)') + ';' +
+            'box-shadow:0 4px 14px rgba(0,0,0,.35);';
+        row.textContent = message;
+        host.appendChild(row);
+        while (host.children.length > 5) {
+            host.removeChild(host.firstChild);
+        }
+        window.setTimeout(function () {
+            try {
+                row.style.opacity = '0';
+                row.style.transition = 'opacity .35s ease';
+                window.setTimeout(function () {
+                    if (row.parentNode) row.parentNode.removeChild(row);
+                }, 360);
+            } catch (e) {}
+        }, 5200);
+    }
+
+    function externalUrlFromNode(raw) {
+        if (!raw) return '';
+        var candidate =
+            (raw.resolved_url || '').trim() ||
+            (raw.sample_external_url || '').trim() ||
+            (raw.domain || '').trim();
+        if (!candidate) return '';
+        if (/^https?:\/\//i.test(candidate)) return candidate;
+        return 'https://' + candidate.replace(/^\/+/, '');
+    }
+
+    function parseJsonResponseSafe(response) {
+        return response.text().then(function (txt) {
+            var body = {};
+            if (txt && txt.trim()) {
+                try {
+                    body = JSON.parse(txt);
+                } catch (e) {
+                    body = { error: 'Réponse serveur non JSON.' };
+                }
+            }
+            return { ok: response.ok, status: response.status, body: body };
+        });
     }
 
     function setLoading(on) {
@@ -663,64 +1366,6 @@
         return d;
     }
 
-    function getClusteringMod() {
-        if (!network) return null;
-        if (network.clustering) return network.clustering;
-        if (network.body && network.body.modules && network.body.modules.clustering) {
-            return network.body.modules.clustering;
-        }
-        return null;
-    }
-
-    function clusterLeaves() {
-        if (!network || !lastRaw) return;
-        var deg = buildVisibleDegree();
-        try {
-            network.cluster({
-                joinCondition: function (nodeOptions) {
-                    if (nodeOptions.hidden) return false;
-                    var raw = apiNodeById.get(nodeOptions.id);
-                    if (!raw) return false;
-                    var g = raw.group || 'external';
-                    if (g === 'entreprise' || g === 'agency') return false;
-                    return (deg[nodeOptions.id] || 0) <= 1;
-                },
-                processProperties: function (clusterOptions, childNodes) {
-                    clusterOptions.label = String(childNodes.length) + ' feuilles';
-                    clusterOptions.shape = 'database';
-                    clusterOptions.color = { background: '#4f46e5', border: '#a5b4fc' };
-                    clusterOptions.font = isLightTheme()
-                        ? { color: '#f8fafc', size: 13 }
-                        : { color: '#f8fafc', size: 13 };
-                    clusterOptions.borderWidth = 2;
-                    return clusterOptions;
-                },
-            });
-        } catch (e) {
-            /* Clustering indisponible selon version / options vis-network */
-        }
-    }
-
-    function openAllClusters() {
-        var cl = getClusteringMod();
-        if (!cl || !network) return;
-        var i = 0;
-        while (i++ < 80) {
-            var found = false;
-            try {
-                network.body.data.nodes.getIds().forEach(function (id) {
-                    if (typeof cl.isCluster === 'function' && cl.isCluster(id)) {
-                        network.openCluster(id);
-                        found = true;
-                    }
-                });
-            } catch (e) {
-                break;
-            }
-            if (!found) break;
-        }
-    }
-
     function edgeKind(e) {
         const lbl = (e.label || '').toLowerCase();
         if (lbl.indexOf('crédit') !== -1 || lbl === 'crédit') return 'credit';
@@ -799,6 +1444,7 @@
             edgeRef: chk('flt-edge-ref', true),
             edgeFiche: chk('flt-edge-fiche', true),
             compactLabels: chk('flt-compact-labels', true),
+            colorByGeo: chk('flt-color-by-geo', false),
             search: (searchEl && searchEl.value ? searchEl.value : '').trim().toLowerCase(),
         };
     }
@@ -824,6 +1470,218 @@
             return { shape: st.shape, image: undefined, size: st.size, value: st.value };
         }
         return { shape: st.shape, image: undefined, size: st.size, value: st.value };
+    }
+
+    /**
+     * Couleur stable par clé géographique (département / ville / inconnu) — lisible en clair et sombre.
+     */
+    function geoPaletteColor(geoKey) {
+        var s = String(geoKey || 'geo:unknown');
+        var h = 2166136261;
+        for (var i = 0; i < s.length; i++) {
+            h ^= s.charCodeAt(i);
+            h = Math.imul(h, 16777619);
+        }
+        var hue = Math.abs(h) % 360;
+        var sat = isLightTheme() ? '52%' : '56%';
+        var light = isLightTheme() ? '40%' : '50%';
+        return 'hsl(' + hue + ',' + sat + ',' + light + ')';
+    }
+
+    function clearDeptZonesCache() {
+        deptZonesCache = [];
+        if (deptZonesRebuildTimer) {
+            clearTimeout(deptZonesRebuildTimer);
+            deptZonesRebuildTimer = null;
+        }
+    }
+
+    function convexHull(points) {
+        if (!points || points.length < 3) return points ? points.slice() : [];
+        var pts = points
+            .map(function (p) { return { x: Number(p.x), y: Number(p.y) }; })
+            .filter(function (p) { return isFinite(p.x) && isFinite(p.y); })
+            .sort(function (a, b) { return a.x === b.x ? a.y - b.y : a.x - b.x; });
+        if (pts.length < 3) return pts;
+        function cross(o, a, b) {
+            return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+        }
+        var lower = [];
+        for (var i = 0; i < pts.length; i++) {
+            while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], pts[i]) <= 0) {
+                lower.pop();
+            }
+            lower.push(pts[i]);
+        }
+        var upper = [];
+        for (var j = pts.length - 1; j >= 0; j--) {
+            while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], pts[j]) <= 0) {
+                upper.pop();
+            }
+            upper.push(pts[j]);
+        }
+        lower.pop();
+        upper.pop();
+        return lower.concat(upper);
+    }
+
+    function expandPolygon(points, pad) {
+        if (!points || !points.length) return [];
+        var cx = 0;
+        var cy = 0;
+        points.forEach(function (p) {
+            cx += p.x;
+            cy += p.y;
+        });
+        cx /= points.length;
+        cy /= points.length;
+        return points.map(function (p) {
+            var dx = p.x - cx;
+            var dy = p.y - cy;
+            var d = Math.hypot(dx, dy) || 1;
+            return {
+                x: p.x + (dx / d) * pad,
+                y: p.y + (dy / d) * pad,
+            };
+        });
+    }
+
+    function drawSmoothPolygon(ctx, points, radius) {
+        if (!points || points.length < 3) return;
+        var r = Math.max(4, radius || 16);
+        var n = points.length;
+        ctx.beginPath();
+        for (var i = 0; i < n; i++) {
+            var p0 = points[(i - 1 + n) % n];
+            var p1 = points[i];
+            var p2 = points[(i + 1) % n];
+            var inDx = p1.x - p0.x;
+            var inDy = p1.y - p0.y;
+            var inLen = Math.hypot(inDx, inDy) || 1;
+            var outDx = p2.x - p1.x;
+            var outDy = p2.y - p1.y;
+            var outLen = Math.hypot(outDx, outDy) || 1;
+            var rr = Math.min(r, inLen * 0.45, outLen * 0.45);
+            var sx = p1.x - (inDx / inLen) * rr;
+            var sy = p1.y - (inDy / inLen) * rr;
+            var ex = p1.x + (outDx / outLen) * rr;
+            var ey = p1.y + (outDy / outLen) * rr;
+            if (i === 0) ctx.moveTo(sx, sy);
+            else ctx.lineTo(sx, sy);
+            ctx.quadraticCurveTo(p1.x, p1.y, ex, ey);
+        }
+        ctx.closePath();
+    }
+
+    function rebuildDeptZonesCache() {
+        if (!network || !lastRaw || !lastRaw.nodes || !lastRaw.nodes.length) {
+            deptZonesCache = [];
+            return;
+        }
+        var state = getFilterState();
+        if (!state.colorByGeo) {
+            deptZonesCache = [];
+            return;
+        }
+        var visibleIds = computeVisibleNodeIds(lastRaw.nodes, lastRaw.edges, state);
+        var byDept = new Map();
+        lastRaw.nodes.forEach(function (n) {
+            if ((n.group || 'external') !== 'entreprise') return;
+            if (!visibleIds.has(n.id)) return;
+            var gk = String(n.geo_key || '');
+            if (!gk || gk.indexOf('dept:') !== 0) return;
+            var dept = gk.slice(5);
+            if (!dept) return;
+            if (!byDept.has(dept)) byDept.set(dept, []);
+            byDept.get(dept).push(n.id);
+        });
+        var cache = [];
+        byDept.forEach(function (ids, dept) {
+            if (!ids || !ids.length) return;
+            var pos = network.getPositions(ids);
+            var points = [];
+            var cx = 0;
+            var cy = 0;
+            ids.forEach(function (id) {
+                var p = pos[id];
+                if (!p) return;
+                points.push({ x: p.x, y: p.y });
+                cx += p.x;
+                cy += p.y;
+            });
+            if (!points.length) return;
+            var count = ids.length;
+            cx /= points.length;
+            cy /= points.length;
+            var hull = convexHull(points);
+            var pad = Math.max(46, Math.min(130, 34 + Math.sqrt(count) * 12));
+            var expanded = expandPolygon(hull, pad);
+            if (expanded.length < 3) {
+                expanded = expandPolygon(
+                    [
+                        { x: cx - 90, y: cy - 60 },
+                        { x: cx + 90, y: cy - 60 },
+                        { x: cx + 90, y: cy + 60 },
+                        { x: cx - 90, y: cy + 60 },
+                    ],
+                    Math.max(10, pad * 0.4)
+                );
+            }
+            cache.push({
+                dept: dept,
+                count: count,
+                cx: cx,
+                cy: cy,
+                points: expanded,
+                color: geoPaletteColor('dept:' + dept),
+            });
+        });
+        cache.sort(function (a, b) {
+            return b.count - a.count;
+        });
+        deptZonesCache = cache;
+    }
+
+    function scheduleDeptZonesRebuild(delayMs) {
+        if (deptZonesRebuildTimer) {
+            clearTimeout(deptZonesRebuildTimer);
+            deptZonesRebuildTimer = null;
+        }
+        deptZonesRebuildTimer = setTimeout(function () {
+            deptZonesRebuildTimer = null;
+            rebuildDeptZonesCache();
+            if (network) {
+                try {
+                    network.redraw();
+                } catch (e) {}
+            }
+        }, delayMs == null ? 220 : delayMs);
+    }
+
+    function drawDeptZones(ctx) {
+        var state = getFilterState();
+        if (!state.colorByGeo || !deptZonesCache.length) return;
+        ctx.save();
+        ctx.globalCompositeOperation = 'destination-over';
+        deptZonesCache.forEach(function (z) {
+            var fill = z.color.replace('hsl(', 'hsla(').replace(')', ',0.14)');
+            var stroke = z.color.replace('hsl(', 'hsla(').replace(')', ',0.34)');
+            drawSmoothPolygon(ctx, z.points, 22);
+            ctx.fillStyle = fill;
+            ctx.fill();
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = stroke;
+            ctx.stroke();
+            var label = 'Dept ' + z.dept + ' - ' + z.count + ' entreprise' + (z.count > 1 ? 's' : '');
+            ctx.font = '600 24px Roboto, sans-serif';
+            ctx.fillStyle = stroke;
+            var tw = 0;
+            try {
+                tw = ctx.measureText(label).width || 0;
+            } catch (e) {}
+            ctx.fillText(label, z.cx - tw / 2, z.cy - 18);
+        });
+        ctx.restore();
     }
 
     function visStyleForGroup(grp) {
@@ -990,7 +1848,10 @@
     function buildTooltipHtml(n) {
         const grp = n.group || 'external';
         const st0 = visStyleForGroup(grp);
-        const accent = st0.color || '#a855f7';
+        let accent = st0.color || '#a855f7';
+        if (grp === 'entreprise' && getFilterState().colorByGeo && n.geo_key) {
+            accent = geoPaletteColor(n.geo_key);
+        }
         const eyebrow = escapeHtml(groupLabelFr(grp));
         let inner = '';
 
@@ -1023,6 +1884,9 @@
             inner += hero;
             if (n.entreprise_id != null) {
                 inner += tooltipStatRow('badge', 'ID fiche', escapeHtml('#' + String(n.entreprise_id)));
+            }
+            if (n.geo_label) {
+                inner += tooltipStatRow('map', 'Localisation', escapeHtml(String(n.geo_label)));
             }
             const sh = n.shared_external_domains_count;
             if (sh != null && sh > 0) {
@@ -1200,8 +2064,12 @@
     function nodeVisualStyle(n) {
         const grp = n.group || 'external';
         const st0 = visStyleForGroup(grp);
+        let nodeColor = st0.color;
+        if (grp === 'entreprise' && getFilterState().colorByGeo && n.geo_key) {
+            nodeColor = geoPaletteColor(n.geo_key);
+        }
         const st = {
-            color: st0.color,
+            color: nodeColor,
             shape: st0.shape,
             size: st0.size,
             value: st0.value,
@@ -1249,13 +2117,39 @@
         });
     }
 
+    function stableHash32(str) {
+        var h = 2166136261;
+        var s = String(str || '');
+        for (var i = 0; i < s.length; i++) {
+            h ^= s.charCodeAt(i);
+            h = Math.imul(h, 16777619);
+        }
+        return (h >>> 0).toString(16);
+    }
+
+    function edgeStableId(e) {
+        var raw =
+            String(e.from || '') +
+            '|' +
+            String(e.to || '') +
+            '|' +
+            String(e.label || '') +
+            '|' +
+            String(e.arrows || 'to') +
+            '|' +
+            String(!!e.dashes) +
+            '|' +
+            String((e.color && e.color.color) || '');
+        return 'eg:' + stableHash32(raw);
+    }
+
     function buildVisEdges(rawEdges, visibleIds, state) {
-        return (rawEdges || []).map(function (e, idx) {
+        return (rawEdges || []).map(function (e) {
             const show = edgeVisible(e, visibleIds, state);
             const k = edgeKind(e);
             const w = k === 'credit' ? 2.4 : k === 'fiche' ? 2.0 : k === 'ref' ? 1.85 : 1.9;
             return {
-                id: 'e' + idx,
+                id: edgeStableId(e),
                 from: e.from,
                 to: e.to,
                 label: state.compactLabels ? '' : e.label || '',
@@ -1539,6 +2433,73 @@
         };
     }
 
+    function computeInitialLayoutPositions(rawNodes, rawEdges) {
+        var pos = {};
+        var nodes = rawNodes || [];
+        var edges = rawEdges || [];
+
+        function isEntrepriseId(id) {
+            return String(id || '').slice(0, 2) === 'e:';
+        }
+
+        var entrepriseIds = nodes
+            .map(function (n) { return n && n.id; })
+            .filter(function (id) { return isEntrepriseId(id); });
+
+        // Placer les entreprises en cercle (layout stable, lisible).
+        var nE = entrepriseIds.length;
+        var radius = Math.max(520, Math.min(1150, 360 + nE * 16));
+        for (var i = 0; i < nE; i++) {
+            var idE = entrepriseIds[i];
+            var ang = (i / Math.max(1, nE)) * Math.PI * 2;
+            pos[idE] = { x: Math.cos(ang) * radius, y: Math.sin(ang) * radius };
+        }
+
+        // Adjacence (pour placer les domaines autour de leur(s) entreprise(s)).
+        var neigh = {};
+        edges.forEach(function (e) {
+            if (!e || !e.from || !e.to) return;
+            if (!neigh[e.from]) neigh[e.from] = [];
+            if (!neigh[e.to]) neigh[e.to] = [];
+            neigh[e.from].push(e.to);
+            neigh[e.to].push(e.from);
+        });
+
+        // Placer les autres nœuds autour de leurs voisins déjà placés (effet "molécule").
+        nodes.forEach(function (n) {
+            if (!n || !n.id) return;
+            if (pos[n.id]) return;
+            if (typeof n.x === 'number' && typeof n.y === 'number') {
+                pos[n.id] = { x: n.x, y: n.y };
+                return;
+            }
+            var ns = neigh[n.id] || [];
+            var seed = null;
+            for (var j = 0; j < ns.length; j++) {
+                if (pos[ns[j]]) {
+                    seed = pos[ns[j]];
+                    break;
+                }
+            }
+            if (!seed) return;
+            var off = seededOffsetForNewNode(n.id);
+            var dist = 280 + (Math.abs(Math.round((off.dist || 200) * 0.72)) % 240);
+            pos[n.id] = { x: seed.x + off.cos * dist, y: seed.y + off.sin * dist };
+        });
+
+        // Fallback pour isolés : spirale.
+        var k = 0;
+        nodes.forEach(function (n) {
+            if (!n || !n.id) return;
+            if (pos[n.id]) return;
+            var ang = k * 0.85;
+            var dist = 260 + k * 34;
+            pos[n.id] = { x: Math.cos(ang) * dist, y: Math.sin(ang) * dist };
+            k++;
+        });
+        return pos;
+    }
+
     function neighborsOf(nodeId, rawEdges) {
         const out = [];
         (rawEdges || []).forEach(function (e) {
@@ -1664,6 +2625,13 @@
                 html +=
                     '<p class="agences-node-card__muted">Aucun domaine externe partagé avec une autre fiche dans ce graphe.</p>';
             }
+            if (raw.geo_label) {
+                html += cardSection(
+                    'Localisation',
+                    '<p class="agences-node-card__kv">' + escapeHtml(String(raw.geo_label)) + '</p>',
+                    'map'
+                );
+            }
             if (raw.entreprise_id != null) {
                 html += cardSection(
                     'Identifiant',
@@ -1760,6 +2728,17 @@
             if (raw.jsonld_types && raw.jsonld_types.length) {
                 html += cardSection('Types JSON-LD', cardChips(raw.jsonld_types, 15, 'jsonld'), 'data_object');
             }
+            var actUrl = externalUrlFromNode(raw);
+            if (actUrl) {
+                html +=
+                    '<div class="agences-node-card__actions">' +
+                    '<button type="button" class="md-btn md-btn--filled" id="graph-external-analyze-btn" data-url="' +
+                    escapeHtml(actUrl) +
+                    '">' +
+                    '<span class="material-symbols-rounded" aria-hidden="true">play_arrow</span> ' +
+                    'Scraping + technique</button></div>' +
+                    '<p id="graph-external-analysis-status" class="agences-node-card__muted" hidden></p>';
+            }
         }
 
         const neigh = neighborsOf(nodeId, lastRaw ? lastRaw.edges : []);
@@ -1794,6 +2773,14 @@
         if (!lastRaw || !nodesDS || !edgesDS) return;
         const state = getFilterState();
         const visibleIds = computeVisibleNodeIds(lastRaw.nodes, lastRaw.edges, state);
+        var posMap = null;
+        try {
+            if (network && !physicsEnabled && typeof network.getPositions === 'function') {
+                posMap = network.getPositions();
+            }
+        } catch (ePos) {
+            posMap = null;
+        }
         const nodeUpdates = [];
         lastRaw.nodes.forEach(function (n) {
             var vs = nodeVisualStyle(n);
@@ -1820,15 +2807,19 @@
                 },
             };
             applyNodeImageFields(upd, si, true);
+            if (posMap && posMap[n.id] && typeof posMap[n.id].x === 'number' && typeof posMap[n.id].y === 'number') {
+                upd.x = posMap[n.id].x;
+                upd.y = posMap[n.id].y;
+            }
             nodeUpdates.push(upd);
         });
         nodesDS.update(nodeUpdates);
         const edgeUpdates = [];
-        lastRaw.edges.forEach(function (e, idx) {
+        lastRaw.edges.forEach(function (e) {
             var k = edgeKind(e);
             var w = k === 'credit' ? 2.4 : k === 'fiche' ? 2.0 : k === 'ref' ? 1.85 : 1.9;
             edgeUpdates.push({
-                id: 'e' + idx,
+                id: edgeStableId(e),
                 hidden: !edgeVisible(e, visibleIds, state),
                 label: state.compactLabels ? '' : e.label || '',
                 width: w,
@@ -1837,6 +2828,7 @@
         });
         edgesDS.update(edgeUpdates);
         if (selectedNodeId && !visibleIds.has(selectedNodeId)) hideNodeCard();
+        scheduleDeptZonesRebuild(80);
     }
 
     function scheduleApplyFilters() {
@@ -1857,6 +2849,7 @@
             'flt-edge-ref',
             'flt-edge-fiche',
             'flt-compact-labels',
+            'flt-color-by-geo',
         ];
         ids.forEach(function (id) {
             const el = document.getElementById(id);
@@ -1916,6 +2909,7 @@
             edgesDS = null;
             lastRaw = null;
             apiNodeById = new Map();
+            clearDeptZonesCache();
             hideNodeCard();
             return;
         }
@@ -1942,13 +2936,24 @@
 
         const state = getFilterState();
         const visibleIds = computeVisibleNodeIds(lastRaw.nodes, lastRaw.edges, state);
+        var initPos = computeInitialLayoutPositions(lastRaw.nodes, lastRaw.edges);
         const vNodes = buildVisNodes(lastRaw.nodes, state, visibleIds);
+        vNodes.forEach(function (vn) {
+            if (!vn || !vn.id) return;
+            if (typeof vn.x === 'number' && typeof vn.y === 'number') return;
+            var p = initPos[vn.id];
+            if (p) {
+                vn.x = p.x;
+                vn.y = p.y;
+            }
+        });
         const vEdges = buildVisEdges(lastRaw.edges, visibleIds, state);
 
         nodesDS = new vis.DataSet(vNodes);
         edgesDS = new vis.DataSet(vEdges);
 
         if (network) network.destroy();
+        clearDeptZonesCache();
         if (graphResizeObserver) {
             try {
                 graphResizeObserver.disconnect();
@@ -1959,16 +2964,14 @@
             window.removeEventListener('resize', graphResizeHandler);
             graphResizeHandler = null;
         }
-        physicsEnabled = true;
-        if (btnPhysics) btnPhysics.classList.add('md-btn--filled');
+        physicsEnabled = false;
+        if (btnPhysics) btnPhysics.classList.remove('md-btn--filled');
 
-        var postLoadPhysicsMinMs = 1300;
-        var postLoadPhysicsT0 = Date.now();
-
-        network = new vis.Network(graphEl, { nodes: nodesDS, edges: edgesDS }, networkOptions(true));
-        try {
-            network.startSimulation();
-        } catch (eSim) {}
+        // Pas de physique ni de recadrage automatique : layout initial calculé ci-dessus.
+        network = new vis.Network(graphEl, { nodes: nodesDS, edges: edgesDS }, networkOptions(false));
+        network.on('beforeDrawing', function (ctx) {
+            drawDeptZones(ctx);
+        });
 
         function syncGraphSize() {
             if (!network || !graphEl) return;
@@ -2004,57 +3007,10 @@
         };
         window.addEventListener('resize', graphResizeHandler);
 
-        let graphPostLoadLayoutDone = false;
-        var postLoadFinishTimer = null;
-        function finishPostLoadPhysicsAndFit() {
-            if (graphPostLoadLayoutDone || !network) return;
-            graphPostLoadLayoutDone = true;
-            if (postLoadFinishTimer) {
-                try {
-                    clearTimeout(postLoadFinishTimer);
-                } catch (eClr) {}
-                postLoadFinishTimer = null;
-            }
-            physicsEnabled = false;
-            try {
-                network.setOptions({ physics: { enabled: false } });
-            } catch (e) {}
-            if (btnPhysics) btnPhysics.classList.remove('md-btn--filled');
-            try {
-                network.fit({
-                    animation: {
-                        duration: 720,
-                        easingFunction: 'easeInOutQuad',
-                    },
-                    padding: 32,
-                });
-            } catch (e2) {}
-        }
-        function scheduleFinishAfterMinDelay() {
-            if (graphPostLoadLayoutDone || !network) return;
-            var elapsed = Date.now() - postLoadPhysicsT0;
-            var wait = Math.max(0, postLoadPhysicsMinMs - elapsed);
-            if (postLoadFinishTimer) {
-                try {
-                    clearTimeout(postLoadFinishTimer);
-                } catch (eClr2) {}
-                postLoadFinishTimer = null;
-            }
-            postLoadFinishTimer = window.setTimeout(function () {
-                postLoadFinishTimer = null;
-                finishPostLoadPhysicsAndFit();
-            }, wait);
-        }
-        var stabilizationPhaseReported = false;
-        function onStabilizationPhaseDone() {
-            if (stabilizationPhaseReported) return;
-            stabilizationPhaseReported = true;
-            scheduleFinishAfterMinDelay();
-        }
-        network.on('stabilizationIterationsDone', onStabilizationPhaseDone);
-        window.setTimeout(function () {
-            if (!graphPostLoadLayoutDone) onStabilizationPhaseDone();
-        }, 4800);
+        // Pas de stabilisation/fit auto : seulement rebuild zones.
+        network.on('stabilized', function () {
+            scheduleDeptZonesRebuild(100);
+        });
 
         network.on('click', function (params) {
             if (params.nodes && params.nodes.length) {
@@ -2100,10 +3056,115 @@
                 }
                 preDragView = null;
             }
+            scheduleDeptZonesRebuild(90);
         });
+        network.on('zoom', function () {
+            scheduleDeptZonesRebuild(120);
+        });
+        network.on('animationFinished', function () {
+            scheduleDeptZonesRebuild(120);
+        });
+        scheduleDeptZonesRebuild(120);
+    }
+
+    function buildGraphApiUrl() {
+        const qp = buildGraphQueryParams();
+        const qs = qp.toString();
+        return '/api/entreprises/graph' + (qs ? '?' + qs : '');
+    }
+
+    function refreshGraphIncremental() {
+        if (!network || !nodesDS || !edgesDS) {
+            loadGraph();
+            return;
+        }
+        var url;
+        try {
+            url = buildGraphApiUrl();
+        } catch (e0) {
+            return;
+        }
+        fetch(url, { credentials: 'same-origin' })
+            .then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            })
+            .then(function (data) {
+                if (!data.success && data.error) throw new Error(data.error);
+                const st = data.stats || {};
+                const scope = data.graph_scope || null;
+                renderStats(st, scope);
+                updateScopeHint(scope);
+                if (!data.nodes || data.nodes.length === 0) {
+                    graphAnalysisDbg('refreshGraphIncremental: réponse vide, on garde le graphe courant');
+                    return;
+                }
+                var posMap = {};
+                try {
+                    if (network && typeof network.getPositions === 'function') {
+                        posMap = network.getPositions() || {};
+                    }
+                } catch (ePos) {
+                    posMap = {};
+                }
+                lastRaw = { nodes: data.nodes || [], edges: data.edges || [] };
+                apiNodeById = new Map();
+                lastRaw.nodes.forEach(function (n) {
+                    apiNodeById.set(n.id, n);
+                });
+                const state = getFilterState();
+                const visibleIds = computeVisibleNodeIds(lastRaw.nodes, lastRaw.edges, state);
+                const vNodes = buildVisNodes(lastRaw.nodes, state, visibleIds);
+                vNodes.forEach(function (vn) {
+                    var existing = posMap[vn.id];
+                    if (existing && typeof existing.x === 'number' && typeof existing.y === 'number') {
+                        vn.x = existing.x;
+                        vn.y = existing.y;
+                        return;
+                    }
+                    var lay = layoutSeedPositionForNewVisNode(vn.id, lastRaw.edges, posMap);
+                    if (lay) {
+                        vn.x = lay.x;
+                        vn.y = lay.y;
+                        posMap[vn.id] = { x: lay.x, y: lay.y };
+                    }
+                });
+                const vEdges = buildVisEdges(lastRaw.edges, visibleIds, state);
+
+                var newNodeIds = new Set(
+                    vNodes.map(function (n) {
+                        return n.id;
+                    })
+                );
+                var curNodeIds = nodesDS.getIds();
+                var nodeToRemove = curNodeIds.filter(function (id) {
+                    return !newNodeIds.has(id);
+                });
+                if (nodeToRemove.length) nodesDS.remove(nodeToRemove);
+                if (vNodes.length) nodesDS.update(vNodes);
+
+                var newEdgeIds = new Set(
+                    vEdges.map(function (e) {
+                        return e.id;
+                    })
+                );
+                var curEdgeIds = edgesDS.getIds();
+                var edgeToRemove = curEdgeIds.filter(function (id) {
+                    return !newEdgeIds.has(id);
+                });
+                if (edgeToRemove.length) edgesDS.remove(edgeToRemove);
+                if (vEdges.length) edgesDS.update(vEdges);
+                applyPendingDomainPromotions();
+                if (selectedNodeId && !newNodeIds.has(selectedNodeId)) hideNodeCard();
+                scheduleDeptZonesRebuild(80);
+            })
+            .catch(function () {
+                /* silencieux pendant le suivi */
+            });
     }
 
     function loadGraph() {
+        clearGraphCoalescedSyncTimer();
         var url;
         try {
             setLoading(true);
@@ -2115,9 +3176,7 @@
             }
             if (statsWrap) statsWrap.innerHTML = '<span class="agences-chip">Chargement…</span>';
 
-            const qp = buildGraphQueryParams();
-            const qs = qp.toString();
-            url = '/api/entreprises/graph' + (qs ? '?' + qs : '');
+            url = buildGraphApiUrl();
         } catch (e0) {
             try {
                 if (errEl) {
@@ -2246,24 +3305,9 @@
     }
     if (btnPhysics) {
         btnPhysics.addEventListener('click', function () {
-            if (!network) return;
-            physicsEnabled = !physicsEnabled;
-            var fa2 = getForceAtlas2Opts();
-            network.setOptions({
-                    physics: {
-                    enabled: physicsEnabled,
-                    stabilization: { iterations: physicsEnabled ? 400 : 0 },
-                    forceAtlas2Based: fa2,
-                    solver: 'forceAtlas2Based',
-                },
-            });
-            btnPhysics.classList.toggle('md-btn--filled', physicsEnabled);
-            try {
-                if (physicsEnabled) network.startSimulation();
-                else network.stopSimulation();
-            } catch (e) {
-                /* vis-network versions */
-            }
+            // Physique désactivée pour garder un layout stable et lisible.
+            // Bouton conservé mais inactif (évite de réintroduire le "spaghetti" + recadrages).
+            return;
         });
     }
     if (btnExport) {
@@ -2282,8 +3326,6 @@
     }
     if (btnViewBack) btnViewBack.addEventListener('click', viewBack);
     if (btnViewFwd) btnViewFwd.addEventListener('click', viewFwd);
-    if (btnClusterLeaves) btnClusterLeaves.addEventListener('click', clusterLeaves);
-    if (btnClusterOpen) btnClusterOpen.addEventListener('click', openAllClusters);
 
     if (window.matchMedia) {
         window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', function () {
@@ -2331,6 +3373,22 @@
             e.stopPropagation();
             graphFsToggleDropdown();
         });
+        fsFiltersToggle.addEventListener('keydown', function (e) {
+            if (e.key === 'ArrowDown' && graphFsActive()) {
+                e.preventDefault();
+                if (!graphFsDropdownOpen) graphFsToggleDropdown();
+            }
+        });
+    }
+    if (fsTabHost) {
+        fsTabHost.addEventListener('mouseenter', function () {
+            if (!graphFsActive() || graphFsDropdownOpen) return;
+            graphFsToggleDropdown();
+        });
+        fsTabHost.addEventListener('mouseleave', function () {
+            if (!graphFsDropdownOpen) return;
+            graphFsCloseDropdown(false);
+        });
     }
     document.addEventListener('click', function (ev) {
         if (!graphFsDropdownOpen || !fsFiltersDropdown || !fsFiltersToggle) return;
@@ -2360,5 +3418,370 @@
     });
 
     bindFilterListeners();
+
+    function bindExternalCardActions() {
+        if (!nodeCardBody) return;
+        nodeCardBody.addEventListener('click', function (ev) {
+            var t = ev.target;
+            var btn = t && t.closest ? t.closest('#graph-external-analyze-btn') : null;
+            if (!btn) return;
+            var rawUrl = (btn.getAttribute('data-url') || '').trim();
+            if (!rawUrl) {
+                setExternalAnalysisStatus('URL externe introuvable.', true);
+                return;
+            }
+            if (!window.wsManager || !window.wsManager.socket || !window.wsManager.socket.connected) {
+                setExternalAnalysisStatus('WebSocket non connecté. Rechargez la page.', true);
+                return;
+            }
+            setExternalAnalyzeButtonBusy(true);
+            setExternalAnalysisStatus('Préparation de la fiche entreprise…', false);
+            fetch('/api/website-analysis/ensure-entreprise', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: JSON.stringify({ website: rawUrl }),
+            })
+                .then(parseJsonResponseSafe)
+                .then(function (out) {
+                    if (!out.ok || !out.body || !out.body.success || !out.body.entreprise_id) {
+                        throw new Error(
+                            (out.body && (out.body.error || out.body.message)) ||
+                                ("Impossible de préparer l'entreprise (HTTP " + out.status + ').')
+                        );
+                    }
+                    var eid = Number(out.body.entreprise_id);
+                    var sourceNode = selectedNodeId && String(selectedNodeId).slice(0, 2) === 'a:' ? selectedNodeId : null;
+                    var fallbackRunName = '';
+                    try {
+                        if (sourceNode && apiNodeById && apiNodeById.get(sourceNode)) {
+                            fallbackRunName = String(apiNodeById.get(sourceNode).label || '').trim();
+                        }
+                    } catch (eNm) {}
+                    graphExternalAnalysisRun = {
+                        entrepriseId: eid,
+                        entrepriseName: String(out.body.entreprise_name || fallbackRunName || '').trim(),
+                        url: out.body.website || rawUrl,
+                        taskId: null,
+                        domainPromotedEarly: false,
+                        lastStepNotified: '',
+                        stepState: {
+                            scrapingStarted: false,
+                            scrapingDone: false,
+                            technicalStarted: false,
+                            technicalDone: false,
+                        },
+                        sourceDomainNodeId: sourceNode,
+                        targetEntrepriseNodeId: 'e:' + String(eid),
+                    };
+                    if (sourceNode) {
+                        domainPromotions.set(sourceNode, graphExternalAnalysisRun.targetEntrepriseNodeId);
+                    }
+                    try {
+                        sessionStorage.setItem('graph_last_analysis_eid', String(eid));
+                    } catch (eSs) {}
+                    // Évite de rester bloqué sur un ancien scope "ID entreprise" injecté automatiquement.
+                    if (scopeIdsEl && String(scopeIdsEl.value || '').trim() === String(eid)) {
+                        scopeIdsEl.value = '';
+                    }
+                    setExternalAnalysisStatus('Démarrage du pack (scraping + technique)…', false);
+                    return fetch('/api/website-full-analysis/start', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                        body: JSON.stringify({
+                            website: graphExternalAnalysisRun.url,
+                            enable_technical: true,
+                            enable_seo: false,
+                            enable_osint: false,
+                            enable_pentest: false,
+                            enable_nmap: false,
+                            max_depth: 2,
+                            max_workers: 5,
+                            max_time: 240,
+                            max_pages: 40,
+                        }),
+                    })
+                        .then(parseJsonResponseSafe)
+                        .then(function (out2) {
+                            if (!out2.ok || !out2.body || !out2.body.success || !out2.body.task_id) {
+                                throw new Error(
+                                    (out2.body && (out2.body.error || out2.body.message)) ||
+                                        ("Démarrage du pack impossible (HTTP " + out2.status + ').')
+                                );
+                            }
+                            graphExternalAnalysisRun.taskId = String(out2.body.task_id);
+                            try {
+                                window.wsManager.socket.emit('monitor_full_website_analysis', {
+                                    task_id: graphExternalAnalysisRun.taskId,
+                                });
+                                graphAnalysisDbg(
+                                    'monitor_full_website_analysis émis, task_id=',
+                                    graphExternalAnalysisRun.taskId
+                                );
+                            } catch (eEmit) {
+                                throw new Error('Émission WebSocket impossible.');
+                            }
+                            setExternalAnalysisStatus('Scraping + technique en cours…', false);
+                        });
+                })
+                .catch(function (err) {
+                    setExternalAnalyzeButtonBusy(false);
+                    setExternalAnalysisStatus(err.message || String(err), true);
+                    showGraphNotification(err.message || String(err), 'error');
+                });
+        });
+    }
+
+    function bindExternalMiniScrapeEvents() {
+        document.addEventListener('external_mini_scrape:started', function (ev) {
+            var d = ev.detail || {};
+            graphAnalysisDbg('external_mini_scrape:started', d);
+            var last = null;
+            try {
+                last = sessionStorage.getItem('graph_last_analysis_eid');
+            } catch (e0) {}
+            if (last && String(d.entreprise_id || '') !== String(last)) return;
+            var nm =
+                graphExternalAnalysisRun &&
+                Number(graphExternalAnalysisRun.entrepriseId) === Number(d.entreprise_id)
+                    ? entrepriseDisplayName(graphExternalAnalysisRun)
+                    : 'Entreprise #' + String(d.entreprise_id || '?');
+            startMiniScrapeProgress(Number(d.external_links_count || 0));
+            showGraphNotification(nm + ' : mini-scrape domaines externes en cours…', 'info');
+        });
+        document.addEventListener('external_mini_scrape:domain_complete', function (ev) {
+            var d = ev.detail || {};
+            graphAnalysisDbg('external_mini_scrape:domain_complete', d);
+            var last = null;
+            try {
+                last = sessionStorage.getItem('graph_last_analysis_eid');
+            } catch (e0) {}
+            if (last && String(d.entreprise_id || '') !== String(last)) return;
+            var entrepriseId = Number(d.entreprise_id || 0);
+            var dom = d.domain || {};
+            if (!entrepriseId || !dom || !dom.domain_host) return;
+            upsertExternalLinkRealtime(dom, entrepriseId);
+            bumpMiniScrapeProgress();
+        });
+        document.addEventListener('external_mini_scrape:complete', function (ev) {
+            var d = ev.detail || {};
+            graphAnalysisDbg('external_mini_scrape:complete', d);
+            var last = null;
+            try {
+                last = sessionStorage.getItem('graph_last_analysis_eid');
+            } catch (e0) {}
+            if (last && String(d.entreprise_id || '') !== String(last)) return;
+            if (d.skipped) {
+                finishMiniScrapeProgress(0);
+                showGraphNotification(
+                    'Mini-scrape ignoré' + (d.reason ? ' (' + d.reason + ')' : ''),
+                    'warning'
+                );
+                return;
+            }
+            if (d.ok === false) {
+                finishMiniScrapeProgress(0);
+                showGraphNotification(d.error ? String(d.error) : 'Mini-scrape en erreur', 'error');
+                return;
+            }
+            var n = d.domains_scanned != null ? String(d.domains_scanned) : '?';
+            finishMiniScrapeProgress(Number(d.domains_scanned || 0));
+            showGraphNotification('Mini-scrape terminé (' + n + ' domaine(s)), graphe mis à jour…', 'success');
+            // Les nœuds/liens sont désormais créés un par un via external_mini_scrape:domain_complete.
+            // Ce refresh API sert uniquement de réconciliation finale.
+            scheduleGraphCoalescedApiSync(2200);
+        });
+    }
+
+    function bindExternalAnalysisRealtime() {
+        function tryPromoteCurrentRunDomainNode() {
+            if (!graphExternalAnalysisRun || graphExternalAnalysisRun.domainPromotedEarly) return false;
+            var dDom = graphExternalAnalysisRun.sourceDomainNodeId;
+            var eEnt = graphExternalAnalysisRun.targetEntrepriseNodeId;
+            if (!dDom || !eEnt) return false;
+            if (!promoteDomainNodeToEntreprise(dDom, eEnt)) return false;
+            graphExternalAnalysisRun.domainPromotedEarly = true;
+            syncLastRawAfterDomainPromotion(dDom, eEnt, graphExternalAnalysisRun);
+            if (selectedNodeId === dDom) {
+                selectedNodeId = eEnt;
+                try {
+                    if (network) network.selectNodes([eEnt], false);
+                } catch (eSel0) {}
+                fillNodeCard(eEnt);
+            }
+            try {
+                applyFilters();
+            } catch (eFlt0) {}
+            return true;
+        }
+
+        document.addEventListener('full_website_analysis:progress', function (ev) {
+            var d = ev.detail || {};
+            if (!graphExternalAnalysisRun || !graphExternalAnalysisRun.taskId) return;
+            if (String(d.task_id || '') !== String(graphExternalAnalysisRun.taskId)) return;
+            graphAnalysisDbg('progress', d.meta || {});
+            var meta = d.meta || {};
+            if (meta.message) setExternalAnalysisStatus(String(meta.message), false);
+            var step = String(meta.step || '');
+            var stepState = graphExternalAnalysisRun.stepState || {};
+            var entName = entrepriseDisplayName(graphExternalAnalysisRun);
+            if (
+                step === 'scraping' &&
+                !stepState.scrapingStarted
+            ) {
+                stepState.scrapingStarted = true;
+                showGraphNotification(entName + ' : scraping en cours', 'info');
+            }
+            if (
+                step === 'technical' &&
+                !stepState.technicalStarted
+            ) {
+                stepState.technicalStarted = true;
+                if (!stepState.scrapingDone) {
+                    stepState.scrapingDone = true;
+                    showGraphNotification(entName + ' : scraping terminé', 'success');
+                }
+                showGraphNotification(entName + ' : analyse technique en cours', 'info');
+                // Fin scraping : fusion domaine → fiche entreprise tout de suite (avant les events lien à flot).
+                tryPromoteCurrentRunDomainNode();
+            }
+            if (
+                step === 'scraping' &&
+                !stepState.scrapingDone &&
+                /scraping\s+termin/i.test(String(meta.message || ''))
+            ) {
+                stepState.scrapingDone = true;
+                showGraphNotification(entName + ' : scraping terminé', 'success');
+                tryPromoteCurrentRunDomainNode();
+            }
+            graphExternalAnalysisRun.stepState = stepState;
+            if (step && step !== graphExternalAnalysisRun.lastStepNotified) {
+                graphExternalAnalysisRun.lastStepNotified = step;
+            }
+        });
+        document.addEventListener('full_website_analysis:external_link_found', function (ev) {
+            var d = ev.detail || {};
+            if (!graphExternalAnalysisRun || !graphExternalAnalysisRun.taskId) return;
+            if (String(d.task_id || '') !== String(graphExternalAnalysisRun.taskId)) return;
+            graphAnalysisDbg('external_link_found', d.link || {});
+            var lk = d.link || {};
+            var host = String(lk.domain_host || '').trim();
+            var srcTxt = 'e:' + String(graphExternalAnalysisRun.entrepriseId || '?');
+            var tgtId = Number(lk.target_entreprise_id || 0);
+            var tgtTxt = tgtId > 0 ? 'e:' + String(tgtId) : '—';
+            if (host) {
+                setExternalAnalysisStatus('Nouveau lien externe : ' + host, false);
+            }
+            pushRealtimeFeedLine('+1 lien ' + srcTxt + ' -> a:' + (host || '?') + ' -> ' + tgtTxt, false);
+            // Ne pas créer les nœuds ici: on ne veut que le flux mini-scrape (un domaine fini = un emit).
+        });
+        document.addEventListener('full_website_analysis:external_domain_enriched', function (ev) {
+            var d = ev.detail || {};
+            if (!graphExternalAnalysisRun || !graphExternalAnalysisRun.taskId) return;
+            if (String(d.task_id || '') !== String(graphExternalAnalysisRun.taskId)) return;
+            var dom = d.domain || {};
+            var host = String(dom.domain_host || '').trim();
+            if (!host) return;
+
+            // Notif + mise à jour du nœud domaine (thumbnail / label / groupe).
+            showGraphNotification('Domaine enrichi : ' + host, 'info');
+            var nodeId = 'a:' + host;
+            try {
+                var cur = apiNodeById && apiNodeById.get ? apiNodeById.get(nodeId) : null;
+                if (cur) {
+                    if (dom.site_title) cur.label = String(dom.site_title).slice(0, 52);
+                    if (dom.site_title) cur.title = String(dom.site_title).slice(0, 300);
+                    if (dom.site_description) cur.site_description = String(dom.site_description).slice(0, 800);
+                    if (dom.thumb_url) {
+                        cur.thumb_url = String(dom.thumb_url).slice(0, 2000);
+                        cur.thumbnail_url = cur.thumb_url;
+                    }
+                    if (dom.graph_group) cur.group = String(dom.graph_group);
+                }
+            } catch (e0) {}
+            try {
+                if (nodesDS && nodesDS.get(nodeId)) {
+                    var st = getFilterState();
+                    var raw = (apiNodeById && apiNodeById.get && apiNodeById.get(nodeId)) || { id: nodeId, label: host, group: 'external', title: host };
+                    var vs = nodeVisualStyle(raw);
+                    var si = vs.si;
+                    var patch = {
+                        id: nodeId,
+                        label: displayLabel(raw, st),
+                        title: graphNodeTooltipEl(raw),
+                        color: {
+                            background: vs.st.color,
+                            border: visNodeOutline(),
+                            highlight: {
+                                background: vs.st.color,
+                                border: isLightTheme() ? '#0f172a' : '#f8fafc',
+                            },
+                        },
+                        font: visNodeFontForGroup(raw.group || 'external'),
+                        shape: si.shape,
+                        size: si.size,
+                        value: si.value,
+                        borderWidth: 2,
+                        hidden: false,
+                    };
+                    applyNodeImageFields(patch, si, false);
+                    nodesDS.update(patch);
+                }
+            } catch (e1) {}
+        });
+        document.addEventListener('full_website_analysis:complete', function (ev) {
+            var d = ev.detail || {};
+            if (!graphExternalAnalysisRun || !graphExternalAnalysisRun.taskId) return;
+            if (String(d.task_id || '') !== String(graphExternalAnalysisRun.taskId)) return;
+            graphAnalysisDbg('complete', d.result || {});
+            var res = d.result || {};
+            var domNode = graphExternalAnalysisRun.sourceDomainNodeId;
+            var entNode = graphExternalAnalysisRun.targetEntrepriseNodeId;
+            var stepState = graphExternalAnalysisRun.stepState || {};
+            var entName = entrepriseDisplayName(graphExternalAnalysisRun);
+            setExternalAnalysisStatus(
+                res.message ? String(res.message) : 'Scraping + technique terminé. Graphe mis à jour.',
+                false
+            );
+            if (stepState.scrapingStarted && !stepState.scrapingDone) {
+                stepState.scrapingDone = true;
+                showGraphNotification(entName + ' : scraping terminé', 'success');
+            }
+            if (stepState.technicalStarted && !stepState.technicalDone) {
+                stepState.technicalDone = true;
+                showGraphNotification(entName + ' : analyse technique terminée', 'success');
+            }
+            graphExternalAnalysisRun.stepState = stepState;
+            // Promotion déjà faite au passage « technical » ; sinon (sans carte domaine) on tente ici.
+            if (domNode && entNode && !graphExternalAnalysisRun.domainPromotedEarly) {
+                tryPromoteCurrentRunDomainNode();
+            }
+            graphExternalAnalysisRun = null;
+            setExternalAnalyzeButtonBusy(false);
+        });
+        document.addEventListener('full_website_analysis:error', function (ev) {
+            var d = ev.detail || {};
+            graphAnalysisDbg('error', d);
+            if (!graphExternalAnalysisRun) return;
+            if (
+                graphExternalAnalysisRun.taskId &&
+                d.task_id &&
+                String(d.task_id) !== String(graphExternalAnalysisRun.taskId)
+            ) {
+                return;
+            }
+            setExternalAnalysisStatus(d.error ? String(d.error) : 'Erreur analyse.', true);
+            finishMiniScrapeProgress(0);
+            showGraphNotification(d.error ? String(d.error) : 'Erreur analyse.', 'error');
+            pushRealtimeFeedLine(d.error ? String(d.error) : 'Erreur analyse.', true);
+            graphExternalAnalysisRun = null;
+            setExternalAnalyzeButtonBusy(false);
+        });
+    }
+
+    bindExternalCardActions();
+    bindExternalMiniScrapeEvents();
+    bindExternalAnalysisRealtime();
     loadGraph();
 })();

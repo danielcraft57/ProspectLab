@@ -22,7 +22,10 @@ from flask_socketio import SocketIO, emit
 # async_mode=None (défaut) : détection auto — avec Gunicorn -k eventlet, utiliser eventlet.
 # Ne pas forcer async_mode='threading' en prod sous eventlet (non supporté, handlers jamais exécutés).
 # Optionnel : variable d'environnement SOCKETIO_ASYNC_MODE=eventlet|threading|gevent
-socketio = SocketIO(app, async_mode=None)
+# IMPORTANT (process externes) :
+# si des workers Celery doivent émettre des events (process séparé), configurer
+# un message queue Redis côté SocketIO : message_queue="redis://...".
+socketio = SocketIO(app, async_mode=None, message_queue="redis://localhost:6379/0")
 
 @socketio.on('start_analysis')
 def handle_analysis(data):
@@ -209,7 +212,35 @@ Les dépendances sont dans `requirements.txt` :
 
 ## Mode async
 
-L'application utilise `async_mode='threading'` pour la compatibilité avec tous les systèmes. Pour de meilleures performances, on peut utiliser `eventlet` ou `gevent`.
+L'application peut utiliser `threading`, `eventlet` ou `gevent` selon l'environnement.
+
+### Redis message_queue + eventlet
+
+Quand `message_queue` est activé avec `eventlet`, la pile socket doit être **monkey-patchée** tôt (avant imports réseau) pour éviter :
+
+- `RuntimeError: Redis requires a monkey patched socket library to work with eventlet`
+
+Le projet applique ce patch au démarrage (voir `app.py`) et on peut forcer `SOCKETIO_ASYNC_MODE=threading` en développement Windows si besoin.
+
+### Graphe entreprises / mini-scrape (temps réel)
+
+Le graphe n’utilise plus le flux “un lien trouvé = un nœud” (trop verbeux). La source unique pour créer les nœuds/liens est le mini-scrape :
+
+**Serveur → Client :**
+
+- `external_mini_scrape_started`
+  - `entreprise_id` (int)
+  - `scraper_id` (int)
+  - `external_links_count` (int)
+- `external_mini_scrape_domain_complete`
+  - `entreprise_id` (int)
+  - `scraper_id` (int)
+  - `domain` (dict) : `domain_host`, `external_href`, `resolved_url`, `site_title`, `site_description`, `thumb_url`, `target_entreprise_id`
+- `external_mini_scrape_complete`
+  - `entreprise_id` (int)
+  - `scraper_id` (int)
+  - `domains_scanned` (int)
+  - `ok/skipped/error` selon le cas
 
 ## Indicateur de connexion
 

@@ -22,6 +22,7 @@ from tasks.seo_tasks import seo_analysis_task
 from tasks.heavy_schedule import next_websocket_stagger_countdown
 from utils.celery_health import broker_ping_ok
 from utils.cluster_files import cluster_copy_upload_to_workers, is_windows_path
+import json
 import os
 import threading
 import logging
@@ -2239,5 +2240,329 @@ def register_websocket_handlers(socketio, app):
                     'error': f'Erreur lors du démarrage du monitoring: {str(e)}'
                 }, room=request.sid)
             except:
+                pass
+
+    @socketio.on('monitor_full_website_analysis')
+    def handle_monitor_full_website_analysis(data):
+        """
+        Suit une tâche Celery ``full_website_analysis_task`` (poll Redis) et propage la meta PROGRESS
+        vers le client (ex. page graphe entreprises), sur le même principe que ``monitor_campagne``.
+        """
+        try:
+            task_id = (data or {}).get('task_id')
+            session_id = request.sid
+
+            if not task_id:
+                safe_emit(socketio, 'full_website_analysis_error', {
+                    'error': 'task_id manquant',
+                }, room=session_id)
+                return
+
+            def _failure_message(info):
+                if isinstance(info, (list, tuple)) and len(info) >= 1:
+                    return str(info[0])
+                if info is not None:
+                    return str(info)
+                return 'Erreur inconnue'
+
+            def _fetch_new_external_links(entreprise_id: int, last_link_id: int, max_rows: int = 30):
+                """Lit les nouveaux liens externes persistés pour diffusion WebSocket incrémentale."""
+                if not entreprise_id:
+                    return []
+                conn = None
+                try:
+                    conn = database.get_connection()
+                    cursor = conn.cursor()
+                    database.execute_sql(
+                        cursor,
+                        '''
+                        SELECT l.id, l.entreprise_id, l.external_href, l.anchor_text,
+                               l.source_page_url, l.target_entreprise_id,
+                               d.domain_host
+                          FROM entreprise_external_links l
+                          JOIN external_domains d ON d.id = l.domain_id
+                         WHERE l.entreprise_id = ?
+                           AND l.id > ?
+                         ORDER BY l.id ASC
+                         LIMIT ?
+                        ''',
+                        (int(entreprise_id), int(last_link_id or 0), int(max_rows)),
+                    )
+                    rows = cursor.fetchall() or []
+                    out = []
+                    for raw in rows:
+                        d = database.clean_row_dict(dict(raw))
+                        out.append(
+                            {
+                                'id': int(d.get('id') or 0),
+                                'entreprise_id': int(d.get('entreprise_id') or 0),
+                                'external_href': (d.get('external_href') or '')[:1200],
+                                'anchor_text': (d.get('anchor_text') or '')[:400],
+                                'source_page_url': (d.get('source_page_url') or '')[:1200],
+                                'target_entreprise_id': d.get('target_entreprise_id'),
+                                'domain_host': (d.get('domain_host') or '')[:255],
+                            }
+                        )
+                    return out
+                except Exception:
+                    return []
+                finally:
+                    try:
+                        if conn is not None:
+                            conn.close()
+                    except Exception:
+                        pass
+
+            def _fetch_new_enriched_domains(scraper_id: int, last_domain_id: int, max_rows: int = 30):
+                """
+                Stream des enrichissements « mini scrape externe » (external_domains) associés à un run (scraper_id).
+                On s'appuie sur domain_id croissant (suffisant ici pour "récent" + simplicité).
+                """
+                if not scraper_id:
+                    return []
+                conn = None
+                try:
+                    conn = database.get_connection()
+                    cursor = conn.cursor()
+                    database.execute_sql(
+                        cursor,
+                        '''
+                        SELECT DISTINCT d.id, d.domain_host, d.site_title, d.site_description,
+                               d.thumb_url, d.graph_group, d.resolved_url, d.mini_scraped_at
+                          FROM entreprise_external_links l
+                          JOIN external_domains d ON d.id = l.domain_id
+                         WHERE l.scraper_id = ?
+                           AND d.mini_scraped_at IS NOT NULL
+                           AND d.id > ?
+                         ORDER BY d.id ASC
+                         LIMIT ?
+                        ''',
+                        (int(scraper_id), int(last_domain_id or 0), int(max_rows)),
+                    )
+                    rows = cursor.fetchall() or []
+                    out = []
+                    for raw in rows:
+                        d = database.clean_row_dict(dict(raw))
+                        out.append(
+                            {
+                                'id': int(d.get('id') or 0),
+                                'domain_host': (d.get('domain_host') or '')[:255],
+                                'site_title': (d.get('site_title') or '')[:300],
+                                'site_description': (d.get('site_description') or '')[:800],
+                                'thumb_url': (d.get('thumb_url') or '')[:2000],
+                                'graph_group': (d.get('graph_group') or '')[:80],
+                                'resolved_url': (d.get('resolved_url') or '')[:600],
+                                'mini_scraped_at': d.get('mini_scraped_at'),
+                            }
+                        )
+                    return out
+                except Exception:
+                    return []
+                finally:
+                    try:
+                        if conn is not None:
+                            conn.close()
+                    except Exception:
+                        pass
+
+            def monitor_task():
+                last_meta_signature = None
+                last_emitted_external_link_id = 0
+                last_emitted_meta_external_seq = 0
+                last_emitted_enriched_domain_id = 0
+                try:
+                    task = celery.AsyncResult(task_id)
+                    while True:
+                        try:
+                            current_state = task.state
+                            task_info = task.info
+
+                            if current_state == 'PROGRESS':
+                                meta = _celery_progress_meta_as_dict(task_info)
+                                try:
+                                    sig = json.dumps(meta, sort_keys=True, default=str)
+                                except Exception:
+                                    sig = str(meta)
+                                if sig != last_meta_signature:
+                                    last_meta_signature = sig
+                                    safe_emit(
+                                        socketio,
+                                        'full_website_analysis_progress',
+                                        {'task_id': task_id, 'meta': meta},
+                                        room=session_id,
+                                    )
+
+                                # Event instantané (avant persistance) : liens externes détectés par UnifiedScraper.
+                                try:
+                                    seq = int(meta.get('scraper_external_link_event_seq') or 0)
+                                except Exception:
+                                    seq = 0
+                                if seq and seq > last_emitted_meta_external_seq:
+                                    last_emitted_meta_external_seq = seq
+                                    ev = meta.get('scraper_external_link_event') or {}
+                                    if isinstance(ev, dict):
+                                        safe_emit(
+                                            socketio,
+                                            'full_website_analysis_external_link_found',
+                                            {
+                                                'task_id': task_id,
+                                                'entreprise_id': int(meta.get('entreprise_id') or 0),
+                                                'link': {
+                                                    'id': None,
+                                                    'entreprise_id': int(meta.get('entreprise_id') or 0),
+                                                    'external_href': (ev.get('external_href') or '')[:1200],
+                                                    'anchor_text': (ev.get('anchor_text') or '')[:400],
+                                                    'source_page_url': (ev.get('source_page_url') or '')[:1200],
+                                                    'target_entreprise_id': None,
+                                                    'domain_host': (ev.get('domain_host') or '')[:255],
+                                                },
+                                            },
+                                            room=session_id,
+                                        )
+
+                                # Streaming "un par un" des liens externes nouvellement persistés.
+                                # Important : ne pas dépendre des changements de meta, sinon on loupe des ajouts
+                                # si la tâche reste longtemps au même PROGRESS.
+                                eid = meta.get('entreprise_id')
+                                try:
+                                    eid_int = int(eid) if eid is not None else None
+                                except Exception:
+                                    eid_int = None
+                                if eid_int:
+                                    new_links = _fetch_new_external_links(
+                                        eid_int,
+                                        last_emitted_external_link_id,
+                                        max_rows=40,
+                                    )
+                                    for lk in new_links:
+                                        lid = int(lk.get('id') or 0)
+                                        if lid <= 0:
+                                            continue
+                                        if lid > last_emitted_external_link_id:
+                                            last_emitted_external_link_id = lid
+                                        safe_emit(
+                                            socketio,
+                                            'full_website_analysis_external_link_found',
+                                            {
+                                                'task_id': task_id,
+                                                'entreprise_id': eid_int,
+                                                'link': lk,
+                                            },
+                                            room=session_id,
+                                        )
+
+                                # Streaming du mini-scrape externe : domaines enrichis (titre/desc/thumbnail/group).
+                                try:
+                                    sid = meta.get('scraper_id')
+                                    sid_int = int(sid) if sid is not None else None
+                                except Exception:
+                                    sid_int = None
+                                if sid_int:
+                                    doms = _fetch_new_enriched_domains(
+                                        sid_int,
+                                        last_emitted_enriched_domain_id,
+                                        max_rows=25,
+                                    )
+                                    for d in doms:
+                                        did = int(d.get('id') or 0)
+                                        if did <= 0:
+                                            continue
+                                        if did > last_emitted_enriched_domain_id:
+                                            last_emitted_enriched_domain_id = did
+                                        safe_emit(
+                                            socketio,
+                                            'full_website_analysis_external_domain_enriched',
+                                            {
+                                                'task_id': task_id,
+                                                'entreprise_id': int(meta.get('entreprise_id') or 0),
+                                                'domain': d,
+                                            },
+                                            room=session_id,
+                                        )
+                            elif current_state == 'SUCCESS':
+                                result = _celery_success_result_as_dict(task.result)
+                                safe_emit(
+                                    socketio,
+                                    'full_website_analysis_complete',
+                                    {'task_id': task_id, 'result': result or {}},
+                                    room=session_id,
+                                )
+                                with tasks_lock:
+                                    if session_id in active_tasks:
+                                        del active_tasks[session_id]
+                                break
+                            elif current_state == 'FAILURE':
+                                safe_emit(
+                                    socketio,
+                                    'full_website_analysis_error',
+                                    {
+                                        'task_id': task_id,
+                                        'error': _failure_message(task_info),
+                                    },
+                                    room=session_id,
+                                )
+                                with tasks_lock:
+                                    if session_id in active_tasks:
+                                        del active_tasks[session_id]
+                                break
+                            elif current_state in ('REVOKED', 'REJECTED'):
+                                safe_emit(
+                                    socketio,
+                                    'full_website_analysis_error',
+                                    {
+                                        'task_id': task_id,
+                                        'error': f'Tâche {current_state.lower()}',
+                                    },
+                                    room=session_id,
+                                )
+                                with tasks_lock:
+                                    if session_id in active_tasks:
+                                        del active_tasks[session_id]
+                                break
+
+                            time.sleep(_WS_MONITOR_POLL_SEC)
+                        except Exception as e:
+                            logger.warning(
+                                'monitor_full_website_analysis: %s',
+                                e,
+                                exc_info=True,
+                            )
+                            safe_emit(
+                                socketio,
+                                'full_website_analysis_error',
+                                {
+                                    'task_id': task_id,
+                                    'error': f'Erreur lors du suivi: {str(e)}',
+                                },
+                                room=session_id,
+                            )
+                            with tasks_lock:
+                                if session_id in active_tasks:
+                                    del active_tasks[session_id]
+                            break
+                except Exception as e:
+                    safe_emit(
+                        socketio,
+                        'full_website_analysis_error',
+                        {
+                            'task_id': task_id,
+                            'error': f'Erreur dans le monitoring: {str(e)}',
+                        },
+                        room=session_id,
+                    )
+
+            with tasks_lock:
+                active_tasks[session_id] = {'type': 'full_website_analysis', 'task_id': task_id}
+
+            _start_monitor_background(socketio, monitor_task)
+        except Exception as e:
+            try:
+                safe_emit(
+                    socketio,
+                    'full_website_analysis_error',
+                    {'error': f'Erreur au démarrage du monitoring: {str(e)}'},
+                    room=request.sid,
+                )
+            except Exception:
                 pass
 

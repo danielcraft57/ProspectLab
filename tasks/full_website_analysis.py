@@ -13,7 +13,7 @@ from urllib.parse import urljoin, urlparse
 
 from services.database import Database
 from services.logging_config import setup_logger
-from tasks.scraping_tasks import scrape_emails_task
+from tasks.scraping_tasks import run_scrape_emails_inline
 from tasks.technical_analysis_tasks import technical_analysis_task
 from tasks.seo_tasks import seo_analysis_task
 from tasks.osint_tasks import osint_analysis_task
@@ -449,6 +449,9 @@ def run_full_website_analysis_impl(
     steps: Dict[str, str] = {}
     scrape_counts: Dict[str, int] = {}
     image_urls: List[str] = []
+    scraper_id: Optional[int] = None
+    external_link_event_seq = 0
+    last_external_link_ts = 0.0
 
     def progress(step: str, pct: int, message: str):
         self.update_state(
@@ -461,6 +464,7 @@ def run_full_website_analysis_impl(
                 'entreprise_id': entreprise_id,
                 'analyse_id': analyse_id,
                 'website': url,
+                'scraper_id': scraper_id,
             },
         )
 
@@ -471,17 +475,74 @@ def run_full_website_analysis_impl(
     # 1) Scraping
     try:
         progress('scraping', 8, 'Scraping (emails, images, formulaires)…')
-        scrape_out = _run_subtask_eager(
-            scrape_emails_task,
+        def _scrape_progress_cb(msg: str):
+            try:
+                m = str(msg or '').strip()
+            except Exception:
+                m = ''
+            if not m:
+                return
+            progress('scraping', 12, m[:260])
+
+        def _on_external_link_found(entry: dict):
+            nonlocal external_link_event_seq, last_external_link_ts
+            now = time.monotonic()
+            if now - last_external_link_ts < 0.25:
+                return
+            last_external_link_ts = now
+            external_link_event_seq += 1
+            try:
+                domain_host = (entry.get('domain') or '')[:255]
+                href = (entry.get('url') or '')[:1200]
+                source_page = (entry.get('page_url') or '')[:1200]
+                anchor_text = (entry.get('text') or '')[:400]
+                likely_credit = bool(entry.get('likely_credit'))
+                link_source = (entry.get('link_source') or '')[:80]
+            except Exception:
+                domain_host = href = source_page = anchor_text = link_source = ''
+                likely_credit = False
+
+            # On pousse un event “instantané” (avant persistance en base).
+            self.update_state(
+                state='PROGRESS',
+                meta={
+                    'step': 'scraping',
+                    'progress': 14,
+                    'message': 'Lien externe détecté…',
+                    'steps': dict(steps),
+                    'entreprise_id': entreprise_id,
+                    'analyse_id': analyse_id,
+                    'website': url,
+                    'scraper_id': scraper_id,
+                    'scraper_external_link_event_seq': external_link_event_seq,
+                    'scraper_external_link_event': {
+                        'domain_host': domain_host,
+                        'external_href': href,
+                        'source_page_url': source_page,
+                        'anchor_text': anchor_text,
+                        'likely_credit': likely_credit,
+                        'link_source': link_source,
+                    },
+                },
+            )
+
+        scrape_out = run_scrape_emails_inline(
             url=url,
             max_depth=max_depth,
             max_workers=max_workers,
             max_time=max_time,
             max_pages=max_pages,
             entreprise_id=entreprise_id,
+            progress_callback=_scrape_progress_cb,
+            on_external_link_found=_on_external_link_found,
         )
         if scrape_out.get('success') and scrape_out.get('results'):
             flat_results = scrape_out['results']
+            try:
+                sid = scrape_out.get('scraper_id')
+                scraper_id = int(sid) if sid is not None else None
+            except Exception:
+                scraper_id = None
             scrape_counts = {
                 'emails': int(flat_results.get('total_emails') or 0),
                 'people': int(flat_results.get('total_people') or 0),

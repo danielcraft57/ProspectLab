@@ -9,12 +9,14 @@ Vue interactive **entreprises ↔ domaines tiers** découverts lors du scraping 
 
 ## Fonctionnalités côté interface
 
-- Graphe **vis-network** : zoom, cadrage, physique on/off, export **PNG**, historique de vues (précédent / suivant), regroupement des feuilles / ouverture des clusters.
+- Graphe **vis-network** : zoom, cadrage (manuel), export **PNG**, historique de vues (précédent / suivant), thème clair/sombre/auto.
+- **Layout initial** : positions calculées (entreprises en cercle + “molécules” autour des voisins) pour éviter l’affichage “en ligne”.
+- **Pas de physique ni recadrage auto** : la vue reste stable (pas de `fit()` automatique). Un bouton **Ajuster** reste disponible si besoin.
 - **Rail du haut** : puces de synthèse (agences, entreprises, domaines, nœuds, liens, etc.) centrées sous la barre du cadre graphe.
-- **Dock d’actions** (colonne à droite sur la zone graphe) : plein écran, vue/zoom, rechargement périmètre, physique, export, regroupements, thème. Le dock est ancré en **haut et bas** de la zone canvas (`top` / `bottom`) pour que la hauteur suive celle du conteneur et que le défilement interne (`overflow-y: auto`) reste fiable (évite les coupures dues à un `max-height: 100%` mal résolu). Variable CSS **`--graph-entreprises-dock-slot`** : marge réservée pour la carte détail et le positionnement du panneau.
+- **Dock d’actions** (colonne à droite sur la zone graphe) : plein écran, vue/zoom, rechargement périmètre, ajuster, export, thème. Le dock est ancré en **haut et bas** de la zone canvas (`top` / `bottom`) pour que la hauteur suive celle du conteneur et que le défilement interne (`overflow-y: auto`) reste fiable (évite les coupures dues à un `max-height: 100%` mal résolu). Variable CSS **`--graph-entreprises-dock-slot`** : marge réservée pour la carte détail et le positionnement du panneau.
 - **Plein écran** : le bloc `#graph-entreprises-wrap` passe en plein navigateur ou pseudo-plein écran ; languette **Filtres & périmètre** et panneau associé ; les filtres hors plein écran restent dans la page au-dessus du cadre.
 - **Conteneur graphe** : canvas vis-network dans `#graph-entreprises-canvas` (pile `#graph-entreprises-canvas-stack`).
-- **Filtres locaux** : types de nœuds (fiche, agence, autres domaines), types d’arêtes (crédit, lien, réf. site, fiche en base), libellés compacts, recherche sur le graphe chargé.
+- **Filtres locaux** : types de nœuds (fiche, agence, autres domaines), types d’arêtes (crédit, lien, réf. site, fiche en base), libellés compacts, recherche sur le graphe chargé, option **Zones** (teinte des fiches par localisation).
 - **Périmètre serveur** : recherche texte, filtre par domaine, plafonds lignes / entreprises, IDs entreprises, option « crédits seuls » ; rechargement via **Actualiser**.
 - **Thème** : bouton **Auto → Sombre → Clair** (préférence stockée dans `localStorage` ; les infobulles synchronisent des variables CSS sur `:root` car le conteneur `vis-tooltip` est hors de la page).
 - **Infobulles (survol)** : contenu riche en **HTML injecté comme nœud DOM** (exigence vis-network ≥ 9 : les chaînes HTML dans `title` ne sont plus interprétées). Cartes avec icônes Material, stats **libellé + valeur sur une même ligne**, blocs schémas / JSON-LD, liens cliquables vers le site fiche.
@@ -37,6 +39,11 @@ Les nœuds **entreprise** peuvent inclure `thumb_url` / `thumbnail_url` à parti
 1. Lors d’un scraping, les **liens externes** pertinents sont extraits et, après mini-scrape optionnel, stockés dans le schéma relationnel (voir ci-dessous).
 2. **`services/external_mini_scraper.py`** : GET homepage (+ pages internes de premier niveau), extraction titre, meta, OG, images, téléphones, lieu (réutilisation de `location_harvest`), favicon depuis balises `link` ou `/favicon.ico` logique, classification grossière (`external_site_classifier`).
 3. **`services/database/external_links.py`** : création / migration des tables, fusion `external_domains`, construction du graphe pour l’API (`ExternalLinksManager`).
+
+### Temps réel (mini-scrape “un par un”)
+
+- Le mini-scrape asynchrone émet **un événement par domaine** dès qu’il est mini-scrapé et persisté.
+- Le graphe crée alors immédiatement le **nœud** (domaine) et l’**arête** depuis la fiche entreprise, sans attendre la fin du lot.
 
 ### Tables principales (graphe externe)
 

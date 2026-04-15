@@ -34,18 +34,21 @@ except ImportError:
 
 
 class EntrepriseAnalyzer:
-    def __init__(self, excel_file, output_file=None, max_workers=3, delay=2):
+    def __init__(self, excel_file=None, output_file=None, max_workers=3, delay=2):
         """
         Initialise l'analyseur
         
         Args:
-            excel_file: Chemin vers le fichier Excel
+            excel_file: Chemin vers le fichier Excel (optionnel pour usage « heuristiques » sans Excel)
             output_file: Fichier de sortie (défaut: ajoute _analyzed au nom)
             max_workers: Nombre de threads parallèles
             delay: Délai entre les requêtes (secondes)
         """
         self.excel_file = excel_file
-        self.output_file = output_file or excel_file.replace('.xlsx', '_analyzed.xlsx')
+        if excel_file:
+            self.output_file = output_file or excel_file.replace('.xlsx', '_analyzed.xlsx')
+        else:
+            self.output_file = output_file
         self.max_workers = max_workers
         self.delay = delay
         self.lock = threading.Lock()
@@ -90,6 +93,8 @@ class EntrepriseAnalyzer:
         Returns:
             DataFrame nettoyé avec les données valides
         """
+        if not self.excel_file:
+            raise Exception("Aucun fichier Excel configuré (excel_file requis pour load_excel).")
         try:
             # Charger le fichier Excel avec gestion des erreurs
             df = pd.read_excel(

@@ -142,6 +142,13 @@
                                     <span class="agences-filter-chip__surface">Mode compact sur les domaines externes</span>
                                 </label>
                             </div>
+                            <div class="agences-local-row">
+                                <span class="agences-local-row__label">Zones</span>
+                                <label class="agences-filter-chip agences-filter-chip--wide">
+                                    <input type="checkbox" id="flt-color-by-geo" class="agences-filter-chip__input" />
+                                    <span class="agences-filter-chip__surface">Couleur des fiches par localisation (dépt. / ville)</span>
+                                </label>
+                            </div>
                             <div class="agences-local-row agences-local-row--search">
                                 <label class="agences-local-row__label" for="graph-entreprises-search">Sur le graphe</label>
                                 <div class="agences-tf agences-tf--grow">
@@ -212,16 +219,6 @@
                                 PNG
                             </button>
                         </div>
-                        <div class="graph-entreprises-dock__group" role="group" aria-label="Regroupements">
-                            <button type="button" class="graph-entreprises-dock__btn md-btn md-btn--outlined" id="graph-entreprises-cluster-leaves" title="Regrouper les domaines externes à une seule connexion">
-                                <span class="material-symbols-rounded" aria-hidden="true">account_tree</span>
-                                Feuilles
-                            </button>
-                            <button type="button" class="graph-entreprises-dock__btn md-btn md-btn--outlined" id="graph-entreprises-cluster-open" title="Ouvrir tous les regroupements">
-                                <span class="material-symbols-rounded" aria-hidden="true">expand_content</span>
-                                Déplier
-                            </button>
-                        </div>
                         <div class="graph-entreprises-dock__group" role="group" aria-label="Affichage">
                             <button type="button" class="graph-entreprises-dock__btn md-btn md-btn--outlined" id="agences-theme-toggle" title="Thème : Auto → Sombre → Clair">
                                 <span class="material-symbols-rounded" aria-hidden="true">routine</span>
@@ -276,6 +273,7 @@
                 <span>Trait violet : lien</span>
                 <span>Trait gris pointillé : réf. site</span>
                 <span>Trait vert pointillé : fiche en base</span>
+                <span>Option « Zones » : teinte des nœuds <strong>entreprise</strong> = département (CP) ou ville si pas de CP</span>
             </div>
         </div>
     </div>
@@ -283,11 +281,12 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js" crossorigin="anonymous"></script>
+{# defer : s'exécute après notifications.js / websocket.js (base_scripts), sinon le graphe peut tourner avant window.Notifications et wsManager #}
+<script defer src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js" crossorigin="anonymous"></script>
 <script>
 window.GRAPH_ENTREPRISES_PAGE = {
     entrepriseUrl: function (id) { return '/entreprise/' + encodeURIComponent(id); }
 };
 </script>
-<script src="{{ url_for('static', filename='js/graph_entreprises.js') }}"></script>
+<script defer src="{{ url_for('static', filename='js/graph_entreprises.js') }}"></script>
 {% endblock %}

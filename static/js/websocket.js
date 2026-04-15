@@ -420,6 +420,54 @@ class ProspectLabWebSocket {
         this.socket.on('scraping_error', (data) => {
             this.onScrapingError(data);
         });
+
+        // Pack analyse site complet (Celery full_website_analysis_task), suivi via monitor_full_website_analysis
+        this.socket.on('full_website_analysis_progress', (data) => {
+            document.dispatchEvent(new CustomEvent('full_website_analysis:progress', { detail: data }));
+        });
+        this.socket.on('full_website_analysis_complete', (data) => {
+            document.dispatchEvent(new CustomEvent('full_website_analysis:complete', { detail: data }));
+        });
+        this.socket.on('full_website_analysis_error', (data) => {
+            document.dispatchEvent(new CustomEvent('full_website_analysis:error', { detail: data }));
+        });
+        this.socket.on('full_website_analysis_external_link_found', (data) => {
+            document.dispatchEvent(
+                new CustomEvent('full_website_analysis:external_link_found', { detail: data })
+            );
+        });
+        this.socket.on('full_website_analysis_external_domain_enriched', (data) => {
+            document.dispatchEvent(
+                new CustomEvent('full_website_analysis:external_domain_enriched', { detail: data })
+            );
+        });
+        // Mini-scrape des liens externes (tâche Celery séparée, émise via Redis message_queue)
+        this.socket.on('external_mini_scrape_started', (data) => {
+            document.dispatchEvent(new CustomEvent('external_mini_scrape:started', { detail: data }));
+            try {
+                if (localStorage.getItem('graph_analysis_debug') === '1') {
+                    console.info('[WS] external_mini_scrape_started', data);
+                }
+            } catch (e) {}
+        });
+        this.socket.on('external_mini_scrape_complete', (data) => {
+            document.dispatchEvent(new CustomEvent('external_mini_scrape:complete', { detail: data }));
+            try {
+                if (localStorage.getItem('graph_analysis_debug') === '1') {
+                    console.info('[WS] external_mini_scrape_complete', data);
+                }
+            } catch (e) {}
+        });
+        this.socket.on('external_mini_scrape_domain_complete', (data) => {
+            document.dispatchEvent(
+                new CustomEvent('external_mini_scrape:domain_complete', { detail: data })
+            );
+            try {
+                if (localStorage.getItem('graph_analysis_debug') === '1') {
+                    console.info('[WS] external_mini_scrape_domain_complete', data);
+                }
+            } catch (e) {}
+        });
     }
 
     // Méthodes de connexion

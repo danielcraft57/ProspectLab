@@ -19,11 +19,11 @@ def clear_redis():
             # Flush DB 0 (broker)
             result = subprocess.run(['redis-cli', 'FLUSHDB'], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
-                print("✓ Queue broker nettoyée")
+                print("Queue broker nettoyee")
             else:
-                print(f"⚠ Erreur redis-cli: {result.stderr}")
+                print(f"Erreur redis-cli: {result.stderr}")
         except FileNotFoundError:
-            print("⚠ redis-cli non trouvé, tentative avec Python redis...")
+            print("redis-cli non trouve, tentative avec Python redis...")
             try:
                 import redis
                 from config import CELERY_BROKER_URL, CELERY_RESULT_BACKEND
@@ -32,21 +32,21 @@ def clear_redis():
                 backend_client = redis.from_url(CELERY_RESULT_BACKEND)
                 
                 broker_client.flushdb()
-                print("✓ Queue broker nettoyée")
+                print("Queue broker nettoyee")
                 
                 backend_client.flushdb()
-                print("✓ Backend résultats nettoyé")
+                print("Backend resultats nettoye")
             except ImportError:
-                print("❌ redis-cli et module redis non disponibles")
+                print("redis-cli et module redis non disponibles")
                 print("Installe redis-cli ou le module redis: pip install redis")
                 return False
         
-        print("\n✓ Redis complètement nettoyé !")
-        print("Tu peux maintenant redémarrer Celery.")
+        print("\nRedis completement nettoye")
+        print("Tu peux maintenant redemarrer Celery.")
         return True
         
     except Exception as e:
-        print(f"❌ Erreur lors du nettoyage: {e}")
+        print(f"Erreur lors du nettoyage: {e}")
         print("Assure-toi que Redis est démarré.")
         return False
 

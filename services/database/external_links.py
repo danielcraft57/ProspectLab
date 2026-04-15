@@ -25,6 +25,49 @@ def _website_host_key(website: str):
     return normalize_website_domain(website)
 
 
+def _fr_dept_code_from_postal(code_postal: Optional[str]) -> Optional[str]:
+    """
+    Département (France) à partir du code postal : 2 chiffres métropole, 3 pour DOM (971…),
+    2A / 2B pour la Corse (heuristique sur le 3e chiffre).
+    """
+    raw = str(code_postal or '').strip().replace(' ', '')
+    digits = ''.join(c for c in raw if c.isdigit())
+    if len(digits) < 5:
+        return None
+    d2 = digits[:2]
+    d3 = digits[:3]
+    if d2 in ('97', '98'):
+        return d3
+    if d2 == '20':
+        if len(digits) > 2 and digits[2] == '0':
+            return '2A'
+        if len(digits) > 2 and digits[2] == '1':
+            return '2B'
+        return '20'
+    return d2
+
+
+def _graph_geo_fields(code_postal: Optional[str], ville: Optional[str]) -> Dict[str, str]:
+    """Clé stable pour la couleur graphe + libellé infobulle (fiches entreprise)."""
+    dept = _fr_dept_code_from_postal(code_postal)
+    if dept:
+        return {
+            'geo_key': f'dept:{dept}',
+            'geo_label': f'Département {dept}',
+        }
+    v = (ville or '').strip()
+    if v:
+        slug = v.lower()[:80]
+        return {
+            'geo_key': f'ville:{slug}',
+            'geo_label': v[:120],
+        }
+    return {
+        'geo_key': 'geo:unknown',
+        'geo_label': 'Localisation inconnue',
+    }
+
+
 def _eid_sort_key(eid) -> int:
     s = str(eid)
     if s.startswith('e:'):
@@ -1460,7 +1503,9 @@ class ExternalLinksManager(DatabaseBase):
                        w.likely_credit, w.link_source, w.target_entreprise_id,
                        d.domain_host, d.site_title, d.site_description, d.resolved_url,
                        d.graph_group, d.thumb_url,
-                       e.nom, e.website, e.favicon AS entreprise_favicon
+                       e.nom, e.website, e.favicon AS entreprise_favicon,
+                       e.code_postal AS entreprise_code_postal,
+                       e.ville AS entreprise_ville
                 FROM entreprise_external_links w
                 JOIN external_domains d ON d.id = w.domain_id
                 JOIN entreprises e ON e.id = w.entreprise_id
@@ -1487,7 +1532,11 @@ class ExternalLinksManager(DatabaseBase):
             if row_dicts:
                 self.execute_sql(
                     cursor,
-                    'SELECT id, nom, website, favicon FROM entreprises WHERE website IS NOT NULL AND TRIM(website) != ?',
+                    '''
+                    SELECT id, nom, website, favicon, code_postal, ville
+                    FROM entreprises
+                    WHERE website IS NOT NULL AND TRIM(website) != ?
+                    ''',
                     ('',),
                 )
                 ent_rows = cursor.fetchall() or []
@@ -1518,6 +1567,8 @@ class ExternalLinksManager(DatabaseBase):
                     'nom': nom or '',
                     'website': web or '',
                     'favicon': (erd.get('favicon') or '').strip(),
+                    'code_postal': (erd.get('code_postal') or '').strip(),
+                    'ville': (erd.get('ville') or '').strip(),
                 }
             hk = _website_host_key(web)
             if not hk or not eid:
@@ -1558,17 +1609,34 @@ class ExternalLinksManager(DatabaseBase):
             efav = efav_raw if efav_raw.startswith(('http://', 'https://')) else ''
 
             if e_node_id not in nodes_map:
+                _geo = _graph_geo_fields(
+                    row.get('entreprise_code_postal'),
+                    row.get('entreprise_ville'),
+                )
                 nodes_map[e_node_id] = {
                     'id': e_node_id,
                     'label': (enom or f'#{eid}')[:48],
                     'group': 'entreprise',
                     'title': eweb or '',
                     'entreprise_id': int(eid),
+                    'geo_key': _geo['geo_key'],
+                    'geo_label': _geo['geo_label'],
                 }
                 if efav:
                     nodes_map[e_node_id]['thumb_url'] = efav[:2000]
                     nodes_map[e_node_id]['thumbnail_url'] = efav[:2000]
-            elif efav and not (nodes_map[e_node_id].get('thumb_url') or '').strip():
+            else:
+                _geo_row = _graph_geo_fields(
+                    row.get('entreprise_code_postal'),
+                    row.get('entreprise_ville'),
+                )
+                if (
+                    nodes_map[e_node_id].get('geo_key') == 'geo:unknown'
+                    and _geo_row.get('geo_key') != 'geo:unknown'
+                ):
+                    nodes_map[e_node_id]['geo_key'] = _geo_row['geo_key']
+                    nodes_map[e_node_id]['geo_label'] = _geo_row['geo_label']
+            if e_node_id in nodes_map and efav and not (nodes_map[e_node_id].get('thumb_url') or '').strip():
                 nodes_map[e_node_id]['thumb_url'] = efav[:2000]
                 nodes_map[e_node_id]['thumbnail_url'] = efav[:2000]
 
@@ -1645,12 +1713,15 @@ class ExternalLinksManager(DatabaseBase):
                     if t_node_id not in nodes_map:
                         info = ent_by_id.get(tid_int) or {}
                         tfav = (info.get('favicon') or '').strip()
+                        _tgeo = _graph_geo_fields(info.get('code_postal'), info.get('ville'))
                         nodes_map[t_node_id] = {
                             'id': t_node_id,
                             'label': (info.get('nom') or f'#{tid_int}')[:48],
                             'group': 'entreprise',
                             'title': info.get('website') or '',
                             'entreprise_id': tid_int,
+                            'geo_key': _tgeo['geo_key'],
+                            'geo_label': _tgeo['geo_label'],
                         }
                         if tfav.startswith(('http://', 'https://')):
                             nodes_map[t_node_id]['thumb_url'] = tfav[:2000]
@@ -1666,6 +1737,19 @@ class ExternalLinksManager(DatabaseBase):
                             'dashes': True,
                             'color': {'color': '#22c55e'},
                         })
+                    dek = ('direct_external', e_node_id, t_node_id, did_int)
+                    if dek not in edge_keys:
+                        edge_keys.add(dek)
+                        edges_list.append(
+                            {
+                                'from': e_node_id,
+                                'to': t_node_id,
+                                'label': 'lien externe direct',
+                                'arrows': 'to',
+                                'dashes': True,
+                                'color': {'color': '#14b8a6'},
+                            }
+                        )
 
             if did_int is not None:
                 for h in port_map.get(did_int, []):
@@ -1685,12 +1769,15 @@ class ExternalLinksManager(DatabaseBase):
                     if t_node_id not in nodes_map:
                         ei = ent_by_id.get(tid) or {}
                         pfav = (ei.get('favicon') or '').strip()
+                        _pgeo = _graph_geo_fields(ei.get('code_postal'), ei.get('ville'))
                         nodes_map[t_node_id] = {
                             'id': t_node_id,
                             'label': (t.get('nom') or f'#{tid}')[:48],
                             'group': 'entreprise',
                             'title': t.get('website') or '',
                             'entreprise_id': tid,
+                            'geo_key': _pgeo['geo_key'],
+                            'geo_label': _pgeo['geo_label'],
                         }
                         if pfav.startswith(('http://', 'https://')):
                             nodes_map[t_node_id]['thumb_url'] = pfav[:2000]

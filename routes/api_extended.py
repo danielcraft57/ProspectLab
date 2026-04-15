@@ -13,7 +13,7 @@ import json
 import pandas as pd
 from urllib.parse import urlparse
 
-from utils.url_utils import canonical_website_https_url
+from utils.url_utils import canonical_website_https_url, normalize_website_domain
 
 api_extended_bp = Blueprint('api_extended', __name__, url_prefix='/api')
 
@@ -34,6 +34,80 @@ def _get_entreprise_id_for_website(database: Database, website: str) -> int | No
         return database.find_duplicate_entreprise(nom='', website=website)
     except Exception:
         return None
+
+
+def _backfill_external_links_target(database: Database, entreprise_id: int, website: str) -> int:
+    """
+    Rattache les anciens liens externes à une fiche entreprise devenue connue.
+    Cas typique : le lien existait déjà dans le graphe, puis on analyse ce domaine plus tard.
+    """
+    host = normalize_website_domain(website)
+    if not host or not entreprise_id:
+        return 0
+    conn = database.get_connection()
+    cursor = conn.cursor()
+    try:
+        database.execute_sql(
+            cursor,
+            '''
+            UPDATE entreprise_external_links
+               SET target_entreprise_id = ?
+             WHERE (target_entreprise_id IS NULL OR target_entreprise_id = 0)
+               AND entreprise_id != ?
+               AND domain_id IN (
+                    SELECT id FROM external_domains WHERE domain_host = ?
+               )
+            ''',
+            (int(entreprise_id), int(entreprise_id), host),
+        )
+        n = int(getattr(cursor, 'rowcount', 0) or 0)
+        conn.commit()
+        return n
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return 0
+    finally:
+        conn.close()
+
+
+def _resolve_target_entreprise_from_external_domain(database: Database, website: str) -> int | None:
+    """
+    Si ce domaine externe est déjà relié à une fiche cible connue, retourne cette fiche.
+    Évite de créer une nouvelle entreprise "indépendante" pour un domaine déjà mappé.
+    """
+    host = normalize_website_domain(website)
+    if not host:
+        return None
+    conn = database.get_connection()
+    cursor = conn.cursor()
+    try:
+        database.execute_sql(
+            cursor,
+            '''
+            SELECT l.target_entreprise_id AS eid, COUNT(*) AS c
+              FROM entreprise_external_links l
+              JOIN external_domains d ON d.id = l.domain_id
+             WHERE d.domain_host = ?
+               AND l.target_entreprise_id IS NOT NULL
+             GROUP BY l.target_entreprise_id
+             ORDER BY c DESC
+             LIMIT 1
+            ''',
+            (host,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        d = database.clean_row_dict(dict(row))
+        eid = d.get('eid')
+        return int(eid) if eid is not None else None
+    except Exception:
+        return None
+    finally:
+        conn.close()
 
 
 def _build_website_analysis_report(database: Database, entreprise_id: int, full: bool = False) -> dict:
@@ -1100,6 +1174,59 @@ def website_analysis():
     }), 202
 
 
+@api_extended_bp.route('/website-analysis/ensure-entreprise', methods=['POST'])
+@login_required
+def website_analysis_ensure_entreprise():
+    """Crée (ou retrouve) la fiche entreprise pour une URL sans lancer d'analyses."""
+    if not session.get('user_id'):
+        return jsonify({'error': 'Authentification requise'}), 401
+    database = Database()
+    payload = request.get_json(silent=True) or {}
+    website = _normalize_url_for_analysis((payload.get('website') or '').strip())
+    if not website:
+        return jsonify({'error': 'Le champ "website" est requis (URL ou domaine).'}), 400
+
+    entreprise_id = _get_entreprise_id_for_website(database, website)
+    if not entreprise_id:
+        entreprise_id = _resolve_target_entreprise_from_external_domain(database, website)
+    created = False
+    if not entreprise_id:
+        entreprise_id = database.save_entreprise(
+            analyse_id=None,
+            entreprise_data={
+                'name': urlparse(website).netloc or website,
+                'website': website,
+                'statut': 'Nouveau',
+            },
+            skip_duplicates=True,
+        )
+        created = True
+    if not entreprise_id:
+        return jsonify({'error': "Impossible de créer/retrouver l'entreprise."}), 500
+    backfilled = _backfill_external_links_target(database, int(entreprise_id), website)
+    entreprise_name = ''
+    try:
+        ent_row = database.get_entreprise(int(entreprise_id)) or {}
+        entreprise_name = (ent_row.get('nom') or ent_row.get('name') or '').strip()
+    except Exception:
+        entreprise_name = ''
+    if not entreprise_name:
+        try:
+            entreprise_name = (urlparse(website).netloc or website or '').strip()
+        except Exception:
+            entreprise_name = ''
+    return jsonify(
+        {
+            'success': True,
+            'website': website,
+            'entreprise_id': int(entreprise_id),
+            'entreprise_name': entreprise_name,
+            'created': created,
+            'links_backfilled': backfilled,
+        }
+    )
+
+
 def _json_safe_celery_result(value):
     """Rend un résultat Celery sérialisable (dates, Exception)."""
     if value is None:
@@ -1172,16 +1299,15 @@ def website_full_analysis_start():
     netloc = urlparse(website).netloc or website
     filename = f'full-scan:{netloc}'
     enable_technical = bool(payload.get('enable_technical', True))
+    enable_seo = bool(payload.get('enable_seo', True))
     enable_osint = bool(payload.get('enable_osint', True))
     enable_pentest = bool(payload.get('enable_pentest', True))
-    # SEO toujours inclus dans ce pack (Lighthouse reste optionnel via use_lighthouse).
-    enable_seo = True
     parametres = {
         'source': 'website_full',
         'url': website,
         'modules': {
             'technical': enable_technical,
-            'seo': True,
+            'seo': enable_seo,
             'osint': enable_osint,
             'pentest': enable_pentest,
         },
@@ -1206,6 +1332,7 @@ def website_full_analysis_start():
         except Exception:
             pass
         return jsonify({'error': 'Impossible de créer ou retrouver l\'entreprise.'}), 500
+    _backfill_external_links_target(database, int(entreprise_id), website)
 
     max_depth = int(payload.get('max_depth', 2) or 2)
     max_workers = int(payload.get('max_workers', 5) or 5)
@@ -1241,10 +1368,18 @@ def website_full_analysis_start():
             pass
         return jsonify({'success': False, 'error': str(e)}), 500
 
+    entreprise_name = ''
+    try:
+        ent = database.get_entreprise(int(entreprise_id)) or {}
+        entreprise_name = (ent.get('nom') or ent.get('name') or netloc or website).strip()
+    except Exception:
+        entreprise_name = (netloc or website or '').strip()
+
     return jsonify({
         'success': True,
         'task_id': async_res.id,
         'entreprise_id': entreprise_id,
+        'entreprise_name': entreprise_name,
         'analyse_id': analyse_id,
         'website': website,
         'message': 'Analyse complète démarrée. Interroger /api/celery-task/<task_id> jusqu\'à state=SUCCESS.',
