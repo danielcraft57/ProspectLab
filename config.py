@@ -142,7 +142,7 @@ CELERY_TASK_ACKS_LATE = os.environ.get('CELERY_TASK_ACKS_LATE', 'true').lower() 
 # (scraping/technical/seo/osint/pentest), sinon les tâches routées ne sont jamais exécutées.
 CELERY_WORKER_QUEUES = os.environ.get(
     'CELERY_WORKER_QUEUES',
-    'celery,scraping,scraping_interactive,technical,seo,osint,pentest,heavy,website_full',
+    'celery,scraping,scraping_interactive,mini_scrape,technical,seo,osint,pentest,heavy,website_full',
 )
 
 # File d’enqueue pour le pack « analyse site complet ».

@@ -40,6 +40,54 @@
     const emptyElDefaultText =
         emptyEl && emptyEl.textContent ? emptyEl.textContent.trim() : '';
 
+    /**
+     * Corrige un cas courant de texte UTF-8 décodé comme Latin-1 (mojibake "Ã©", "Ã¨", etc.).
+     * Exemple: "ResponsabilitÃ©" -> "Responsabilité"
+     * On ne touche que les chaînes qui semblent concernées (heuristique).
+     */
+    function fixMojibake(s) {
+        if (s == null) return s;
+        if (typeof s !== 'string') return s;
+        if (!/[ÃÂ]/.test(s)) return s;
+        if (!/(Ã.|Â.|â€™|â€œ|â€\x9d|â€¦)/.test(s)) return s;
+        try {
+            if (typeof TextDecoder !== 'undefined') {
+                var bytes = new Uint8Array(
+                    s.split('').map(function (c) {
+                        return c.charCodeAt(0) & 0xff;
+                    })
+                );
+                return new TextDecoder('utf-8').decode(bytes);
+            }
+        } catch (e0) {}
+        try {
+            // Fallback historique (marche dans la majorité des navigateurs)
+            // eslint-disable-next-line no-undef
+            return decodeURIComponent(escape(s));
+        } catch (e1) {
+            return s;
+        }
+    }
+
+    function fixMojibakeInObj(o) {
+        if (!o || typeof o !== 'object') return o;
+        var keys = [
+            'label',
+            'title',
+            'domain',
+            'domain_host',
+            'site_title',
+            'site_description',
+            'resolved_url',
+            'external_href',
+            'sample_anchor_text',
+        ];
+        keys.forEach(function (k) {
+            if (typeof o[k] === 'string') o[k] = fixMojibake(o[k]);
+        });
+        return o;
+    }
+
     const scopeHintEl = document.getElementById('graph-entreprises-scope-hint');
     const scopeSearchEl = document.getElementById('agences-scope-search');
     const scopeDomainEl = document.getElementById('agences-scope-domain');
@@ -64,10 +112,6 @@
     var FILTERS_COLLAPSED_KEY = 'prospectlab_graph_filters_collapsed';
     var filtersPanelEl = document.getElementById('agences-filters-panel');
     var filtersCollapseToggleEl = document.getElementById('agences-filters-collapse-toggle');
-
-    function graphSizeHost() {
-        return canvasStackEl || wrapEl;
-    }
 
     function readFiltersCollapsedPref() {
         var v = localStorage.getItem(FILTERS_COLLAPSED_KEY);
@@ -284,9 +328,11 @@
     let physicsEnabled = false;
     let selectedNodeId = null;
     let filterDebounce = null;
+    let filterRafScheduled = false;
     let viewPast = [];
     let viewFuture = [];
     let preDragView = null;
+    var pendingMiniScrapeDomainEvents = [];
 
     /** Miniatures : URL source → data URL PNG (vis-network ne doit pas recharger l’URL distante → évite CachedImage 0×0). */
     var THUMB_DATA_MAX_PX = 72;
@@ -812,6 +858,7 @@
 
     function upsertExternalLinkRealtime(link, sourceEntrepriseId) {
         if (!link || !sourceEntrepriseId || !lastRaw || !nodesDS || !edgesDS) return;
+        fixMojibakeInObj(link);
         var host = String(link.domain_host || '').trim();
         if (!host) return;
 
@@ -870,9 +917,9 @@
             }
         }
 
-        var linkTitle = String(link.site_title || '').trim();
-        var linkDesc = String(link.site_description || '').trim();
-        var linkResolved = String(link.resolved_url || link.external_href || '').trim();
+        var linkTitle = String(fixMojibake(link.site_title || '') || '').trim();
+        var linkDesc = String(fixMojibake(link.site_description || '') || '').trim();
+        var linkResolved = String(fixMojibake(link.resolved_url || link.external_href || '') || '').trim();
         var linkThumb = String(link.thumb_url || '').trim();
 
         // 1) Upsert node domaine externe.
@@ -1049,7 +1096,7 @@
         }
 
         // Recalcule les hidden/labels selon filtres actifs.
-        scheduleApplyFilters();
+        scheduleApplyFiltersRaf();
         scheduleDeptZonesRebuild(40);
     }
 
@@ -1197,12 +1244,15 @@
         if (k === 'dark') {
             if (icon) icon.textContent = 'dark_mode';
             if (label) label.textContent = 'Sombre';
+            btn.setAttribute('aria-label', 'Thème : sombre');
         } else if (k === 'light') {
             if (icon) icon.textContent = 'light_mode';
             if (label) label.textContent = 'Clair';
+            btn.setAttribute('aria-label', 'Thème : clair');
         } else {
             if (icon) icon.textContent = 'routine';
             if (label) label.textContent = 'Auto';
+            btn.setAttribute('aria-label', 'Thème : automatique');
         }
     }
 
@@ -1346,6 +1396,13 @@
             Math.abs(a.x - b.x) / 400 +
             Math.abs(a.y - b.y) / 400
         );
+    }
+
+    /** Options communes pour network.fit (même animation que « Cadrer »). */
+    function graphFitOptions() {
+        return {
+            animation: { duration: 550, easingFunction: 'easeInOutQuad' },
+        };
     }
 
     function buildVisibleDegree() {
@@ -2409,12 +2466,35 @@
         statsWrap.innerHTML = chips.join('');
     }
 
-    function networkOptions(physicsOn) {
+    /**
+     * Options physique seules : à utiliser au toggle Physique.
+     * Ne pas repasser nodes/edges/interaction via setOptions (vis-network peut réinitialiser la vue).
+     */
+    function physicsOptionsOnly(physicsOn) {
         var fa2 = getForceAtlas2Opts();
+        var stab = { iterations: physicsOn ? 520 : 80 };
+        if (physicsOn) stab.fit = false;
+        else stab.fit = true;
         return {
             physics: {
                 enabled: !!physicsOn,
-                stabilization: { iterations: physicsOn ? 520 : 80 },
+                stabilization: stab,
+                forceAtlas2Based: fa2,
+                solver: 'forceAtlas2Based',
+            },
+        };
+    }
+
+    function networkOptions(physicsOn) {
+        var fa2 = getForceAtlas2Opts();
+        // Sans physique : laisser le comportement par défaut (stabilization.fit true) pour un cadrage correct.
+        // Avec physique : éviter le recadrage auto à la fin de la stabilisation (sinon la vue "saute").
+        var stab = { iterations: physicsOn ? 520 : 80 };
+        if (physicsOn) stab.fit = false;
+        return {
+            physics: {
+                enabled: !!physicsOn,
+                stabilization: stab,
                 forceAtlas2Based: fa2,
                 solver: 'forceAtlas2Based',
             },
@@ -2839,6 +2919,34 @@
         }, 120);
     }
 
+    /** Variante "temps réel" : 1 application max par frame (évite l'effet "tout d'un coup" du debounce). */
+    function scheduleApplyFiltersRaf() {
+        if (filterRafScheduled) return;
+        filterRafScheduled = true;
+        var raf =
+            window.requestAnimationFrame ||
+            function (cb) {
+                return window.setTimeout(cb, 16);
+            };
+        raf(function () {
+            filterRafScheduled = false;
+            applyFilters();
+        });
+    }
+
+    function flushPendingMiniScrapeDomainEvents() {
+        if (!pendingMiniScrapeDomainEvents.length) return;
+        if (!lastRaw || !nodesDS || !edgesDS) return;
+        var batch = pendingMiniScrapeDomainEvents.slice(0);
+        pendingMiniScrapeDomainEvents = [];
+        batch.forEach(function (it) {
+            if (!it) return;
+            try {
+                upsertExternalLinkRealtime(it.dom, it.entrepriseId);
+            } catch (e) {}
+        });
+    }
+
     function bindFilterListeners() {
         const ids = [
             'flt-nodes-ent',
@@ -2863,6 +2971,10 @@
 
     function render(data) {
         if (!graphEl) return;
+        try {
+            if (data && Array.isArray(data.nodes)) data.nodes.forEach(fixMojibakeInObj);
+            if (data && Array.isArray(data.edges)) data.edges.forEach(fixMojibakeInObj);
+        } catch (eFix) {}
         const st = data.stats || {};
         const scope = data.graph_scope || null;
         renderStats(st, scope);
@@ -2965,7 +3077,10 @@
             graphResizeHandler = null;
         }
         physicsEnabled = false;
-        if (btnPhysics) btnPhysics.classList.remove('md-btn--filled');
+        if (btnPhysics) {
+            btnPhysics.classList.remove('md-btn--filled');
+            btnPhysics.classList.add('md-btn--outlined');
+        }
 
         // Pas de physique ni de recadrage automatique : layout initial calculé ci-dessus.
         network = new vis.Network(graphEl, { nodes: nodesDS, edges: edgesDS }, networkOptions(false));
@@ -2975,10 +3090,9 @@
 
         function syncGraphSize() {
             if (!network || !graphEl) return;
-            const host = graphSizeHost();
-            if (!host) return;
-            const w = host.clientWidth;
-            const h = host.clientHeight;
+            // Dimensions du conteneur vis-network (pas toute la stack) : cohérent avec la zone hors dock.
+            const w = graphEl.clientWidth;
+            const h = graphEl.clientHeight;
             if (w < 48 || h < 48) return;
             try {
                 network.setSize(w + 'px', h + 'px');
@@ -2990,17 +3104,22 @@
             requestAnimationFrame(function () {
                 requestAnimationFrame(function () {
                     syncGraphSize();
+                    // Sans fit initial, vis-network peut laisser la caméra par défaut → nœuds en coin / tout petits.
+                    try {
+                        network.fit(graphFitOptions());
+                    } catch (eFit0) {}
                 });
             });
+        } else {
+            try {
+                network.fit(graphFitOptions());
+            } catch (eFit1) {}
         }
-        if (typeof ResizeObserver !== 'undefined') {
-            const observeEl = graphSizeHost();
-            if (observeEl) {
-                graphResizeObserver = new ResizeObserver(function () {
-                    syncGraphSize();
-                });
-                graphResizeObserver.observe(observeEl);
-            }
+        if (typeof ResizeObserver !== 'undefined' && graphEl) {
+            graphResizeObserver = new ResizeObserver(function () {
+                syncGraphSize();
+            });
+            graphResizeObserver.observe(graphEl);
         }
         graphResizeHandler = function () {
             syncGraphSize();
@@ -3011,6 +3130,9 @@
         network.on('stabilized', function () {
             scheduleDeptZonesRebuild(100);
         });
+
+        // Si des events mini-scrape arrivent pendant un reload, on les applique dès que le graphe est prêt.
+        flushPendingMiniScrapeDomainEvents();
 
         network.on('click', function (params) {
             if (params.nodes && params.nodes.length) {
@@ -3284,9 +3406,7 @@
         btnFit.addEventListener('click', function () {
             if (!network) return;
             viewPushCurrent();
-            network.fit({
-                animation: { duration: 550, easingFunction: 'easeInOutQuad' },
-            });
+            network.fit(graphFitOptions());
         });
     }
     if (btnZoomIn) {
@@ -3305,9 +3425,56 @@
     }
     if (btnPhysics) {
         btnPhysics.addEventListener('click', function () {
-            // Physique désactivée pour garder un layout stable et lisible.
-            // Bouton conservé mais inactif (évite de réintroduire le "spaghetti" + recadrages).
-            return;
+            if (!network) return;
+            function syncPhysicsBtnUi(on) {
+                try {
+                    btnPhysics.classList.toggle('md-btn--filled', !!on);
+                    btnPhysics.classList.toggle('md-btn--outlined', !on);
+                    btnPhysics.disabled = false;
+                    btnPhysics.setAttribute('aria-busy', 'false');
+                    btnPhysics.setAttribute(
+                        'title',
+                        on
+                            ? 'Désactiver la physique (fige le layout actuel)'
+                            : 'Activer la physique pour réorganiser les nœuds'
+                    );
+                } catch (e) {}
+            }
+
+            var next = !physicsEnabled;
+            physicsEnabled = next;
+            syncPhysicsBtnUi(next);
+
+            function fitGraphFull() {
+                if (!network) return;
+                try {
+                    network.fit(graphFitOptions());
+                } catch (eFit) {}
+            }
+
+            try {
+                // Uniquement la section physics : évite de re-pousser nodes/edges et de casser zoom / centre.
+                network.setOptions(physicsOptionsOnly(next));
+                if (!next && typeof network.stopSimulation === 'function') {
+                    try {
+                        network.stopSimulation();
+                    } catch (eStop) {}
+                }
+            } catch (e2) {
+                physicsEnabled = false;
+                syncPhysicsBtnUi(false);
+                return;
+            }
+
+            // Un seul cadrage, juste après que vis-network ait appliqué les options (1 frame).
+            // Pas de setTimeout ni de fit sur « stabilized » : ça recadrait plus tard et donnait l’impression d’un double saut.
+            if (typeof requestAnimationFrame === 'function') {
+                requestAnimationFrame(function () {
+                    fitGraphFull();
+                });
+            } else {
+                fitGraphFull();
+            }
         });
     }
     if (btnExport) {
@@ -3561,7 +3728,11 @@
             var entrepriseId = Number(d.entreprise_id || 0);
             var dom = d.domain || {};
             if (!entrepriseId || !dom || !dom.domain_host) return;
-            upsertExternalLinkRealtime(dom, entrepriseId);
+            if (!lastRaw || !nodesDS || !edgesDS) {
+                pendingMiniScrapeDomainEvents.push({ dom: dom, entrepriseId: entrepriseId });
+            } else {
+                upsertExternalLinkRealtime(dom, entrepriseId);
+            }
             bumpMiniScrapeProgress();
         });
         document.addEventListener('external_mini_scrape:complete', function (ev) {

@@ -53,6 +53,8 @@ celery.conf.update(
         Queue('scraping', routing_key='scraping'),
         # Relances UI / API unitaires : ne pas se faire bloquer derrière un bulk multi-sites
         Queue('scraping_interactive', routing_key='scraping_interactive'),
+        # Mini-scrape des liens externes : HTTP par domaine, idéalement réparti sur plusieurs nœuds.
+        Queue('mini_scrape', routing_key='mini_scrape'),
         Queue('technical', routing_key='technical'),
         Queue('seo', routing_key='seo'),
         Queue('osint', routing_key='osint'),
@@ -66,8 +68,8 @@ celery.conf.update(
     # Dict pattern -> route (Celery 5 / kombu : une *liste* de tuples casse MapRoute qui itère
     # chaque entrée en « k, v » — le 1er élément est une str → too many values to unpack).
     task_routes={
-        # Mini-scrape des liens externes (HTTP par domaine) : même file que le scraping lourd.
-        'tasks.scraping_tasks.enrich_external_links_mini_scrape_task': {'queue': 'scraping'},
+        # Mini-scrape des liens externes (HTTP par domaine) : file dédiée pour faciliter la répartition multi-nœuds.
+        'tasks.scraping_tasks.enrich_external_links_mini_scrape_task': {'queue': 'mini_scrape'},
         # scrape_emails sans queue explicite → relances UI ; le bulk API garde apply_async(..., queue='scraping')
         'tasks.scraping_tasks.scrape_emails_task': {'queue': 'scraping_interactive'},
         # Bulk "analyse site" : isoler sur la queue heavy (utile pour donner plus de temps au node rapide).

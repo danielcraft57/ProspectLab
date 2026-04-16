@@ -255,11 +255,11 @@ def _persist_personnes_from_email_analyses(db, entreprise_id: int, email_analyse
 
 @celery.task(
     name='tasks.scraping_tasks.enrich_external_links_mini_scrape_task',
-    queue='scraping',
+    queue='mini_scrape',
 )
 def enrich_external_links_mini_scrape_task(entreprise_id: int, scraper_id: int):
     """
-    Mini-scrape asynchrone (Celery, file « scraping ») des domaines externes après sauvegarde du scraper.
+    Mini-scrape asynchrone (Celery, file « mini_scrape ») des domaines externes après sauvegarde du scraper.
     Met à jour ``metadata.external_links`` puis ``web_external_links``.
     """
     from services.external_mini_scraper import enrich_external_links_in_place

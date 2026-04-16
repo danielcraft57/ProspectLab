@@ -24,13 +24,13 @@ def apply_postgresql_tuning(db: DatabaseBase) -> None:
     cursor = conn.cursor()
     try:
         try:
-            db.execute_sql(cursor, 'CREATE EXTENSION IF NOT EXISTS pg_trgm', ())
+            db.safe_execute_sql(cursor, 'CREATE EXTENSION IF NOT EXISTS pg_trgm', ())
         except Exception as exc:
             logger.info('PostgreSQL : extension pg_trgm non activée (%s)', exc)
 
         if _relation_exists(cursor, db, 'external_domains'):
             try:
-                db.execute_sql(
+                db.safe_execute_sql(
                     cursor,
                     '''
                     CREATE INDEX IF NOT EXISTS idx_ext_dom_domain_gin_trgm
@@ -43,7 +43,7 @@ def apply_postgresql_tuning(db: DatabaseBase) -> None:
 
         if _relation_exists(cursor, db, 'entreprises'):
             try:
-                db.execute_sql(
+                db.safe_execute_sql(
                     cursor,
                     '''
                     CREATE INDEX IF NOT EXISTS idx_entreprises_website_btrim_lower
@@ -56,8 +56,8 @@ def apply_postgresql_tuning(db: DatabaseBase) -> None:
                 logger.debug('PostgreSQL : index website entreprises : %s', exc)
 
         if _relation_exists(cursor, db, 'entreprise_external_links'):
-            db.execute_sql(cursor, 'DROP INDEX IF EXISTS idx_eel_likely_date', ())
-            db.execute_sql(
+            db.safe_execute_sql(cursor, 'DROP INDEX IF EXISTS idx_eel_likely_date', ())
+            db.safe_execute_sql(
                 cursor,
                 '''
                 CREATE INDEX IF NOT EXISTS idx_eel_graph_sort
@@ -65,7 +65,7 @@ def apply_postgresql_tuning(db: DatabaseBase) -> None:
                 ''',
                 (),
             )
-            db.execute_sql(
+            db.safe_execute_sql(
                 cursor,
                 '''
                 CREATE INDEX IF NOT EXISTS idx_eel_ent_credit_date
@@ -74,7 +74,7 @@ def apply_postgresql_tuning(db: DatabaseBase) -> None:
                 ''',
                 (),
             )
-            db.execute_sql(
+            db.safe_execute_sql(
                 cursor,
                 '''
                 CREATE INDEX IF NOT EXISTS idx_eel_ent_any_date
@@ -84,7 +84,7 @@ def apply_postgresql_tuning(db: DatabaseBase) -> None:
             )
 
             try:
-                db.execute_sql(
+                db.safe_execute_sql(
                     cursor,
                     '''
                     ALTER TABLE entreprise_external_links
@@ -98,7 +98,7 @@ def apply_postgresql_tuning(db: DatabaseBase) -> None:
                 if 'already exists' not in err and 'duplicate' not in err:
                     logger.debug('PostgreSQL : ADD chk_eel_likely_credit : %s', exc)
             try:
-                db.execute_sql(
+                db.safe_execute_sql(
                     cursor,
                     '''
                     ALTER TABLE entreprise_external_links
@@ -114,6 +114,12 @@ def apply_postgresql_tuning(db: DatabaseBase) -> None:
                         '(contrainte absente ou données hors 0/1) : %s',
                         exc,
                     )
+                # Important: un échec de VALIDATE met la transaction en "aborted".
+                # On rollback tout de suite pour ne pas casser les opérations suivantes.
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
 
         for tbl in (
             'external_domains',
@@ -128,7 +134,7 @@ def apply_postgresql_tuning(db: DatabaseBase) -> None:
         ):
             if _relation_exists(cursor, db, tbl):
                 try:
-                    db.execute_sql(cursor, f'ANALYZE {tbl}', ())
+                    db.safe_execute_sql(cursor, f'ANALYZE {tbl}', ())
                 except Exception as exc:
                     logger.debug('PostgreSQL : ANALYZE %s : %s', tbl, exc)
 
@@ -144,13 +150,21 @@ def apply_postgresql_tuning(db: DatabaseBase) -> None:
 
 
 def _relation_exists(cursor, db: DatabaseBase, name: str) -> bool:
-    db.execute_sql(
-        cursor,
-        '''
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = 'public' AND table_name = ?
-        LIMIT 1
-        ''',
-        (name,),
-    )
-    return cursor.fetchone() is not None
+    try:
+        db.execute_sql(
+            cursor,
+            '''
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_name = ?
+            LIMIT 1
+            ''',
+            (name,),
+        )
+        return cursor.fetchone() is not None
+    except Exception:
+        # Si la transaction est en erreur (aborted), on rollback pour repartir clean.
+        try:
+            cursor.connection.rollback()
+        except Exception:
+            pass
+        return False
