@@ -16,7 +16,7 @@ class CampagneManager(DatabaseBase):
         """Initialise le module campagnes"""
         super().__init__(*args, **kwargs)
     
-    def create_campagne(self, nom, template_id=None, sujet=None, total_destinataires=0, statut='draft', scheduled_at=None, campaign_params_json=None):
+    def create_campagne(self, nom, template_id=None, sujet=None, total_destinataires=0, statut='draft', scheduled_at=None, campaign_params_json=None, mail_account_id=None):
         """
         Crée une nouvelle campagne email.
 
@@ -38,21 +38,21 @@ class CampagneManager(DatabaseBase):
         if self.is_postgresql():
             self.execute_sql(cursor,
                 '''
-                INSERT INTO campagnes_email (nom, template_id, sujet, total_destinataires, total_envoyes, total_reussis, statut, scheduled_at, campaign_params_json)
-                VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?)
+                INSERT INTO campagnes_email (nom, template_id, sujet, total_destinataires, total_envoyes, total_reussis, statut, scheduled_at, campaign_params_json, mail_account_id)
+                VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?, ?)
                 RETURNING id
                 ''',
-                (nom, template_id, sujet, total_destinataires, statut, scheduled_at, campaign_params_json)
+                (nom, template_id, sujet, total_destinataires, statut, scheduled_at, campaign_params_json, mail_account_id)
             )
             row = cursor.fetchone()
             campagne_id = row.get('id') if isinstance(row, dict) else (row[0] if row else None)
         else:
             self.execute_sql(cursor,
                 '''
-                INSERT INTO campagnes_email (nom, template_id, sujet, total_destinataires, total_envoyes, total_reussis, statut, scheduled_at, campaign_params_json)
-                VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?)
+                INSERT INTO campagnes_email (nom, template_id, sujet, total_destinataires, total_envoyes, total_reussis, statut, scheduled_at, campaign_params_json, mail_account_id)
+                VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?, ?)
                 ''',
-                (nom, template_id, sujet, total_destinataires, statut, scheduled_at, campaign_params_json)
+                (nom, template_id, sujet, total_destinataires, statut, scheduled_at, campaign_params_json, mail_account_id)
             )
             campagne_id = cursor.lastrowid
 
@@ -71,7 +71,8 @@ class CampagneManager(DatabaseBase):
         total_reussis=None,
         statut=None,
         scheduled_at=None,
-        campaign_params_json=None
+        campaign_params_json=None,
+        mail_account_id=None,
     ):
         """
         Met à jour une campagne email.
@@ -124,6 +125,9 @@ class CampagneManager(DatabaseBase):
         if campaign_params_json is not None:
             updates.append('campaign_params_json = ?')
             values.append(campaign_params_json)
+        if mail_account_id is not None:
+            updates.append('mail_account_id = ?')
+            values.append(mail_account_id)
 
         if not updates:
             conn.close()
@@ -160,7 +164,7 @@ class CampagneManager(DatabaseBase):
             return dict(row)
         return None
 
-    def list_campagnes(self, statut=None, limit=100, offset=0, entreprise_id=None):
+    def list_campagnes(self, statut=None, limit=100, offset=0, entreprise_id=None, mail_account_id=None):
         """
         Liste les campagnes.
 
@@ -170,12 +174,21 @@ class CampagneManager(DatabaseBase):
             offset (int): Offset pour la pagination
             entreprise_id (int|None): Si renseigné, uniquement les campagnes liées à cette entreprise
                 (emails envoyés et/ou destinataires dans campaign_params_json pour les brouillons programmés).
+            mail_account_id (int|None): Si renseigné, limite aux campagnes du compte SMTP sélectionné.
+                Inclut aussi les campagnes `mail_account_id IS NULL` (campagnes globales).
 
         Returns:
             list[dict]: Liste des campagnes
         """
         conn = self.get_connection()
         cursor = conn.cursor()
+
+        mid = None
+        try:
+            if mail_account_id is not None and str(mail_account_id).strip() != '':
+                mid = int(mail_account_id)
+        except Exception:
+            mid = None
 
         if entreprise_id is not None:
             eid = int(entreprise_id)
@@ -210,6 +223,9 @@ class CampagneManager(DatabaseBase):
             if statut:
                 where_sql += ' AND statut = ?'
                 params.append(statut)
+            if mid is not None:
+                where_sql += ' AND mail_account_id = ?'
+                params.append(mid)
             params.extend([limit, offset])
             sql = f'''
                 SELECT * FROM campagnes_email
@@ -229,6 +245,9 @@ class CampagneManager(DatabaseBase):
                 if statut:
                     where2 += ' AND statut = ?'
                     params2.append(statut)
+                if mid is not None:
+                    where2 += ' AND mail_account_id = ?'
+                    params2.append(mid)
                 params2.extend([limit, offset])
                 self.execute_sql(cursor, f'''
                     SELECT * FROM campagnes_email
@@ -242,24 +261,51 @@ class CampagneManager(DatabaseBase):
             return [dict(row) for row in rows]
 
         if statut:
-            self.execute_sql(cursor,
-                '''
-                SELECT * FROM campagnes_email
-                WHERE statut = ?
-                ORDER BY date_creation DESC
-                LIMIT ? OFFSET ?
-                ''',
-                (statut, limit, offset)
-            )
+            if mid is not None:
+                self.execute_sql(
+                    cursor,
+                    '''
+                    SELECT * FROM campagnes_email
+                    WHERE statut = ?
+                      AND mail_account_id = ?
+                    ORDER BY date_creation DESC
+                    LIMIT ? OFFSET ?
+                    ''',
+                    (statut, mid, limit, offset),
+                )
+            else:
+                self.execute_sql(
+                    cursor,
+                    '''
+                    SELECT * FROM campagnes_email
+                    WHERE statut = ?
+                    ORDER BY date_creation DESC
+                    LIMIT ? OFFSET ?
+                    ''',
+                    (statut, limit, offset),
+                )
         else:
-            self.execute_sql(cursor,
-                '''
-                SELECT * FROM campagnes_email
-                ORDER BY date_creation DESC
-                LIMIT ? OFFSET ?
-                ''',
-                (limit, offset)
-            )
+            if mid is not None:
+                self.execute_sql(
+                    cursor,
+                    '''
+                    SELECT * FROM campagnes_email
+                    WHERE mail_account_id = ?
+                    ORDER BY date_creation DESC
+                    LIMIT ? OFFSET ?
+                    ''',
+                    (mid, limit, offset),
+                )
+            else:
+                self.execute_sql(
+                    cursor,
+                    '''
+                    SELECT * FROM campagnes_email
+                    ORDER BY date_creation DESC
+                    LIMIT ? OFFSET ?
+                    ''',
+                    (limit, offset),
+                )
 
         rows = cursor.fetchall()
         conn.close()

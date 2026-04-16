@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+
+{% block title %}Gestion domaines & comptes SMTP - ProspectLab{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/modules/pages/mail_accounts_manager.css') }}?v={{ asset_version }}">
+{% endblock %}
+
+{% block content %}
+<div class="mac-page">
+    <div class="page-header mac-header-full">
+        <h1>Gestion domaines & comptes SMTP</h1>
+        <p>Crée, modifie, teste et supprime tes identités d’envoi. Recherche, filtres et menus d’actions inclus.</p>
+    </div>
+
+    <div class="mac-grid">
+        <section class="mac-card">
+            <div class="mac-card-head">
+                <div>
+                    <h2>Comptes configurés</h2>
+                    <div class="mac-hint">Active un domaine, teste sa configuration, puis édite ou supprime-le si besoin.</div>
+                </div>
+                <button id="mac-new-account-btn" class="mac-btn mac-btn--soft" type="button">
+                    <i class="fa-solid fa-plus"></i>
+                    Nouveau domaine
+                </button>
+            </div>
+
+            <div class="mac-stats" id="mac-stats"></div>
+
+            <div class="mac-controls">
+                <div class="mac-controls-group">
+                    <label class="mac-search" for="mac-search-input">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <input id="mac-search-input" type="text" placeholder="Rechercher un domaine, label, host..." />
+                    </label>
+                </div>
+                <div class="mac-controls-group mac-filter-pills" id="mac-filter-pills">
+                    <button class="mac-pill is-active" type="button" data-filter="all">Tous</button>
+                    <button class="mac-pill" type="button" data-filter="active">Actifs</button>
+                    <button class="mac-pill" type="button" data-filter="inactive">Inactifs</button>
+                    <button class="mac-pill" type="button" data-filter="dns-missing">DNS à vérifier</button>
+                </div>
+            </div>
+
+            <div id="mac-accounts-empty" class="mac-empty" style="display:none;">
+                Aucun compte configuré pour le moment.
+            </div>
+            <div id="mac-accounts-table-wrap" class="mac-list"></div>
+        </section>
+
+        <aside class="mac-card mac-card--sticky">
+            <div class="mac-modebar">
+                <div>
+                    <h3 id="mac-form-title">Ajouter un compte</h3>
+                    <p id="mac-form-subtitle">Crée un nouvel expéditeur pour un domaine.</p>
+                </div>
+                <button id="mac-cancel-edit-btn" class="mac-btn mac-btn--ghost" type="button" style="display:none;">
+                    <i class="fa-solid fa-xmark"></i>
+                    Fermer
+                </button>
+            </div>
+
+            <form id="mac-create-form">
+                <input id="mac-account-id" type="hidden" value="" />
+
+                <div class="mac-form-grid">
+                    <div class="form-group">
+                        <label for="mac-slug">Slug (unique)</label>
+                        <input id="mac-slug" type="text" placeholder="danielcraft" required />
+                    </div>
+                    <div class="form-group">
+                        <label for="mac-label">Nom affiché</label>
+                        <input id="mac-label" type="text" placeholder="Daniel Craft" required />
+                    </div>
+
+                    <div class="form-group wide">
+                        <label for="mac-domain-name">Domaine (DNS + usage email)</label>
+                        <input id="mac-domain-name" type="text" placeholder="danielcraft.fr" />
+                        <div class="mac-hint">Conseillé pour les checks DNS, les liens de marque et l’identification visuelle.</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="mac-smtp-host">SMTP Host</label>
+                        <input id="mac-smtp-host" type="text" placeholder="node12.lan" required />
+                    </div>
+                    <div class="form-group">
+                        <label for="mac-smtp-port">SMTP Port</label>
+                        <input id="mac-smtp-port" type="number" value="587" min="1" />
+                    </div>
+
+                    <div class="form-group">
+                        <label for="mac-smtp-username">SMTP Username</label>
+                        <input id="mac-smtp-username" type="text" placeholder="contact@danielcraft.fr" />
+                    </div>
+                    <div class="form-group">
+                        <label for="mac-smtp-password">SMTP Password</label>
+                        <input id="mac-smtp-password" type="password" placeholder="Laisser vide pour conserver l’actuel" />
+                    </div>
+
+                    <div class="form-group">
+                        <label class="mac-check">
+                            <input id="mac-smtp-use-tls" type="checkbox" checked />
+                            STARTTLS
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label class="mac-check">
+                            <input id="mac-smtp-use-ssl" type="checkbox" />
+                            SSL implicite
+                        </label>
+                    </div>
+
+                    <div class="form-group wide">
+                        <label for="mac-default-sender">From (default_sender)</label>
+                        <input id="mac-default-sender" type="text" placeholder="Contact <contact@danielcraft.fr>" required />
+                    </div>
+                    <div class="form-group wide">
+                        <label for="mac-reply-to">Reply-To (optionnel)</label>
+                        <input id="mac-reply-to" type="text" placeholder="contact@danielcraft.fr" />
+                    </div>
+                    <div class="form-group wide">
+                        <label class="mac-check">
+                            <input id="mac-is-active" type="checkbox" checked />
+                            Compte actif
+                        </label>
+                    </div>
+                </div>
+
+                <div class="mac-actions" style="margin-top:1rem;">
+                    <button id="mac-submit-btn" class="mac-btn mac-btn--primary" type="submit">
+                        <i class="fa-solid fa-plus"></i>
+                        Créer le compte
+                    </button>
+                    <button id="mac-reset-form-btn" class="mac-btn mac-btn--soft" type="button">
+                        <i class="fa-solid fa-rotate-left"></i>
+                        Réinitialiser
+                    </button>
+                </div>
+
+                <div id="mac-create-status" class="mac-inline-status"></div>
+
+                <div id="mac-edit-danger-zone" class="mac-danger-zone" style="display:none;">
+                    <div class="mac-hint" style="margin-bottom:0.7rem;">Zone sensible : suppression définitive du compte sélectionné.</div>
+                    <button id="mac-delete-current-btn" class="mac-btn mac-btn--danger" type="button">
+                        <i class="fa-solid fa-trash"></i>
+                        Supprimer ce domaine
+                    </button>
+                </div>
+            </form>
+        </aside>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/mail_accounts_manager.js') }}?v={{ asset_version }}"></script>
+{% endblock %}
+

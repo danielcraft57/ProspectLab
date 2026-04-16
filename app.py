@@ -150,6 +150,7 @@ from routes.api_tokens import api_tokens_bp
 from routes.api_integration import api_integration_bp
 from routes.upload import upload_bp
 from routes.other import other_bp
+from routes.mail_accounts import mail_accounts_bp
 from routes.auth import auth_bp
 
 app.register_blueprint(auth_bp)  # Auth en premier pour gérer la redirection /
@@ -160,7 +161,31 @@ app.register_blueprint(api_public_bp)  # API publique
 app.register_blueprint(api_tokens_bp)  # Gestion des tokens API
 app.register_blueprint(api_integration_bp)  # API d'intégration interne (applications clientes)
 app.register_blueprint(upload_bp)
+app.register_blueprint(mail_accounts_bp)
 app.register_blueprint(other_bp)
+
+# Contexte global pour le switch domaine (navigation)
+@app.context_processor
+def inject_mail_account_context():
+    """
+    Injecte dans tous les templates:
+    - `mail_accounts`: liste des comptes SMTP actifs
+    - `current_mail_account_id`: id du compte choisi via session (ou None pour global)
+    """
+    from flask import session
+
+    accounts = []
+    try:
+        from services.database import Database
+
+        accounts = Database().list_mail_accounts(active_only=True)
+    except Exception:
+        accounts = []
+
+    return {
+        'mail_accounts': accounts,
+        'current_mail_account_id': session.get('mail_account_id', None),
+    }
 
 # Enregistrer les handlers WebSocket
 from routes.websocket_handlers import register_websocket_handlers

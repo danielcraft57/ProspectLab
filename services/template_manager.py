@@ -10,14 +10,17 @@ from typing import Dict, List, Optional
 from urllib.parse import quote
 
 
-def _normalize_danielcraft_href(url: str) -> str:
+def _normalize_danielcraft_href(url: str, brand_domain: str = 'danielcraft.fr') -> str:
     """
     Le site vitrine est une SPA : /contact renvoie 404. On normalise vers /#contact.
     """
-    if not url or 'danielcraft.fr' not in url.lower():
+    if not url or not brand_domain:
+        return url
+    brand_domain = str(brand_domain).strip().lower().lstrip('www.')
+    if brand_domain not in url.lower():
         return url
     return re.sub(
-        r'(https?://(?:www\.)?danielcraft\.fr)/contact/?(?=\?|#|$)',
+        rf'(https?://(?:www\.)?{re.escape(brand_domain)})/contact/?(?=\?|#|$)',
         r'\1/#contact',
         url,
         flags=re.IGNORECASE,
@@ -159,7 +162,7 @@ class TemplateManager:
         with open(self.templates_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     
-    def list_templates(self, category=None) -> List[Dict]:
+    def list_templates(self, category=None, mail_account_id: Optional[int] = None) -> List[Dict]:
         """
         Liste tous les templates.
         Recharge le fichier à chaque appel pour afficher les modèles ajoutés ou modifiés.
@@ -172,6 +175,40 @@ class TemplateManager:
         """
         self.templates = self._load_templates()
         templates = [dict(t) for t in self.templates]
+
+        # Switch domaine : filtrer les templates par compte SMTP.
+        mid = None
+        try:
+            if mail_account_id is not None and str(mail_account_id).strip() != '' and str(mail_account_id).strip() != '0':
+                mid = int(mail_account_id)
+        except Exception:
+            mid = None
+
+        if mid is None:
+            # Mode global : uniquement templates "global" (mail_account_id NULL)
+            templates = [
+                t for t in templates
+                if t.get('mail_account_id') is None or 'mail_account_id' not in t
+            ]
+        else:
+            templates = [
+                t for t in templates
+                if 'mail_account_id' in t
+                and t.get('mail_account_id') is not None
+                and str(t.get('mail_account_id')).strip() != ''
+                and int(t.get('mail_account_id')) == mid
+            ]
+
+        brand_host = 'danielcraft.fr'
+        if mid is not None:
+            try:
+                from services.database.mail_accounts import MailAccountManager
+                mam = MailAccountManager()
+                acc = mam.get_mail_account(int(mid))
+                if acc and acc.get('domain_name'):
+                    brand_host = acc.get('domain_name')
+            except Exception:
+                pass
         
         if category:
             templates = [t for t in templates if t.get('category') == category]
@@ -192,7 +229,7 @@ class TemplateManager:
                         content = self._apply_includes(content)
                         # Pour la prévisualisation UI, rendre les liens cliquables même si
                         # les placeholders ne sont pas rendus (ex: href="{dc_contact_url}").
-                        content = self._make_ui_preview_links_clickable(content)
+                        content = self._make_ui_preview_links_clickable(content, brand_host=brand_host)
                         template['content'] = content
                     template['preview'] = 'Modèle HTML avec variables dynamiques. {{nom}} = nom du contact ou responsable entreprise si inconnu ; {{entreprise}}, {{email}}, {{responsable}}, blocs conditionnels.'
                 else:
@@ -201,7 +238,7 @@ class TemplateManager:
         
         return templates
     
-    def get_template(self, template_id: str) -> Optional[Dict]:
+    def get_template(self, template_id: str, for_preview: bool = True) -> Optional[Dict]:
         """
         Récupère un template par son ID
         
@@ -222,7 +259,9 @@ class TemplateManager:
                     d['is_html'] = bool(d.get('is_html'))
                     if d.get('is_html') and isinstance(d.get('content'), str):
                         d['content'] = self._apply_includes(d['content'])
-                        d['content'] = self._make_ui_preview_links_clickable(d['content'])
+                        # Ne pas figer les URLs de preview pour l'envoi réel.
+                        if for_preview:
+                            d['content'] = self._make_ui_preview_links_clickable(d['content'])
                     return d
         except Exception:
             pass
@@ -239,7 +278,7 @@ class TemplateManager:
         return None
 
     @staticmethod
-    def _make_ui_preview_links_clickable(content: str) -> str:
+    def _make_ui_preview_links_clickable(content: str, brand_host: str = 'danielcraft.fr') -> str:
         """
         Dans la page "modèles d'email", on affiche souvent le HTML sans rendre les variables.
         On remplace donc quelques href placeholders par des URLs de fallback cliquables.
@@ -247,19 +286,23 @@ class TemplateManager:
         if not isinstance(content, str) or 'href="' not in content:
             return content
 
+        brand_host = (brand_host or 'danielcraft.fr').strip().lower()
+        brand_host = re.sub(r'^https?://', '', brand_host).rstrip('/')
+        brand_base_url = f'https://{brand_host}'.rstrip('/')
+
         # CTA principal
-        content = content.replace('href="{dc_contact_url}"', 'href="https://danielcraft.fr/#contact"')
+        content = content.replace('href="{dc_contact_url}"', f'href="{brand_base_url}/#contact"')
 
         # Analyse (fallback "exemple.com" pour que le lien soit valide en UI)
         content = content.replace(
             'href="{analysis_url}"',
-            'href="https://danielcraft.fr/analyse?website=https%3A%2F%2Fexemple.com&full=1"',
+            f'href="{brand_base_url}/analyse?website=https%3A%2F%2Fexemple.com&full=1"',
         )
 
         # Désabonnement (fallback "exemple.com")
         content = content.replace(
             'href="{unsubscribe_url}"',
-            'href="https://danielcraft.fr/desabonnement?website=https%3A%2F%2Fexemple.com"',
+            f'href="{brand_base_url}/desabonnement?website=https%3A%2F%2Fexemple.com"',
         )
 
         return content
@@ -317,7 +360,11 @@ class TemplateManager:
         return content
 
     @staticmethod
-    def _append_email_to_all_hrefs(content: str, encoded_email: str) -> str:
+    def _append_email_to_all_hrefs(
+        content: str,
+        encoded_email: str,
+        brand_domain: str = 'danielcraft.fr',
+    ) -> str:
         """
         Ajoute `email=...` à tous les liens HTTP(S) d'un HTML rendu.
         - Ne touche pas aux mailto:, tel:, #anchors, javascript:
@@ -335,7 +382,7 @@ class TemplateManager:
             if low.startswith('mailto:') or low.startswith('tel:') or low.startswith('#') or low.startswith('javascript:'):
                 return m.group(0)
             if low.startswith('http://') or low.startswith('https://'):
-                url2 = _normalize_danielcraft_href(url)
+                url2 = _normalize_danielcraft_href(url, brand_domain=brand_domain)
                 url2 = _append_email_query_before_fragment(url2, encoded_email)
                 return f'{prefix}{url2}{suffix}'
             return m.group(0)
@@ -343,7 +390,7 @@ class TemplateManager:
         return href_re.sub(repl, content)
     
     def create_template(self, name: str, subject: str, content: str, category: str = 'cold_email',
-                        template_id: Optional[str] = None) -> Dict:
+                        template_id: Optional[str] = None, mail_account_id: Optional[int] = None) -> Dict:
         """
         Crée un nouveau template
         
@@ -368,6 +415,7 @@ class TemplateManager:
             'subject': subject,
             'content': content,
             'is_html': category == 'html_email',
+            'mail_account_id': mail_account_id,
             'created_at': datetime.now().isoformat(),
             'updated_at': datetime.now().isoformat()
         }
@@ -384,7 +432,8 @@ class TemplateManager:
                     subject=subject,
                     content=content,
                     is_html=(category == 'html_email'),
-                    is_active=True
+                    is_active=True,
+                    mail_account_id=mail_account_id,
                 )
                 return dict(saved)
         except Exception:
@@ -395,7 +444,7 @@ class TemplateManager:
         return template
     
     def update_template(self, template_id: str, name: str = None, subject: str = None,
-                        content: str = None, category: str = None) -> Optional[Dict]:
+                        content: str = None, category: str = None, mail_account_id: Optional[int] = None) -> Optional[Dict]:
         """
         Met à jour un template existant.
 
@@ -421,6 +470,11 @@ class TemplateManager:
                     new_category = category if category is not None else existing.get('category', 'cold_email')
                     new_subject = subject if subject is not None else existing.get('subject', '')
                     new_content = content if content is not None else existing.get('content', '')
+                    mid_to_set = (
+                        mail_account_id
+                        if mail_account_id is not None
+                        else existing.get('mail_account_id')
+                    )
                     saved = db.upsert_email_template(
                         template_id=template_id,
                         name=new_name,
@@ -428,7 +482,8 @@ class TemplateManager:
                         subject=new_subject,
                         content=new_content,
                         is_html=(new_category == 'html_email'),
-                        is_active=bool(existing.get('is_active', 1))
+                        is_active=bool(existing.get('is_active', 1)),
+                        mail_account_id=mid_to_set,
                     )
                     return dict(saved)
         except Exception:
@@ -899,6 +954,7 @@ class TemplateManager:
         email: str = '',
         entreprise_id: int = None,
         extended_overrides: Optional[Dict] = None,
+        brand_domain: Optional[str] = None,
     ):
         """
         Rend un template avec les variables remplacées
@@ -915,7 +971,7 @@ class TemplateManager:
         Returns:
             Tuple (contenu rendu, is_html)
         """
-        template = self.get_template(template_id)
+        template = self.get_template(template_id, for_preview=False)
         if not template:
             return '', False
         
@@ -972,13 +1028,18 @@ class TemplateManager:
             base_url = (BASE_URL or '').rstrip('/') or 'http://localhost:5000'
         except Exception:
             base_url = 'http://localhost:5000'
+
+        # Domaine "marque" pour générer des URLs analyse / désabonnement / contact.
+        brand_host = (brand_domain or 'danielcraft.fr').strip().lower()
+        brand_host = re.sub(r'^https?://', '', brand_host).rstrip('/')
+        brand_base_url = f'https://{brand_host}'.rstrip('/')
         
         # Préparer toutes les variables (total_social_count pour condition scraping)
         extended_flat = dict(extended_data)
         if 'total_social' in extended_flat and isinstance(extended_flat.get('total_social'), list):
             extended_flat['total_social_count'] = len(extended_flat['total_social'])
 
-        # Lien direct vers l'analyse en ligne du site (danielcraft.fr/analyse)
+        # Lien direct vers l'analyse en ligne du site
         website_val = extended_flat.get('website') or ''
         encoded_email = quote((email or '').strip(), safe='') if isinstance(email, str) and email.strip() else ''
         analysis_url = ''
@@ -986,26 +1047,26 @@ class TemplateManager:
             # URL-encode du website pour l'inclure dans la query string
             encoded_website = quote(website_val.strip(), safe='')
             if encoded_email:
-                analysis_url = f"https://danielcraft.fr/analyse?website={encoded_website}&full=1&email={encoded_email}"
+                analysis_url = f"{brand_base_url}/analyse?website={encoded_website}&full=1&email={encoded_email}"
             else:
-                analysis_url = f"https://danielcraft.fr/analyse?website={encoded_website}&full=1"
+                analysis_url = f"{brand_base_url}/analyse?website={encoded_website}&full=1"
         extended_flat['analysis_url'] = analysis_url
 
-        # Lien de désabonnement (danielcraft.fr/desabonnement?website=...)
+        # Lien de désabonnement
         unsubscribe_url = ''
         if isinstance(website_val, str) and website_val.strip():
             encoded_website = quote(website_val.strip(), safe='')
             if encoded_email:
-                unsubscribe_url = f"https://danielcraft.fr/desabonnement?website={encoded_website}&email={encoded_email}"
+                unsubscribe_url = f"{brand_base_url}/desabonnement?website={encoded_website}&email={encoded_email}"
             else:
-                unsubscribe_url = f"https://danielcraft.fr/desabonnement?website={encoded_website}"
+                unsubscribe_url = f"{brand_base_url}/desabonnement?website={encoded_website}"
         extended_flat['unsubscribe_url'] = unsubscribe_url
 
-        # Contact site vitrine DanielCraft (SPA : #contact — pas de route /contact)
+        # Contact site vitrine (SPA : #contact — pas de route /contact)
         if encoded_email:
-            dc_contact_url = f'https://danielcraft.fr/?email={encoded_email}#contact'
+            dc_contact_url = f'{brand_base_url}/?email={encoded_email}#contact'
         else:
-            dc_contact_url = 'https://danielcraft.fr/#contact'
+            dc_contact_url = f'{brand_base_url}/#contact'
         extended_flat['dc_contact_url'] = dc_contact_url
 
         variables = {
@@ -1114,14 +1175,14 @@ class TemplateManager:
             if isinstance(content, str) and analysis_url:
                 # Version non-encodée
                 content = content.replace(
-                    "https://danielcraft.fr/analyse?website=https://exemple.com&full=1",
+                    f"{brand_base_url}/analyse?website=https://exemple.com&full=1",
                     analysis_url,
                 )
                 # Version encodée dans une query de tracking éventuelle
                 legacy_encoded = quote("https://exemple.com", safe='')
                 if legacy_encoded in content:
                     content = content.replace(
-                        f"https://danielcraft.fr/analyse?website={legacy_encoded}&full=1",
+                        f"{brand_base_url}/analyse?website={legacy_encoded}&full=1",
                         analysis_url,
                     )
         except Exception:
@@ -1162,17 +1223,18 @@ class TemplateManager:
         except Exception:
             pass
 
-        # Liens danielcraft.fr : corriger /contact (404 SPA) + email= avant #fragment
+        # Liens de la marque : corriger /contact (404 SPA) + email= avant #fragment
         try:
-            if isinstance(content, str) and 'danielcraft.fr' in content:
+            if isinstance(content, str) and brand_host in content.lower():
+                escaped = re.escape(brand_host)
                 href_re = re.compile(
-                    r'(href\s*=\s*["\'])(https?://(?:www\.)?danielcraft\.fr/[^"\']*)(["\'])',
+                    rf'(href\s*=\s*["\'])(https?://(?:www\.)?{escaped}/[^"\']*)(["\'])',
                     flags=re.IGNORECASE,
                 )
 
                 def href_repl(m: re.Match) -> str:
                     prefix, url, suffix = m.group(1), m.group(2), m.group(3)
-                    url = _normalize_danielcraft_href(url)
+                    url = _normalize_danielcraft_href(url, brand_domain=brand_host)
                     if encoded_email:
                         url = _append_email_query_before_fragment(url, encoded_email)
                     return f'{prefix}{url}{suffix}'
@@ -1185,7 +1247,7 @@ class TemplateManager:
         # Important : ne s'applique que si un email destinataire est fourni.
         try:
             if is_html and isinstance(content, str) and encoded_email:
-                content = self._append_email_to_all_hrefs(content, encoded_email)
+                content = self._append_email_to_all_hrefs(content, encoded_email, brand_domain=brand_host)
         except Exception:
             pass
 

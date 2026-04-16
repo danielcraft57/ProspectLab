@@ -31,6 +31,15 @@
             </div>
         </div>
         <ul class="nav-links">
+            {# Indicateur de domaine : dépend de la sélection mail_account_id en session #}
+            {% set current_domain_name = 'Global' %}
+            {% if current_mail_account_id is not none and mail_accounts and mail_accounts|length > 0 %}
+                {% for acc in mail_accounts %}
+                    {% if acc.id == current_mail_account_id %}
+                        {% set current_domain_name = acc.domain_name if acc.domain_name else acc.label %}
+                    {% endif %}
+                {% endfor %}
+            {% endif %}
             <li><a href="{{ url_for('main.dashboard') }}">Dashboard</a></li>
             <li class="nav-dropdown">
                 <a href="#" class="dropdown-toggle">Entreprises <span class="dropdown-arrow">▼</span></a>
@@ -68,6 +77,39 @@
                     <li><a href="{{ url_for('other.api_tokens_page') }}">Tokens API</a></li>
                 </ul>
             </li>
+            <li class="nav-dropdown">
+                <a href="#" class="dropdown-toggle" aria-label="Domaine">
+                    Domaines
+                    <span class="dropdown-arrow">▼</span>
+                </a>
+                <ul class="dropdown-menu" role="menu" aria-label="Comptes email">
+                    <li>
+                        <a href="{{ url_for('other.switch_mail_account', account_id=0) }}" class="{{ 'is-active' if current_mail_account_id is none else '' }}">
+                            {% if current_mail_account_id is none %}
+                                <i class="fa-solid fa-globe domain-indicator" title="DanielCraft (danielcraft.fr)"></i>
+                            {% endif %}
+                            DanielCraft (danielcraft.fr)
+                        </a>
+                    </li>
+                    {% if mail_accounts and mail_accounts|length > 0 %}
+                        {% for acc in mail_accounts %}
+                            <li>
+                                <a href="{{ url_for('other.switch_mail_account', account_id=acc.id) }}" class="{{ 'is-active' if current_mail_account_id == acc.id else '' }}">
+                                    {% if current_mail_account_id == acc.id %}
+                                        <i class="fa-solid fa-circle-dot domain-indicator" title="{{ acc.domain_name if acc.domain_name else acc.label }}"></i>
+                                    {% endif %}
+                                    {{ acc.label }}{% if acc.domain_name %} ({{ acc.domain_name }}){% endif %}
+                                </a>
+                            </li>
+                        {% endfor %}
+                    {% endif %}
+                    <li>
+                        <a href="{{ url_for('other.manage_mail_accounts_page') }}">
+                            Gestion domaines
+                        </a>
+                    </li>
+                </ul>
+            </li>
             <!-- <li class="nav-user">
                 <a href="{{ url_for('auth.logout') }}" class="logout-btn">
                     <i class="fas fa-sign-out-alt"></i> Déconnexion
@@ -76,4 +118,19 @@
         </ul>
     </div>
 </nav>
+
+<div
+  id="mail-account-context"
+  data-mail-account-id="{{ current_mail_account_id if current_mail_account_id is not none else '' }}"
+  hidden
+></div>
+
+<script>
+  (function () {
+    const el = document.getElementById('mail-account-context');
+    const raw = el ? (el.getAttribute('data-mail-account-id') || '') : '';
+    const s = String(raw || '').trim();
+    window.__MAIL_ACCOUNT_ID__ = s ? Number.parseInt(s, 10) : null;
+  })();
+</script>
 

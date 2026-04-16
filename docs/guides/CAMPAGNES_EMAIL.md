@@ -81,17 +81,32 @@ Le système de campagnes email permet d'envoyer des emails en masse à des entre
 - **`analysis_url`** est construit au rendu à partir du `website` de l'entreprise (`/analyse?website=...&full=1`).
 - Si un ancien template stocké en BDD contient encore un lien de démo (`exemple.com`), le rendu remplace ce lien par l'URL calculée pour l'entreprise au moment de l'envoi.
 
+### 5. Multi-domaines (comptes SMTP)
+
+ProspectLab peut envoyer depuis plusieurs domaines (ex. `danielcraft.fr`, `jammy.fr`) avec une base entreprises commune.
+
+- **Compte SMTP par domaine** : table `mail_accounts` (host, port, auth, sender, domain_name, statut, tests).
+- **Rattachement des campagnes** : `campagnes_email.mail_account_id`.
+- **Rattachement des templates** : `email_templates.mail_account_id`.
+- **Sélection du domaine actif** : via le menu `Domaines` (session utilisateur) et page `Gestion domaines & comptes SMTP`.
+- **Fallback** : si aucun compte n'est sélectionné, l'app utilise le mode par défaut (DanielCraft / configuration globale).
+- **Sécurité** : mot de passe SMTP stocké chiffré en base.
+
+En asynchrone, les workers Celery résolvent automatiquement l'expéditeur à partir de `mail_account_id` de la campagne.
+
 ## Architecture technique
 
 ### Composants principaux
 
 #### Backend
 - **`services/database/campagnes.py`** : Gestion des campagnes, emails envoyés et événements de tracking
+- **`services/database/mail_accounts.py`** : CRUD des comptes SMTP multi-domaines
 - **`services/email_tracker.py`** : Injection du pixel de tracking et modification des liens
 - **`services/template_manager.py`** : Rendu des templates avec données dynamiques
 - **`services/email_sender.py`** : Envoi des emails via SMTP
 - **`tasks/email_tasks.py`** : Tâche Celery pour l'envoi asynchrone
-- **`routes/other.py`** : Routes API et tracking
+- **`routes/other.py`** : Routes campagnes/tracking + sélection du domaine actif
+- **`routes/mail_accounts.py`** : API de gestion des comptes SMTP/domaines (create/update/delete/probe/check DNS/test send)
 
 #### Frontend
 - **`static/js/campagnes.js`** : Gestion de l'interface, WebSocket, génération de noms, paramètres d'envoi (programmation, suggestions intelligentes, reset formulaire)
@@ -101,6 +116,7 @@ Le système de campagnes email permet d'envoyer des emails en masse à des entre
 ### Base de données
 
 #### Tables
+- **`mail_accounts`** : Comptes SMTP multi-domaines
 - **`campagnes_email`** : Métadonnées des campagnes
 - **`emails_envoyes`** : Détails de chaque email envoyé (avec `tracking_token`)
 - **`email_tracking_events`** : Événements de tracking (open, click)

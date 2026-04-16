@@ -92,6 +92,7 @@ Bienvenue dans la documentation de ProspectLab. Cette documentation est organis√
 - **pentest_analyses** : Analyses Pentest (securite)
 - **email_templates** : Modeles d'emails (templates HTML / texte stock√©s en base)
 - **campagnes_email** : Campagnes email avec metadonnees
+- **mail_accounts** : Comptes SMTP multi-domaines (domain_name, sender, auth, statut, probes)
 - **emails_envoyes** : Details des emails envoyes avec tracking_token
 - **email_tracking_events** : Evenements de tracking (ouvertures, clics)
 - **users** : Utilisateurs avec authentification (username, email, password_hash, is_admin)

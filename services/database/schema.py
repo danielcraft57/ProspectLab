@@ -183,6 +183,54 @@ class DatabaseSchema(DatabaseBase):
         finally:
             conn.close()
 
+    def ensure_mail_accounts_table(self):
+        """
+        Comptes SMTP multi-domaines + rattachement optionnel campagnes / templates.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS mail_accounts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    slug TEXT NOT NULL UNIQUE,
+                    label TEXT NOT NULL,
+                    domain_name TEXT,
+                    smtp_host TEXT NOT NULL,
+                    smtp_port INTEGER NOT NULL DEFAULT 587,
+                    smtp_use_tls INTEGER NOT NULL DEFAULT 1,
+                    smtp_use_ssl INTEGER NOT NULL DEFAULT 0,
+                    smtp_username TEXT,
+                    smtp_password_encrypted TEXT,
+                    default_sender TEXT NOT NULL,
+                    reply_to TEXT,
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    last_test_at TIMESTAMP,
+                    last_test_ok INTEGER,
+                    last_test_message TEXT,
+                    last_dns_check_at TIMESTAMP,
+                    last_dns_check_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                ''',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_mail_accounts_slug ON mail_accounts(slug)',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_mail_accounts_active ON mail_accounts(is_active)',
+            )
+            self.safe_execute_sql(cursor, 'ALTER TABLE campagnes_email ADD COLUMN mail_account_id INTEGER')
+            self.safe_execute_sql(cursor, 'ALTER TABLE email_templates ADD COLUMN mail_account_id INTEGER')
+            conn.commit()
+        finally:
+            conn.close()
+
     def ensure_pentest_forms_normalized_tables(self):
         """
         Migration idempotente : tables normalisées des tests formulaires pentest.

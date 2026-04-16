@@ -36,6 +36,26 @@ logger = setup_logger(__name__, 'email_tasks.log', level=logging.DEBUG)
 STATS_CACHE_PATH = Path(__file__).resolve().parents[1] / 'logs' / 'campagne_stats_cache.json'
 
 
+def _resolve_email_sender(mail_account_id, campagne_row):
+    """
+    Choisit le transport SMTP : compte BDD (mail_accounts) ou variables d'environnement (.env).
+    """
+    mid = mail_account_id
+    if mid is None and campagne_row:
+        mid = campagne_row.get('mail_account_id')
+    if mid is not None:
+        try:
+            from services.database.mail_accounts import MailAccountManager
+
+            mam = MailAccountManager()
+            acc = mam.get_mail_account_decrypted(int(mid))
+            if acc:
+                return EmailSender.from_mail_account(acc)
+        except Exception as e:
+            logger.warning(f'Compte mail {mid} indisponible, fallback .env: {e}')
+    return EmailSender()
+
+
 @celery.task
 def run_bounce_scan_task(days=None, profiles=None, delete_processed=None, limit=None, debug=False):
     """
@@ -213,7 +233,7 @@ def send_bulk_emails_task(self, recipients, subject_template, body_template, del
 
 
 @celery.task(bind=True)
-def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=None, custom_message=None, delay=2):
+def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=None, custom_message=None, delay=2, mail_account_id=None):
     """
     Envoie une campagne email complète avec suivi en temps réel.
 
@@ -224,6 +244,7 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
         subject (str|None): Sujet de l'email
         custom_message (str|None): Message personnalisé si pas de template
         delay (int): Délai entre envois (secondes)
+        mail_account_id (int|None): Compte SMTP en base (prioritaire sur .env)
 
     Returns:
         dict: Résultats de la campagne
@@ -238,6 +259,7 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
     db = Database()
     campagne_manager = CampagneManager()
     template_manager = TemplateManager()
+    campagne_row = campagne_manager.get_campagne(campagne_id)
 
     # URL de base pour les liens de tracking
     try:
@@ -247,7 +269,21 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
         base_url = 'http://localhost:5000'
 
     tracker = EmailTracker(base_url=base_url)
-    email_sender = EmailSender()
+    email_sender = _resolve_email_sender(mail_account_id, campagne_row)
+    brand_domain = 'danielcraft.fr'
+    try:
+        mid_for_brand = mail_account_id
+        if mid_for_brand is None and campagne_row:
+            mid_for_brand = campagne_row.get('mail_account_id')
+        if mid_for_brand is not None:
+            from services.database.mail_accounts import MailAccountManager
+
+            mam = MailAccountManager()
+            acc = mam.get_mail_account(int(mid_for_brand))
+            if acc and acc.get('domain_name'):
+                brand_domain = acc.get('domain_name') or brand_domain
+    except Exception:
+        pass
 
     total = len(recipients) if recipients else 0
     results = []
@@ -280,7 +316,7 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
 
     template = None
     if template_id:
-        template = template_manager.get_template(template_id)
+        template = template_manager.get_template(template_id, for_preview=False)
 
     try:
         for idx, recipient in enumerate(recipients or [], start=1):
@@ -318,7 +354,8 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
                     recipient_nom,
                     recipient.get('entreprise', ''),
                     recipient.get('email', ''),
-                    entreprise_id=entreprise_id
+                    entreprise_id=entreprise_id,
+                    brand_domain=brand_domain,
                 )
                 # Formater le sujet avec les variables
                 subject_template = subject or template.get('subject', 'Prospection')
@@ -496,6 +533,7 @@ def start_scheduled_campagnes():
             subject=params.get('subject'),
             custom_message=params.get('custom_message'),
             delay=params.get('delay', 2),
+            mail_account_id=params.get('mail_account_id'),
         )
         logger.info(f'[Beat] Campagne {campagne_id} programmée démarrée ({len(recipients)} destinataires)')
         

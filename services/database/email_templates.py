@@ -15,13 +15,19 @@ class EmailTemplateManager(DatabaseBase):
     Manager CRUD des modèles d'emails stockés en BDD.
     """
 
-    def list_email_templates(self, category: Optional[str] = None, active_only: bool = True) -> List[Dict[str, Any]]:
+    def list_email_templates(
+        self,
+        category: Optional[str] = None,
+        active_only: bool = True,
+        mail_account_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
         """
         Liste les modèles.
 
         Args:
             category: Filtrer par catégorie (optionnel).
             active_only: Si True, ne renvoie que les modèles actifs.
+            mail_account_id: Si renseigné, modèles globaux (sans compte) ou rattachés à ce compte.
 
         Returns:
             Liste de modèles.
@@ -39,7 +45,14 @@ class EmailTemplateManager(DatabaseBase):
             if active_only:
                 where.append("is_active = 1")
 
-            sql = "SELECT id, name, category, subject, content, is_html, is_active, created_at, updated_at FROM email_templates"
+            if mail_account_id is not None:
+                where.append("(mail_account_id IS NULL OR mail_account_id = ?)")
+                params.append(int(mail_account_id))
+
+            sql = (
+                "SELECT id, name, category, subject, content, is_html, is_active, mail_account_id, "
+                "created_at, updated_at FROM email_templates"
+            )
             if where:
                 sql += " WHERE " + " AND ".join(where)
             sql += " ORDER BY updated_at DESC"
@@ -59,8 +72,8 @@ class EmailTemplateManager(DatabaseBase):
         try:
             cursor = conn.cursor()
             sql = (
-                "SELECT id, name, category, subject, content, is_html, is_active, created_at, updated_at "
-                "FROM email_templates WHERE id = ?"
+                "SELECT id, name, category, subject, content, is_html, is_active, mail_account_id, "
+                "created_at, updated_at FROM email_templates WHERE id = ?"
             )
             self.execute_sql(cursor, sql, (template_id,))
             row = cursor.fetchone()
@@ -77,6 +90,7 @@ class EmailTemplateManager(DatabaseBase):
         content: str,
         is_html: bool,
         is_active: bool = True,
+        mail_account_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Crée ou met à jour un modèle.
@@ -90,22 +104,44 @@ class EmailTemplateManager(DatabaseBase):
             if existing:
                 sql = (
                     "UPDATE email_templates SET name = ?, category = ?, subject = ?, content = ?, "
-                    "is_html = ?, is_active = ?, updated_at = ? WHERE id = ?"
+                    "is_html = ?, is_active = ?, mail_account_id = ?, updated_at = ? WHERE id = ?"
                 )
                 self.execute_sql(
                     cursor,
                     sql,
-                    (name, category, subject, content, 1 if is_html else 0, 1 if is_active else 0, now, template_id),
+                    (
+                        name,
+                        category,
+                        subject,
+                        content,
+                        1 if is_html else 0,
+                        1 if is_active else 0,
+                        mail_account_id,
+                        now,
+                        template_id,
+                    ),
                 )
             else:
                 sql = (
-                    "INSERT INTO email_templates (id, name, category, subject, content, is_html, is_active, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                    "INSERT INTO email_templates (id, name, category, subject, content, is_html, is_active, "
+                    "mail_account_id, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 )
                 self.execute_sql(
                     cursor,
                     sql,
-                    (template_id, name, category, subject, content, 1 if is_html else 0, 1 if is_active else 0, now, now),
+                    (
+                        template_id,
+                        name,
+                        category,
+                        subject,
+                        content,
+                        1 if is_html else 0,
+                        1 if is_active else 0,
+                        mail_account_id,
+                        now,
+                        now,
+                    ),
                 )
 
             # Toujours valider la transaction, SQLite ou PostgreSQL.
@@ -120,6 +156,7 @@ class EmailTemplateManager(DatabaseBase):
                 "content": content,
                 "is_html": 1 if is_html else 0,
                 "is_active": 1 if is_active else 0,
+                "mail_account_id": mail_account_id,
                 "created_at": now,
                 "updated_at": now,
             }

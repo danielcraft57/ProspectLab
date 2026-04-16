@@ -30,6 +30,7 @@ from .technical import TechnicalManager
 from .pentest import PentestManager
 from .seo import SEOManager
 from .email_templates import EmailTemplateManager
+from .mail_accounts import MailAccountManager
 from .external_links import ExternalLinksManager
 from .postgresql_tune import apply_postgresql_tuning
 import os
@@ -46,6 +47,7 @@ class Database(
     PersonneManager,
     CampagneManager,
     EmailTemplateManager,
+    MailAccountManager,
     OSINTManager,
     TechnicalManager,
     PentestManager,
@@ -134,6 +136,13 @@ class Database(
             logging.getLogger(__name__).warning(
                 'Migration analysis_pentest_forms_summary / analysis_pentest_form_checks non appliquée',
                 exc_info=True,
+            )
+
+        try:
+            self.ensure_mail_accounts_table()
+        except Exception:
+            logging.getLogger(__name__).warning(
+                'Migration mail_accounts non appliquée', exc_info=True
             )
 
         try:

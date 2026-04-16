@@ -53,7 +53,11 @@ document.addEventListener('DOMContentLoaded', function() {
 // Charger les campagnes
 async function loadCampagnes() {
     try {
-        const response = await fetch('/api/campagnes');
+        const mid = window.__MAIL_ACCOUNT_ID__;
+        const url = (mid !== null && mid !== undefined)
+            ? `/api/campagnes?mail_account_id=${encodeURIComponent(mid)}`
+            : '/api/campagnes';
+        const response = await fetch(url);
         const campagnes = await response.json();
         campagnesData = Array.isArray(campagnes) ? campagnes : [];
         applyCampagnesFilters();
@@ -1966,7 +1970,10 @@ async function submitCampagne() {
                 custom_message: customMessage,
                 delay,
                 send_mode: sendMode,
-                scheduled_at_iso: scheduledAtIso
+                scheduled_at_iso: scheduledAtIso,
+                mail_account_id: (window.__MAIL_ACCOUNT_ID__ !== null && window.__MAIL_ACCOUNT_ID__ !== undefined)
+                    ? window.__MAIL_ACCOUNT_ID__
+                    : null,
             })
         });
 

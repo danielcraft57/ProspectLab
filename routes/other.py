@@ -4,7 +4,7 @@ Blueprint pour les routes supplémentaires non encore migrées
 Contient les routes pour les emails, templates, scraping et téléchargements.
 """
 
-from flask import Blueprint, render_template, request, jsonify, send_file, redirect, url_for, flash
+from flask import Blueprint, render_template, request, jsonify, send_file, redirect, url_for, flash, session
 import time
 import os
 from services.email_sender import EmailSender
@@ -80,12 +80,34 @@ def send_emails():
         template_id = data.get('template_id')
         subject = data.get('subject')
         custom_message = data.get('custom_message')
+        mail_account_id = data.get('mail_account_id')
+        if mail_account_id is None:
+            mail_account_id = session.get('mail_account_id', None)
+        try:
+            if mail_account_id is not None and str(mail_account_id).strip() == '0':
+                mail_account_id = None
+        except Exception:
+            mail_account_id = None
         
         if not recipients:
             return jsonify({'error': 'Aucun destinataire'}), 400
         
         try:
+            # Expéditeur SMTP sélectionné (multi-domaines) via session
+            brand_domain = 'danielcraft.fr'
             email_sender = EmailSender()
+            if mail_account_id is not None:
+                try:
+                    from services.database.mail_accounts import MailAccountManager
+
+                    mam = MailAccountManager()
+                    acc = mam.get_mail_account_decrypted(int(mail_account_id))
+                    if acc:
+                        email_sender = EmailSender.from_mail_account(acc)
+                        brand_domain = acc.get('domain_name') or brand_domain
+                except Exception:
+                    # Repli silencieux vers MAIL_* (.env) si compte indisponible
+                    pass
             
             # Charger le template si fourni
             template = None
@@ -104,7 +126,8 @@ def send_emails():
                         recipient.get('nom', ''),
                         recipient.get('entreprise', ''),
                         recipient.get('email', ''),
-                        recipient.get('entreprise_id')  # Passer l'ID si disponible
+                        recipient.get('entreprise_id'),  # Passer l'ID si disponible
+                        brand_domain=brand_domain
                     )
                     if is_html:
                         html_body = message
@@ -152,7 +175,7 @@ def send_emails():
             return jsonify({'error': str(e)}), 500
     
     # GET: Afficher le formulaire
-    templates = template_manager.list_templates()
+    templates = template_manager.list_templates(mail_account_id=session.get('mail_account_id'))
     return render_page('send_emails.html', templates=templates)
 
 
@@ -211,6 +234,33 @@ def manage_templates_db_page():
     return render_page('email_templates_manager.html')
 
 
+@other_bp.route('/mail-accounts/manage', methods=['GET'])
+@login_required
+def manage_mail_accounts_page():
+    """Page UI : ajouter / tester / basculer les comptes SMTP (multi-domaines)."""
+    return render_page('mail_accounts_manager.html')
+
+
+@other_bp.route('/mail-accounts/switch/<int:account_id>', methods=['GET'])
+@login_required
+def switch_mail_account(account_id: int):
+    """
+    Switch UI : stocke `mail_account_id` dans la session pour filtrer les campagnes / choisir l'expéditeur.
+
+    - `account_id <= 0` => mode global (None)
+    """
+    if account_id <= 0:
+        session.pop('mail_account_id', None)
+    else:
+        session['mail_account_id'] = int(account_id)
+
+    # Priorité : ?next=... sinon referrer
+    next_url = request.args.get('next') or request.referrer
+    if not next_url:
+        next_url = url_for('main.dashboard')
+    return redirect(next_url)
+
+
 @other_bp.route('/download/<filename>')
 @login_required
 def download_file(filename):
@@ -248,7 +298,7 @@ def api_templates():
         JSON: Liste des templates
     """
     if request.method == 'GET':
-        templates = template_manager.list_templates()
+        templates = template_manager.list_templates(mail_account_id=session.get('mail_account_id'))
         return jsonify(templates)
 
     # POST: créer un template (REST)
@@ -267,7 +317,8 @@ def api_templates():
         subject=subject,
         content=content,
         category=category,
-        template_id=explicit_id or None
+        template_id=explicit_id or None,
+        mail_account_id=session.get('mail_account_id'),
     )
     return jsonify({'success': True, 'template': tpl}), 201
 
@@ -303,7 +354,8 @@ def api_template_detail(template_id):
         name=data.get('name'),
         subject=data.get('subject'),
         content=data.get('content'),
-        category=data.get('category')
+        category=data.get('category'),
+        mail_account_id=session.get('mail_account_id'),
     )
     if tpl:
         return jsonify({'success': True, 'template': tpl})
@@ -376,7 +428,15 @@ def api_list_campagnes():
     from services.database.campagnes import CampagneManager
     campagne_manager = CampagneManager()
     statut = request.args.get('statut')
-    campagnes = campagne_manager.list_campagnes(statut=statut, limit=100)
+    mail_account_id = request.args.get('mail_account_id')
+    mid = None
+    try:
+        if mail_account_id is not None and str(mail_account_id).strip() != '':
+            mid = int(mail_account_id)
+    except Exception:
+        mid = None
+
+    campagnes = campagne_manager.list_campagnes(statut=statut, limit=100, mail_account_id=mid)
 
     # Ajouter des métriques de délivrabilité (bounces) calculées depuis emails_envoyes.
     # On ne modifie pas les compteurs historiques stockés dans campagnes_email,
@@ -514,6 +574,7 @@ def api_create_campagne():
     delay = data.get('delay', 2)
     send_mode = data.get('send_mode', 'now')
     scheduled_at_iso = data.get('scheduled_at_iso')
+    mail_account_id = data.get('mail_account_id')
 
     if not nom:
         now = datetime.now()
@@ -547,6 +608,7 @@ def api_create_campagne():
             'subject': sujet,
             'custom_message': custom_message,
             'delay': delay,
+            'mail_account_id': mail_account_id,
         }
         params_json = json.dumps(campaign_params)
 
@@ -558,6 +620,7 @@ def api_create_campagne():
             statut='scheduled',
             scheduled_at=scheduled_at_str,
             campaign_params_json=params_json,
+            mail_account_id=mail_account_id,
         )
         return jsonify({'success': True, 'campagne_id': campagne_id, 'task_id': None, 'scheduled_at': scheduled_at_str})
     else:
@@ -568,6 +631,7 @@ def api_create_campagne():
             sujet=sujet,
             total_destinataires=len(recipients),
             statut='draft',
+            mail_account_id=mail_account_id,
         )
         task = send_campagne_task.delay(
             campagne_id=campagne_id,
@@ -576,6 +640,7 @@ def api_create_campagne():
             subject=sujet,
             custom_message=custom_message,
             delay=delay,
+            mail_account_id=mail_account_id,
         )
         campagne_manager.update_campagne(campagne_id, statut='scheduled')
         return jsonify({'success': True, 'campagne_id': campagne_id, 'task_id': task.id})
@@ -695,12 +760,14 @@ def api_relaunch_campagne(campagne_id):
 
     source_name = campagne.get('nom') or f'Campagne #{campagne_id}'
     new_name = f"{source_name} Relance"
+    _mid = campagne.get('mail_account_id')
     new_campagne_id = campagne_manager.create_campagne(
         nom=new_name[:190],
         template_id=template_id,
         sujet=sujet,
         total_destinataires=len(recipients),
-        statut='draft'
+        statut='draft',
+        mail_account_id=_mid,
     )
 
     task = send_campagne_task.delay(
@@ -709,7 +776,8 @@ def api_relaunch_campagne(campagne_id):
         template_id=template_id,
         subject=sujet,
         custom_message=custom_message,
-        delay=2
+        delay=2,
+        mail_account_id=_mid,
     )
     campagne_manager.update_campagne(new_campagne_id, statut='scheduled')
 
@@ -921,7 +989,19 @@ def api_send_campagne_report_email(campagne_id):
     </html>
     """
 
+    # Expéditeur choisi selon le compte utilisé pour la campagne (multi-domaines).
     sender = EmailSender()
+    try:
+        mid = campagne.get('mail_account_id')
+        if mid is not None:
+            from services.database.mail_accounts import MailAccountManager
+
+            mam = MailAccountManager()
+            acc = mam.get_mail_account_decrypted(int(mid))
+            if acc:
+                sender = EmailSender.from_mail_account(acc)
+    except Exception:
+        pass
     result = sender.send_email(
         to=MAIL_DEFAULT_RECIPIENT,
         subject=subject,

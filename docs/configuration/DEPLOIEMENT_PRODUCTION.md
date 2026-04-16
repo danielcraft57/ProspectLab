@@ -193,6 +193,27 @@ cd /opt/prospectlab
 /opt/prospectlab/env/bin/python -c "from services.database import Database; db = Database(); db.init_database(); print('Base initialisée')"
 ```
 
+### 1.6.1 Vérification migration multi-domaines (PostgreSQL)
+
+Après déploiement, vérifier que le schéma multi-domaines est bien présent :
+
+```sql
+SELECT to_regclass('public.mail_accounts');
+
+SELECT column_name
+FROM information_schema.columns
+WHERE table_name = 'campagnes_email' AND column_name = 'mail_account_id';
+
+SELECT column_name
+FROM information_schema.columns
+WHERE table_name = 'email_templates' AND column_name = 'mail_account_id';
+```
+
+Attendu :
+- `mail_accounts` existe
+- `campagnes_email.mail_account_id` existe
+- `email_templates.mail_account_id` existe
+
 ## Étape 2 : Configuration des services systemd
 
 ### 2.1. Service ProspectLab (Gunicorn)

@@ -424,6 +424,20 @@ body[data-theme="dark"] .notification-item-message {
     color: #2c3e50;
 }
 
+.domain-indicator {
+    font-size: 0.6rem;
+    line-height: 1;
+    opacity: 0.85;
+    margin-left: 0.25rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.domain-indicator.fa-globe {
+    font-size: 0.65rem;
+}
+
 /* Main content */
 .main-content {
     width: 100%;
@@ -518,6 +532,10 @@ body[data-theme="dark"] .dropdown-menu a {
 body[data-theme="dark"] .dropdown-menu a:hover {
     background-color: #1e293b;
     color: #f8fafc;
+}
+
+body[data-theme="dark"] .domain-indicator {
+    opacity: 0.95;
 }
 
 /* Backdrop pour le menu mobile/tablette */
