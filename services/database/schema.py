@@ -135,7 +135,38 @@ class DatabaseSchema(DatabaseBase):
                 cursor,
                 'CREATE INDEX IF NOT EXISTS idx_market_actions_pillar_created ON market_roadmap_actions(pillar, created_at DESC)',
             )
-            self.safe_execute_sql(cursor, "ALTER TABLE market_roadmap_actions ADD COLUMN category TEXT DEFAULT 'commercial'")
+
+            category_exists = False
+            if self.is_postgresql():
+                self.execute_sql(
+                    cursor,
+                    '''
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'market_roadmap_actions'
+                      AND column_name = 'category'
+                    LIMIT 1
+                    ''',
+                )
+                category_exists = cursor.fetchone() is not None
+            else:
+                self.execute_sql(cursor, "PRAGMA table_info('market_roadmap_actions')")
+                cols = cursor.fetchall() or []
+                for col in cols:
+                    try:
+                        col_name = col.get('name') if isinstance(col, dict) else col[1]
+                    except Exception:
+                        col_name = None
+                    if col_name == 'category':
+                        category_exists = True
+                        break
+
+            if not category_exists:
+                self.safe_execute_sql(
+                    cursor,
+                    "ALTER TABLE market_roadmap_actions ADD COLUMN category TEXT DEFAULT 'commercial'",
+                )
             self.execute_sql(
                 cursor,
                 'CREATE INDEX IF NOT EXISTS idx_market_actions_category_status ON market_roadmap_actions(category, status)',

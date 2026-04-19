@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urljoin
 import re
 import time
+import os
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
@@ -928,9 +929,12 @@ class EntrepriseAnalyzer:
         
         soup = None
         text_for_sector = ''
+        use_initial_website_scrape = str(
+            os.environ.get('ANALYSIS_USE_INITIAL_WEBSITE_SCRAPE', '0')
+        ).strip().lower() in ('1', 'true', 'yes', 'on')
         
         # Vérifier que website n'est pas NA et n'est pas vide
-        if pd.notna(website) and website and str(website).strip():
+        if pd.notna(website) and website and str(website).strip() and use_initial_website_scrape:
             # Désactiver le scraping complet ici car il sera fait séparément via scrape_analysis_task
             # On fait juste un scraping basique pour obtenir les infos essentielles (titre, description, etc.)
             site_data = self.scrape_website(website, use_global_scraper=False)
@@ -1006,18 +1010,13 @@ class EntrepriseAnalyzer:
                 # Toujours inclure le résumé généré par le scraper (même s'il est vide)
                 result['resume'] = site_data.get('resume', '')
                 
-                # Récupérer le soup pour les analyses suivantes
-                try:
-                    response = requests.get(website, headers=self.headers, timeout=10)
-                    if response.status_code == 200:
-                        soup = BeautifulSoup(response.text, 'html.parser')
-                        text_for_sector = soup.get_text()
-                except:
-                    pass
+                # Éviter un second appel HTTP redondant ici (source de lenteurs/blocages).
+                # On se base sur les données déjà extraites par scrape_website.
+                text_for_sector = result.get('html_content_sample', '') or result.get('description', '') or ''
                 time.sleep(self.delay)
             elif site_data:
                 result.update(site_data)  # Inclure l'erreur
-        else:
+        elif not (pd.notna(website) and website and str(website).strip()):
             result['error'] = 'Pas de site web'
         
         # Utiliser le texte extrait pour les analyses

@@ -276,7 +276,23 @@ def analyze_entreprise_batch_task(
 
         batch_rows = _records_to_jsonable(batch_rows)
         total_processed = len(batch_rows or [])
+        batch_task_id = getattr(self.request, 'id', None)
+        processed_counter = 0
+        progress_lock = threading.Lock()
         logger.info('Batch démarre analysis_id=%s batch_len=%s filepath=%s', analysis_id, total_processed, filepath)
+
+        _safe_update_state(
+            self,
+            batch_task_id,
+            state='PROGRESS',
+            meta={
+                'analysis_id': analysis_id,
+                'current': 0,
+                'total': total_processed,
+                'percentage': 0,
+                'message': f'Batch en cours (0/{total_processed})',
+            },
+        )
 
         def _process_one(row_dict):
             """
@@ -373,6 +389,22 @@ def analyze_entreprise_batch_task(
                 except Exception as se:
                     logger.warning('Erreur sauvegarde entreprise: %s', se)
 
+            nonlocal processed_counter
+            with progress_lock:
+                processed_counter += 1
+                percentage = int((processed_counter / total_processed) * 100) if total_processed > 0 else 100
+                _safe_update_state(
+                    self,
+                    batch_task_id,
+                    state='PROGRESS',
+                    meta={
+                        'analysis_id': analysis_id,
+                        'current': processed_counter,
+                        'total': total_processed,
+                        'percentage': percentage,
+                        'message': f'Batch en cours ({processed_counter}/{total_processed})',
+                    },
+                )
             return 1
 
         # Exécuter en parallèle à l'intérieur du batch
@@ -541,6 +573,7 @@ def analyze_entreprise_orchestrator_task(
 
         # Lancer les batch tasks en parallèle (multi-noeuds)
         batch_task_ids = []
+        batch_started_at = {}
         for batch_index, records in enumerate(batches):
             res = analyze_entreprise_batch_task.apply_async(
                 kwargs=dict(
@@ -555,33 +588,74 @@ def analyze_entreprise_orchestrator_task(
                 queue='technical',
             )
             batch_task_ids.append((res.id, len(records)))
+            batch_started_at[res.id] = time.time()
 
         completed_rows = 0
         processed_done_ids = set()
+        per_batch_progress = {tid: 0 for tid, _ in batch_task_ids}
+        last_reported_completed_rows = -1
+        batch_watchdog_timeout_s = float(os.environ.get('ANALYSIS_BATCH_WATCHDOG_TIMEOUT_S', '300'))
+        timed_out_batches = set()
 
         while len(processed_done_ids) < len(batch_task_ids):
+            progress_changed = False
             for tid, batch_len in batch_task_ids:
                 if tid in processed_done_ids:
                     continue
                 r = celery.AsyncResult(tid)
-                if r.state == 'SUCCESS':
+                if r.state == 'PROGRESS':
+                    meta = r.info if isinstance(r.info, dict) else {}
+                    current_batch = int(meta.get('current', 0) or 0)
+                    current_batch = max(0, min(current_batch, batch_len))
+                    if current_batch != per_batch_progress.get(tid, 0):
+                        per_batch_progress[tid] = current_batch
+                        progress_changed = True
+                elif r.state == 'SUCCESS':
                     processed_done_ids.add(tid)
-                    completed_rows += batch_len
-
-                    percentage = int((completed_rows / total_rows) * 100) if total_rows > 0 else 0
-                    _safe_update_state(
-                        self,
-                        task_id,
-                        state='PROGRESS',
-                        meta={
-                            'current': completed_rows,
-                            'total': total_rows,
-                            'percentage': percentage,
-                            'message': f'Analyse en cours ({completed_rows}/{total_rows})'
-                        }
-                    )
+                    per_batch_progress[tid] = batch_len
+                    progress_changed = True
                 elif r.state in ('FAILURE', 'REVOKED'):
+                    if tid in timed_out_batches:
+                        processed_done_ids.add(tid)
+                        progress_changed = True
+                        continue
                     raise RuntimeError(f'Batch {tid} en échec: state={r.state}')
+
+                if tid not in processed_done_ids and batch_watchdog_timeout_s > 0:
+                    started = batch_started_at.get(tid, time.time())
+                    elapsed = time.time() - started
+                    if elapsed >= batch_watchdog_timeout_s:
+                        logger.error(
+                            'Batch timeout analysis_id=%s task_id=%s elapsed=%.1fs current=%s/%s',
+                            analysis_id,
+                            tid,
+                            elapsed,
+                            per_batch_progress.get(tid, 0),
+                            batch_len,
+                        )
+                        try:
+                            celery.AsyncResult(tid).revoke(terminate=True)
+                        except Exception as revoke_exc:
+                            logger.warning('Batch revoke échoué task_id=%s: %s', tid, revoke_exc)
+                        timed_out_batches.add(tid)
+                        processed_done_ids.add(tid)
+                        progress_changed = True
+
+            completed_rows = sum(per_batch_progress.values())
+            if progress_changed and completed_rows != last_reported_completed_rows:
+                last_reported_completed_rows = completed_rows
+                percentage = int((completed_rows / total_rows) * 100) if total_rows > 0 else 0
+                _safe_update_state(
+                    self,
+                    task_id,
+                    state='PROGRESS',
+                    meta={
+                        'current': completed_rows,
+                        'total': total_rows,
+                        'percentage': percentage,
+                        'message': f'Analyse en cours ({completed_rows}/{total_rows})'
+                    }
+                )
             time.sleep(1.0)
 
         duration = time.time() - start_time
@@ -601,7 +675,11 @@ def analyze_entreprise_orchestrator_task(
             'success': True,
             'output_file': None,
             'total_processed': completed_rows,
-            'stats': {'inserted': completed_rows, 'duplicates': 0},
+            'stats': {
+                'inserted': completed_rows,
+                'duplicates': 0,
+                'timed_out_batches': len(timed_out_batches),
+            },
             'analysis_id': analysis_id,
         }
 
