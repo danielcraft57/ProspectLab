@@ -10,24 +10,57 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from template_studio.html_sources_provider import FileHtmlContentProvider
+from template_studio.html_sources_provider import brand_provider
 from template_studio.html_templates_generator import HtmlTemplatesGenerator
 from template_studio.include_expander import expand_includes
 from template_studio.template_repo import JsonTemplatesRepository
 
 
-def _build_generator(repo_root: Path) -> HtmlTemplatesGenerator:
+def _normalize_brand_slug(brand: str | None) -> str | None:
+    if brand is None:
+        return None
+    b = str(brand).strip().lower()
+    if not b:
+        return None
+    b = re.sub(r"[^a-z0-9_-]+", "_", b)
+    b = re.sub(r"_+", "_", b).strip("_")
+    return b or None
+
+
+def _build_generator(repo_root: Path, brand: str | None = None) -> HtmlTemplatesGenerator:
+    brand_slug = _normalize_brand_slug(brand)
     # Source de vérité JSON côté Template Studio
-    templates_file = repo_root / "template_studio" / "templates_data.json"
-    default_file = repo_root / "template_studio" / "templates_data.default.json"
+    if brand_slug:
+        brand_root = repo_root / "template_studio" / "brands" / brand_slug
+        brand_root.mkdir(parents=True, exist_ok=True)
+        templates_file = brand_root / "templates_data.json"
+        default_file = brand_root / "templates_data.default.json"
+    else:
+        templates_file = repo_root / "template_studio" / "templates_data.json"
+        default_file = repo_root / "template_studio" / "templates_data.default.json"
 
     repo = JsonTemplatesRepository(templates_file=templates_file, default_file=default_file)
 
     templates = repo.load_templates()
 
-    sources_dir = repo_root / "template_studio" / "html_sources"
-    file_provider = FileHtmlContentProvider(sources_dir=sources_dir)
-    fragments_dir = repo_root / "template_studio" / "fragments"
+    common_sources_dir = repo_root / "template_studio" / "html_sources"
+    brand_sources_dir = (
+        repo_root / "template_studio" / "brands" / brand_slug / "html_sources"
+        if brand_slug
+        else None
+    )
+    get_html_from_sources = brand_provider(
+        common_sources_dir=common_sources_dir,
+        brand_sources_dir=brand_sources_dir,
+    )
+
+    common_fragments_dir = repo_root / "template_studio" / "fragments"
+    brand_fragments_dir = (
+        repo_root / "template_studio" / "brands" / brand_slug / "fragments"
+        if brand_slug
+        else None
+    )
+    fragments_dirs = [d for d in [brand_fragments_dir, common_fragments_dir] if d is not None]
 
     def _infer_title(html_text: str) -> str:
         # On tente de récupérer le <title> pour proposer un subject réutilisable.
@@ -62,24 +95,32 @@ def _build_generator(repo_root: Path) -> HtmlTemplatesGenerator:
 
     def _infer_specs_from_html_sources() -> list[dict]:
         specs: list[dict] = []
-        if not sources_dir.exists():
+        scan_dirs = [d for d in [brand_sources_dir, common_sources_dir] if d is not None]
+        known: set[str] = set()
+        if not scan_dirs:
             return specs
-        for file_path in sorted(sources_dir.glob("*.html")):
-            tpl_id = file_path.stem
-            try:
-                html_text = file_path.read_text(encoding="utf-8")
-            except Exception:
+        for src_dir in scan_dirs:
+            if not src_dir.exists():
                 continue
-            title = _infer_title(html_text)
-            subject = title
-            name = _humanize_name_from_title_or_id(title, tpl_id)
-            specs.append(
-                {
-                    "id": tpl_id,
-                    "name": name,
-                    "subject": subject or "",
-                }
-            )
+            for file_path in sorted(src_dir.glob("*.html")):
+                tpl_id = file_path.stem
+                if tpl_id in known:
+                    continue
+                known.add(tpl_id)
+                try:
+                    html_text = get_html_from_sources(tpl_id)
+                except Exception:
+                    continue
+                title = _infer_title(html_text)
+                subject = title
+                name = _humanize_name_from_title_or_id(title, tpl_id)
+                specs.append(
+                    {
+                        "id": tpl_id,
+                        "name": name,
+                        "subject": subject or "",
+                    }
+                )
         return specs
 
     # Specs = 100% dérivées des sources HTML (source de vérité),
@@ -92,7 +133,10 @@ def _build_generator(repo_root: Path) -> HtmlTemplatesGenerator:
         html_specs=html_specs,
         # On inline les fragments dans templates_data*.json pour que l'UI
         # (page “modèles d'email”) affiche du HTML complet sans directives {#include:...}.
-        get_html_content_by_id=lambda template_id: expand_includes(file_provider(template_id), fragments_dir),
+        get_html_content_by_id=lambda template_id: expand_includes(
+            get_html_from_sources(template_id),
+            fragments_dirs,
+        ),
     )
 
 
@@ -105,16 +149,35 @@ def main(argv: list[str] | None = None) -> int:
         default=str(Path(__file__).resolve().parent.parent),
         help="Racine du repo (par défaut: dossier parent du package template_studio).",
     )
+    parser.add_argument(
+        "--brand",
+        default=None,
+        help="Slug de marque/domaine (ex: danielcraft, jammy). "
+             "Si défini, lit/écrit dans template_studio/brands/<slug>/.",
+    )
 
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--write-default", "-w", action="store_true", help="Génère templates_data.default.json (HTML).")
     group.add_argument("--restore", "-r", action="store_true", help="Recopie templates_data.default.json -> templates_data.json.")
     group.add_argument("--sync", "-s", action="store_true", help="Write-default puis restore (sync complète).")
 
+    parser.add_argument(
+        "--only-ids",
+        default=None,
+        metavar="ID1,ID2",
+        help="Régénère et fusionne uniquement ces template_id (sources HTML), sans resynchroniser tout le bundle.",
+    )
+
     args = parser.parse_args(argv)
 
     repo_root = Path(args.repo_root).resolve()
-    gen = _build_generator(repo_root)
+    gen = _build_generator(repo_root, brand=args.brand)
+
+    if args.only_ids:
+        ids = [x.strip() for x in str(args.only_ids).split(",") if x.strip()]
+        n = gen.upsert_templates_by_ids(ids)
+        print(f"OK: {n} modele(s) mis a jour (merge) -> {gen.repo.templates_file}")
+        return 0
 
     if args.sync:
         n = gen.write_default_html_only()

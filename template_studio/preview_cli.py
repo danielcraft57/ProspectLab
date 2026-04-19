@@ -69,10 +69,10 @@ def build_preview_wrapper(rendered_html: str, template_id: str, variables_summar
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Template preview - {html.escape(template_id)}</title>
   <style>
-    body {{ font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 16px; }}
-    .top {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }}
-    .card {{ border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; background: #fff; }}
-    iframe {{ width: 100%; height: 760px; border: 1px solid #e5e7eb; border-radius: 10px; margin-top: 12px; }}
+    body {{ font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 16px auto; padding: 0 12px; max-width: 1120px; }}
+    .top {{ display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }}
+    .card {{ border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 16px; background: #fff; }}
+    iframe {{ width: 100%; height: 920px; border: 1px solid #e5e7eb; border-radius: 10px; margin-top: 12px; }}
     textarea {{ width: 100%; height: 240px; margin-top: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-size: 12px; }}
     .muted {{ color: #6b7280; font-size: 12px; }}
     .preview-note {{ margin-top: 8px; }}
@@ -180,18 +180,39 @@ def main() -> int:
             "framework": "React",
             "cms": "WordPress",
             "hosting_provider": "OVHcloud",
-            "performance_score": 82,
-            "security_score": 90,
+            # Scores volontairement bas (preview “site en difficulté”)
+            "performance_score": 34,
+            "security_score": 22,
+            "pages_scanned": 18,
+            "avg_response_time_ms": 1280,
+            # Pentest : score surface distinct du score sécurité analyse technique (templates récents)
+            "has_pentest": True,
+            "has_pentest_surface_score": True,
+            "pentest_surface_score": 22,
+            "technical_security_score": 31,
+            "has_technical_security_score": True,
+            "show_technical_security_score": False,
             # Pentest (mock) pour visualiser les blocs du template "score zero"
             "has_security_headers_missing_top": True,
+            "security_headers_missing_count": 6,
             "security_headers_missing_top": _normalize_li_list(
-                "Strict-Transport-Security, Content-Security-Policy, Permissions-Policy"
+                "Strict-Transport-Security, Content-Security-Policy, X-Frame-Options"
+            ),
+            "vulnerabilities_count": 12,
+            "has_vulnerabilities_top": True,
+            "vulnerabilities_top": _normalize_li_list(
+                "Cookie de session exposé sur une route sensible du tunnel de commande\n"
+                "Absence de CSP sur les pages qui affichent des formulaires\n"
+                "Bibliothèque JavaScript tierce en fin de vie (CVE connues, mises à jour arrêtées)"
             ),
             "total_emails": 120,
             "total_people": 60,
             "total_social_count": 4,
             "seo_issues": _normalize_li_list(
-                "Titres H1/H2 à uniformiser, Core Web Vitals instables, Meta descriptions manquantes"
+                "Plusieurs pages sans balise title unique (risque de titres dupliqués dans Google)\n"
+                "Meta descriptions absentes ou quasi vides sur les pages produit\n"
+                "Core Web Vitals instables (LCP élevé sur mobile, ressources bloquantes)\n"
+                "Sitemap incomplet : des URLs importantes ne sont pas déclarées au crawler"
             ),
         }
 
@@ -231,13 +252,36 @@ def main() -> int:
             "framework": "React",
             "cms": "WordPress",
             "hosting_provider": "OVHcloud",
-            "performance_score": 82,
-            "security_score": 90,
+            "performance_score": 34,
+            "security_score": 22,
+            "pages_scanned": 18,
+            "avg_response_time_ms": 1280,
+            "has_pentest": True,
+            "has_pentest_surface_score": True,
+            "pentest_surface_score": 22,
+            "technical_security_score": 31,
+            "has_technical_security_score": True,
+            "show_technical_security_score": False,
+            "has_security_headers_missing_top": True,
+            "security_headers_missing_count": 6,
+            "security_headers_missing_top": _normalize_li_list(
+                "Strict-Transport-Security, Content-Security-Policy, X-Frame-Options"
+            ),
+            "vulnerabilities_count": 12,
+            "has_vulnerabilities_top": True,
+            "vulnerabilities_top": _normalize_li_list(
+                "Cookie de session exposé sur une route sensible du tunnel de commande\n"
+                "Absence de CSP sur les pages qui affichent des formulaires\n"
+                "Bibliothèque JavaScript tierce en fin de vie (CVE connues, mises à jour arrêtées)"
+            ),
             "total_emails": 120,
             "total_people": 60,
             "total_social_count": 4,
             "seo_issues": _normalize_li_list(
-                "Titres H1/H2 à uniformiser, Core Web Vitals instables, Meta descriptions manquantes"
+                "Plusieurs pages sans balise title unique (risque de titres dupliqués dans Google)\n"
+                "Meta descriptions absentes ou quasi vides sur les pages produit\n"
+                "Core Web Vitals instables (LCP élevé sur mobile, ressources bloquantes)\n"
+                "Sitemap incomplet : des URLs importantes ne sont pas déclarées au crawler"
             ),
         }
 

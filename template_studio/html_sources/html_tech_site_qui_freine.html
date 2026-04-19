@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>On en parle franchement ? — {entreprise}</title>
+</head>
+<body style="margin:0;padding:0;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:#ecfeff;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        Le rapport du site est en ligne : synthèse lisible, priorités, et ce qu’il faudrait traiter en premier.
+    </div>
+    <table role="presentation" style="width:100%;border-collapse:collapse;background:#ecfeff;">
+        <tr>
+            <td style="padding:28px 14px;">
+                <table role="presentation" style="max-width:760px;margin:0 auto;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 8px 30px rgba(8,47,73,0.08);">
+                    <tr>
+                        <td style="padding:24px 26px;background:linear-gradient(135deg,#0e7490 0%,#164e63 100%);">
+                            <h1 style="margin:0;color:#ecfeff;font-size:23px;font-weight:800;line-height:1.2;">Votre site mérite qu’on lui dise la vérité</h1>
+                            <p style="margin:10px 0 0 0;color:#a5f3fc;font-size:14px;">{entreprise}</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:28px 26px;">
+                            <p style="margin:0 0 16px 0;color:#0f172a;font-size:16px;line-height:1.65;">Bonjour {nom},</p>
+                            <p style="margin:0 0 12px 0;color:#334155;font-size:16px;line-height:1.65;">
+                                Je me permets ce mail parce que j’ai déjà passé un moment sur <strong>{entreprise}</strong>{#if_website} et sur <strong>{website}</strong>{#endif}.
+                            </p>
+                            <p style="margin:0 0 18px 0;color:#334155;font-size:16px;line-height:1.65;">
+                                Ce qu’on en retire, en tout cas, c’est qu’il reste <strong>quelques zones à lisser</strong> — rien de “catastrophique” dans la forme, mais assez pour que, plus tard, ça devienne un sujet de référencement, de confiance client, ou simplement de tranquillité d’esprit pour vous et votre équipe.
+                            </p>
+                            {#if_website}
+                            <table role="presentation" style="width:100%;margin:0 0 20px 0;">
+                                <tr>
+                                    <td style="text-align:center;">
+                                        <a href="{analysis_url}" style="display:inline-block;background:#0e7490;color:#ecfeff;text-decoration:none;font-size:16px;font-weight:800;padding:16px 26px;border-radius:12px;line-height:1.2;">Voir l’analyse complète du site</a>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding-top:10px;text-align:center;">
+                                        <span style="font-size:12px;color:#64748b;">C’est la même page que dans l’outil : vous pouvez la parcourir tranquillement, dans l’ordre, sans deviner ce qui est important.</span>
+                                    </td>
+                                </tr>
+                            </table>
+                            {#endif}
+                            {#if_has_pentest_surface_score}
+                            <div style="padding:16px 18px;border-radius:12px;background:#f0fdfa;border:1px solid #99f6e4;margin:0 0 16px 0;">
+                                <p style="margin:0;color:#115e59;font-size:15px;line-height:1.6;">
+                                    Sur la partie <strong>“surface web”</strong> (un peu comme si on se plaçait du côté de quelqu’un qui teste l’exposition du site sans rentrer dans les coulisses), l’indice global est à <strong>{pentest_surface_score}/100</strong>. Ça ne remplace pas une discussion humaine, mais ça donne une photo nette de ce qui est trop ouvert ou fragile vu de l’extérieur.
+                                </p>
+                            </div>
+                            {#endif}
+                            {#if_show_technical_security_score}
+                            <p style="margin:0 0 18px 0;color:#334155;font-size:14px;line-height:1.6;">
+                                À titre de comparaison, le volet <strong>sécurité de surface</strong> vu par l’analyse technique se situe autour de <strong>{technical_security_score}/100</strong>. En pratique, ça veut dire qu’il y a de la marge pour sécuriser sans tout casser — à condition de choisir l’ordre des correctifs avec un peu de méthode.
+                            </p>
+                            {#endif}
+                            <p style="margin:0 0 8px 0;color:#0f172a;font-size:15px;line-height:1.65;">
+                                Si je devais résumer mon avis en une phrase : <strong>trois bons choix</strong> aujourd’hui valent presque toujours mieux qu’un grand discours sur “la refonte de l’année prochaine”.
+                            </p>
+                            {#include:cta_dual_analysis_and_15min}
+                            {#include:signature_standard}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:16px 26px 22px;background:#f8fafc;text-align:center;border-top:1px solid #e2e8f0;">
+                            {#include:footer_standard}
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

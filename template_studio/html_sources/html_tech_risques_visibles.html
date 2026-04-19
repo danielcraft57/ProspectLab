@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ce que votre site “dit” sans le vouloir — {entreprise}</title>
+</head>
+<body style="margin:0;padding:0;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:#faf5ff;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        Référencement, sécurité, cohérence : le rapport en ligne dit ce qui se voit de l’extérieur. Lien pour l’ouvrir.
+    </div>
+    <table role="presentation" style="width:100%;border-collapse:collapse;background:#faf5ff;">
+        <tr>
+            <td style="padding:28px 14px;">
+                <table role="presentation" style="max-width:760px;margin:0 auto;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e9d5ff;">
+                    <tr>
+                        <td style="padding:22px 26px;background:#581c87;">
+                            <p style="margin:0 0 6px 0;color:#e9d5ff;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;font-weight:800;">Lecture simple</p>
+                            <h1 style="margin:0;color:#faf5ff;font-size:22px;font-weight:800;line-height:1.25;">Les oublis se voient vite, une fois qu’on sait où regarder</h1>
+                            <p style="margin:10px 0 0 0;color:#ddd6fe;font-size:14px;">{entreprise}{#if_website} — {website}{#endif}</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:28px 26px;">
+                            <p style="margin:0 0 16px 0;color:#1e1b4b;font-size:16px;line-height:1.65;">Bonjour {nom},</p>
+                            <p style="margin:0 0 12px 0;color:#312e81;font-size:16px;line-height:1.65;">
+                                Une analyse technique, ce n’est pas un jugement sur votre travail ou sur votre équipe. C’est surtout une façon de regarder ce que <strong>Google</strong>, un <strong>navigateur</strong>, ou quelqu’un de mal intentionné mais peu sophistiqué peut remarquer <strong>en surface</strong>, sans entrer dans vos bureaux.
+                            </p>
+                            <p style="margin:0 0 18px 0;color:#312e81;font-size:16px;line-height:1.65;">
+                                Sur votre dossier, <strong>il y a plusieurs endroits où cette lecture devient inconfortable</strong> — et la bonne nouvelle, c’est que tout est déjà rangé dans le rapport, avec des formulations qu’on peut comprendre sans être ingénieur.
+                            </p>
+                            {#if_website}
+                            <table role="presentation" style="width:100%;margin:0 0 22px 0;">
+                                <tr>
+                                    <td style="padding:18px 16px;text-align:center;background:#f5f3ff;border-radius:12px;">
+                                        <p style="margin:0 0 12px 0;color:#4c1d95;font-size:14px;font-weight:700;">Le rapport, tel qu’il est aujourd’hui en ligne</p>
+                                        <a href="{analysis_url}" style="display:inline-block;background:#7c3aed;color:#ffffff;text-decoration:none;font-size:15px;font-weight:800;padding:14px 24px;border-radius:10px;line-height:1.2;">Consulter l’analyse du site</a>
+                                    </td>
+                                </tr>
+                            </table>
+                            {#endif}
+                            {#if_has_pentest_surface_score}
+                            <p style="margin:0 0 16px 0;padding:12px 14px;background:#faf5ff;border-radius:10px;border:1px solid #c4b5fd;color:#4c1d95;font-size:14px;line-height:1.55;">
+                                Pour la partie <strong>exposition “vue de l’extérieur”</strong> (l’équivalent d’un pentest léger sur la surface du site), l’indice ressort à <strong>{pentest_surface_score}/100</strong>. Je vous invite à le recouper avec les pages du rapport : les chiffres prennent tout leur sens quand on les lit à côté des explications.
+                            </p>
+                            {#endif}
+                            {#if_show_technical_security_score}
+                            <p style="margin:0 0 16px 0;padding:12px 14px;background:#f8fafc;border-radius:10px;border:1px solid #e2e8f0;color:#334155;font-size:14px;line-height:1.55;">
+                                Côté <strong>analyse technique plus classique</strong>, le volet sécurité de surface est à <strong>{technical_security_score}/100</strong> — une façon simple de dire “voilà ce qui manque pour que le site respire plus serein aux yeux des outils et des habitudes du métier”.
+                            </p>
+                            {#endif}
+                            {#if_seo_issues}
+                            <div style="margin:0 0 16px 0;padding:14px 16px;background:#fefce8;border-radius:10px;border-left:4px solid #ca8a04;">
+                                <p style="margin:0 0 8px 0;color:#713f12;font-size:13px;font-weight:800;">Référencement : ce qui peut vous coûter des clics sans bruit</p>
+                                <ul style="margin:0;padding-left:18px;color:#57534e;font-size:13px;line-height:1.65;">{seo_issues}</ul>
+                            </div>
+                            {#endif}
+                            {#if_has_security_headers_missing_top}
+                            <div style="margin:0 0 16px 0;padding:14px 16px;background:#faf5ff;border-radius:10px;border-left:4px solid #7c3aed;">
+                                <p style="margin:0 0 8px 0;color:#4c1d95;font-size:13px;font-weight:800;">Petits réglages HTTP manquants (aperçu)</p>
+                                <ul style="margin:0;padding-left:18px;color:#57534e;font-size:13px;line-height:1.65;">{security_headers_missing_top}</ul>
+                            </div>
+                            {#endif}
+                            {#if_show_security_issues_fallback}
+                            <div style="margin:0 0 16px 0;padding:14px 16px;background:#fef2f2;border-radius:10px;border-left:4px solid #e11d48;">
+                                <p style="margin:0 0 8px 0;color:#881337;font-size:13px;font-weight:800;">Sécurité : les points qui méritent un œil humain</p>
+                                <ul style="margin:0;padding-left:18px;color:#57534e;font-size:13px;line-height:1.65;">{security_issues_top}</ul>
+                            </div>
+                            {#endif}
+                            {#if_has_vulnerabilities_top}
+                            <div style="margin:0 0 16px 0;padding:14px 16px;background:#fff1f2;border-radius:10px;border-left:4px solid #fb7185;">
+                                <p style="margin:0 0 8px 0;color:#9f1239;font-size:13px;font-weight:800;">Autres contrôles : ce qui a retenu l’attention</p>
+                                <ul style="margin:0;padding-left:18px;color:#57534e;font-size:13px;line-height:1.65;">{vulnerabilities_top}</ul>
+                            </div>
+                            {#endif}
+                            <p style="margin:18px 0 0 0;color:#312e81;font-size:15px;line-height:1.65;">
+                                Quand vous cliquerez sur le lien, vous verrez assez vite <strong>où le rapport serre un peu</strong>. Après ça, si vous le souhaitez, on peut s’appeler quinze minutes pour trancher ensemble ce qui mérite d’être fait cette semaine, et ce qui peut patienter sans risquer de vous retomber dessus.
+                            </p>
+                            {#include:cta_dual_analysis_and_15min}
+                            {#include:signature_standard}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:16px 26px 22px;background:#faf5ff;text-align:center;border-top:1px solid #e9d5ff;">
+                            {#include:footer_standard}
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

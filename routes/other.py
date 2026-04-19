@@ -112,7 +112,10 @@ def send_emails():
             # Charger le template si fourni
             template = None
             if template_id:
-                template = template_manager.get_template(template_id)
+                template = template_manager.get_template(
+                    template_id,
+                    mail_account_id=mail_account_id,
+                )
                 if not template:
                     return jsonify({'error': 'Template introuvable'}), 404
             
@@ -127,7 +130,8 @@ def send_emails():
                         recipient.get('entreprise', ''),
                         recipient.get('email', ''),
                         recipient.get('entreprise_id'),  # Passer l'ID si disponible
-                        brand_domain=brand_domain
+                        brand_domain=brand_domain,
+                        mail_account_id=mail_account_id,
                     )
                     if is_html:
                         html_body = message
@@ -336,7 +340,10 @@ def api_template_detail(template_id):
         JSON: Détails du template ou erreur 404
     """
     if request.method == 'GET':
-        template = template_manager.get_template(template_id)
+        template = template_manager.get_template(
+            template_id,
+            mail_account_id=session.get('mail_account_id'),
+        )
         if template:
             return jsonify(template)
         return jsonify({'error': 'Template introuvable'}), 404
@@ -372,7 +379,11 @@ def api_entreprise_template_suggestions(entreprise_id):
     """
     try:
         max_results = request.args.get('limit', type=int) or 3
-        suggestions = template_manager.suggest_templates_for_entreprise(entreprise_id, max_results=max_results)
+        suggestions = template_manager.suggest_templates_for_entreprise(
+            entreprise_id,
+            max_results=max_results,
+            mail_account_id=session.get('mail_account_id'),
+        )
         return jsonify(suggestions)
     except Exception as e:
         return jsonify({'error': str(e)}), 500

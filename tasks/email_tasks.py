@@ -316,7 +316,11 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
 
     template = None
     if template_id:
-        template = template_manager.get_template(template_id, for_preview=False)
+        template = template_manager.get_template(
+            template_id,
+            for_preview=False,
+            mail_account_id=mail_account_id,
+        )
 
     try:
         for idx, recipient in enumerate(recipients or [], start=1):
@@ -356,6 +360,7 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
                     recipient.get('email', ''),
                     entreprise_id=entreprise_id,
                     brand_domain=brand_domain,
+                    mail_account_id=mail_account_id,
                 )
                 # Formater le sujet avec les variables
                 subject_template = subject or template.get('subject', 'Prospection')

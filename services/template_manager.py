@@ -73,6 +73,35 @@ class TemplateManager:
                 self._init_templates_file()
         
         self.templates = self._load_templates()
+
+    @staticmethod
+    def _normalize_brand_slug(value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        s = str(value).strip().lower()
+        if not s:
+            return None
+        s = re.sub(r'^https?://', '', s)
+        s = s.replace('.', '_').replace('-', '_')
+        s = re.sub(r'[^a-z0-9_]+', '_', s)
+        s = re.sub(r'_+', '_', s).strip('_')
+        return s or None
+
+    def _resolve_brand_slug(self, mail_account_id: Optional[int] = None, brand_slug: Optional[str] = None) -> Optional[str]:
+        slug = self._normalize_brand_slug(brand_slug)
+        if slug:
+            return slug
+        if mail_account_id is None:
+            return None
+        try:
+            from services.database.mail_accounts import MailAccountManager
+            mam = MailAccountManager()
+            acc = mam.get_mail_account(int(mail_account_id))
+            if not acc:
+                return None
+            return self._normalize_brand_slug(acc.get('slug') or acc.get('domain_name'))
+        except Exception:
+            return None
     
     def _init_templates_file(self):
         """Initialise le fichier de templates (vide).
@@ -88,14 +117,14 @@ class TemplateManager:
         with open(self.templates_file, 'w', encoding='utf-8') as f:
             json.dump(default_templates, f, ensure_ascii=False, indent=2)
     
-    def _load_templates(self) -> Dict:
+    def _load_templates(self, mail_account_id: Optional[int] = None, brand_slug: Optional[str] = None) -> Dict:
         """Charge les templates depuis la BDD si disponible, sinon depuis le JSON."""
         # 1) Essayer la BDD (source de vérité)
         try:
             from services.database import Database
             db = Database()
             if hasattr(db, 'list_email_templates'):
-                rows = db.list_email_templates(active_only=True)
+                rows = db.list_email_templates(active_only=True, mail_account_id=mail_account_id)
                 # Si la BDD est connectée mais ne renvoie rien (liste vide),
                 # on fallback sur le JSON local pour rester fonctionnel en dev/CLI.
                 if rows:
@@ -110,7 +139,30 @@ class TemplateManager:
             # Fallback JSON
             pass
 
-        # 2) Fallback: JSON
+        # 2) Fallback: JSON (brand puis commun)
+        resolved_brand = self._resolve_brand_slug(mail_account_id=mail_account_id, brand_slug=brand_slug)
+        if resolved_brand:
+            brand_json = self.templates_file.parent / "brands" / resolved_brand / "templates_data.json"
+            if brand_json.exists():
+                try:
+                    with open(brand_json, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        templates = data.get('templates', []) or []
+                    # Fallback vers commun pour les IDs manquants
+                    common_templates = []
+                    try:
+                        with open(self.templates_file, 'r', encoding='utf-8') as f2:
+                            common_data = json.load(f2)
+                            common_templates = common_data.get('templates', []) or []
+                    except Exception:
+                        common_templates = []
+                    merged = {t.get('id'): t for t in common_templates if t.get('id')}
+                    merged.update({t.get('id'): t for t in templates if t.get('id')})
+                    return list(merged.values())
+                except Exception:
+                    pass
+
+        # 3) Fallback commun
         try:
             with open(self.templates_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
@@ -173,16 +225,17 @@ class TemplateManager:
         Returns:
             Liste de templates
         """
-        self.templates = self._load_templates()
-        templates = [dict(t) for t in self.templates]
-
-        # Switch domaine : filtrer les templates par compte SMTP.
         mid = None
         try:
             if mail_account_id is not None and str(mail_account_id).strip() != '' and str(mail_account_id).strip() != '0':
                 mid = int(mail_account_id)
         except Exception:
             mid = None
+        resolved_brand = self._resolve_brand_slug(mail_account_id=mid)
+        self.templates = self._load_templates(mail_account_id=mid, brand_slug=resolved_brand)
+        templates = [dict(t) for t in self.templates]
+
+        # Switch domaine : filtrer les templates par compte SMTP.
 
         if mid is None:
             # Mode global : uniquement templates "global" (mail_account_id NULL)
@@ -226,7 +279,7 @@ class TemplateManager:
                     # Pour l'UI (gestionnaire de modèles), on renvoie du HTML "résolu"
                     # (fragments inclus) afin d'éviter d'afficher des directives {#include:...}.
                     if isinstance(content, str):
-                        content = self._apply_includes(content)
+                        content = self._apply_includes(content, mail_account_id=mid, brand_slug=resolved_brand)
                         # Pour la prévisualisation UI, rendre les liens cliquables même si
                         # les placeholders ne sont pas rendus (ex: href="{dc_contact_url}").
                         content = self._make_ui_preview_links_clickable(content, brand_host=brand_host)
@@ -238,7 +291,13 @@ class TemplateManager:
         
         return templates
     
-    def get_template(self, template_id: str, for_preview: bool = True) -> Optional[Dict]:
+    def get_template(
+        self,
+        template_id: str,
+        for_preview: bool = True,
+        mail_account_id: Optional[int] = None,
+        brand_slug: Optional[str] = None,
+    ) -> Optional[Dict]:
         """
         Récupère un template par son ID
         
@@ -258,7 +317,11 @@ class TemplateManager:
                     d = dict(tpl)
                     d['is_html'] = bool(d.get('is_html'))
                     if d.get('is_html') and isinstance(d.get('content'), str):
-                        d['content'] = self._apply_includes(d['content'])
+                        d['content'] = self._apply_includes(
+                            d['content'],
+                            mail_account_id=mail_account_id,
+                            brand_slug=brand_slug,
+                        )
                         # Ne pas figer les URLs de preview pour l'envoi réel.
                         if for_preview:
                             d['content'] = self._make_ui_preview_links_clickable(d['content'])
@@ -266,6 +329,8 @@ class TemplateManager:
         except Exception:
             pass
 
+        resolved_brand = self._resolve_brand_slug(mail_account_id=mail_account_id, brand_slug=brand_slug)
+        self.templates = self._load_templates(mail_account_id=mail_account_id, brand_slug=resolved_brand)
         for template in self.templates:
             if template.get('id') == template_id:
                 d = template.copy()
@@ -273,7 +338,11 @@ class TemplateManager:
                     # Pour l'envoi réel d'emails, on applique seulement les includes ici.
                     # Les liens "cliquables" de preview (exemple.com) sont réservés à list_templates()
                     # pour l'UI, pas pour les campagnes.
-                    d['content'] = self._apply_includes(d['content'])
+                    d['content'] = self._apply_includes(
+                        d['content'],
+                        mail_account_id=mail_account_id,
+                        brand_slug=resolved_brand,
+                    )
                 return d
         return None
 
@@ -307,7 +376,12 @@ class TemplateManager:
 
         return content
 
-    def _apply_includes(self, content: str) -> str:
+    def _apply_includes(
+        self,
+        content: str,
+        mail_account_id: Optional[int] = None,
+        brand_slug: Optional[str] = None,
+    ) -> str:
         """
         Supporte des “morceaux communs” pour factoriser le HTML.
 
@@ -321,15 +395,24 @@ class TemplateManager:
         if not isinstance(content, str) or "{#include" not in content:
             return content
 
-        fragments_dir = Path(__file__).parent.parent / "template_studio" / "fragments"
-        if not fragments_dir.exists():
+        app_dir = Path(__file__).parent.parent
+        common_fragments_dir = app_dir / "template_studio" / "fragments"
+        resolved_brand = self._resolve_brand_slug(mail_account_id=mail_account_id, brand_slug=brand_slug)
+        brand_fragments_dir = (
+            app_dir / "template_studio" / "brands" / resolved_brand / "fragments"
+            if resolved_brand
+            else None
+        )
+        fragments_dirs = [d for d in [brand_fragments_dir, common_fragments_dir] if d is not None and d.exists()]
+        if not fragments_dirs:
             return content
 
         def load_fragment(fragment_name: str) -> str:
-            fragment_file = fragments_dir / f"{fragment_name}.html"
-            if not fragment_file.exists():
-                return ""
-            return fragment_file.read_text(encoding="utf-8")
+            for directory in fragments_dirs:
+                fragment_file = directory / f"{fragment_name}.html"
+                if fragment_file.exists():
+                    return fragment_file.read_text(encoding="utf-8")
+            return ""
 
         # On applique les includes de façon récursive (un fragment peut inclure un autre fragment).
         # Protection : profondeur max pour éviter les boucles infinies.
@@ -724,6 +807,10 @@ class TemplateManager:
                     'osint_emails_count': len(osint_analysis.get('emails', [])),
                 })
             
+            # Score sécurité issu de l'analyse technique (avant fusion / écrasement pentest)
+            technical_security_score_snapshot = data.get('security_score')
+            pentest_score_computed = False
+
             # Analyse Pentest
             pentest_analysis = pentest_manager.get_pentest_analysis_by_entreprise(entreprise_id)
             if pentest_analysis:
@@ -736,6 +823,7 @@ class TemplateManager:
                     try:
                         rs = float(risk_score)
                         data['security_score'] = max(0, 100 - rs)
+                        pentest_score_computed = True
                     except Exception:
                         # Ne pas écraser un score existant si conversion impossible.
                         pass
@@ -760,6 +848,7 @@ class TemplateManager:
                     max_total = max(1.0, len(vulnerabilities) * 4.0)
                     est_risk = min(100.0, max(0.0, (weighted_total / max_total) * 100.0))
                     data['security_score'] = max(0.0, 100.0 - est_risk)
+                    pentest_score_computed = True
 
                 # Exposer une liste courte (HTML) pour les templates (top 3).
                 # But: rendre l'email concret, même si le prospect voit "beaucoup" de résultats.
@@ -804,6 +893,16 @@ class TemplateManager:
                     # utiliser le nombre de headers manquants comme compteur lisible.
                     if not data.get('vulnerabilities_count'):
                         data['vulnerabilities_count'] = len(missing_headers)
+
+            # Synthèse pentest (surface) sous un libellé distinct des emails ; score technique séparé.
+            if technical_security_score_snapshot is not None:
+                data['technical_security_score'] = technical_security_score_snapshot
+                data['has_technical_security_score'] = True
+            if pentest_analysis and pentest_score_computed and data.get('security_score') is not None:
+                data['pentest_surface_score'] = data['security_score']
+                data['has_pentest_surface_score'] = True
+            if data.get('has_technical_security_score') and not data.get('has_pentest_surface_score'):
+                data['show_technical_security_score'] = True
 
             # Fallback : si la partie pentest ne remonte aucun résumé exploitable,
             # on affiche les "points sécurité" calculés côté analyse technique.
@@ -955,6 +1054,7 @@ class TemplateManager:
         entreprise_id: int = None,
         extended_overrides: Optional[Dict] = None,
         brand_domain: Optional[str] = None,
+        mail_account_id: Optional[int] = None,
     ):
         """
         Rend un template avec les variables remplacées
@@ -971,13 +1071,19 @@ class TemplateManager:
         Returns:
             Tuple (contenu rendu, is_html)
         """
-        template = self.get_template(template_id, for_preview=False)
+        resolved_brand = self._resolve_brand_slug(mail_account_id=mail_account_id)
+        template = self.get_template(
+            template_id,
+            for_preview=False,
+            mail_account_id=mail_account_id,
+            brand_slug=resolved_brand,
+        )
         if not template:
             return '', False
         
         content = template.get('content', '')
         # Factorisation via fragments communs (header/footer/CTA…).
-        content = self._apply_includes(content)
+        content = self._apply_includes(content, mail_account_id=mail_account_id, brand_slug=resolved_brand)
         is_html = template.get('is_html', False)
 
         # Auto-détection de modèles HTML au moment du rendu, même si is_html est à False
@@ -1271,10 +1377,27 @@ class TemplateManager:
         except Exception:
             # Ne jamais casser le rendu si l'injection échoue.
             pass
-        
+
+        # Largeur carte email : harmoniser à l'envoi / preview (y compris vieux HTML en BDD en 560–680px).
+        try:
+            if is_html and isinstance(content, str) and 'max-width' in content.lower():
+                content = re.sub(
+                    r'max-width\s*:\s*(?:560|600|640|680)px',
+                    'max-width:760px',
+                    content,
+                    flags=re.IGNORECASE,
+                )
+        except Exception:
+            pass
+
         return content, is_html
 
-    def suggest_templates_for_entreprise(self, entreprise_id: int, max_results: int = 3) -> List[Dict]:
+    def suggest_templates_for_entreprise(
+        self,
+        entreprise_id: int,
+        max_results: int = 3,
+        mail_account_id: Optional[int] = None,
+    ) -> List[Dict]:
         """
         Propose les templates les plus pertinents pour une entreprise donnée,
         en fonction des résultats d'analyse (performance, sécurité, scraping, opportunité, etc.).
@@ -1318,7 +1441,7 @@ class TemplateManager:
         suggestions = []
 
         def add_suggestion(tpl_id, base_score, reason):
-            tpl = self.get_template(tpl_id)
+            tpl = self.get_template(tpl_id, mail_account_id=mail_account_id)
             if not tpl:
                 return
             suggestions.append({

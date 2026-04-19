@@ -67,7 +67,6 @@ exports/*
 *.swp
 *.swo
 *~
-.DS_Store
 
 # Celery
 celerybeat-schedule
@@ -96,8 +95,15 @@ docs/configuration/CLUSTER_NODES_DEBIAN_MODELS.md
 *_old.*
 *.backup
 
-# Template Studio (préviews navigateur générées)
+# --- Template Studio (docs/developpement/TEMPLATE_STUDIO.md) ---
+# Préviews navigateur (preview_cli, etc.)
 .template_studio_preview/
+# Bundles JSON régénérés par generate_cli (--sync / --write-default / --restore)
+# Source de vérité : html_sources/, fragments/. Après clone : python -m template_studio.generate_cli --sync
+template_studio/templates_data.json
+template_studio/templates_data.default.json
+template_studio/brands/**/templates_data.json
+template_studio/brands/**/templates_data.default.json
 
 # OS
 Thumbs.db

@@ -1,126 +1,139 @@
 # Template Studio (templates email)
 
 ## Objectif
-Isoler la génération des templates d’emails HTML dans un “dossier source” dédié, pour éviter les gros blocs de HTML en dur dans `scripts/` et rendre la preview et la maintenance plus simples.
+
+Isoler la génération des emails HTML dans un dossier source (`template_studio/html_sources/`) et des fragments réutilisables, pour limiter le HTML en dur ailleurs, faciliter la preview et garder un flux de génération reproductible.
 
 ## Arborescence
-Le cœur de la refonte se trouve ici :
-`template_studio/`
 
-- `template_studio/html_sources/<template_id>.html` : fichiers HTML sources (source de vérité)
-- `template_studio/export_html_sources.py` : exporte depuis `template_studio/templates_data.json` vers `template_studio/html_sources/`
-- `template_studio/html_templates_generator.py` : régénère `template_studio/templates_data.default.json` puis `template_studio/templates_data.json` depuis `template_studio/html_sources/`
-- `template_studio/template_repo.py` : repository JSON utilitaire
+Racine : `template_studio/`
 
-La CLI interactive de preview :
-- `template_studio/preview_cli.py`
+| Élément | Rôle |
+|--------|------|
+| `html_sources/<template_id>.html` | **Source de vérité** du contenu (un fichier = un `template_id`) |
+| `fragments/<nom>.html` | Morceaux inclus via `{#include:nom}` |
+| `export_html_sources.py` | Outil optionnel : exporte le HTML **depuis** un JSON vers `html_sources/` (migration / rattrapage) |
+| `html_templates_generator.py` | Assemble les specs et le HTML (utilisé par `generate_cli`) |
+| `template_repo.py` | Lecture / écriture des fichiers `templates_data*.json` |
+| `generate_cli.py` | Génération des bundles JSON |
+| `preview_cli.py` | Preview navigateur avec rendu `TemplateManager` |
 
-La CLI de génération (Template Studio) :
-- `template_studio/generate_cli.py`
+**Multi-marque** (`--brand <slug>`) :
 
-## Source de vérité
-Le dossier :
-- `template_studio/html_sources/`
+- `brands/<slug>/html_sources/` puis fallback `html_sources/`
+- `brands/<slug>/fragments/` puis fallback `fragments/`
+- Bundles JSON par marque sous `brands/<slug>/` (mêmes noms de fichiers que le commun)
 
-Une génération `python -m template_studio.generate_cli --sync` lit les fichiers de ce dossier. Si une source manque pour un `template_id`, la génération échoue (pour éviter les “silencieux fallback”).
+## Versionnement Git
 
-## Placeholders et conditionnels
+Les fichiers suivants **ne sont pas suivis** (voir `.gitignore` à la racine) :
 
-Les templates utilisent des placeholders gérés par `services/template_manager.py` :
-- variables simples : `{nom}`, `{entreprise}`, `{email}`
-- variables enrichies côté `TemplateManager` : `analysis_url`, `unsubscribe_url`, `dc_contact_url`, etc.
+- `template_studio/templates_data.json`
+- `template_studio/templates_data.default.json`
+- `template_studio/brands/**/templates_data.json`
+- `template_studio/brands/**/templates_data.default.json`
 
-Conditionnels (deux syntaxes possibles, la première est “normalisée” par `TemplateManager`) :
-- compatibilité (encore utilisée dans certains templates) :
-  - `{{#if_website}} ... {{#endif}}`
-- forme normalisée (celle qui est ensuite traitée) :
-  - `{#if_website} ... {#endif}`
+Les préviews locales sont ignorées : `.template_studio_preview/`.
 
-Cas “générique” :
-- `{#if_<xxx>}` ... `{#endif}` : le bloc est conservé si `variables["<xxx>"]` est “truthy” côté rendu.
+**Après un clone** (ou si ces JSON manquent), régénérer depuis les sources :
 
-## Morceaux communs (include)
-Tu peux factoriser du HTML via des fragments partagés.
-
-Syntaxe (chargée par `services/template_manager.py`) :
-- `{#include:footer_standard}` (ou `{#include_footer_standard}`)
-
-Les fragments sont chargés depuis `template_studio/fragments/<nom>.html`.
-
-Exemple :
-```html
-{#include:footer_standard}
-```
-
-### Includes imbriqués (récursifs)
-Les includes sont **récursifs** : un fragment peut inclure un autre fragment.  
-Une protection empêche les boucles infinies (profondeur max).
-
-### Fragments fournis (standardisation)
-- `footer_standard` : footer “familier” (robot + réponse + lien ne plus recevoir d’email)
-- `signature_standard` : signature type (Cordialement, **Prénom Nom**, lien `https://exemple.fr`)
-- `cta_primary_15min` : CTA principal “Oui, je réserve 15 min” (pill)
-- `cta_secondary_analysis` : CTA secondaire “Voir mon rapport d'analyse” (avec `{#if_website}`)
-- `cta_dual_analysis_and_15min` : double CTA (analyse + réserver 15 min) style bleu/noir
-
-## Variables utiles (pentest / sécurité)
-
-Selon les données disponibles en base (analyses technique + pentest), `TemplateManager.render_template()` peut injecter:
-
-- **`analysis_url`**: lien vers `https://danielcraft.fr/analyse?website=...&full=1` (basé sur le vrai `website` de l'entreprise).
-- **Pentest (si présent)**:
-  - `vulnerabilities_count`
-  - `vulnerabilities_top` (HTML `<li>...</li>` top 3)
-  - `has_vulnerabilities_top` (bool)
-  - `security_headers_missing_top` (HTML `<li>...</li>` top 3)
-  - `has_security_headers_missing_top` (bool)
-- **Fallback sécurité (analyse technique)**:
-  - `security_issues_top` (HTML `<li>...</li>` top 3)
-  - `show_security_issues_fallback` (bool)
-
-### Note importante (preview UI vs envoi réel)
-Dans la page "modèles d'email", les templates HTML peuvent être affichés sans rendu des variables.
-Dans ce cas, certains liens sont rendus "cliquables" avec des valeurs de démo.
-Pour les campagnes envoyées, c'est `render_template()` qui reconstruit les URLs à partir des données réelles (ex: `website` de l'entreprise).
-
-## Commandes (workflow)
-
-1. Export initial / ré-export des sources depuis le JSON actuel
-```powershell
-python -m template_studio.export_html_sources --overwrite
-```
-
-2. Générer `templates_data.default.json`
-```powershell
-python -m template_studio.generate_cli --write-default
-```
-
-3. Synchroniser `templates_data.json` depuis `html_sources/`
 ```powershell
 python -m template_studio.generate_cli --sync
 ```
 
-4. Preview (rendu navigateur + regénération)
+`TemplateManager` peut recopier le `.default` vers `templates_data.json` au premier lancement si le fichier manque, mais pour un bundle à jour il faut lancer la commande ci-dessus (ou `--write-default` puis `--restore` selon le besoin).
+
+## Source de vérité et génération
+
+1. Éditer `html_sources/*.html` et `fragments/*.html`.
+2. Régénérer les JSON :
+
 ```powershell
-python -m template_studio.preview_cli --defaults --template-id html_decouverte_hero
+# Recréer default + recopier vers templates_data.json (recommandé au quotidien)
+python -m template_studio.generate_cli --sync
 ```
 
-## Preview CLI : modes
+Si une entrée `template_id` existe dans le JSON mais que le fichier `html_sources/<template_id>.html` manque, la génération **échoue** (pas de fallback silencieux).
 
-Exemples utiles :
+### Régénérer seulement quelques modèles
+
+Sans resynchroniser tout le bundle :
+
 ```powershell
-# Preview “complète” avec données non vides (affiche les blocs conditionnels)
-python -m template_studio.preview_cli --defaults --template-id html_seo_chatgpt
+python -m template_studio.generate_cli --only-ids html_tech_sonar_alert,html_tech_site_qui_freine
+```
 
-# Preview sans ouvrir le navigateur
+Même principe avec `--brand jammy`.
+
+### Autres commandes utiles
+
+```powershell
+# Export optionnel HTML depuis un JSON existant (rattrapage)
+python -m template_studio.export_html_sources --overwrite
+
+# Écrire seulement le default
+python -m template_studio.generate_cli --write-default
+
+# Recopier default -> templates_data.json
+python -m template_studio.generate_cli --restore
+```
+
+## Placeholders et conditionnels
+
+Gérés par `services/template_manager.py` :
+
+- Variables simples : `{nom}`, `{entreprise}`, `{email}`
+- Enrichies : `analysis_url`, `unsubscribe_url`, `dc_contact_url`, `website`, `secteur`, scores, listes HTML, etc.
+
+**Conditionnels** (normalisés en `{#if_…}…{#endif}` ; l’ancienne forme `{{#if_…}}` est encore acceptée puis convertie) :
+
+- `{#if_website}…{#endif}` : conservé si `website` est renseigné
+- `{#if_<nom>}…{#endif}` : conservé si `variables["<nom>"]` est truthy
+
+## Includes
+
+Syntaxe : `{#include:footer_standard}` (alias `{#include_footer_standard}`). Chargement depuis `fragments/` (ou override marque). Includes **récursifs**, avec limite de profondeur anti-boucle.
+
+Fragments fournis courants : `footer_standard`, `signature_standard`, `cta_primary_15min`, `cta_secondary_analysis`, `cta_dual_analysis_and_15min`.
+
+## Variables utiles (analyse technique, pentest, SEO)
+
+Injectées notamment via `_get_entreprise_extended_data()` lors du rendu avec `entreprise_id` :
+
+- **`analysis_url`** : lien analyse en ligne (`/analyse?website=…&full=1`, email de tracking si présent).
+- **Pentest** : `vulnerabilities_count`, `vulnerabilities_top`, `has_vulnerabilities_top`, `security_headers_missing_top`, `has_security_headers_missing_top`, `has_pentest`.
+- **Scores distincts pour les templates** :
+  - **`pentest_surface_score`** + **`has_pentest_surface_score`** : indice issu du pentest (risque / vulnérabilités), libellé côté copy email à part du score sécurité “analyse technique”.
+  - **`technical_security_score`** + **`has_technical_security_score`** : score sécurité de surface **avant** fusion pentest.
+  - **`show_technical_security_score`** : afficher le bloc “analyse technique” seulement quand il n’y a pas d’indice pentest calculé (évite doublon).
+- **Fallback sécurité (analyse technique)** : `security_issues_top`, `show_security_issues_fallback`.
+- **SEO** : `seo_issues` (liste `<li>…</li>`), condition `{#if_seo_issues}`.
+
+Les booléens `{#if_performance}` / `{#if_security}` reflètent la présence des scores `performance_score` / `security_score` (usage selon les modèles).
+
+### Largeur des cartes à l’envoi
+
+Dans `render_template()`, le HTML des emails subit une normalisation : les `max-width` des cartes courantes (**560px à 680px**) sont ramenées à **760px**, y compris pour d’anciens modèles encore en base. Les sources dans `html_sources/` utilisent déjà **760px** sur le conteneur principal.
+
+## Modèles « analyse technique difficile » (exemples)
+
+Trois modèles dédiés aux prospects avec signaux faibles, ton direct, lien d’analyse mis en avant (sans s’appuyer sur le score performance dans le copy) :
+
+- `html_tech_sonar_alert`
+- `html_tech_site_qui_freine`
+- `html_tech_risques_visibles`
+
+## Preview CLI
+
+```powershell
+python -m template_studio.preview_cli --defaults --template-id html_tech_sonar_alert
 python -m template_studio.preview_cli --defaults --template-id html_seo_chatgpt --no-open
 ```
 
-Le rendu HTML est affiché via :
-- un fichier `./.template_studio_preview/preview_<template_id>_<timestamp>.html`
-- ouvert automatiquement dans ton navigateur (sauf `--no-open`)
+Le HTML est écrit sous `.template_studio_preview/preview_<template_id>_<timestamp>.html`. Le mode `--defaults` utilise des `extended_overrides` (scores bas, SEO, pentest mock, etc.) pour afficher un maximum de blocs conditionnels.
 
 ## Notes
-- `TemplateManager.render_template()` accepte `extended_overrides` (utile pour la preview en `--defaults`/mock).
-- Même si `templates_data*.json` est bien régénéré, l’application peut aussi charger des templates depuis la BDD si elle est connectée. En dev/CLI, le fallback JSON est prévu.
 
+- `render_template()` accepte `extended_overrides` (preview, tests).
+- En production, les modèles peuvent venir de la **BDD** ; le JSON local sert de repli (dev, CLI, premier boot).
+- Page « modèles d’email » : certains liens peuvent être affichés en démo ; l’envoi réel repasse par `render_template()` avec les données entreprise.

@@ -77,3 +77,59 @@ class HtmlTemplatesGenerator:
         self.repo.save_templates(templates)
         return added
 
+    def upsert_templates_by_ids(self, template_ids: Sequence[str]) -> int:
+        """
+        Régénère uniquement les IDs demandés depuis les sources HTML et les fusionne
+        dans templates_data.json (et dans templates_data.default.json s'il existe),
+        sans toucher aux autres entrées.
+        """
+        now_iso = self.repo.now_iso()
+        specs_by_id = {s["id"]: s for s in self.html_specs}
+        wanted = [str(x).strip() for x in template_ids if str(x).strip()]
+        if not wanted:
+            return 0
+
+        templates = list(self.repo.load_templates() or [])
+        index_by_id = {t.get("id"): i for i, t in enumerate(templates) if t.get("id")}
+
+        built: List[Dict[str, Any]] = []
+        for tid in wanted:
+            spec = specs_by_id.get(tid)
+            if not spec:
+                continue
+            content = self.get_html_content_by_id(tid)
+            record = self.build_html_template_record(spec, content, now_iso)
+            if tid in index_by_id:
+                prev = templates[index_by_id[tid]]
+                record["created_at"] = prev.get("created_at") or now_iso
+                templates[index_by_id[tid]] = record
+            else:
+                templates.append(record)
+            built.append(record)
+
+        self.repo.save_templates(templates)
+
+        if self.repo.default_file and self.repo.default_file.exists():
+            try:
+                with open(self.repo.default_file, "r", encoding="utf-8") as f:
+                    payload = json.load(f) or {}
+                default_list = list(payload.get("templates", []) or [])
+                d_index = {t.get("id"): i for i, t in enumerate(default_list) if t.get("id")}
+                for record in built:
+                    tid = record.get("id")
+                    if not tid:
+                        continue
+                    if tid in d_index:
+                        prev = default_list[d_index[tid]]
+                        record_d = dict(record)
+                        record_d["created_at"] = prev.get("created_at") or record_d.get("created_at")
+                        default_list[d_index[tid]] = record_d
+                    else:
+                        default_list.append(dict(record))
+                with open(self.repo.default_file, "w", encoding="utf-8") as f:
+                    json.dump({"templates": default_list}, f, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
+
+        return len(built)
+

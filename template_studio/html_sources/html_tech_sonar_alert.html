@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>J’ai regardé votre site de près — {entreprise}</title>
+</head>
+<body style="margin:0;padding:0;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:#f4f4f5;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        Quelques points méritent votre attention ; tout est expliqué pas à pas dans l’analyse en ligne.
+    </div>
+    <table role="presentation" style="width:100%;border-collapse:collapse;background:#f4f4f5;">
+        <tr>
+            <td style="padding:28px 14px;">
+                <table role="presentation" style="max-width:760px;margin:0 auto;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e4e4e7;">
+                    <tr>
+                        <td style="padding:22px 26px;background:#18181b;">
+                            <p style="margin:0 0 6px 0;color:#fbbf24;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;font-weight:800;">Diagnostic</p>
+                            <h1 style="margin:0;color:#fafafa;font-size:22px;font-weight:800;line-height:1.25;">Des points concrets, pas du jargon</h1>
+                            <p style="margin:10px 0 0 0;color:#a1a1aa;font-size:14px;line-height:1.5;">{entreprise}{#if_website} · <span style="color:#e4e4e7;">{website}</span>{#endif}</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:28px 26px;">
+                            <p style="margin:0 0 16px 0;color:#18181b;font-size:16px;line-height:1.65;">Bonjour {nom},</p>
+                            <p style="margin:0 0 12px 0;color:#27272a;font-size:16px;line-height:1.65;">
+                                J’ai pris le temps de regarder votre présence en ligne avec un œil honnête, et franchement : <strong>il y a plusieurs endroits où on sent que ça coince</strong> — sécurité perçue, cohérence technique, premiers signaux côté référencement.
+                            </p>
+                            <p style="margin:0 0 18px 0;color:#27272a;font-size:16px;line-height:1.65;">
+                                Je ne vous écris pas pour dramatiser. Simplement parce qu’à force d’être au quotidien dans le détail, on sait que ces petits écarts finissent par coûter cher en image, en confiance, ou en visibilité, sans qu’on s’en rende compte tout de suite.
+                            </p>
+                            {#if_website}
+                            <table role="presentation" style="width:100%;margin:0 0 22px 0;">
+                                <tr>
+                                    <td style="text-align:center;padding:16px 14px;background:linear-gradient(180deg,#fffbeb 0%,#ffffff 100%);border-radius:12px;border:1px solid #fde68a;">
+                                        <p style="margin:0 0 12px 0;color:#78350f;font-size:14px;font-weight:700;line-height:1.45;">Si vous voulez voir la même chose que moi, tout est regroupé ici, avec les chiffres et l’ordre des priorités.</p>
+                                        <a href="{analysis_url}" style="display:inline-block;background:#ea580c;color:#ffffff;text-decoration:none;font-size:15px;font-weight:800;padding:14px 22px;border-radius:999px;line-height:1.2;">Ouvrir l’analyse du site</a>
+                                    </td>
+                                </tr>
+                            </table>
+                            {#endif}
+                            {#if_has_pentest_surface_score}
+                            <p style="margin:0 0 10px 0;color:#3f3f46;font-size:14px;line-height:1.6;">
+                                Côté <strong>contrôle “surface web”</strong> (le même type de lecture qu’un pentest léger), on arrive à un indice de <strong>{pentest_surface_score}/100</strong> : ça résume à quel point l’exposition “vue de l’extérieur” est confortable ou, au contraire, un peu trop ouverte.
+                            </p>
+                            {#endif}
+                            {#if_show_technical_security_score}
+                            <p style="margin:0 0 10px 0;color:#3f3f46;font-size:14px;line-height:1.6;">
+                                Du côté <strong>analyse technique classique</strong>, le volet sécurité de surface est à <strong>{technical_security_score}/100</strong> — en clair, ce qui manque aujourd’hui pour que le site respire “propre” aux yeux des navigateurs et des bonnes pratiques habituelles.
+                            </p>
+                            {#endif}
+                            {#if_seo_issues}
+                            <div style="margin:16px 0 0 0;padding:14px 16px;background:#fafafa;border-radius:10px;border-left:4px solid #ca8a04;">
+                                <p style="margin:0 0 8px 0;color:#713f12;font-size:13px;font-weight:700;">Côté Google et titres : ce qui mérite un coup de polish</p>
+                                <ul style="margin:0;padding-left:18px;color:#52525b;font-size:13px;line-height:1.65;">{seo_issues}</ul>
+                            </div>
+                            {#endif}
+                            {#if_has_vulnerabilities_top}
+                            <div style="margin:16px 0 0 0;padding:14px 16px;background:#fef2f2;border-radius:10px;border-left:4px solid #dc2626;">
+                                <p style="margin:0 0 8px 0;color:#7f1d1d;font-size:13px;font-weight:700;">Quelques points sensibles repérés (aperçu)</p>
+                                <ul style="margin:0;padding-left:18px;color:#52525b;font-size:13px;line-height:1.65;">{vulnerabilities_top}</ul>
+                            </div>
+                            {#endif}
+                            {#if_show_security_issues_fallback}
+                            <div style="margin:16px 0 0 0;padding:14px 16px;background:#fef2f2;border-radius:10px;border-left:4px solid #dc2626;">
+                                <p style="margin:0 0 8px 0;color:#7f1d1d;font-size:13px;font-weight:700;">Sécurité : ce que je mettrais en haut de la pile</p>
+                                <ul style="margin:0;padding-left:18px;color:#52525b;font-size:13px;line-height:1.65;">{security_issues_top}</ul>
+                            </div>
+                            {#endif}
+                            <p style="margin:22px 0 0 0;color:#27272a;font-size:15px;line-height:1.65;">
+                                Si ça vous parle, on peut en discuter calmement. Pas besoin d’une journée entière : souvent, <strong>trois actions bien choisies</strong> suffisent déjà à dégager le terrain. Je peux vous proposer un créneau de quinze minutes quand vous voulez.
+                            </p>
+                            {#include:cta_dual_analysis_and_15min}
+                            {#include:signature_standard}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:16px 26px 22px;background:#fafafa;text-align:center;border-top:1px solid #e4e4e7;">
+                            {#include:footer_standard}
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

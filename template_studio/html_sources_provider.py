@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional
 
 
 @dataclass(frozen=True)
@@ -38,4 +38,22 @@ def fallback_provider(
             return fallback(template_id)
 
     return _provider
+
+
+def brand_provider(
+    common_sources_dir: Path,
+    brand_sources_dir: Optional[Path] = None,
+    *,
+    encoding: str = "utf-8",
+) -> Callable[[str], str]:
+    """
+    Provider multi-domaine:
+    - lit d'abord `template_studio/brands/<brand>/html_sources/<template_id>.html`
+    - sinon fallback vers `template_studio/html_sources/<template_id>.html`
+    """
+    common = FileHtmlContentProvider(sources_dir=common_sources_dir, encoding=encoding)
+    if brand_sources_dir is None:
+        return common
+    brand = FileHtmlContentProvider(sources_dir=brand_sources_dir, encoding=encoding)
+    return fallback_provider(brand, common)
 
