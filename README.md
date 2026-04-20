@@ -179,6 +179,7 @@ ProspectLab/
 │   ├── analysis_tasks.py  # Analyse d'entreprises depuis Excel
 │   ├── scraping_tasks.py  # Scraping complet (emails, personnes, phones, etc.)
 │   ├── technical_analysis_tasks.py  # Analyses techniques (standard + avancée)
+│   ├── screenshot_tasks.py  # Captures site desktop/tablette/mobile + rétention
 │   ├── email_tasks.py     # Envoi d'emails en masse
 │   └── cleanup_tasks.py   # Nettoyage automatique des fichiers anciens (Celery Beat)
 ├── services/              # Services métier (logique métier)
@@ -257,12 +258,12 @@ L'application utilise une architecture moderne et modulaire :
 ### Logs centralisés
 Tous les logs sont centralisés dans le dossier `logs/` avec rotation automatique :
 - Logs Flask : `ProspectLab.log`
-- Logs par tâche : `analysis_tasks.log`, `scraping_tasks.log`, `technical_analysis_tasks.log`, `cleanup_tasks.log`, `email_tasks.log`
+- Logs par tâche : `analysis_tasks.log`, `scraping_tasks.log`, `technical_analysis_tasks.log`, `screenshot_tasks.log`, `cleanup_tasks.log`, `email_tasks.log`
 
 Chaque type de tâche a son propre fichier de log pour faciliter le débogage et le suivi.
 
 ### Nettoyage automatique
-Un script Celery Beat s'exécute automatiquement toutes les heures pour supprimer les fichiers uploads et exports de plus de 6 heures. Cette tâche est configurée dans `celery_app.py` et s'exécute via `cleanup.cleanup_old_files`.
+Un script Celery Beat s'exécute automatiquement toutes les heures pour supprimer les fichiers uploads/exports anciens (`cleanup.cleanup_old_files`) et appliquer la rétention screenshots globale (`screenshot.cleanup_old_screenshot_sets`).
 
 Pour plus de détails, voir [la documentation de l'architecture](docs/architecture/ARCHITECTURE.md).
 

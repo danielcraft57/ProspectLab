@@ -131,6 +131,12 @@ def _build_website_analysis_report(database: Database, entreprise_id: int, full:
     except Exception:
         seo = None
 
+    screenshots_latest = {}
+    try:
+        screenshots_latest = database.get_latest_entreprise_screenshots(entreprise_id) or {}
+    except Exception:
+        screenshots_latest = {}
+
     osint = None
     try:
         osint = database.get_osint_analysis_by_entreprise(entreprise_id)
@@ -158,6 +164,10 @@ def _build_website_analysis_report(database: Database, entreprise_id: int, full:
         'seo': {
             'status': 'done' if seo else 'never',
             'latest': seo,
+        },
+        'screenshots': {
+            'status': 'done' if screenshots_latest else 'never',
+            'latest': screenshots_latest,
         },
         'osint': {
             'status': 'done' if osint else 'never',
@@ -678,6 +688,20 @@ def entreprise_audit_pipeline(entreprise_id):
             pass
         pipeline['seo'] = seo_summary
 
+        screenshots_latest = {}
+        try:
+            screenshots_latest = database.get_latest_entreprise_screenshots(entreprise_id) or {}
+        except Exception:
+            screenshots_latest = {}
+        if screenshots_latest:
+            pipeline['screenshots'] = {
+                'status': 'done',
+                'devices': ['desktop', 'tablet', 'mobile'],
+                'latest': screenshots_latest,
+            }
+        else:
+            pipeline['screenshots'] = {'status': 'never'}
+
         # Analyse OSINT
         try:
             osint = database.get_osint_analysis_by_entreprise(entreprise_id)
@@ -1099,6 +1123,7 @@ def website_analysis():
     from tasks.scraping_tasks import scrape_emails_task
     from tasks.technical_analysis_tasks import technical_analysis_task
     from tasks.seo_tasks import seo_analysis_task
+    from tasks.screenshot_tasks import website_screenshot_task
     from tasks.osint_tasks import osint_analysis_task
     from tasks.pentest_tasks import pentest_analysis_task
     from tasks.heavy_schedule import BulkSubtaskStagger
@@ -1142,6 +1167,16 @@ def website_analysis():
         tasks_launched['seo_task_id'] = seo_task.id
     except Exception as e:
         tasks_launched['seo_error'] = str(e)
+
+    try:
+        screenshot_task = website_screenshot_task.apply_async(
+            kwargs=dict(url=website, entreprise_id=entreprise_id, analysis_id=None, full_page=False),
+            countdown=_st.next_countdown(),
+            queue='screenshot',
+        )
+        tasks_launched['screenshot_task_id'] = screenshot_task.id
+    except Exception as e:
+        tasks_launched['screenshot_error'] = str(e)
 
     # OSINT/Pentest peuvent fonctionner sans attendre le scraping (ils récupèrent aussi les données en BDD si dispo)
     try:
@@ -1300,6 +1335,7 @@ def website_full_analysis_start():
     filename = f'full-scan:{netloc}'
     enable_technical = bool(payload.get('enable_technical', True))
     enable_seo = bool(payload.get('enable_seo', True))
+    enable_screenshot = bool(payload.get('enable_screenshot', True))
     enable_osint = bool(payload.get('enable_osint', True))
     enable_pentest = bool(payload.get('enable_pentest', True))
     parametres = {
@@ -1308,6 +1344,7 @@ def website_full_analysis_start():
         'modules': {
             'technical': enable_technical,
             'seo': enable_seo,
+            'screenshot': enable_screenshot,
             'osint': enable_osint,
             'pentest': enable_pentest,
         },
@@ -1356,6 +1393,7 @@ def website_full_analysis_start():
                 use_lighthouse=use_lighthouse,
                 enable_technical=enable_technical,
                 enable_seo=enable_seo,
+                enable_screenshot=enable_screenshot,
                 enable_osint=enable_osint,
                 enable_pentest=enable_pentest,
             ),
@@ -1384,6 +1422,76 @@ def website_full_analysis_start():
         'website': website,
         'message': 'Analyse complète démarrée. Interroger /api/celery-task/<task_id> jusqu\'à state=SUCCESS.',
     }), 202
+
+
+@api_extended_bp.route('/entreprise/<int:entreprise_id>/screenshots')
+@login_required
+def entreprise_screenshots(entreprise_id):
+    """
+    API: Récupère les captures d'écran d'une entreprise (historique + dernière par device).
+    """
+    try:
+        limit = int(request.args.get('limit', 30) or 30)
+        rows = database.list_entreprise_screenshots(
+            entreprise_id=int(entreprise_id),
+            limit=limit,
+        )
+        latest = database.get_latest_entreprise_screenshots(int(entreprise_id))
+        return jsonify(
+            {
+                'success': True,
+                'entreprise_id': int(entreprise_id),
+                'latest': latest,
+                'items': rows,
+            }
+        )
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@api_extended_bp.route('/entreprise/<int:entreprise_id>/screenshots/capture', methods=['POST'])
+@login_required
+def entreprise_screenshots_capture(entreprise_id):
+    """
+    API: Lance une tâche Celery de capture screenshots (desktop/tablet/mobile) pour une entreprise.
+    """
+    try:
+        entreprise = database.get_entreprise(int(entreprise_id))
+        if not entreprise:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable'}), 404
+
+        website = _normalize_url_for_analysis(entreprise.get('website'))
+        if not website:
+            return jsonify({'success': False, 'error': 'Aucun website valide sur cette entreprise'}), 400
+
+        payload = request.get_json(silent=True) or {}
+        analysis_id = payload.get('analysis_id')
+        if analysis_id is not None:
+            try:
+                analysis_id = int(analysis_id)
+            except Exception:
+                analysis_id = None
+
+        from tasks.screenshot_tasks import website_screenshot_task
+
+        task = website_screenshot_task.apply_async(
+            kwargs=dict(
+                url=website,
+                entreprise_id=int(entreprise_id),
+                analysis_id=analysis_id,
+            ),
+            queue='screenshot',
+        )
+        return jsonify(
+            {
+                'success': True,
+                'entreprise_id': int(entreprise_id),
+                'website': website,
+                'task_id': task.id,
+            }
+        ), 202
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @api_extended_bp.route('/celery-task/<task_id>', methods=['GET'])

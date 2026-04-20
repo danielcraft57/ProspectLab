@@ -155,6 +155,13 @@ const API_DOC_FAMILIES = [
                     },
                     {
                         method: 'GET',
+                        path: '/entreprises/<id>/screenshots',
+                        desc: 'Dernier set de screenshots publics (desktop/tablet/mobile) + historique récent.',
+                        permission: 'Entreprises',
+                        params: [{ name: 'limit', type: 'int', desc: 'Optionnel, défaut 20, max 100' }]
+                    },
+                    {
+                        method: 'GET',
                         path: '/entreprises/<id>/campagnes',
                         desc: 'Campagnes liées à l’entreprise.',
                         permission: 'Campagnes',

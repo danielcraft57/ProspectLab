@@ -1199,6 +1199,7 @@ def full_website_analysis_task(
     use_lighthouse=False,
     enable_technical=True,
     enable_seo=True,
+    enable_screenshot=True,
     enable_osint=True,
     enable_pentest=True,
 ):
@@ -1217,6 +1218,7 @@ def full_website_analysis_task(
         use_lighthouse=use_lighthouse,
         enable_technical=enable_technical,
         enable_seo=enable_seo,
+        enable_screenshot=enable_screenshot,
         enable_osint=enable_osint,
         enable_pentest=enable_pentest,
     )

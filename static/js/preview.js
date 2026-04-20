@@ -1,6 +1,6 @@
 /**
  * Script de gestion de la page de prévisualisation et d'analyse
- * Gère le lancement de l'analyse, le suivi du scraping et de l'analyse technique en temps réel
+ * Gère le lancement de l'analyse, le suivi du scraping et des analyses en temps réel
  */
 
 (function() {
@@ -749,8 +749,8 @@
     
     const technicalProgressTitle = document.createElement('div');
     technicalProgressTitle.style.cssText = 'font-weight: 700; color: #e5e7eb;';
-    // Mettre en avant que cette analyse inclut aussi SEO (Lighthouse)
-    technicalProgressTitle.textContent = 'Analyse technique + SEO en cours...';
+    // Mettre en avant que cette analyse inclut aussi SEO + screenshots.
+    technicalProgressTitle.textContent = 'Analyse technique + SEO + screenshots en cours...';
     
     const technicalProgressCountBadge = document.createElement('div');
     technicalProgressCountBadge.id = 'technical-progress-count';
@@ -804,7 +804,7 @@
                 }
                 technicalProgressContainer.style.display = 'block';
                 
-                const message = data.message || 'Analyse technique + SEO en cours...';
+                const message = data.message || 'Analyse technique + SEO + screenshots en cours...';
                 
                 // Compteur X/Y entreprises (analyse technique)
                 if (typeof data.total === 'number' && data.total > 0) {
@@ -838,7 +838,7 @@
                 }
                 technicalProgressContainer.style.display = 'block';
                 
-                const message = data.message || 'Analyse technique + SEO en cours...';
+                const message = data.message || 'Analyse technique + SEO + screenshots en cours...';
                 const percent = typeof data.progress === 'number' ? Math.min(100, Math.max(0, data.progress)) : null;
                 
                 // Compteur X/Y entreprises (analyse technique)
@@ -929,17 +929,17 @@
                 let technicalSummaryText = '';
                 if (current !== null && total !== null && total > 0) {
                     technicalProgressCountBadge.textContent = `${current} / ${total} entreprises`;
-                    technicalProgressText.textContent = `Analyses techniques + SEO terminées pour ${current}/${total} entreprises.`;
+                    technicalProgressText.textContent = `Analyses techniques + SEO + screenshots terminées pour ${current}/${total} entreprises.`;
                     // Ne marquer comme terminé que si toutes les analyses sont vraiment terminées
                     if (current >= total) {
                         technicalDone = true;
-                        technicalSummaryText = `Analyses techniques + SEO terminées pour ${total}/${total} entreprises.`;
+                        technicalSummaryText = `Analyses techniques + SEO + screenshots terminées pour ${total}/${total} entreprises.`;
                         technicalProgressText.textContent = technicalSummaryText;
                     }
                 } else {
                     // Si pas de compteur, considérer comme terminé
                     technicalDone = true;
-                    technicalSummaryText = data.message || 'Analyse technique + SEO terminée';
+                    technicalSummaryText = data.message || 'Analyse technique + SEO + screenshots terminée';
                     technicalProgressText.textContent = technicalSummaryText;
                 }
 
@@ -959,11 +959,11 @@
                         technicalProgressContainer.appendChild(box);
                     }
 
-                    const message = technicalSummaryText || 'Analyses techniques + SEO terminées.';
+                    const message = technicalSummaryText || 'Analyses techniques + SEO + screenshots terminées.';
                     box.innerHTML =
                         `<div style=\"background: ${summaryBg}; padding: 1rem; border-radius: 6px; border-left: 3px solid ${summaryBorderLeft};\">` +
                         `<div style=\"font-size: 0.9rem; color: ${titleColor}; font-weight: 600; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.5px;\">` +
-                        `<i class=\"fas fa-check\"></i> Analyse technique + SEO terminée</div>` +
+                        `<i class=\"fas fa-check\"></i> Analyse technique + SEO + screenshots terminée</div>` +
                         `<div style=\"color: ${textColor}; font-size: 0.95rem; font-weight: 500;\">${message}</div>` +
                         `</div>`;
                 }

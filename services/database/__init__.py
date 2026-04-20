@@ -101,6 +101,13 @@ class Database(
             )
 
         try:
+            self.ensure_entreprise_screenshots_table()
+        except Exception:
+            logging.getLogger(__name__).warning(
+                'Migration entreprise_screenshots non appliquée', exc_info=True
+            )
+
+        try:
             self.ensure_market_roadmap_actions_table()
         except Exception:
             logging.getLogger(__name__).warning(

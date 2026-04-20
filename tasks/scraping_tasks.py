@@ -754,6 +754,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
     osint_tasks = []  # Stocker les tâches d'analyse OSINT lancées
     pentest_tasks = []  # Stocker les tâches d'analyse Pentest lancées
     seo_tasks = []    # Stocker les tâches d'analyse SEO lancées
+    screenshot_tasks = []  # Stocker les tâches de screenshots lancées
 
     # Compteur partagé : technique + OSINT + SEO + Pentest (évite de poster 200 tâches instantanément)
     bulk_stagger = BulkSubtaskStagger()
@@ -836,6 +837,10 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
             {'task_id': t['task_id'], 'entreprise_id': t['entreprise_id'], 'url': t['url'], 'nom': t['nom']}
             for t in seo_tasks
         ]
+        screenshot_tasks_launched_ids = [
+            {'task_id': t['task_id'], 'entreprise_id': t['entreprise_id'], 'url': t['url'], 'nom': t['nom']}
+            for t in screenshot_tasks
+        ]
         
         meta = {
             'current': current_index,
@@ -852,6 +857,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
             'tech_tasks_launched_ids': tech_tasks_launched_ids,  # IDs analyses techniques
             'osint_tasks_launched_ids': osint_tasks_launched_ids,  # IDs analyses OSINT
             'seo_tasks_launched_ids': seo_tasks_launched_ids,  # IDs analyses SEO
+            'screenshot_tasks_launched_ids': screenshot_tasks_launched_ids,  # IDs screenshots
             'pentest_tasks_launched_ids': [
                 {'task_id': t['task_id'], 'entreprise_id': t['entreprise_id'], 'url': t['url'], 'nom': t['nom']}
                 for t in pentest_tasks
@@ -1121,6 +1127,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                     from tasks.osint_tasks import osint_analysis_task
                     from tasks.seo_tasks import seo_analysis_task
                     from tasks.pentest_tasks import pentest_analysis_task
+                    from tasks.screenshot_tasks import website_screenshot_task
 
                     # Préparer les données du scraper pour l'OSINT
                     people_from_scrapers = results.get('people', [])
@@ -1196,6 +1203,35 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                     except Exception as seo_error:
                         logger.warning(
                             f'[Scraping Analyse {analysis_id}] ⚠ Erreur lors du lancement de l analyse SEO pour {entreprise_name}: {seo_error}',
+                            exc_info=True
+                        )
+
+                    # Lancer la capture screenshots en parallèle
+                    try:
+                        screenshot_cd = bulk_stagger.next_countdown()
+                        screenshot_task = website_screenshot_task.apply_async(
+                            kwargs=dict(
+                                url=website_str,
+                                entreprise_id=entreprise_id,
+                                analysis_id=analysis_id,
+                                full_page=False,
+                            ),
+                            countdown=screenshot_cd,
+                            queue='screenshot',
+                        )
+                        screenshot_tasks.append({
+                            'task': screenshot_task,
+                            'task_id': screenshot_task.id,
+                            'entreprise_id': entreprise_id,
+                            'url': website_str,
+                            'nom': entreprise_name,
+                        })
+                        logger.info(
+                            f'[Scraping Analyse {analysis_id}] ✓ Screenshots planifiés pour {entreprise_name} (task_id={screenshot_task.id})'
+                        )
+                    except Exception as screenshot_error:
+                        logger.warning(
+                            f'[Scraping Analyse {analysis_id}] ⚠ Erreur lors du lancement des screenshots pour {entreprise_name}: {screenshot_error}',
                             exc_info=True
                         )
 

@@ -57,6 +57,7 @@ celery.conf.update(
         Queue('mini_scrape', routing_key='mini_scrape'),
         Queue('technical', routing_key='technical'),
         Queue('seo', routing_key='seo'),
+        Queue('screenshot', routing_key='screenshot'),
         Queue('osint', routing_key='osint'),
         Queue('pentest', routing_key='pentest'),
         # Queue legacy conservée (compat). A terme, tout doit être routé ailleurs.
@@ -80,6 +81,7 @@ celery.conf.update(
         'tasks.scraping_tasks.*': {'queue': 'scraping'},
         'tasks.technical_analysis_tasks.*': {'queue': 'technical'},
         'tasks.seo_tasks.*': {'queue': 'seo'},
+        'tasks.screenshot_tasks.*': {'queue': 'screenshot'},
         'tasks.osint_tasks.*': {'queue': 'osint'},
         'tasks.phone_tasks.*': {'queue': 'osint'},
         'tasks.pentest_tasks.*': {'queue': 'pentest'},
@@ -105,6 +107,7 @@ celery.conf.update(
         'tasks.phone_tasks',
         'tasks.pentest_tasks',
         'tasks.seo_tasks',
+        'tasks.screenshot_tasks',
         'tasks.email_tasks',
         'tasks.cleanup_tasks',
         'tasks.metric_rescan_tasks',
@@ -125,6 +128,10 @@ celery.conf.update(
             'task': 'cleanup.cleanup_old_files',
             'schedule': 3600.0,  # Toutes les heures
             'args': (6,)  # Supprimer les fichiers de plus de 6 heures
+        },
+        'cleanup-old-screenshots': {
+            'task': 'screenshot.cleanup_old_screenshot_sets',
+            'schedule': 3600.0,  # Toutes les heures
         },
         'start-scheduled-campagnes': {
             'task': 'tasks.email_tasks.start_scheduled_campagnes',

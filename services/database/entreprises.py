@@ -2418,6 +2418,254 @@ class EntrepriseManager(DatabaseBase):
         d['poids'] = p
         return d
 
+    def save_entreprise_screenshot_set(
+        self,
+        entreprise_id: int,
+        page_url: str,
+        analysis_id: int | None = None,
+        source_task_id: str | None = None,
+        full_page: bool = False,
+        desktop_file_path: str | None = None,
+        desktop_public_url: str | None = None,
+        tablet_file_path: str | None = None,
+        tablet_public_url: str | None = None,
+        mobile_file_path: str | None = None,
+        mobile_public_url: str | None = None,
+        desktop_error: str | None = None,
+        tablet_error: str | None = None,
+        mobile_error: str | None = None,
+    ) -> int:
+        """
+        Enregistre un set de screenshots (desktop/tablet/mobile) pour une entreprise.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self.execute_sql(
+            cursor,
+            '''
+            INSERT INTO entreprise_screenshots (
+                entreprise_id, analysis_id, source_task_id, page_url, full_page,
+                desktop_file_path, desktop_public_url, tablet_file_path, tablet_public_url,
+                mobile_file_path, mobile_public_url, desktop_error, tablet_error, mobile_error,
+                captured_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ''',
+            (
+                int(entreprise_id),
+                int(analysis_id) if analysis_id is not None else None,
+                (str(source_task_id).strip() if source_task_id else None),
+                str(page_url or '').strip()[:1200],
+                1 if full_page else 0,
+                str(desktop_file_path).strip()[:1800] if desktop_file_path else None,
+                str(desktop_public_url).strip()[:1200] if desktop_public_url else None,
+                str(tablet_file_path).strip()[:1800] if tablet_file_path else None,
+                str(tablet_public_url).strip()[:1200] if tablet_public_url else None,
+                str(mobile_file_path).strip()[:1800] if mobile_file_path else None,
+                str(mobile_public_url).strip()[:1200] if mobile_public_url else None,
+                str(desktop_error).strip()[:8000] if desktop_error else None,
+                str(tablet_error).strip()[:8000] if tablet_error else None,
+                str(mobile_error).strip()[:8000] if mobile_error else None,
+            ),
+        )
+        sid = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return int(sid or 0)
+
+    def list_entreprise_screenshots(self, entreprise_id: int, limit: int = 50, device_type: str | None = None):
+        """
+        Historique des sets de screenshots d'une entreprise (plus récent en premier).
+        Paramètre device_type conservé pour compatibilité, ignoré.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        lim = max(1, min(int(limit or 50), 300))
+        params = [int(entreprise_id)]
+        q = '''
+            SELECT
+                id, entreprise_id, analysis_id, source_task_id, page_url, full_page,
+                desktop_file_path, desktop_public_url, tablet_file_path, tablet_public_url,
+                mobile_file_path, mobile_public_url, desktop_error, tablet_error, mobile_error,
+                captured_at, created_at, updated_at
+            FROM entreprise_screenshots
+            WHERE entreprise_id = ?
+        '''
+        q += ' ORDER BY captured_at DESC, id DESC LIMIT ?'
+        params.append(lim)
+        self.execute_sql(cursor, q, tuple(params))
+        rows = cursor.fetchall() or []
+        conn.close()
+        return [self.clean_row_dict(dict(r)) for r in rows]
+
+    def get_latest_entreprise_screenshots(self, entreprise_id: int):
+        """
+        Retourne le dernier set de captures (desktop/tablet/mobile) pour une entreprise.
+        """
+        rows = self.list_entreprise_screenshots(entreprise_id=entreprise_id, limit=1)
+        if rows:
+            row = rows[0]
+            latest = {
+                'id': row.get('id'),
+                'entreprise_id': row.get('entreprise_id'),
+                'analysis_id': row.get('analysis_id'),
+                'source_task_id': row.get('source_task_id'),
+                'page_url': row.get('page_url'),
+                'full_page': row.get('full_page'),
+                'captured_at': row.get('captured_at'),
+                'desktop': {
+                    'file_path': row.get('desktop_file_path'),
+                    'public_url': row.get('desktop_public_url'),
+                    'error': row.get('desktop_error'),
+                },
+                'tablet': {
+                    'file_path': row.get('tablet_file_path'),
+                    'public_url': row.get('tablet_public_url'),
+                    'error': row.get('tablet_error'),
+                },
+                'mobile': {
+                    'file_path': row.get('mobile_file_path'),
+                    'public_url': row.get('mobile_public_url'),
+                    'error': row.get('mobile_error'),
+                },
+            }
+            has_any = any(
+                [
+                    latest['desktop']['file_path'],
+                    latest['desktop']['public_url'],
+                    latest['tablet']['file_path'],
+                    latest['tablet']['public_url'],
+                    latest['mobile']['file_path'],
+                    latest['mobile']['public_url'],
+                ]
+            )
+            if has_any:
+                return latest
+
+        # Compat: fallback vers l'ancien modèle (1 ligne par device avec device_type/file_path/public_url).
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            self.execute_sql(
+                cursor,
+                '''
+                SELECT id, entreprise_id, analysis_id, source_task_id, page_url,
+                       device_type, file_path, public_url, capture_error, full_page,
+                       created_at
+                FROM entreprise_screenshots
+                WHERE entreprise_id = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT 30
+                ''',
+                (int(entreprise_id),),
+            )
+            legacy_rows = cursor.fetchall() or []
+        except Exception:
+            legacy_rows = []
+        finally:
+            conn.close()
+
+        if not legacy_rows:
+            return {}
+
+        out = {
+            'id': None,
+            'entreprise_id': int(entreprise_id),
+            'analysis_id': None,
+            'source_task_id': None,
+            'page_url': None,
+            'full_page': None,
+            'captured_at': None,
+            'desktop': {'file_path': None, 'public_url': None, 'error': None},
+            'tablet': {'file_path': None, 'public_url': None, 'error': None},
+            'mobile': {'file_path': None, 'public_url': None, 'error': None},
+        }
+        for r in legacy_rows:
+            d = self.clean_row_dict(dict(r))
+            if out['id'] is None:
+                out['id'] = d.get('id')
+                out['analysis_id'] = d.get('analysis_id')
+                out['source_task_id'] = d.get('source_task_id')
+                out['page_url'] = d.get('page_url')
+                out['full_page'] = d.get('full_page')
+                out['captured_at'] = d.get('created_at')
+            dev = str(d.get('device_type') or '').strip().lower()
+            if dev in ('desktop', 'tablet', 'mobile') and not out[dev]['file_path']:
+                out[dev]['file_path'] = d.get('file_path')
+                out[dev]['public_url'] = d.get('public_url')
+                out[dev]['error'] = d.get('capture_error')
+        return out
+
+    def prune_entreprise_screenshot_sets(self, entreprise_id: int, keep_last: int = 5) -> list[dict]:
+        """
+        Supprime les anciens sets de screenshots d'une entreprise et retourne les lignes supprimées.
+        """
+        keep = max(1, int(keep_last or 5))
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self.execute_sql(
+            cursor,
+            '''
+            SELECT
+                id, entreprise_id, analysis_id, source_task_id, page_url, full_page,
+                desktop_file_path, desktop_public_url, tablet_file_path, tablet_public_url,
+                mobile_file_path, mobile_public_url, desktop_error, tablet_error, mobile_error,
+                captured_at, created_at, updated_at
+            FROM entreprise_screenshots
+            WHERE entreprise_id = ?
+            ORDER BY captured_at DESC, id DESC
+            ''',
+            (int(entreprise_id),),
+        )
+        rows = cursor.fetchall() or []
+        if len(rows) <= keep:
+            conn.close()
+            return []
+
+        to_delete = [self.clean_row_dict(dict(r)) for r in rows[keep:]]
+        ids = [int(r['id']) for r in to_delete if r.get('id') is not None]
+        if ids:
+            placeholders = ','.join(['?'] * len(ids))
+            self.execute_sql(
+                cursor,
+                f'DELETE FROM entreprise_screenshots WHERE id IN ({placeholders})',
+                tuple(ids),
+            )
+            conn.commit()
+        conn.close()
+        return to_delete
+
+    def list_entreprise_ids_with_screenshots(self, limit: int = 2000) -> list[int]:
+        """
+        Retourne la liste des entreprises ayant au moins un set de screenshots.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        lim = max(1, min(int(limit or 2000), 10000))
+        self.execute_sql(
+            cursor,
+            '''
+            SELECT DISTINCT entreprise_id
+            FROM entreprise_screenshots
+            WHERE entreprise_id IS NOT NULL
+            ORDER BY entreprise_id DESC
+            LIMIT ?
+            ''',
+            (lim,),
+        )
+        rows = cursor.fetchall() or []
+        conn.close()
+        out: list[int] = []
+        for r in rows:
+            d = self.clean_row_dict(dict(r))
+            eid = d.get('entreprise_id')
+            if eid is None:
+                continue
+            try:
+                out.append(int(eid))
+            except Exception:
+                continue
+        return out
+
     def record_metric_snapshot(self, cursor, entreprise_id, source, analysis_id, metrics_dict):
         """
         Enregistre un snapshot de métriques (même transaction que l'analyse si cursor fourni).

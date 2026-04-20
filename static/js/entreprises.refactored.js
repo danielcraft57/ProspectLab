@@ -426,6 +426,10 @@
     // Etat des relances en cours (technique/seo/pentest) pour conserver l'affichage après rechargement des filtres.
     // Structure: { [entrepriseId]: { technique: true, seo: true, pentest: true } }
     const relaunchLoadingState = {};
+    let currentInfoScreenshotItems = [];
+    let currentInfoBrandingItems = [];
+    let currentPreviewItems = [];
+    let currentPreviewIndex = -1;
 
     function applyRelaunchLoadingStateToRenderedEnterprises(entreprises) {
         if (!Array.isArray(entreprises) || entreprises.length === 0) return;
@@ -3406,6 +3410,7 @@
             modalBody.innerHTML = createModalContent(currentModalEntrepriseData);
             
             setupModalInteractions();
+            loadEntrepriseInfoScreenshots(entrepriseId);
             loadEntrepriseImages(entrepriseId);
             loadEntreprisePages(currentModalEntrepriseData);
             loadScrapingResults(entrepriseId);
@@ -3434,6 +3439,200 @@
         if (!btn) return;
         const labels = { images: 'Images', pages: 'Pages' };
         btn.textContent = (labels[tabKey] || tabKey) + ' (' + (count || 0) + ')';
+    }
+
+    function _renderInfoScreenshotsContent(latest) {
+        const escape = (txt) => (Formatters && Formatters.escapeHtml ? Formatters.escapeHtml(String(txt || '')) : String(txt || ''));
+        if (!latest || typeof latest !== 'object') {
+            return `
+                <div class="info-screenshots-empty">
+                    <p>Aucun screenshot disponible pour le moment.</p>
+                    <span>Clique sur “Lancer / Relancer”.</span>
+                </div>
+            `;
+        }
+
+        const devices = [
+            { key: 'desktop', label: 'Desktop', icon: 'fa-desktop' },
+            { key: 'tablet', label: 'Tablette', icon: 'fa-tablet-alt' },
+            { key: 'mobile', label: 'Mobile', icon: 'fa-mobile-alt' },
+        ];
+
+        currentInfoScreenshotItems = [];
+        const cards = devices.map((d) => {
+            const dev = latest && latest[d.key] && typeof latest[d.key] === 'object' ? latest[d.key] : null;
+            const url = dev ? (dev.public_url || dev.publicUrl || dev.url) : null;
+            const err = dev ? (dev.error || dev.capture_error) : null;
+            if (url) {
+                const idx = currentInfoScreenshotItems.length;
+                currentInfoScreenshotItems.push({ url: String(url), label: d.label });
+                return `
+                    <div class="info-screenshots-card">
+                        <div class="info-screenshots-card-head">
+                            <strong><i class="fas ${d.icon}"></i> ${escape(d.label)}</strong>
+                        </div>
+                        <button
+                            type="button"
+                            class="info-screenshot-thumb-btn"
+                            data-screenshot-open="1"
+                            data-screenshot-index="${idx}"
+                            aria-label="Ouvrir screenshot ${escape(d.label)}"
+                        >
+                            <img class="info-screenshots-img" src="${escape(url)}" alt="Screenshot ${escape(d.label)}">
+                        </button>
+                    </div>
+                `;
+            }
+            return `
+                <div class="info-screenshots-card info-screenshots-card--empty">
+                    <strong><i class="fas ${d.icon}"></i> ${escape(d.label)}</strong>
+                    <p>${escape(err || 'Aucune capture disponible')}</p>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <div class="info-screenshots-grid">
+                ${cards}
+            </div>
+        `;
+    }
+
+    async function loadEntrepriseInfoScreenshots(entrepriseId) {
+        const container = document.getElementById('info-screenshots-content');
+        if (!container) return;
+        try {
+            const response = await fetch(`/api/entreprise/${entrepriseId}/screenshots?limit=1`);
+            if (!response.ok) {
+                throw new Error('HTTP ' + response.status);
+            }
+            const data = await response.json();
+            const latest = data && data.latest ? data.latest : null;
+            container.innerHTML = _renderInfoScreenshotsContent(latest);
+        } catch (e) {
+            console.error('Erreur chargement screenshots info:', e);
+            container.innerHTML = '<p class="empty-state" style="margin:0;">Impossible de charger les screenshots.</p>';
+        }
+    }
+
+    function setInfoScreenshotsLoading(isLoading, message = '') {
+        const btn = document.getElementById('info-screenshots-refresh-btn');
+        const status = document.getElementById('info-screenshots-status');
+        if (btn) {
+            btn.disabled = !!isLoading;
+            btn.innerHTML = isLoading
+                ? '<i class="fas fa-spinner fa-spin"></i> Capture en cours...'
+                : '<i class="fas fa-sync-alt"></i> Lancer / Relancer';
+        }
+        if (status) {
+            if (message) {
+                status.style.display = 'block';
+                status.classList.remove('is-error');
+                status.textContent = message;
+            } else {
+                status.style.display = 'none';
+                status.textContent = '';
+            }
+        }
+    }
+
+    function triggerScreenshotsCapture(entrepriseId) {
+        const socket = window.wsManager && window.wsManager.socket;
+        if (!socket) {
+            Notifications.show('Connexion temps réel non disponible. Rechargez la page.', 'warning');
+            return;
+        }
+        setInfoScreenshotsLoading(true, 'Lancement de la capture screenshots...');
+        socket.emit('start_screenshot_capture', { entreprise_id: entrepriseId });
+    }
+
+    function ensureScreenshotPreviewModal() {
+        let modal = document.getElementById('screenshot-preview-modal');
+        if (modal) return modal;
+        modal = document.createElement('div');
+        modal.id = 'screenshot-preview-modal';
+        modal.className = 'screenshot-preview-modal';
+        modal.innerHTML = `
+            <div class="screenshot-preview-panel">
+                <div class="screenshot-preview-header">
+                    <h4 id="screenshot-preview-title">Screenshot</h4>
+                    <div class="screenshot-preview-header-actions">
+                        <button type="button" class="screenshot-preview-nav screenshot-preview-prev" aria-label="Précédent"><i class="fas fa-chevron-left"></i></button>
+                        <button type="button" class="screenshot-preview-nav screenshot-preview-next" aria-label="Suivant"><i class="fas fa-chevron-right"></i></button>
+                        <button type="button" class="screenshot-preview-close" aria-label="Fermer">×</button>
+                    </div>
+                </div>
+                <div class="screenshot-preview-body">
+                    <img id="screenshot-preview-image" src="" alt="Screenshot">
+                </div>
+            </div>
+        `;
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.classList.remove('show');
+            }
+        });
+        const closeBtn = modal.querySelector('.screenshot-preview-close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => modal.classList.remove('show'));
+        }
+        const prevBtn = modal.querySelector('.screenshot-preview-prev');
+        if (prevBtn) {
+            prevBtn.addEventListener('click', () => openScreenshotPreviewModalByIndex(currentPreviewIndex - 1));
+        }
+        const nextBtn = modal.querySelector('.screenshot-preview-next');
+        if (nextBtn) {
+            nextBtn.addEventListener('click', () => openScreenshotPreviewModalByIndex(currentPreviewIndex + 1));
+        }
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && modal.classList.contains('show')) {
+                modal.classList.remove('show');
+                return;
+            }
+            if (!modal.classList.contains('show')) return;
+            if (e.key === 'ArrowLeft') {
+                openScreenshotPreviewModalByIndex(currentPreviewIndex - 1);
+            } else if (e.key === 'ArrowRight') {
+                openScreenshotPreviewModalByIndex(currentPreviewIndex + 1);
+            }
+        });
+        document.body.appendChild(modal);
+        return modal;
+    }
+
+    function _updateScreenshotPreviewNav(modal) {
+        const prevBtn = modal.querySelector('.screenshot-preview-prev');
+        const nextBtn = modal.querySelector('.screenshot-preview-next');
+        const hasItems = Array.isArray(currentPreviewItems) && currentPreviewItems.length > 0;
+        const canPrev = hasItems && currentPreviewIndex > 0;
+        const canNext = hasItems && currentPreviewIndex < currentPreviewItems.length - 1;
+        if (prevBtn) prevBtn.disabled = !canPrev;
+        if (nextBtn) nextBtn.disabled = !canNext;
+    }
+
+    function openPreviewCollection(items, index) {
+        if (!Array.isArray(items) || items.length === 0) return;
+        currentPreviewItems = items;
+        openScreenshotPreviewModalByIndex(index);
+    }
+
+    function openScreenshotPreviewModalByIndex(index) {
+        if (!Array.isArray(currentPreviewItems) || currentPreviewItems.length === 0) return;
+        const bounded = Math.max(0, Math.min(currentPreviewItems.length - 1, Number(index) || 0));
+        currentPreviewIndex = bounded;
+        const item = currentPreviewItems[bounded] || {};
+        openScreenshotPreviewModal(item.url, item.label);
+    }
+
+    function openScreenshotPreviewModal(url, label) {
+        const modal = ensureScreenshotPreviewModal();
+        const img = modal.querySelector('#screenshot-preview-image');
+        const title = modal.querySelector('#screenshot-preview-title');
+        if (img) img.src = String(url || '');
+        if (img) img.alt = `Screenshot ${label || ''}`.trim();
+        if (title) title.textContent = label ? `Screenshot ${label}` : 'Screenshot';
+        _updateScreenshotPreviewNav(modal);
+        modal.classList.add('show');
     }
 
     /**
@@ -3858,9 +4057,28 @@
                 
                 <div class="tabs-content">
                     <div class="tab-panel active" id="tab-info">
+                        ${entreprise.resume ? `
+                        <div class="detail-section" style="margin-bottom: 1.5rem; background: #f8f9fa; padding: 1.5rem; border-radius: 8px; border-left: 4px solid #667eea;">
+                            <h3 style="margin: 0 0 0.75rem 0; color: #2c3e50; font-size: 1.1rem;"><i class="fas fa-file-alt"></i> Résumé de l'entreprise</h3>
+                            <p style="margin: 0; color: #555; line-height: 1.6; font-size: 0.95rem;">${Formatters.escapeHtml(entreprise.resume)}</p>
+                        </div>
+                        ` : ''}
+                        <div class="detail-section info-screenshots-section">
+                            <div class="info-screenshots-header">
+                                <h3 class="info-screenshots-title"><i class="fas fa-camera"></i> Screenshots du site</h3>
+                                <button type="button" class="btn btn-outline btn-small" id="info-screenshots-refresh-btn" title="Lancer / relancer la capture screenshots">
+                                    <i class="fas fa-sync-alt"></i> Lancer / Relancer
+                                </button>
+                            </div>
+                            <div id="info-screenshots-status" class="info-screenshots-status" style="display:none;"></div>
+                            <div id="info-screenshots-content">
+                                <p class="loading info-screenshots-loading">Chargement des screenshots...</p>
+                            </div>
+                        </div>
                         ${(function() {
                             // Récupérer toutes les images disponibles
                             const imagesToShow = [];
+                            currentInfoBrandingItems = [];
                             
                             if (entreprise.og_image) {
                                 imagesToShow.push({url: entreprise.og_image, type: 'Image OpenGraph'});
@@ -3890,23 +4108,28 @@
                             
                             let html = '<div class="detail-section" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 2rem; border-radius: 8px;"><div style="text-align: center;"><div style="display: flex; align-items: center; justify-content: center; gap: 2rem; flex-wrap: wrap;">';
                             
-                            imagesToShow.forEach(img => {
+                            imagesToShow.forEach((img) => {
                                 const maxHeight = img.type === 'Favicon' ? '64px' : img.type === 'Logo' ? '150px' : '300px';
+                                const idx = currentInfoBrandingItems.length;
+                                currentInfoBrandingItems.push({ url: String(img.url), label: img.type || 'Image' });
                                 html += `<div style="flex: 1; min-width: ${img.type === 'Favicon' ? '100px' : img.type === 'Logo' ? '150px' : '200px'};">
                                     <h4 style="color: white; margin: 0 0 1rem 0; font-size: 0.9rem; text-transform: uppercase; opacity: 0.9;">${Formatters.escapeHtml(img.type)}</h4>
-                                    <img src="${Formatters.escapeHtml(img.url)}" alt="${Formatters.escapeHtml(img.alt || img.type)}" style="max-width: 100%; max-height: ${maxHeight}; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); background: white; padding: 0.5rem;" onerror="this.style.display='none'">
+                                    <button
+                                        type="button"
+                                        class="info-branding-thumb-btn"
+                                        data-branding-open="1"
+                                        data-branding-index="${idx}"
+                                        aria-label="Ouvrir ${Formatters.escapeHtml(img.type || 'image')}"
+                                        style="border:none;background:transparent;padding:0;cursor:zoom-in;"
+                                    >
+                                        <img src="${Formatters.escapeHtml(img.url)}" alt="${Formatters.escapeHtml(img.alt || img.type)}" style="max-width: 100%; max-height: ${maxHeight}; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); background: white; padding: 0.5rem;" onerror="this.style.display='none'">
+                                    </button>
                                 </div>`;
                             });
                             
                             html += '</div></div></div>';
                             return html;
                         })()}
-                        ${entreprise.resume ? `
-                        <div class="detail-section" style="margin-bottom: 1.5rem; background: #f8f9fa; padding: 1.5rem; border-radius: 8px; border-left: 4px solid #667eea;">
-                            <h3 style="margin: 0 0 0.75rem 0; color: #2c3e50; font-size: 1.1rem;"><i class="fas fa-file-alt"></i> Résumé de l'entreprise</h3>
-                            <p style="margin: 0; color: #555; line-height: 1.6; font-size: 0.95rem;">${Formatters.escapeHtml(entreprise.resume)}</p>
-                        </div>
-                        ` : ''}
                         <div class="info-grid">
                             ${createInfoRow('Nom', entreprise.nom)}
                             ${createInfoRow('Site web', entreprise.website, true)}
@@ -4229,6 +4452,56 @@
             const nom = getEntrepriseNom(entrepriseId);
             Notifications.show(nom + ' — ' + (data && data.error ? data.error : 'Erreur scraping'), 'error', 'fa-exclamation-circle');
         });
+
+        s.on('screenshot_capture_started', function(data) {
+            const entrepriseId = data && data.entreprise_id != null ? data.entreprise_id : currentModalEntrepriseId;
+            if (entrepriseId == null) return;
+            if (entrepriseId === currentModalEntrepriseId) {
+                setInfoScreenshotsLoading(true, (data && data.message) || 'Capture screenshots démarrée...');
+            }
+            const nom = getEntrepriseNom(entrepriseId);
+            Notifications.show(nom + ' — Capture screenshots démarrée', 'info', 'fa-camera');
+        });
+
+        s.on('screenshot_capture_progress', function(data) {
+            const entrepriseId = data && data.entreprise_id != null ? data.entreprise_id : currentModalEntrepriseId;
+            if (entrepriseId == null || entrepriseId !== currentModalEntrepriseId) return;
+            const device = data && data.device ? ` (${data.device})` : '';
+            const pct = typeof data.progress === 'number' ? `${Math.max(0, Math.min(100, data.progress))}%` : '';
+            const msg = data && data.message ? data.message : 'Capture screenshots en cours...';
+            setInfoScreenshotsLoading(true, `${msg}${device}${pct ? ` — ${pct}` : ''}`);
+        });
+
+        s.on('screenshot_capture_complete', function(data) {
+            const entrepriseId = data && data.entreprise_id != null ? data.entreprise_id : currentModalEntrepriseId;
+            if (entrepriseId == null) return;
+            const nom = getEntrepriseNom(entrepriseId);
+            Notifications.show(nom + ' — Screenshots mis à jour', 'success', 'fa-check-circle');
+            if (entrepriseId === currentModalEntrepriseId) {
+                setInfoScreenshotsLoading(false);
+                loadEntrepriseInfoScreenshots(entrepriseId);
+            }
+        });
+
+        s.on('screenshot_capture_error', function(data) {
+            const entrepriseId = data && data.entreprise_id != null ? data.entreprise_id : currentModalEntrepriseId;
+            const err = data && data.error ? data.error : 'Erreur capture screenshots';
+            if (entrepriseId != null) {
+                const nom = getEntrepriseNom(entrepriseId);
+                Notifications.show(nom + ' — ' + err, 'error', 'fa-exclamation-circle');
+            } else {
+                Notifications.show(err, 'error', 'fa-exclamation-circle');
+            }
+            if (entrepriseId != null && entrepriseId === currentModalEntrepriseId) {
+                setInfoScreenshotsLoading(false);
+                const status = document.getElementById('info-screenshots-status');
+                if (status) {
+                    status.style.display = 'block';
+                    status.classList.add('is-error');
+                    status.textContent = err;
+                }
+            }
+        });
         window._entrepriseModalWsListenersSetup = true;
     }
     
@@ -4262,6 +4535,34 @@
                     closeEntrepriseModal();
                 }
             };
+
+            modal.addEventListener('click', (e) => {
+                const screenshotBtn = e.target && e.target.closest && e.target.closest('[data-screenshot-open="1"]');
+                if (screenshotBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const idx = parseInt(screenshotBtn.getAttribute('data-screenshot-index') || '0', 10);
+                    openPreviewCollection(currentInfoScreenshotItems, Number.isNaN(idx) ? 0 : idx);
+                    return;
+                }
+                const brandingBtn = e.target && e.target.closest && e.target.closest('[data-branding-open="1"]');
+                if (brandingBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const idx = parseInt(brandingBtn.getAttribute('data-branding-index') || '0', 10);
+                    openPreviewCollection(currentInfoBrandingItems, Number.isNaN(idx) ? 0 : idx);
+                }
+            });
+
+            const screenshotBtn = document.getElementById('info-screenshots-refresh-btn');
+            if (screenshotBtn) {
+                screenshotBtn.onclick = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (!currentModalEntrepriseId) return;
+                    triggerScreenshotsCapture(currentModalEntrepriseId);
+                };
+            }
 
             if (!window._modalMetricRescanDelegation) {
                 window._modalMetricRescanDelegation = true;

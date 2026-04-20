@@ -122,6 +122,7 @@ deploy_cluster_worker/
 
 # Mobile / outillage local
 backups/
+static/screenshots/
 scan_report.json
 mobile/scripts/.patch-tmp/
 scripts/google_maps_tools/.google_maps_api_key

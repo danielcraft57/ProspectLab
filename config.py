@@ -51,6 +51,93 @@ MAIL_DEFAULT_RECIPIENT = os.environ.get('MAIL_DEFAULT_RECIPIENT', 'contact@danie
 SCRAPING_DELAY = 2.0  # Délai entre requêtes (secondes)
 SCRAPING_MAX_WORKERS = 3  # Nombre de threads parallèles
 SCRAPING_MAX_DEPTH = 3  # Profondeur maximale de scraping
+WEBSITE_SCREENSHOTS_DIR = Path(
+    os.environ.get('WEBSITE_SCREENSHOTS_DIR', str(APP_DIR / 'static' / 'screenshots' / 'website_previews'))
+)
+WEBSITE_SCREENSHOTS_BASE_URL = (
+    os.environ.get('WEBSITE_SCREENSHOTS_BASE_URL', '/static/screenshots/website_previews').strip()
+    or '/static/screenshots/website_previews'
+)
+# Après chargement : courte pause pour fonts/animations (vitesse vs rendu).
+WEBSITE_SCREENSHOT_WAIT_MS = int(os.environ.get('WEBSITE_SCREENSHOT_WAIT_MS', '700'))
+# domcontentloaded = plus rapide que networkidle ; load = un peu plus lourd.
+WEBSITE_SCREENSHOT_GOTO_WAIT_UNTIL = (
+    os.environ.get('WEBSITE_SCREENSHOT_GOTO_WAIT_UNTIL', 'domcontentloaded').strip().lower()
+    or 'domcontentloaded'
+)
+WEBSITE_SCREENSHOT_WEBP_QUALITY = int(os.environ.get('WEBSITE_SCREENSHOT_WEBP_QUALITY', '78'))
+# Viewports de capture (pas full-page, mais plus "longs" pour couvrir plus que le hero).
+WEBSITE_SCREENSHOT_VIEWPORT_DESKTOP_WIDTH = max(900, int(os.environ.get('WEBSITE_SCREENSHOT_VIEWPORT_DESKTOP_WIDTH', '1920')))
+WEBSITE_SCREENSHOT_VIEWPORT_DESKTOP_HEIGHT = max(700, int(os.environ.get('WEBSITE_SCREENSHOT_VIEWPORT_DESKTOP_HEIGHT', '1600')))
+WEBSITE_SCREENSHOT_VIEWPORT_TABLET_WIDTH = max(700, int(os.environ.get('WEBSITE_SCREENSHOT_VIEWPORT_TABLET_WIDTH', '1024')))
+WEBSITE_SCREENSHOT_VIEWPORT_TABLET_HEIGHT = max(900, int(os.environ.get('WEBSITE_SCREENSHOT_VIEWPORT_TABLET_HEIGHT', '1700')))
+WEBSITE_SCREENSHOT_VIEWPORT_MOBILE_WIDTH = max(300, int(os.environ.get('WEBSITE_SCREENSHOT_VIEWPORT_MOBILE_WIDTH', '430')))
+WEBSITE_SCREENSHOT_VIEWPORT_MOBILE_HEIGHT = max(650, int(os.environ.get('WEBSITE_SCREENSHOT_VIEWPORT_MOBILE_HEIGHT', '1200')))
+# Largeur max avant WEBP (réduit poids disque ; None pour désactiver).
+WEBSITE_SCREENSHOT_MAX_WIDTH_DESKTOP = int(os.environ.get('WEBSITE_SCREENSHOT_MAX_WIDTH_DESKTOP', '1600'))
+WEBSITE_SCREENSHOT_MAX_WIDTH_TABLET = int(os.environ.get('WEBSITE_SCREENSHOT_MAX_WIDTH_TABLET', '1200'))
+WEBSITE_SCREENSHOT_MAX_WIDTH_MOBILE = int(os.environ.get('WEBSITE_SCREENSHOT_MAX_WIDTH_MOBILE', '800'))
+WEBSITE_SCREENSHOT_KEEP_SETS = max(1, int(os.environ.get('WEBSITE_SCREENSHOT_KEEP_SETS', '5')))
+WEBSITE_SCREENSHOT_CLEANUP_BATCH_SIZE = max(
+    10,
+    min(5000, int(os.environ.get('WEBSITE_SCREENSHOT_CLEANUP_BATCH_SIZE', '1500'))),
+)
+# True = les 3 viewports en parallèle (async Playwright) ; False = séquentiel (moins de RAM).
+WEBSITE_SCREENSHOT_PARALLEL = os.environ.get('WEBSITE_SCREENSHOT_PARALLEL', 'true').lower() in (
+    '1',
+    'true',
+    'yes',
+    'on',
+)
+# Timeout navigation (ms) pour page.goto.
+WEBSITE_SCREENSHOT_GOTO_TIMEOUT_MS = int(os.environ.get('WEBSITE_SCREENSHOT_GOTO_TIMEOUT_MS', '28000'))
+# Capture navigateur : jpeg = moins de données que png avant encodage WEBP.
+_fmt = os.environ.get('WEBSITE_SCREENSHOT_CAPTURE_FORMAT', 'jpeg').strip().lower() or 'jpeg'
+WEBSITE_SCREENSHOT_CAPTURE_FORMAT = _fmt if _fmt in ('jpeg', 'jpg', 'png') else 'jpeg'
+WEBSITE_SCREENSHOT_JPEG_QUALITY = max(50, min(95, int(os.environ.get('WEBSITE_SCREENSHOT_JPEG_QUALITY', '82'))))
+# 1 = moins de pixels (fichiers plus légers) ; 2 = plus net sur viewports « mobile ».
+WEBSITE_SCREENSHOT_DEVICE_SCALE_FACTOR = max(
+    1.0,
+    min(3.0, float(os.environ.get('WEBSITE_SCREENSHOT_DEVICE_SCALE_FACTOR', '1'))),
+)
+WEBSITE_SCREENSHOT_BLOCK_TRACKERS = os.environ.get('WEBSITE_SCREENSHOT_BLOCK_TRACKERS', 'true').lower() in (
+    '1',
+    'true',
+    'yes',
+    'on',
+)
+WEBSITE_SCREENSHOT_REDUCED_MOTION = os.environ.get('WEBSITE_SCREENSHOT_REDUCED_MOTION', 'true').lower() in (
+    '1',
+    'true',
+    'yes',
+    'on',
+)
+WEBSITE_SCREENSHOT_DISABLE_ANIMATIONS = os.environ.get('WEBSITE_SCREENSHOT_DISABLE_ANIMATIONS', 'true').lower() in (
+    '1',
+    'true',
+    'yes',
+    'on',
+)
+# Recadrage automatique du blanc en bas (utile sur sites très "courts" dans de grands viewports).
+WEBSITE_SCREENSHOT_TRIM_WHITE_BOTTOM = os.environ.get('WEBSITE_SCREENSHOT_TRIM_WHITE_BOTTOM', 'true').lower() in (
+    '1',
+    'true',
+    'yes',
+    'on',
+)
+WEBSITE_SCREENSHOT_TRIM_WHITE_THRESHOLD = max(
+    220,
+    min(254, int(os.environ.get('WEBSITE_SCREENSHOT_TRIM_WHITE_THRESHOLD', '245'))),
+)
+WEBSITE_SCREENSHOT_TRIM_WHITE_MIN_TRAILING_RATIO = max(
+    0.05,
+    min(0.9, float(os.environ.get('WEBSITE_SCREENSHOT_TRIM_WHITE_MIN_TRAILING_RATIO', '0.18'))),
+)
+WEBSITE_SCREENSHOT_TRIM_WHITE_PADDING_PX = max(
+    0,
+    min(300, int(os.environ.get('WEBSITE_SCREENSHOT_TRIM_WHITE_PADDING_PX', '24'))),
+)
+WEBSITE_SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Allowed extensions
 ALLOWED_EXTENSIONS = {'xlsx', 'xls'}
@@ -142,7 +229,7 @@ CELERY_TASK_ACKS_LATE = os.environ.get('CELERY_TASK_ACKS_LATE', 'true').lower() 
 # (scraping/technical/seo/osint/pentest), sinon les tâches routées ne sont jamais exécutées.
 CELERY_WORKER_QUEUES = os.environ.get(
     'CELERY_WORKER_QUEUES',
-    'celery,scraping,scraping_interactive,mini_scrape,technical,seo,osint,pentest,heavy,website_full',
+    'celery,scraping,scraping_interactive,mini_scrape,technical,seo,screenshot,osint,pentest,heavy,website_full',
 )
 
 # File d’enqueue pour le pack « analyse site complet ».

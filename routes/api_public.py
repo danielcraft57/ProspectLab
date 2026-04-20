@@ -473,6 +473,12 @@ def _build_website_analysis_report(database: Database, entreprise_id: int, full:
     except Exception:
         seo = None
 
+    screenshots_latest = {}
+    try:
+        screenshots_latest = database.get_latest_entreprise_screenshots(entreprise_id) or {}
+    except Exception:
+        screenshots_latest = {}
+
     osint = None
     try:
         osint = database.get_osint_analysis_by_entreprise(entreprise_id)
@@ -500,6 +506,10 @@ def _build_website_analysis_report(database: Database, entreprise_id: int, full:
         'seo': {
             'status': 'done' if seo else 'never',
             'latest': seo,
+        },
+        'screenshots': {
+            'status': 'done' if screenshots_latest else 'never',
+            'latest': screenshots_latest,
         },
         'osint': {
             'status': 'done' if osint else 'never',
@@ -1524,6 +1534,7 @@ def public_website_analysis():
     from tasks.scraping_tasks import scrape_emails_task
     from tasks.technical_analysis_tasks import technical_analysis_task
     from tasks.seo_tasks import seo_analysis_task
+    from tasks.screenshot_tasks import website_screenshot_task
     from tasks.osint_tasks import osint_analysis_task
     from tasks.pentest_tasks import pentest_analysis_task
     from tasks.heavy_schedule import BulkSubtaskStagger
@@ -1567,6 +1578,16 @@ def public_website_analysis():
         tasks_launched['seo_error'] = str(e)
 
     try:
+        screenshot_task = website_screenshot_task.apply_async(
+            kwargs=dict(url=website, entreprise_id=entreprise_id, analysis_id=None, full_page=False),
+            countdown=_st.next_countdown(),
+            queue='screenshot',
+        )
+        tasks_launched['screenshot_task_id'] = screenshot_task.id
+    except Exception as e:
+        tasks_launched['screenshot_error'] = str(e)
+
+    try:
         osint_task = osint_analysis_task.apply_async(
             kwargs=dict(url=website, entreprise_id=entreprise_id),
             countdown=_st.next_countdown(),
@@ -1594,6 +1615,35 @@ def public_website_analysis():
         'tasks': tasks_launched,
         'message': 'Analyses lancées. Utilisez GET /api/public/website-analysis?website=... pour récupérer le rapport.',
     }), 202
+
+
+@api_public_bp.route('/entreprises/<int:entreprise_id>/screenshots', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+@public_response_cache(20)
+def get_entreprise_screenshots_public(entreprise_id: int):
+    """
+    API publique : dernier set de captures (desktop/tablet/mobile) + historique.
+    """
+    try:
+        entreprise = database.get_entreprise(entreprise_id)
+        if not entreprise:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable'}), 404
+
+        limit = min(max(int(request.args.get('limit', 20) or 20), 1), 100)
+        latest = database.get_latest_entreprise_screenshots(entreprise_id)
+        items = database.list_entreprise_screenshots(entreprise_id, limit=limit)
+        return jsonify(
+            {
+                'success': True,
+                'entreprise_id': entreprise_id,
+                'latest': latest,
+                'count': len(items),
+                'data': items,
+            }
+        )
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @api_public_bp.route('/campagnes/statuses', methods=['GET'])

@@ -100,6 +100,67 @@ class DatabaseSchema(DatabaseBase):
         finally:
             conn.close()
 
+    def ensure_entreprise_screenshots_table(self):
+        """
+        Migration idempotente : captures d'écran par set (desktop/tablet/mobile) avec date.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS entreprise_screenshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entreprise_id INTEGER NOT NULL,
+                    analysis_id INTEGER,
+                    source_task_id TEXT,
+                    page_url TEXT NOT NULL,
+                    full_page INTEGER DEFAULT 0,
+                    desktop_file_path TEXT,
+                    desktop_public_url TEXT,
+                    tablet_file_path TEXT,
+                    tablet_public_url TEXT,
+                    mobile_file_path TEXT,
+                    mobile_public_url TEXT,
+                    desktop_error TEXT,
+                    tablet_error TEXT,
+                    mobile_error TEXT,
+                    captured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE,
+                    FOREIGN KEY (analysis_id) REFERENCES analyses(id) ON DELETE SET NULL
+                )
+                ''',
+            )
+            # Compat migration depuis l'ancien modèle (1 ligne par device).
+            for col_name, col_type in (
+                ('desktop_file_path', 'TEXT'),
+                ('desktop_public_url', 'TEXT'),
+                ('tablet_file_path', 'TEXT'),
+                ('tablet_public_url', 'TEXT'),
+                ('mobile_file_path', 'TEXT'),
+                ('mobile_public_url', 'TEXT'),
+                ('desktop_error', 'TEXT'),
+                ('tablet_error', 'TEXT'),
+                ('mobile_error', 'TEXT'),
+                ('captured_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+                ('updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+            ):
+                self.safe_execute_sql(cursor, f'ALTER TABLE entreprise_screenshots ADD COLUMN {col_name} {col_type}')
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_entreprise_screenshots_ent_captured ON entreprise_screenshots (entreprise_id, captured_at DESC)',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_entreprise_screenshots_analysis ON entreprise_screenshots (analysis_id)',
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def ensure_market_roadmap_actions_table(self):
         """
         Migration idempotente : backlog actionnable de la roadmap marché/concurrence.
@@ -830,6 +891,42 @@ class DatabaseSchema(DatabaseBase):
         self.execute_sql(
             cursor,
             'CREATE INDEX IF NOT EXISTS idx_metric_snapshots_ent_captured ON entreprise_metric_snapshots (entreprise_id, captured_at DESC)',
+        )
+
+        self.execute_sql(
+            cursor,
+            '''
+            CREATE TABLE IF NOT EXISTS entreprise_screenshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entreprise_id INTEGER NOT NULL,
+                analysis_id INTEGER,
+                source_task_id TEXT,
+                page_url TEXT NOT NULL,
+                full_page INTEGER DEFAULT 0,
+                desktop_file_path TEXT,
+                desktop_public_url TEXT,
+                tablet_file_path TEXT,
+                tablet_public_url TEXT,
+                mobile_file_path TEXT,
+                mobile_public_url TEXT,
+                desktop_error TEXT,
+                tablet_error TEXT,
+                mobile_error TEXT,
+                captured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE,
+                FOREIGN KEY (analysis_id) REFERENCES analyses(id) ON DELETE SET NULL
+            )
+            ''',
+        )
+        self.execute_sql(
+            cursor,
+            'CREATE INDEX IF NOT EXISTS idx_entreprise_screenshots_ent_captured ON entreprise_screenshots (entreprise_id, captured_at DESC)',
+        )
+        self.execute_sql(
+            cursor,
+            'CREATE INDEX IF NOT EXISTS idx_entreprise_screenshots_analysis ON entreprise_screenshots (analysis_id)',
         )
 
         # Table des analyses techniques

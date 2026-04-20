@@ -11,6 +11,7 @@ from . import technical_analysis_tasks
 from . import osint_tasks
 from . import pentest_tasks
 from . import seo_tasks
+from . import screenshot_tasks
 from . import email_tasks
 from . import phone_tasks
 from . import debug_tasks
@@ -23,6 +24,7 @@ __all__ = [
     'osint_tasks',
     'pentest_tasks',
     'seo_tasks',
+    'screenshot_tasks',
     'email_tasks',
     'phone_tasks',
     'debug_tasks',

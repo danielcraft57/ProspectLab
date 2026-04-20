@@ -353,6 +353,39 @@ beat_schedule = {
 }
 ```
 
+### screenshot_tasks.py
+
+#### website_screenshot_task
+Capture des screenshots website (desktop / tablette / mobile) en viewport (non full-page), conversion WEBP et persistance BDD.
+
+**Points clés :**
+- Queue dédiée : `screenshot`
+- Logs détaillés : `logs/screenshot_tasks.log`
+- Paramètres `.env` : `WEBSITE_SCREENSHOT_*` (viewport, qualité, format, attente, rétention)
+- Rétention automatique par entreprise : conserve `WEBSITE_SCREENSHOT_KEEP_SETS`, purge BDD + fichiers disque plus anciens
+
+**Retour principal :**
+```python
+{
+    'success': True,
+    'screenshot_set_id': 123,
+    'entreprise_id': 456,
+    'captures': [...],
+    'errors': [...],
+    'captured_count': 3,
+    'retention_deleted_files': 6,
+    'elapsed_ms': 1824
+}
+```
+
+#### screenshot.cleanup_old_screenshot_sets
+Tâche périodique Celery Beat qui applique la rétention screenshots globalement (toutes entreprises, batchée).
+
+**Configuration :**
+- Planifiée toutes les heures dans `celery_app.py`
+- Batch max configurable : `WEBSITE_SCREENSHOT_CLEANUP_BATCH_SIZE`
+- Rétention ciblée : `WEBSITE_SCREENSHOT_KEEP_SETS`
+
 ## Suivi de progression
 
 ### Depuis Flask
@@ -418,6 +451,7 @@ Les logs par tache sont dans :
 - `logs/pentest_tasks.log` (niveau DEBUG pour détails complets)
 - `logs/osint_tasks.log` (niveau INFO)
 - `logs/cleanup_tasks.log`
+- `logs/screenshot_tasks.log`
 
 ## Monitoring
 

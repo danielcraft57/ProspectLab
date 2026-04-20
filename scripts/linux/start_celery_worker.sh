@@ -14,20 +14,20 @@ cd /opt/prospectlab || exit 1
 CELERY_WORKERS="${CELERY_WORKERS:-6}"
 # Liste par défaut selon preset (surchargée par CELERY_WORKER_QUEUES dans .env).
 # scraping_interactive : scrape unitaire Socket.IO (ne pas rester derrière scrape_analysis bulk sur scraping).
-_DEFAULT_Q="celery,scraping,scraping_interactive,technical,seo,osint,pentest,heavy,website_full"
+_DEFAULT_Q="celery,scraping,scraping_interactive,technical,seo,screenshot,osint,pentest,heavy,website_full"
 case "${CELERY_WORKER_QUEUE_PRESET:-}" in
     scraping_only)
         _DEFAULT_Q="scraping,scraping_interactive"
         ;;
     non_scraping)
-        _DEFAULT_Q="celery,technical,seo,osint,pentest,heavy,website_full"
+        _DEFAULT_Q="celery,technical,seo,screenshot,osint,pentest,heavy,website_full"
         ;;
 esac
 CELERY_WORKER_QUEUES="${CELERY_WORKER_QUEUES:-$_DEFAULT_Q}"
 # Option -Q : pas d'espaces (si .env = uniquement des espaces, tr donne "" → Celery démarre avec « -Q » vide et ne consomme rien correctement)
 CELERY_Q=$(echo "${CELERY_WORKER_QUEUES}" | tr -d ' ')
 if [ -z "$CELERY_Q" ]; then
-    CELERY_Q="celery,scraping,scraping_interactive,technical,seo,osint,pentest,heavy,website_full"
+    CELERY_Q="celery,scraping,scraping_interactive,technical,seo,screenshot,osint,pentest,heavy,website_full"
 fi
 
 # Aide au diagnostic cluster : si « scraping » n’est pas dans -Q, les bulk (scrape_analysis_*)
@@ -38,6 +38,16 @@ case ",${CELERY_Q}," in
         echo "prospectlab-celery: ATTENTION: la file « scraping » est absente de -Q (${CELERY_Q})." >&2
         echo "prospectlab-celery: Les tâches bulk de scraping ne seront pas exécutées sur ce nœud." >&2
         echo "prospectlab-celery: Ajoute « scraping » à CELERY_WORKER_QUEUES ou enlève CELERY_WORKER_QUEUE_PRESET=non_scraping." >&2
+        ;;
+esac
+
+# Les captures site sont routées vers la file « screenshot ».
+case ",${CELERY_Q}," in
+    *,screenshot,*) ;;
+    *)
+        echo "prospectlab-celery: ATTENTION: la file « screenshot » est absente de -Q (${CELERY_Q})." >&2
+        echo "prospectlab-celery: Les tâches website_screenshot_task resteront en PENDING." >&2
+        echo "prospectlab-celery: Ajoute « screenshot » à CELERY_WORKER_QUEUES." >&2
         ;;
 esac
 echo "prospectlab-celery: démarrage avec -Q ${CELERY_Q}" >&2

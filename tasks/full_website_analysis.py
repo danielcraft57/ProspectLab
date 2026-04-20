@@ -8,6 +8,7 @@ du scraper à l'OSINT et au pentest sans course avec les autres tâches.
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin, urlparse
 
@@ -16,6 +17,7 @@ from services.logging_config import setup_logger
 from tasks.scraping_tasks import run_scrape_emails_inline
 from tasks.technical_analysis_tasks import technical_analysis_task
 from tasks.seo_tasks import seo_analysis_task
+from tasks.screenshot_tasks import website_screenshot_task
 from tasks.osint_tasks import osint_analysis_task
 from tasks.phone_tasks import analyze_phones_task
 from tasks.pentest_tasks import pentest_analysis_task
@@ -438,6 +440,7 @@ def run_full_website_analysis_impl(
     use_lighthouse: bool = False,
     enable_technical: bool = True,
     enable_seo: bool = True,
+    enable_screenshot: bool = True,
     enable_osint: bool = True,
     enable_pentest: bool = True,
 ):
@@ -571,6 +574,7 @@ def run_full_website_analysis_impl(
         for n, on in (
             ('technique', enable_technical),
             ('SEO', enable_seo),
+            ('screenshot', enable_screenshot),
             ('OSINT', enable_osint),
             ('pentest', enable_pentest),
         )
@@ -590,7 +594,7 @@ def run_full_website_analysis_impl(
         )
 
     # Réduit les HTTP 429 avant la prochaine salve HTTP (technique / SEO / …).
-    any_post_scrape = enable_technical or enable_seo or enable_osint or enable_pentest
+    any_post_scrape = enable_technical or enable_seo or enable_screenshot or enable_osint or enable_pentest
     if any_post_scrape and FULL_ANALYSIS_INTER_STEP_PAUSE_SEC > 0:
         logger.info(
             'Pause %.1fs avant les analyses (FULL_ANALYSIS_INTER_STEP_PAUSE_SEC).',
@@ -611,22 +615,64 @@ def run_full_website_analysis_impl(
         if n_forms_raw != len(forms_pentest):
             scrape_counts['forms'] = len(forms_pentest)
 
-    # 2) Technique
-    if enable_technical:
-        try:
-            progress('technical', 28, 'Analyse technique…')
-            _run_subtask_eager(
+    screenshot_summary = None
+    run_technical_and_screenshot_parallel = enable_technical and enable_screenshot
+    if run_technical_and_screenshot_parallel:
+        progress('technical', 28, 'Analyse technique + screenshots (parallèle)…')
+        progress('screenshot', 30, 'Capture screenshots desktop/tablet/mobile…')
+
+        def _run_technical():
+            return _run_subtask_eager(
                 technical_analysis_task,
                 url=url,
                 entreprise_id=entreprise_id,
                 enable_nmap=enable_nmap,
             )
-            steps['technical'] = 'ok'
-        except Exception as e:
-            logger.exception('Full analysis: technique échouée')
-            steps['technical'] = f'erreur: {e!s}'[:200]
+
+        def _run_screenshot():
+            return _run_subtask_eager(
+                website_screenshot_task,
+                url=url,
+                entreprise_id=entreprise_id,
+                analysis_id=analyse_id,
+                full_page=False,
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_map = {
+                executor.submit(_run_technical): 'technical',
+                executor.submit(_run_screenshot): 'screenshot',
+            }
+            for future in as_completed(future_map):
+                module_name = future_map[future]
+                try:
+                    result = future.result()
+                    if module_name == 'screenshot':
+                        screenshot_summary = result
+                    steps[module_name] = 'ok'
+                except Exception as e:
+                    if module_name == 'technical':
+                        logger.exception('Full analysis: technique échouée')
+                    else:
+                        logger.exception('Full analysis: screenshot échoué')
+                    steps[module_name] = f'erreur: {e!s}'[:200]
     else:
-        steps['technical'] = 'désactivé'
+        # 2) Technique
+        if enable_technical:
+            try:
+                progress('technical', 28, 'Analyse technique…')
+                _run_subtask_eager(
+                    technical_analysis_task,
+                    url=url,
+                    entreprise_id=entreprise_id,
+                    enable_nmap=enable_nmap,
+                )
+                steps['technical'] = 'ok'
+            except Exception as e:
+                logger.exception('Full analysis: technique échouée')
+                steps['technical'] = f'erreur: {e!s}'[:200]
+        else:
+            steps['technical'] = 'désactivé'
 
     # 3) SEO
     if enable_seo:
@@ -645,7 +691,26 @@ def run_full_website_analysis_impl(
     else:
         steps['seo'] = 'désactivé'
 
-    # 4) OSINT (téléphones : tâche dédiée analyze_phones_task, comme analyze_emails_task)
+    # 4) Screenshot site (si non lancé en parallèle avec la technique)
+    if not run_technical_and_screenshot_parallel:
+        if enable_screenshot:
+            try:
+                progress('screenshot', 56, 'Capture screenshots desktop/tablet/mobile…')
+                screenshot_summary = _run_subtask_eager(
+                    website_screenshot_task,
+                    url=url,
+                    entreprise_id=entreprise_id,
+                    analysis_id=analyse_id,
+                    full_page=False,
+                )
+                steps['screenshot'] = 'ok'
+            except Exception as e:
+                logger.exception('Full analysis: screenshot échoué')
+                steps['screenshot'] = f'erreur: {e!s}'[:200]
+        else:
+            steps['screenshot'] = 'désactivé'
+
+    # 5) OSINT (téléphones : tâche dédiée analyze_phones_task, comme analyze_emails_task)
     phone_pack = None
     if enable_osint:
         try:
@@ -682,7 +747,7 @@ def run_full_website_analysis_impl(
         steps['phone_osint'] = 'désactivé'
         steps['osint'] = 'désactivé'
 
-    # 5) Pentest
+    # 6) Pentest
     if enable_pentest:
         try:
             progress('pentest', 82, 'Analyse pentest / sécurité applicative…')
@@ -723,6 +788,7 @@ def run_full_website_analysis_impl(
         'scrape_counts': scrape_counts,
         'scores': scores,
         'image_urls_sample': image_urls[:24],
+        'screenshots': screenshot_summary or {},
         'duration_seconds': round(duree, 2),
         'message': f'Analyse terminée ({modules_hint}).',
     }

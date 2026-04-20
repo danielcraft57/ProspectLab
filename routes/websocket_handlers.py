@@ -16,6 +16,7 @@ from tasks.scraping_tasks import (
     run_scrape_emails_inline,
 )
 from tasks.technical_analysis_tasks import technical_analysis_task
+from tasks.screenshot_tasks import website_screenshot_task
 from tasks.pentest_tasks import pentest_analysis_task
 from tasks.osint_tasks import osint_analysis_task
 from tasks.seo_tasks import seo_analysis_task
@@ -426,7 +427,7 @@ def register_websocket_handlers(socketio, app):
                                                     socketio,
                                                     'technical_analysis_started',
                                                     {
-                                                        'message': f'Analyse technique démarrée pour {total_entreprises_avec_site} entreprises...',
+                                                        'message': f'Analyse technique + SEO + screenshots démarrée pour {total_entreprises_avec_site} entreprises...',
                                                         'total': total_entreprises_avec_site,
                                                         'current': 0,
                                                         'immediate_100': False
@@ -2007,6 +2008,7 @@ def register_websocket_handlers(socketio, app):
             url = data.get('url')
             entreprise_id = data.get('entreprise_id')
             enable_nmap = data.get('enable_nmap', False)
+            enable_screenshot = data.get('enable_screenshot', True)
             session_id = request.sid
 
             try:
@@ -2071,6 +2073,29 @@ def register_websocket_handlers(socketio, app):
                 }, room=session_id)
                 return
 
+            screenshot_task_id = None
+            if enable_screenshot:
+                try:
+                    screenshot_task = website_screenshot_task.apply_async(
+                        kwargs=dict(
+                            url=url,
+                            entreprise_id=entreprise_id,
+                            analysis_id=None,
+                            full_page=False,
+                        ),
+                        countdown=cd,
+                        queue='screenshot',
+                    )
+                    screenshot_task_id = screenshot_task.id
+                except Exception as e:
+                    logger.warning(
+                        '[Socket.IO] lancement screenshot échoué sid=%s entreprise_id=%s: %s',
+                        session_id,
+                        entreprise_id,
+                        str(e),
+                        exc_info=True,
+                    )
+
             # Stocker la tâche
             with tasks_lock:
                 active_tasks[session_id] = {'task_id': task.id, 'type': 'technical', 'url': url}
@@ -2085,7 +2110,8 @@ def register_websocket_handlers(socketio, app):
 
             safe_emit(socketio, 'technical_analysis_started', {
                 'message': 'Analyse technique démarrée...',
-                'task_id': task.id
+                'task_id': task.id,
+                'screenshot_task_id': screenshot_task_id,
             }, room=session_id)
 
             # Surveiller la progression
@@ -2151,6 +2177,139 @@ def register_websocket_handlers(socketio, app):
                     'error': f'Erreur lors du démarrage de l\'analyse technique: {str(e)}'
                 }, room=request.sid)
             except:
+                pass
+
+    @socketio.on('start_screenshot_capture')
+    def handle_start_screenshot_capture(data):
+        """
+        Démarre une capture screenshots (desktop/tablette/mobile) via Celery.
+        """
+        try:
+            url = data.get('url') if isinstance(data, dict) else None
+            entreprise_id = data.get('entreprise_id') if isinstance(data, dict) else None
+            session_id = request.sid
+
+            if not url and entreprise_id:
+                try:
+                    entreprise = database.get_entreprise(entreprise_id)
+                    if entreprise:
+                        url = entreprise.get('website') or entreprise.get('url')
+                except Exception as e:
+                    logger.warning(
+                        '[Socket.IO] screenshot fallback url échoué via entreprise_id=%s: %s',
+                        entreprise_id,
+                        str(e),
+                        exc_info=True,
+                    )
+
+            if not url:
+                safe_emit(socketio, 'screenshot_capture_error', {'error': 'URL requise', 'entreprise_id': entreprise_id}, room=session_id)
+                return
+
+            if not broker_ping_ok():
+                safe_emit(socketio, 'screenshot_capture_error', {'error': _CELERY_BROKER_UNREACHABLE_MSG, 'entreprise_id': entreprise_id}, room=session_id)
+                return
+
+            cd = next_websocket_stagger_countdown(session_id)
+            try:
+                task = website_screenshot_task.apply_async(
+                    kwargs=dict(url=url, entreprise_id=entreprise_id, analysis_id=None, full_page=False),
+                    countdown=cd,
+                    queue='screenshot',
+                )
+            except Exception as e:
+                logger.exception('[Socket.IO] apply_async screenshot échoué sid=%s entreprise_id=%s', session_id, entreprise_id)
+                safe_emit(socketio, 'screenshot_capture_error', {'error': f'Erreur lors du démarrage de la tâche: {str(e)}', 'entreprise_id': entreprise_id}, room=session_id)
+                return
+
+            safe_emit(
+                socketio,
+                'screenshot_capture_started',
+                {
+                    'message': 'Capture screenshots démarrée...',
+                    'task_id': task.id,
+                    'entreprise_id': entreprise_id,
+                },
+                room=session_id,
+            )
+
+            def monitor_task():
+                try:
+                    _sleep_before_monitor_poll(cd)
+                    last_meta = None
+                    while True:
+                        try:
+                            task_result = celery.AsyncResult(task.id)
+                            current_state = task_result.state
+
+                            if current_state == 'PROGRESS':
+                                meta = _celery_progress_meta_as_dict(task_result.info)
+                                if meta != last_meta:
+                                    safe_emit(
+                                        socketio,
+                                        'screenshot_capture_progress',
+                                        {
+                                            'entreprise_id': entreprise_id,
+                                            'progress': meta.get('progress', 0),
+                                            'message': meta.get('message', ''),
+                                            'device': meta.get('device'),
+                                        },
+                                        room=session_id,
+                                    )
+                                    last_meta = meta
+                            elif current_state == 'SUCCESS':
+                                result = _celery_success_result_as_dict(task_result.result)
+                                safe_emit(
+                                    socketio,
+                                    'screenshot_capture_complete',
+                                    {
+                                        'success': True,
+                                        'entreprise_id': entreprise_id,
+                                        'url': url,
+                                        'result': result or {},
+                                    },
+                                    room=session_id,
+                                )
+                                break
+                            elif current_state == 'FAILURE':
+                                safe_emit(
+                                    socketio,
+                                    'screenshot_capture_error',
+                                    {
+                                        'entreprise_id': entreprise_id,
+                                        'error': str(task_result.info),
+                                    },
+                                    room=session_id,
+                                )
+                                break
+                        except Exception as e:
+                            safe_emit(
+                                socketio,
+                                'screenshot_capture_error',
+                                {
+                                    'entreprise_id': entreprise_id,
+                                    'error': f'Erreur lors du suivi de la tâche: {str(e)}',
+                                },
+                                room=session_id,
+                            )
+                            break
+                        time.sleep(_WS_MONITOR_POLL_SEC)
+                except Exception as e:
+                    safe_emit(
+                        socketio,
+                        'screenshot_capture_error',
+                        {
+                            'entreprise_id': entreprise_id,
+                            'error': f'Erreur dans le suivi: {str(e)}',
+                        },
+                        room=session_id,
+                    )
+
+            _start_monitor_background(socketio, monitor_task)
+        except Exception as e:
+            try:
+                safe_emit(socketio, 'screenshot_capture_error', {'error': f'Erreur lors du démarrage de la capture: {str(e)}'}, room=request.sid)
+            except Exception:
                 pass
 
     @socketio.on('monitor_campagne')
