@@ -61,6 +61,10 @@ uploads/*
 exports/*
 !exports/.gitkeep
 
+# Veille concurrentielle (experimental): rapports generes
+scripts/experiments/competitive_intel/exports/*
+!scripts/experiments/competitive_intel/exports/.gitkeep
+
 # IDE
 .vscode/
 .idea/
@@ -126,5 +130,6 @@ static/screenshots/
 scan_report.json
 mobile/scripts/.patch-tmp/
 scripts/google_maps_tools/.google_maps_api_key
+scripts/google_maps_tools/presets_grand_est.json
 ml_face/
 .cursorrules

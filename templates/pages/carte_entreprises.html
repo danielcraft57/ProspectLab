@@ -38,8 +38,13 @@
             </button>
         </div>
         <div class="form-group" style="display: flex; align-items: flex-end;">
+            <button type="button" id="btn-load-viewport" class="btn btn-secondary" title="Centre = milieu de la carte, rayon = cadre visible">
+                <i class="fas fa-expand" aria-hidden="true"></i> Zone visible
+            </button>
+        </div>
+        <div class="form-group" style="display: flex; align-items: flex-end;">
             <button type="button" id="btn-load-all" class="btn btn-secondary">
-                <i class="fas fa-map-marked-alt" aria-hidden="true"></i> Charger toutes
+                <i class="fas fa-map-marked-alt" aria-hidden="true"></i> Charger toutes (lent)
             </button>
         </div>
     </div>
@@ -86,7 +91,7 @@
                 <div id="results-list" class="carte-results-list"></div>
                 <div id="results-empty" class="carte-sidebar-empty">
                     <i class="fas fa-map-marker-alt" aria-hidden="true"></i>
-                    <p>Cliquez sur « Charger toutes » ou définissez un point et « Rechercher à proximité » pour afficher les entreprises sur la carte.</p>
+                    <p>Au chargement, la carte propose ta position ou une zone Grand Est par défaut. Tu peux zoomer puis « Zone visible », ou « Rechercher à proximité ». « Charger toutes » charge toute la base et peut être très lent.</p>
                 </div>
             </div>
         </aside>

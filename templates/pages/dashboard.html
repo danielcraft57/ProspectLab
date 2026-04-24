@@ -70,6 +70,19 @@
             {'id': 'stat-click-rate', 'label': 'Taux de clic'}
         ], 'stats-grid--email') }}
     </section>
+
+    <section class="dashboard-kpi-block" aria-labelledby="dashboard-kpi-followup-title">
+        <div class="dashboard-kpi-block-head">
+            <h2 id="dashboard-kpi-followup-title" class="dashboard-kpi-block-title">Suivi &amp; conversion</h2>
+            <span class="dashboard-kpi-block-hint">Réponses, RDV, prospects chauds</span>
+        </div>
+        {{ stats_grid([
+            {'id': 'stat-replies', 'label': 'Réponses'},
+            {'id': 'stat-reply-rate', 'label': 'Taux de réponse'},
+            {'id': 'stat-rdv', 'label': 'RDV (CRM)'},
+            {'id': 'stat-hot', 'label': 'Prospects chauds (clics)'}
+        ], 'stats-grid--followup') }}
+    </section>
 </div>
 
 <section class="dashboard-insights" id="dashboard-insights">
@@ -111,6 +124,22 @@
         <div class="chart-card">
             <h3>Top secteurs par prospects gagnés</h3>
             <canvas id="chart-secteurs-gagnes"></canvas>
+        </div>
+    </div>
+</section>
+
+<section class="dashboard-section">
+    <h2 class="dashboard-section-title">Funnel CRM & actions</h2>
+    <div class="charts-section">
+        <div class="chart-card">
+            <h3>Funnel prospection (CRM)</h3>
+            <canvas id="chart-crm-funnel"></canvas>
+        </div>
+        <div class="chart-card">
+            <h3>Prospects chauds à relancer</h3>
+            <div id="hot-leads" class="dashboard-list">
+                <p class="dashboard-muted">Chargement...</p>
+            </div>
         </div>
     </div>
 </section>

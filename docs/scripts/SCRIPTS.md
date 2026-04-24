@@ -208,6 +208,39 @@ python scripts/clear_redis.py
 
 **Avertissement :** Cette opération supprime toutes les tâches en attente et les résultats en cache dans Redis.
 
+### Scripts emails (bounces / statuts)
+
+#### `fetch_bounces_imap.py` - Scan IMAP des bounces
+
+Récupère des bounces depuis une boite IMAP et marque les destinataires en `bounced` dans `emails_envoyes`.
+
+**Emplacement :** `scripts/fetch_bounces_imap.py`
+
+#### `import_bounces.py` - Import manuel de bounces
+
+Import simple a partir d'un fichier (txt/eml/mbox). Utile pour rattraper un lot de NDR.
+
+**Emplacement :** `scripts/import_bounces.py`
+
+#### `recalculate_bounce_statuses.py` - Recalcul du statut entreprise Bounce
+
+Recalcule les entreprises qui doivent passer en statut `Bounce` selon la regle stricte:
+une entreprise passe `Bounce` seulement si toutes ses adresses deja utilisees en campagne ont bouncé.
+
+**Emplacement :** `scripts/recalculate_bounce_statuses.py`
+
+**Utilisation :**
+```powershell
+# Dry-run
+python .\scripts\recalculate_bounce_statuses.py
+
+# Appliquer
+python .\scripts\recalculate_bounce_statuses.py --apply
+
+# Appliquer + repasser les faux Bounce en À qualifier
+python .\scripts\recalculate_bounce_statuses.py --apply --reset-non-qualifying
+```
+
 ### Scripts de test
 
 #### `test_multicanal_send.py` - Test d'envoi multicanal (X/Meta)

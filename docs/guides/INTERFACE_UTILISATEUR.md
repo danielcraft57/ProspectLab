@@ -72,7 +72,9 @@ Affiche toutes les entreprises importees avec leurs informations principales.
 
 ### Graph entreprises (liens externes)
 
-Page **`/graph-entreprises`** (l'ancienne URL **`/agences-reseau`** redirige en permanence vers celle-ci). Visualisation des **relations entre fiches et domaines tiers** (liens sortants au scraping) : graphe vis-network, rail de stats, dock d'actions a droite (plein ecran, zoom, export PNG, theme, etc.), filtres locaux et panneau de **perimetre serveur**, carte detail au clic, infobulles enrichies. Guide detaille : [GRAPH_ENTREPRISES.md](GRAPH_ENTREPRISES.md).
+Page **`/graph-entreprises`** (l'ancienne URL **`/agences-reseau`** redirige en permanence vers celle-ci). Visualisation des **relations entre fiches et domaines tiers** (liens sortants au scraping) : graphe vis-network, rail de stats, dock d'actions a droite (plein ecran, zoom, export PNG, theme, etc.), filtres locaux et panneau de **perimetre serveur**, carte detail au clic, infobulles enrichies.  
+Au premier chargement, la page applique automatiquement un perimetre prudent (`max_link_rows=1200`, `max_enterprises=160`) si aucun filtre n'est saisi, pour eviter les freezes sur gros volumes.  
+Guide detaille : [GRAPH_ENTREPRISES.md](GRAPH_ENTREPRISES.md).
 
 ### Fiche entreprise detaillee
 

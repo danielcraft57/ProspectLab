@@ -99,6 +99,10 @@
     const scopeAutocompleteEl = document.getElementById('agences-scope-autocomplete');
     const scopeApplyBtn = document.getElementById('agences-scope-apply');
 
+    // Garde-fous au tout premier chargement de page (évite le "mur de liens" sur gros volumes).
+    const BOOTSTRAP_MAX_LINK_ROWS = 1200;
+    const BOOTSTRAP_MAX_ENTERPRISES = 160;
+
     let scopeAutocompleteTimer = null;
     let scopeAutocompleteActiveIdx = -1;
     let graphResizeObserver = null;
@@ -3195,6 +3199,24 @@
         return '/api/entreprises/graph' + (qs ? '?' + qs : '');
     }
 
+    function hasAnyScopeInput() {
+        return !!(
+            (scopeSearchEl && scopeSearchEl.value.trim()) ||
+            (scopeDomainEl && scopeDomainEl.value.trim()) ||
+            (scopeIdsEl && scopeIdsEl.value.trim()) ||
+            (scopeOnlyCreditEl && scopeOnlyCreditEl.checked) ||
+            (scopeMaxRowsEl && scopeMaxRowsEl.value.trim()) ||
+            (scopeMaxEntsEl && scopeMaxEntsEl.value.trim())
+        );
+    }
+
+    function applyBootstrapScopeDefaults() {
+        // On applique uniquement si l'utilisateur n'a encore rien saisi.
+        if (hasAnyScopeInput()) return;
+        if (scopeMaxRowsEl) scopeMaxRowsEl.value = String(BOOTSTRAP_MAX_LINK_ROWS);
+        if (scopeMaxEntsEl) scopeMaxEntsEl.value = String(BOOTSTRAP_MAX_ENTERPRISES);
+    }
+
     function refreshGraphIncremental() {
         if (!network || !nodesDS || !edgesDS) {
             loadGraph();
@@ -3954,5 +3976,6 @@
     bindExternalCardActions();
     bindExternalMiniScrapeEvents();
     bindExternalAnalysisRealtime();
+    applyBootstrapScopeDefaults();
     loadGraph();
 })();

@@ -6,6 +6,16 @@
 (function() {
     'use strict';
 
+    /** Pas de chargement massif au démarrage : géoloc + rayon + limite serveur (voir bootstrapCarte). */
+    const BOOTSTRAP_RADIUS_KM = 14;
+    const BOOTSTRAP_LIMIT = 280;
+    const FALLBACK_CENTER = { lat: 49.1193, lng: 6.1757 };
+    const FALLBACK_RADIUS_KM = 40;
+    const VIEWPORT_LIMIT = 320;
+    const MOVEEND_DEBOUNCE_MS = 850;
+    /** Rechargement auto quand la carte bouge (désactivé si tu préfères uniquement le bouton zone). */
+    const RELOAD_ON_MAP_MOVEEND = false;
+
     let map;
     let markers = [];
     let currentLayer = null;
@@ -13,13 +23,15 @@
     let selectionMode = false;
     const selectedIds = new Set();
     let groupes = [];
+    let moveEndTimer = null;
+    let bootstrapDone = false;
 
     document.addEventListener('DOMContentLoaded', () => {
         initMap();
         loadSecteurs();
         loadGroupes();
         setupEventListeners();
-        loadAllEntreprises();
+        bootstrapCarte();
     });
 
     function initMap() {
@@ -35,16 +47,180 @@
             if (latInput) latInput.value = e.latlng.lat.toFixed(6);
             if (lngInput) lngInput.value = e.latlng.lng.toFixed(6);
         });
+
+        if (RELOAD_ON_MAP_MOVEEND) {
+            map.on('moveend', function() {
+                if (!bootstrapDone) return;
+                if (moveEndTimer) clearTimeout(moveEndTimer);
+                moveEndTimer = setTimeout(() => {
+                    loadCurrentViewport(false);
+                }, MOVEEND_DEBOUNCE_MS);
+            });
+        }
+    }
+
+    function tryBrowserGeolocation() {
+        return new Promise(function(resolve) {
+            if (!navigator.geolocation || !navigator.geolocation.getCurrentPosition) {
+                resolve(null);
+                return;
+            }
+            if (typeof window.isSecureContext === 'boolean' && window.isSecureContext !== true) {
+                resolve(null);
+                return;
+            }
+            navigator.geolocation.getCurrentPosition(
+                function(pos) {
+                    resolve({
+                        lat: pos.coords.latitude,
+                        lng: pos.coords.longitude
+                    });
+                },
+                function() {
+                    resolve(null);
+                },
+                {
+                    enableHighAccuracy: false,
+                    maximumAge: 120000,
+                    timeout: 18000
+                }
+            );
+        });
+    }
+
+    async function bootstrapCarte() {
+        const radiusEl = document.getElementById('search-radius');
+        const latEl = document.getElementById('search-lat');
+        const lngEl = document.getElementById('search-lng');
+
+        const geo = await tryBrowserGeolocation();
+        let lat;
+        let lng;
+        let radiusKm = BOOTSTRAP_RADIUS_KM;
+
+        if (geo && geo.lat != null && geo.lng != null && !isNaN(geo.lat) && !isNaN(geo.lng)) {
+            lat = geo.lat;
+            lng = geo.lng;
+            if (radiusEl) radiusEl.value = String(BOOTSTRAP_RADIUS_KM);
+        } else {
+            lat = FALLBACK_CENTER.lat;
+            lng = FALLBACK_CENTER.lng;
+            radiusKm = FALLBACK_RADIUS_KM;
+            if (radiusEl) radiusEl.value = String(FALLBACK_RADIUS_KM);
+            if (window.Notifications) {
+                window.Notifications.show(
+                    'Position non disponible ou refusée : affichage d’un secteur par défaut (Grand Est). Tu peux zoomer puis « Zone visible » ou saisir lat/lng.',
+                    'info'
+                );
+            }
+        }
+
+        if (latEl) latEl.value = lat.toFixed(6);
+        if (lngEl) lngEl.value = lng.toFixed(6);
+
+        try {
+            await fetchAndDisplayNearby(lat, lng, radiusKm, {
+                limit: BOOTSTRAP_LIMIT,
+                fit: true,
+                showCircle: true,
+                panZoom: false
+            });
+        } catch (e) {
+            console.error(e);
+            if (window.Notifications) {
+                window.Notifications.show('Impossible de charger les entreprises à proximité. Réessaie ou utilise « Zone visible ».', 'error');
+            }
+        }
+
+        bootstrapDone = true;
+    }
+
+    function boundsRadiusKm(bounds) {
+        const c = bounds.getCenter();
+        const nw = bounds.getNorthWest();
+        const rKm = c.distanceTo(nw) / 1000;
+        return Math.min(100, Math.max(8, rKm * 1.12));
+    }
+
+    async function fetchAndDisplayNearby(lat, lng, radiusKm, options) {
+        const opts = options || {};
+        const limit = opts.limit != null ? opts.limit : 300;
+        const fit = opts.fit !== false;
+        const showCircle = opts.showCircle !== false;
+        const panZoom = opts.panZoom !== false;
+
+        let url = '/api/entreprises/nearby?latitude=' + encodeURIComponent(lat) + '&longitude=' + encodeURIComponent(lng) +
+            '&radius_km=' + encodeURIComponent(radiusKm) + '&limit=' + encodeURIComponent(limit);
+        const secteurEl = document.getElementById('filter-secteur');
+        const secteur = secteurEl ? secteurEl.value : '';
+        if (secteur) url += '&secteur=' + encodeURIComponent(secteur);
+
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (!response.ok || !data.success || !Array.isArray(data.entreprises)) {
+            const msg = (data && data.error) ? data.error : 'Réponse serveur invalide';
+            throw new Error(msg);
+        }
+
+        displayEntreprises(data.entreprises, { fit: fit });
+        if (panZoom) {
+            map.setView([lat, lng], Math.max(map.getZoom(), 11));
+        }
+        if (currentLayer) {
+            map.removeLayer(currentLayer);
+            currentLayer = null;
+        }
+        if (showCircle) {
+            currentLayer = L.circle([lat, lng], {
+                radius: radiusKm * 1000,
+                color: '#6366f1',
+                fillColor: '#6366f1',
+                fillOpacity: 0.15
+            }).addTo(map);
+        }
+        return true;
+    }
+
+    async function loadCurrentViewport(showToast) {
+        if (!map) return;
+        const b = map.getBounds();
+        const c = b.getCenter();
+        const radiusKm = boundsRadiusKm(b);
+        const latEl = document.getElementById('search-lat');
+        const lngEl = document.getElementById('search-lng');
+        const radiusEl = document.getElementById('search-radius');
+        if (latEl) latEl.value = c.lat.toFixed(6);
+        if (lngEl) lngEl.value = c.lng.toFixed(6);
+        if (radiusEl) radiusEl.value = String(Math.round(radiusKm));
+
+        try {
+            await fetchAndDisplayNearby(c.lat, c.lng, radiusKm, {
+                limit: VIEWPORT_LIMIT,
+                fit: false,
+                showCircle: false,
+                panZoom: false
+            });
+            if (showToast && window.Notifications) {
+                window.Notifications.show(
+                    'Zone carte : rayon ~' + Math.round(radiusKm) + ' km (max ' + VIEWPORT_LIMIT + ' fiches).',
+                    'info'
+                );
+            }
+        } catch (err) {
+            console.error(err);
+            if (window.Notifications) window.Notifications.show('Erreur lors du chargement de la zone', 'error');
+        }
     }
 
     async function loadSecteurs() {
         try {
-            const response = await fetch('/api/entreprises');
-            const entreprises = await response.json();
-            const secteurs = [...new Set(entreprises.map(e => e.secteur).filter(Boolean))].sort();
+            const response = await fetch('/api/secteurs');
+            const raw = await response.json();
+            const list = Array.isArray(raw) ? raw : [];
             const select = document.getElementById('filter-secteur');
             if (!select) return;
-            secteurs.forEach(secteur => {
+            list.forEach(function(secteur) {
                 const option = document.createElement('option');
                 option.value = secteur;
                 option.textContent = secteur;
@@ -107,6 +283,7 @@
 
     function setupEventListeners() {
         const btnSearch = document.getElementById('btn-search-nearby');
+        const btnViewport = document.getElementById('btn-load-viewport');
         const btnLoadAll = document.getElementById('btn-load-all');
         const filterSecteur = document.getElementById('filter-secteur');
         const selectionToggle = document.getElementById('selection-mode-toggle');
@@ -121,6 +298,7 @@
         const btnCancelCreate = document.getElementById('btn-cancel-create-group');
 
         if (btnSearch) btnSearch.addEventListener('click', searchNearby);
+        if (btnViewport) btnViewport.addEventListener('click', function() { loadCurrentViewport(true); });
         if (btnLoadAll) btnLoadAll.addEventListener('click', loadAllEntreprises);
         if (filterSecteur) filterSecteur.addEventListener('change', filterBySecteur);
 
@@ -282,32 +460,21 @@
         const lat = parseFloat(document.getElementById('search-lat').value);
         const lng = parseFloat(document.getElementById('search-lng').value);
         const radius = parseFloat(document.getElementById('search-radius').value);
-        const secteur = document.getElementById('filter-secteur').value;
 
         if (!lat || !lng || isNaN(lat) || isNaN(lng)) {
             if (window.Notifications) window.Notifications.show('Définissez un point (cliquez sur la carte ou saisissez lat/lng)', 'warning');
             return;
         }
 
-        try {
-            let url = '/api/entreprises/nearby?latitude=' + lat + '&longitude=' + lng + '&radius_km=' + radius;
-            if (secteur) url += '&secteur=' + encodeURIComponent(secteur);
-            const response = await fetch(url);
-            const data = await response.json();
+        const rKm = !isNaN(radius) && radius > 0 ? radius : 10;
 
-            if (data.success && data.entreprises) {
-                displayEntreprises(data.entreprises, lat, lng);
-                map.setView([lat, lng], 12);
-                if (currentLayer) map.removeLayer(currentLayer);
-                currentLayer = L.circle([lat, lng], {
-                    radius: radius * 1000,
-                    color: '#6366f1',
-                    fillColor: '#6366f1',
-                    fillOpacity: 0.15
-                }).addTo(map);
-            } else {
-                if (window.Notifications) window.Notifications.show('Aucun résultat ou erreur serveur', 'info');
-            }
+        try {
+            await fetchAndDisplayNearby(lat, lng, rKm, {
+                limit: 350,
+                fit: true,
+                showCircle: true,
+                panZoom: true
+            });
         } catch (err) {
             console.error(err);
             if (window.Notifications) window.Notifications.show('Erreur lors de la recherche', 'error');
@@ -315,11 +482,16 @@
     }
 
     async function loadAllEntreprises() {
+        if (!window.confirm(
+            'Charger toutes les fiches avec coordonnées peut figer le navigateur un bon moment si la base est très grande. Continuer ?'
+        )) {
+            return;
+        }
         try {
             const response = await fetch('/api/entreprises');
             const entreprises = await response.json();
             const withCoords = entreprises.filter(e => e.latitude && e.longitude);
-            displayEntreprises(withCoords);
+            displayEntreprises(withCoords, { fit: true });
             if (currentLayer) {
                 map.removeLayer(currentLayer);
                 currentLayer = null;
@@ -347,7 +519,10 @@
         });
     }
 
-    function displayEntreprises(entreprises) {
+    function displayEntreprises(entreprises, options) {
+        const opts = options || {};
+        const fit = opts.fit !== false;
+
         clearMarkers();
         displayedEntreprises = Array.isArray(entreprises) ? entreprises : [];
 
@@ -389,7 +564,7 @@
             });
         });
 
-        if (markers.length > 0) {
+        if (markers.length > 0 && fit) {
             const group = new L.featureGroup(markers);
             if (markers.length === 1) {
                 map.setView([displayedEntreprises[0].latitude, displayedEntreprises[0].longitude], 13);

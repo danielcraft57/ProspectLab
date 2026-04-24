@@ -922,6 +922,7 @@ def nearby_entreprises():
         radius_km = float(request.args.get('radius_km', 10))
         secteur = request.args.get('secteur')
         limit = int(request.args.get('limit', 50))
+        limit = max(1, min(limit, 500))
         
         if not latitude or not longitude:
             return jsonify({'error': 'Latitude et longitude requises'}), 400

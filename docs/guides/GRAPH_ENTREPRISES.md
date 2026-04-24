@@ -18,6 +18,8 @@ Vue interactive **entreprises ↔ domaines tiers** découverts lors du scraping 
 - **Conteneur graphe** : canvas vis-network dans `#graph-entreprises-canvas` (pile `#graph-entreprises-canvas-stack`).
 - **Filtres locaux** : types de nœuds (fiche, agence, autres domaines), types d’arêtes (crédit, lien, réf. site, fiche en base), libellés compacts, recherche sur le graphe chargé, option **Zones** (teinte des fiches par localisation).
 - **Périmètre serveur** : recherche texte, filtre par domaine, plafonds lignes / entreprises, IDs entreprises, option « crédits seuls » ; rechargement via **Actualiser**.
+- **Chargement initial allégé (anti-freeze)** : au premier affichage, si les champs périmètre sont vides, la page applique automatiquement `max_link_rows=1200` et `max_enterprises=160` avant le premier appel API.
+- **Comportement inchangé en manuel** : dès qu'un utilisateur saisit un périmètre (recherche, domaine, IDs, plafonds, crédits seuls), ces valeurs prennent la priorité.
 - **Thème** : bouton **Auto → Sombre → Clair** (préférence stockée dans `localStorage` ; les infobulles synchronisent des variables CSS sur `:root` car le conteneur `vis-tooltip` est hors de la page).
 - **Infobulles (survol)** : contenu riche en **HTML injecté comme nœud DOM** (exigence vis-network ≥ 9 : les chaînes HTML dans `title` ne sont plus interprétées). Cartes avec icônes Material, stats **libellé + valeur sur une même ligne**, blocs schémas / JSON-LD, liens cliquables vers le site fiche.
 - **Carte détail** (clic nœud) : panneau latéral avec sections icônées, puces catégories / JSON-LD différenciées, lien vers la fiche entreprise si applicable.
@@ -31,6 +33,12 @@ Vue interactive **entreprises ↔ domaines tiers** découverts lors du scraping 
 - **`GET /api/entreprises/graph`**  
   Paramètres de requête typiques : `search`, `domain`, `only_credit`, `max_link_rows`, `max_enterprises`, `entreprise_ids` (liste d’IDs séparés par des virgules).  
   Réponse JSON : `nodes`, `edges`, `stats`, `graph_scope` (filtres et métadonnées d’échantillonnage).
+
+### Notes de performance recommandées
+
+- Garder des plafonds modestes pour l'ouverture (ex. `1200 / 160`) puis élargir progressivement.
+- Utiliser `entreprise_ids` quand un sous-ensemble est connu (mode investigation ciblée).
+- En cas de bannière « Aperçu tronqué », affiner d'abord `search` / `domain` avant d'augmenter les plafonds.
 
 Les nœuds **entreprise** peuvent inclure `thumb_url` / `thumbnail_url` à partir du champ **`entreprises.favicon`** (scraper unifié). Les nœuds **domaine** utilisent **`external_domains.thumb_url`** alimenté par le mini-scrape (favicon / aperçu OG), sans URL de services tiers type Google favicon.
 

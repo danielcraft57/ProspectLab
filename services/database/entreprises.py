@@ -3432,6 +3432,26 @@ class EntrepriseManager(DatabaseBase):
             stats['open_rate'] = 0.0
             stats['click_rate'] = 0.0
 
+        # Réponses "explicites" (statuts CRM). Hypothèse simple et robuste:
+        # si tu marques un prospect en "Réponse positive/négative", alors c'est une réponse.
+        try:
+            self.execute_sql(
+                cursor,
+                """
+                SELECT COUNT(*) as count
+                FROM entreprises
+                WHERE statut IN ('Réponse positive', 'Réponse négative')
+                """,
+            )
+            stats['reponses'] = int(cursor.fetchone()['count'] or 0)
+        except Exception:
+            stats['reponses'] = 0
+
+        if total_emails_sent > 0:
+            stats['reply_rate'] = round((float(stats.get('reponses') or 0) / float(total_emails_sent)) * 100, 1)
+        else:
+            stats['reply_rate'] = 0.0
+
         # Campagnes email (optionnellement filtrées par période)
         try:
             sql_campagnes = 'SELECT COUNT(*) as count FROM campagnes_email'
@@ -3529,6 +3549,125 @@ class EntrepriseManager(DatabaseBase):
             }
         except Exception:
             stats['par_etape_prospection'] = {}
+
+        # Funnel CRM ordonné + taux de passage (si la colonne est utilisée).
+        try:
+            crm_counts = stats.get('par_etape_prospection') or {}
+            crm_funnel = []
+            for step in CRM_PIPELINE_ETAPES:
+                crm_funnel.append({
+                    'etape': step,
+                    'count': int(crm_counts.get(step) or 0),
+                })
+            stats['crm_funnel'] = crm_funnel
+
+            base = int(crm_counts.get('À prospecter') or 0)
+            contacted = int(crm_counts.get('Contacté') or 0)
+            rdv = int(crm_counts.get('RDV') or 0)
+            proposition = int(crm_counts.get('Proposition') or 0)
+            gagne = int(crm_counts.get('Gagné') or 0)
+            perdu = int(crm_counts.get('Perdu') or 0)
+
+            stats['crm_rates'] = {
+                'contact_rate': round((contacted / base) * 100, 1) if base > 0 else 0.0,
+                'rdv_rate': round((rdv / base) * 100, 1) if base > 0 else 0.0,
+                'proposal_rate': round((proposition / base) * 100, 1) if base > 0 else 0.0,
+                'win_rate': round((gagne / base) * 100, 1) if base > 0 else 0.0,
+                'loss_rate': round((perdu / base) * 100, 1) if base > 0 else 0.0,
+            }
+            stats['rdv'] = rdv
+            stats['propositions'] = proposition
+        except Exception:
+            stats['crm_funnel'] = []
+            stats['crm_rates'] = {
+                'contact_rate': 0.0,
+                'rdv_rate': 0.0,
+                'proposal_rate': 0.0,
+                'win_rate': 0.0,
+                'loss_rate': 0.0,
+            }
+            stats['rdv'] = 0
+            stats['propositions'] = 0
+
+        # Touchpoints (journal d'interactions) - utile pour piloter le "suivi".
+        # On filtre par happened_at si une période est active.
+        try:
+            sql_tp = """
+                SELECT canal, COUNT(*) as count
+                FROM entreprise_touchpoints
+                WHERE 1=1
+            """
+            params_tp: list[object] = []
+            if since:
+                sql_tp += " AND happened_at >= ?"
+                params_tp.append(since)
+                if until:
+                    sql_tp += " AND happened_at < ?"
+                    params_tp.append(until)
+            sql_tp += " GROUP BY canal ORDER BY count DESC"
+            self.execute_sql(cursor, sql_tp, params_tp)
+            stats['touchpoints_par_canal'] = {
+                (row['canal'] if isinstance(row, dict) else row[0]): (row['count'] if isinstance(row, dict) else row[1])
+                for row in (cursor.fetchall() or [])
+                if (row['canal'] if isinstance(row, dict) else row[0])
+            }
+        except Exception:
+            stats['touchpoints_par_canal'] = {}
+
+        # Prospects "chauds": entreprises avec click récents (et quelques stats open/click), hors gagnés/perdus.
+        try:
+            sql_hot = """
+                SELECT
+                    ent.id as entreprise_id,
+                    ent.nom as nom,
+                    ent.secteur as secteur,
+                    ent.website as website,
+                    ent.statut as statut,
+                    ent.etape_prospection as etape_prospection,
+                    MAX(CASE WHEN et.event_type = 'click' THEN et.date_event ELSE NULL END) as last_click_at,
+                    SUM(CASE WHEN et.event_type = 'click' THEN 1 ELSE 0 END) as clicks,
+                    SUM(CASE WHEN et.event_type = 'open' THEN 1 ELSE 0 END) as opens
+                FROM email_tracking_events et
+                JOIN emails_envoyes ee ON ee.id = et.email_id
+                JOIN entreprises ent ON ent.id = ee.entreprise_id
+                WHERE ee.entreprise_id IS NOT NULL
+                  AND et.event_type IN ('open', 'click')
+                  AND COALESCE(ent.statut, '') NOT IN ('Gagné', 'Perdu', 'Désabonné', 'Plainte spam', 'Ne pas contacter')
+            """
+            params_hot: list[object] = []
+            if since:
+                sql_hot += " AND et.date_event >= ?"
+                params_hot.append(since)
+                if until:
+                    sql_hot += " AND et.date_event < ?"
+                    params_hot.append(until)
+            sql_hot += """
+                GROUP BY ent.id
+                HAVING SUM(CASE WHEN et.event_type = 'click' THEN 1 ELSE 0 END) > 0
+                ORDER BY last_click_at DESC
+                LIMIT 20
+            """
+            self.execute_sql(cursor, sql_hot, params_hot)
+            rows = cursor.fetchall() or []
+            hot = []
+            for row in rows:
+                d = dict(row)
+                hot.append({
+                    'entreprise_id': d.get('entreprise_id'),
+                    'nom': d.get('nom'),
+                    'secteur': d.get('secteur'),
+                    'website': d.get('website'),
+                    'statut': d.get('statut'),
+                    'etape_prospection': d.get('etape_prospection'),
+                    'last_click_at': d.get('last_click_at'),
+                    'clicks': int(d.get('clicks') or 0),
+                    'opens': int(d.get('opens') or 0),
+                })
+            stats['hot_leads'] = hot
+            stats['hot_leads_count'] = len(hot)
+        except Exception:
+            stats['hot_leads'] = []
+            stats['hot_leads_count'] = 0
 
         # Priorités « gagnables » : forte opportunité, pas encore gagné/perdu
         try:
@@ -4022,6 +4161,12 @@ class EntrepriseManager(DatabaseBase):
             FROM entreprises e
             INNER JOIN scraper_emails se ON e.id = se.entreprise_id
             WHERE se.email IS NOT NULL AND se.email != ''
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM emails_envoyes ee
+                  WHERE ee.statut = 'bounced'
+                    AND LOWER(TRIM(ee.email)) = LOWER(TRIM(se.email))
+              )
             ORDER BY e.nom, COALESCE(se.is_person, 0) DESC, se.date_found DESC, se.id
         ''')
 
@@ -4119,6 +4264,12 @@ class EntrepriseManager(DatabaseBase):
             FROM entreprises e
             INNER JOIN scraper_emails se ON e.id = se.entreprise_id
             WHERE se.email IS NOT NULL AND se.email != ''
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM emails_envoyes ee
+                  WHERE ee.statut = 'bounced'
+                    AND LOWER(TRIM(ee.email)) = LOWER(TRIM(se.email))
+              )
         '''
         params = []
         

@@ -32,6 +32,7 @@ Bienvenue dans la documentation de ProspectLab. Cette documentation est organis�
 - [Évolution des métriques (snapshots)](guides/EVOLUTION_METRIQUES_SNAPSHOTS.md) - Historique technique/SEO, comparaison et alertes (API)
 - [Critères de recherche Google Maps](guides/CRITERES_RECHERCHE_GOOGLE_MAPS.md) - Guide pour les recherches Google Maps
 - [Recommandations AJAX](guides/RECOMMANDATIONS_AJAX.md) - Bonnes pratiques pour l'utilisation d'AJAX
+- [Veille concurrentielle (experimental)](guides/VEILLE_CONCURRENTIELLE.md) - Point d'entree vers `scripts/experiments/competitive_intel/docs/`
 
 ### API publique (`/api/public`)
 

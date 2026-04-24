@@ -554,18 +554,113 @@ class CampagneManager(DatabaseBase):
                 pass
         conn.close()
 
-        # Mise à jour entreprise (statut + tag) hors transaction email
+        # Mise à jour entreprise (statut + tags) hors transaction email
         try:
             if entreprise_id:
                 from services.database.entreprises import EntrepriseManager
                 em = EntrepriseManager()
-                em.update_entreprise_statut(int(entreprise_id), 'Bounce')
                 em.add_entreprise_tag(int(entreprise_id), 'bounce')
                 em.add_entreprise_tag(int(entreprise_id), 'email_invalide')
+                if self._all_entreprise_sent_emails_are_bounced(int(entreprise_id)):
+                    em.update_entreprise_statut(int(entreprise_id), 'Bounce')
         except Exception:
             pass
 
         return updated
+
+    def _all_entreprise_sent_emails_are_bounced(self, entreprise_id: int) -> bool:
+        """
+        Indique si toutes les adresses déjà ciblées en campagne pour cette entreprise
+        sont actuellement en statut bounced.
+
+        Notes:
+        - Se base uniquement sur emails_envoyes (historique campagne réel).
+        - Retourne False si aucune adresse n'a encore été trouvée.
+        """
+        if not entreprise_id:
+            return False
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            self.execute_sql(
+                cursor,
+                '''
+                SELECT LOWER(TRIM(email)) AS email_norm,
+                       SUM(CASE WHEN statut = 'bounced' THEN 1 ELSE 0 END) AS bounced_cnt,
+                       COUNT(*) AS total_cnt
+                FROM emails_envoyes
+                WHERE entreprise_id = ?
+                  AND email IS NOT NULL
+                  AND TRIM(email) <> ''
+                GROUP BY LOWER(TRIM(email))
+                ''',
+                (int(entreprise_id),),
+            )
+            rows = cursor.fetchall() or []
+        finally:
+            conn.close()
+
+        if not rows:
+            return False
+
+        for row in rows:
+            try:
+                bounced_cnt = row.get('bounced_cnt') if isinstance(row, dict) else row[1]
+                total_cnt = row.get('total_cnt') if isinstance(row, dict) else row[2]
+            except Exception:
+                return False
+            if int(total_cnt or 0) < 1:
+                continue
+            if int(bounced_cnt or 0) < 1:
+                return False
+        return True
+
+    def is_email_blocked_for_campaign(self, email: str, entreprise_id: int | None = None) -> bool:
+        """
+        Retourne True si l'adresse est marquée bounced dans l'historique des campagnes.
+
+        Args:
+            email (str): Adresse à tester
+            entreprise_id (int|None): Si fourni, on priorise le matching sur l'entreprise.
+        """
+        e = (email or '').strip().lower()
+        if not e or '@' not in e:
+            return False
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            if entreprise_id:
+                self.execute_sql(
+                    cursor,
+                    '''
+                    SELECT 1
+                    FROM emails_envoyes
+                    WHERE entreprise_id = ?
+                      AND LOWER(TRIM(email)) = ?
+                      AND statut = 'bounced'
+                    LIMIT 1
+                    ''',
+                    (int(entreprise_id), e),
+                )
+                if cursor.fetchone():
+                    return True
+
+            self.execute_sql(
+                cursor,
+                '''
+                SELECT 1
+                FROM emails_envoyes
+                WHERE LOWER(TRIM(email)) = ?
+                  AND statut = 'bounced'
+                LIMIT 1
+                ''',
+                (e,),
+            )
+            return cursor.fetchone() is not None
+        finally:
+            conn.close()
 
     def mark_latest_email_bounced_for_recipient(
         self,
@@ -819,6 +914,7 @@ class CampagneManager(DatabaseBase):
                         allowed_previous={'Nouveau', 'À qualifier'}
                     )
                     self._add_entreprise_tag_safe(entreprise_id, 'email_ouvert')
+                    self._add_entreprise_tag_safe(entreprise_id, 'relance')
                 elif event_type == 'click':
                     # Un clic est un signal d'intention très fort:
                     # on passe en "Relance" pour traiter le prospect comme chaud.
@@ -828,6 +924,7 @@ class CampagneManager(DatabaseBase):
                         allowed_previous={'Nouveau', 'À qualifier', 'Relance', 'À rappeler'}
                     )
                     self._add_entreprise_tag_safe(entreprise_id, 'email_clique')
+                    self._add_entreprise_tag_safe(entreprise_id, 'relance')
         except Exception:
             # Ne pas impacter le tracking en cas de souci
             pass

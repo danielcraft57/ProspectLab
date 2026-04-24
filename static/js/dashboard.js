@@ -67,6 +67,12 @@
             setNumber('stat-emails-envoyes', stats.emails_envoyes || 0, true);
             setPercent('stat-open-rate', stats.open_rate || 0, true);
             setPercent('stat-click-rate', stats.click_rate || 0, true);
+
+            setNumber('stat-replies', stats.reponses || 0, true);
+            setPercent('stat-reply-rate', stats.reply_rate || 0, true);
+            setNumber('stat-rdv', stats.rdv || 0, true);
+            setNumber('stat-hot', stats.hot_leads_count || 0, true);
+
             renderKpiDeltas(currentKpi, previousKpi);
             const insightContext = {
                 totalEntreprises: currentKpi.totalEntreprises,
@@ -78,10 +84,16 @@
                 emailsCliques: stats['emails_cliqués'] || stats.emails_cliques || 0,
                 openRate: stats.open_rate || 0,
                 clickRate: stats.click_rate || 0,
+                replies: stats.reponses || 0,
+                replyRate: stats.reply_rate || 0,
+                rdv: stats.rdv || 0,
+                hotLeadsCount: stats.hot_leads_count || 0,
                 favoris: stats.favoris || 0,
                 totalAnalyses: stats.total_analyses || 0,
                 totalCampagnes: stats.total_campagnes || 0,
                 parStatut,
+                crmFunnel: stats.crm_funnel || [],
+                hotLeads: stats.hot_leads || [],
                 parOpportunite: stats.par_opportunite || {},
                 parSecteur: stats.par_secteur || {},
                 topTags: stats.top_tags || [],
@@ -104,6 +116,9 @@
 
             renderRecentGagnes(stats.recent_gagnes || []);
             renderRecentCampagnes(stats.recent_campagnes || []);
+
+            createCrmFunnelChart(stats.crm_funnel || []);
+            renderHotLeads(stats.hot_leads || []);
         } catch (error) {
             // eslint-disable-next-line no-console
             console.error('Erreur lors du chargement des statistiques:', error);
@@ -412,6 +427,87 @@
         };
     }
 
+    function createCrmFunnelChart(funnel) {
+        const ctx = document.getElementById('chart-crm-funnel');
+        if (!ctx) return;
+        const items = Array.isArray(funnel) ? funnel : [];
+        if (!items.length || items.every(i => Number(i.count || 0) === 0)) {
+            ctx.parentElement.innerHTML += '<p>Aucune donnée CRM (etape_prospection).</p>';
+            return;
+        }
+
+        const labels = items.map(i => i.etape);
+        const data = items.map(i => Number(i.count || 0));
+
+        const theme = getChartThemeOptions();
+        const colors = ['#64748b', '#2563eb', '#9333ea', '#ea580c', '#16a34a', '#dc2626'];
+
+        if (charts.crmFunnel) charts.crmFunnel.destroy();
+        const chart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [{
+                    label: 'Prospects',
+                    data,
+                    backgroundColor: labels.map((_, idx) => colors[idx] || 'rgba(99, 102, 241, 0.9)'),
+                    borderRadius: 10,
+                    borderSkipped: false
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { labels: theme.legend.labels }
+                },
+                scales: {
+                    x: { ticks: { color: theme.textColor }, grid: { display: false } },
+                    y: { beginAtZero: true, ticks: { color: theme.textColor }, grid: { color: theme.gridColor } }
+                }
+            }
+        });
+        charts.crmFunnel = chart;
+    }
+
+    function renderHotLeads(list) {
+        const container = document.getElementById('hot-leads');
+        if (!container) return;
+        const items = Array.isArray(list) ? list : [];
+        if (!items.length) {
+            container.innerHTML = '<p>Aucun clic récent à relancer.</p>';
+            return;
+        }
+
+        container.innerHTML = items.slice(0, 12).map((it) => {
+            const id = it.entreprise_id;
+            const name = escapeHtml(it.nom || 'Sans nom');
+            const secteur = escapeHtml(it.secteur || 'Secteur n/a');
+            const statut = escapeHtml(it.statut || '');
+            const etape = escapeHtml(it.etape_prospection || '');
+            const clicks = Number(it.clicks || 0);
+            const opens = Number(it.opens || 0);
+            const lastClick = it.last_click_at ? new Date(it.last_click_at).toLocaleString('fr-FR') : '';
+            const meta = [
+                clicks ? `${clicks} clic${clicks > 1 ? 's' : ''}` : null,
+                opens ? `${opens} ouverture${opens > 1 ? 's' : ''}` : null,
+                lastClick ? `dernier clic: ${escapeHtml(lastClick)}` : null,
+                statut ? `statut: ${statut}` : null,
+                etape ? `CRM: ${etape}` : null
+            ].filter(Boolean);
+
+            return `
+                <div class="dashboard-row">
+                    <div class="dashboard-row-main">
+                        <div class="dashboard-row-title"><a href="/entreprise/${encodeURIComponent(String(id))}">${name}</a></div>
+                        <div class="dashboard-row-meta"><span>${secteur}</span></div>
+                        ${meta.length ? `<div class="hot-lead-badges">${meta.slice(0, 4).map(m => `<span class="hot-lead-badge">${m}</span>`).join('')}</div>` : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
     function createOpportunitesChart(parOpportunite) {
         const ctx = document.getElementById('chart-opportunites');
         if (!ctx) return;
@@ -511,6 +607,10 @@
         const emails = Number(metrics.emailsEnvoyes || 0);
         const openRate = Number(metrics.openRate || 0);
         const clickRate = Number(metrics.clickRate || 0);
+        const replies = Number(metrics.replies || 0);
+        const replyRate = Number(metrics.replyRate || 0);
+        const rdv = Number(metrics.rdv || 0);
+        const hotLeadsCount = Number(metrics.hotLeadsCount || 0);
         const favoris = Number(metrics.favoris || 0);
         const totalCampagnes = Number(metrics.totalCampagnes || 0);
         const parStatut = metrics.parStatut || {};
@@ -554,6 +654,24 @@
             } else {
                 pushChip('success', `Clics engagés (${clickRate.toFixed(1)}%)`, '/campagnes', 10);
             }
+        }
+
+        if (emails > 0 && replies === 0) {
+            pushChip('warning', '0 réponse: renforcer l'offre + relances', '/entreprises', 92);
+        } else if (replies > 0) {
+            pushChip('success', `${replies.toLocaleString('fr-FR')} réponse(s) sur la période`, '/entreprises', 18);
+        }
+
+        if (emails > 0 && replyRate > 0) {
+            pushChip('neutral', `Taux de réponse ${replyRate.toFixed(1)}%`, '/entreprises', 26);
+        }
+
+        if (rdv > 0) {
+            pushChip('success', `${rdv.toLocaleString('fr-FR')} RDV (CRM)`, '/entreprises', 18);
+        }
+
+        if (hotLeadsCount > 0) {
+            pushChip('warning', `${hotLeadsCount.toLocaleString('fr-FR')} prospects chauds à relancer`, '/entreprises?statut=Relance', 74);
         }
 
         if (conversion <= 0 && total > 0) {

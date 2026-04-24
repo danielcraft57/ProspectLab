@@ -152,7 +152,13 @@ Pour faciliter le filtrage dans les prospects:
 - `email_echec_envoi`
 - `email_ouvert`
 - `email_clique`
+- `relance`
 - `bounce` + `email_invalide`
+
+### Règles importantes (anti-spam / qualité)
+
+- **Blocage par email**: si une adresse a déjà été marquée `bounced` dans `emails_envoyes`, ProspectLab **n'enverra plus** de campagnes vers cette adresse a l'avenir.
+- **Statut entreprise `Bounce`**: une entreprise passe en `Bounce` **uniquement si toutes les adresses email déjà utilisées en campagne** pour cette entreprise ont bouncé.
 
 ## Récupération automatique des bounces (IMAP)
 
@@ -180,6 +186,14 @@ Variables (`.env`) associées:
 - `BOUNCE_SCAN_LIMIT` (0 = sans limite)
 - `BOUNCE_SCAN_DELETE_PROCESSED`
 - `BOUNCE_SCAN_POST_CAMPAIGN_DELAY_SEC`
+
+### Script de rattrapage (recalcul des statuts Bounce)
+
+Quand tu as un historique existant (ou un changement de regle), tu peux recalculer les statuts `Bounce` avec:
+
+- `scripts/recalculate_bounce_statuses.py`
+
+Par défaut c'est un **dry-run**. Utilise `--apply` pour écrire en base.
 
 ### Formatage des noms
 
