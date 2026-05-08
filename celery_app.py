@@ -65,6 +65,8 @@ celery.conf.update(
         # Pack « analyse site complet » : file dédiée pour éviter qu’un vieux worker (file celery
         # seule) vole le job et renvoie NotRegistered alors qu’un autre nœud a le code à jour.
         Queue('website_full', routing_key='website_full'),
+        # Génération landing variants (agent distant serv1) isolée pour contrôler la charge.
+        Queue('landing', routing_key='landing'),
     ),
     # Dict pattern -> route (Celery 5 / kombu : une *liste* de tuples casse MapRoute qui itère
     # chaque entrée en « k, v » — le 1er élément est une str → too many values to unpack).
@@ -92,6 +94,8 @@ celery.conf.update(
         'tasks.full_website_analysis.*': {'queue': 'technical'},
         # Orchestrateur léger : enqueue technique + SEO (snapshots métriques)
         'tasks.metric_rescan_tasks.*': {'queue': 'celery'},
+        # Génération de variantes de landing via agent distant.
+        'tasks.landing_variant_tasks.*': {'queue': 'landing'},
     },
     task_create_missing_queues=True,
     worker_prefetch_multiplier=CELERY_WORKER_PREFETCH_MULTIPLIER,
@@ -111,6 +115,7 @@ celery.conf.update(
         'tasks.email_tasks',
         'tasks.cleanup_tasks',
         'tasks.metric_rescan_tasks',
+        'tasks.landing_variant_tasks',
     ),
     # Configuration pour Windows : utiliser solo au lieu de prefork
     # Le mode prefork n'est pas supporté sur Windows

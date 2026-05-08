@@ -162,6 +162,18 @@ const API_DOC_FAMILIES = [
                     },
                     {
                         method: 'GET',
+                        path: '/entreprises/<id>/landing-variants',
+                        desc: 'Dernier run de landing variants (liens index.html + screenshots + runs récents).',
+                        permission: 'Entreprises'
+                    },
+                    {
+                        method: 'GET',
+                        path: '/landing-variants/runs/<run_id>',
+                        desc: 'Détail d’un run précis (liste normalisée des assets: html/css/js/screenshots).',
+                        permission: 'Entreprises'
+                    },
+                    {
+                        method: 'GET',
                         path: '/entreprises/<id>/campagnes',
                         desc: 'Campagnes liées à l’entreprise.',
                         permission: 'Campagnes',

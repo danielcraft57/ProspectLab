@@ -16,6 +16,7 @@ from . import email_tasks
 from . import phone_tasks
 from . import debug_tasks
 from . import metric_rescan_tasks
+from . import landing_variant_tasks
 
 __all__ = [
     'analysis_tasks',
@@ -29,4 +30,5 @@ __all__ = [
     'phone_tasks',
     'debug_tasks',
     'metric_rescan_tasks',
+    'landing_variant_tasks',
 ]

@@ -59,15 +59,17 @@ def _load_presets(path: Path) -> List[Preset]:
     return out
 
 
-def _city_global_xlsx(out_root: Path, city: str) -> Path:
-    return out_root / city / f"{_safe_filename(city)}.xlsx"
+def _city_dir(out_root: Path, preset: Preset) -> Path:
+    region = (preset.region or "-").strip() or "-"
+    department = (preset.department or "-").strip() or "-"
+    return out_root / region / department / preset.city
 
 
-def _status_for_city(out_root: Path, city: str) -> Tuple[str, str]:
+def _status_for_preset(out_root: Path, preset: Preset) -> Tuple[str, str]:
     now_ts = __import__("time").time()
     recent_window_s = 20 * 60
-    xlsx = _city_global_xlsx(out_root, city)
-    city_dir = out_root / city
+    city_dir = _city_dir(out_root, preset)
+    xlsx = city_dir / f"{_safe_filename(preset.city)}.xlsx"
     if not city_dir.exists():
         return "PAS FAIT", "red"
 
@@ -406,8 +408,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     table.add_column("Lignes (si dispo)", justify="right", style="dim")
 
     for i, pr in enumerate(city_presets, start=1):
-        tag, style = _status_for_city(out_root, pr.city)
-        xlsx = _city_global_xlsx(out_root, pr.city)
+        tag, style = _status_for_preset(out_root, pr)
+        xlsx = _city_dir(out_root, pr) / f"{_safe_filename(pr.city)}.xlsx"
         nrows: Optional[int] = None
         try:
             from openpyxl import load_workbook  # type: ignore
@@ -493,15 +495,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     if level not in preset.levels and level != "tres_large":
         raise SystemExit(f"Level '{level}' non défini pour {preset.city}.")
 
-    cache_path = (
-        Path(args.cache).expanduser().resolve()
-        if args.cache
-        else (out_root / preset.city / "places_details_cache.jsonl")
-    )
+    city_dir = _city_dir(out_root, preset)
+    city_dir.mkdir(parents=True, exist_ok=True)
+    city_parent_dir = city_dir.parent
+
+    cache_path = Path(args.cache).expanduser().resolve() if args.cache else (city_dir / "places_details_cache.jsonl")
 
     cmd = _build_command(
         here=here,
-        out_root=out_root,
+        out_root=city_parent_dir,
         groups_file=groups_file,
         preset=preset,
         level=level,
@@ -519,7 +521,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     console.print(f"[bold]Ville[/]: {preset.city}  [dim]({preset.department})[/]")
     console.print(f"[bold]Level[/]: {level}   [bold]Mode[/]: {args.mode}")
     console.print(f"[bold]Cat translate[/]: {args.category_translate}")
-    console.print(f"[bold]Sortie[/]: {out_root / preset.city}")
+    console.print(f"[bold]Sortie[/]: {city_dir}")
     console.print()
     console.print("[dim]Commande:[/]")
     console.print(" ".join([f"\"{c}\"" if " " in c else c for c in cmd]), style="dim")

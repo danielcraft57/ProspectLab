@@ -275,6 +275,76 @@ class DatabaseSchema(DatabaseBase):
         finally:
             conn.close()
 
+    def ensure_landing_variants_tables(self):
+        """
+        Migration idempotente : runs + assets de landing variants (normalisé).
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS landing_variant_runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entreprise_id INTEGER NOT NULL,
+                    website_url TEXT NOT NULL,
+                    website_slug TEXT NOT NULL,
+                    source_task_id TEXT,
+                    status TEXT DEFAULT 'completed',
+                    variants_requested INTEGER DEFAULT 4,
+                    variants_generated INTEGER DEFAULT 0,
+                    output_dir TEXT,
+                    output_base_url TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE
+                )
+                ''',
+            )
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS landing_variant_assets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id INTEGER NOT NULL,
+                    entreprise_id INTEGER NOT NULL,
+                    variant_name TEXT NOT NULL,
+                    variant_index INTEGER,
+                    asset_kind TEXT NOT NULL,
+                    device_type TEXT,
+                    relative_path TEXT NOT NULL,
+                    file_path TEXT,
+                    public_url TEXT,
+                    mime_type TEXT,
+                    size_bytes INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (run_id) REFERENCES landing_variant_runs(id) ON DELETE CASCADE,
+                    FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE,
+                    UNIQUE(run_id, variant_name, asset_kind, device_type)
+                )
+                ''',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_landing_variant_runs_ent_created ON landing_variant_runs(entreprise_id, created_at DESC)',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_landing_variant_runs_task ON landing_variant_runs(source_task_id)',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_landing_variant_assets_run ON landing_variant_assets(run_id)',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_landing_variant_assets_ent_variant ON landing_variant_assets(entreprise_id, variant_name)',
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def ensure_mail_accounts_table(self):
         """
         Comptes SMTP multi-domaines + rattachement optionnel campagnes / templates.
@@ -927,6 +997,66 @@ class DatabaseSchema(DatabaseBase):
         self.execute_sql(
             cursor,
             'CREATE INDEX IF NOT EXISTS idx_entreprise_screenshots_analysis ON entreprise_screenshots (analysis_id)',
+        )
+
+        self.execute_sql(
+            cursor,
+            '''
+            CREATE TABLE IF NOT EXISTS landing_variant_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entreprise_id INTEGER NOT NULL,
+                website_url TEXT NOT NULL,
+                website_slug TEXT NOT NULL,
+                source_task_id TEXT,
+                status TEXT DEFAULT 'completed',
+                variants_requested INTEGER DEFAULT 4,
+                variants_generated INTEGER DEFAULT 0,
+                output_dir TEXT,
+                output_base_url TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE
+            )
+            ''',
+        )
+        self.execute_sql(
+            cursor,
+            '''
+            CREATE TABLE IF NOT EXISTS landing_variant_assets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id INTEGER NOT NULL,
+                entreprise_id INTEGER NOT NULL,
+                variant_name TEXT NOT NULL,
+                variant_index INTEGER,
+                asset_kind TEXT NOT NULL,
+                device_type TEXT,
+                relative_path TEXT NOT NULL,
+                file_path TEXT,
+                public_url TEXT,
+                mime_type TEXT,
+                size_bytes INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (run_id) REFERENCES landing_variant_runs(id) ON DELETE CASCADE,
+                FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE,
+                UNIQUE(run_id, variant_name, asset_kind, device_type)
+            )
+            ''',
+        )
+        self.execute_sql(
+            cursor,
+            'CREATE INDEX IF NOT EXISTS idx_landing_variant_runs_ent_created ON landing_variant_runs(entreprise_id, created_at DESC)',
+        )
+        self.execute_sql(
+            cursor,
+            'CREATE INDEX IF NOT EXISTS idx_landing_variant_runs_task ON landing_variant_runs(source_task_id)',
+        )
+        self.execute_sql(
+            cursor,
+            'CREATE INDEX IF NOT EXISTS idx_landing_variant_assets_run ON landing_variant_assets(run_id)',
+        )
+        self.execute_sql(
+            cursor,
+            'CREATE INDEX IF NOT EXISTS idx_landing_variant_assets_ent_variant ON landing_variant_assets(entreprise_id, variant_name)',
         )
 
         # Table des analyses techniques

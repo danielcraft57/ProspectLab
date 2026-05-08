@@ -1646,6 +1646,50 @@ def get_entreprise_screenshots_public(entreprise_id: int):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@api_public_bp.route('/entreprises/<int:entreprise_id>/landing-variants', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+@public_response_cache(20)
+def get_entreprise_landing_variants_public(entreprise_id: int):
+    """
+    API publique : dernier run de landing variants (screenshots + fichiers web).
+    """
+    try:
+        entreprise = database.get_entreprise(entreprise_id)
+        if not entreprise:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable'}), 404
+        latest = database.get_latest_landing_variant_bundle(int(entreprise_id)) or {}
+        runs = database.list_landing_variant_runs(int(entreprise_id), limit=10)
+        return jsonify(
+            {
+                'success': True,
+                'entreprise_id': int(entreprise_id),
+                'latest': latest,
+                'runs': runs,
+            }
+        )
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@api_public_bp.route('/landing-variants/runs/<int:run_id>', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+@public_response_cache(20)
+def get_landing_variant_run_public(run_id: int):
+    """
+    API publique : détails d'un run (assets normalisés) pour intégration externe.
+    """
+    try:
+        run = database.get_landing_variant_run(int(run_id))
+        if not run:
+            return jsonify({'success': False, 'error': 'Run introuvable'}), 404
+        assets = database.list_landing_variant_assets(int(run_id))
+        return jsonify({'success': True, 'run': run, 'assets': assets, 'count': len(assets)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @api_public_bp.route('/campagnes/statuses', methods=['GET'])
 @api_token_required
 @require_api_permission('campagnes')

@@ -15,6 +15,9 @@ param(
     [string]$DbPassword = '',
 
     [Parameter(Mandatory=$false)]
+    [string]$EnvFilePath = '',
+
+    [Parameter(Mandatory=$false)]
     [int]$DbPort = 5432,
 
     [Parameter(Mandatory=$false)]
@@ -28,6 +31,90 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+function Get-EnvValueFromFile {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$FilePath,
+
+        [Parameter(Mandatory=$true)]
+        [string]$Key
+    )
+
+    if (-not (Test-Path -LiteralPath $FilePath)) {
+        return $null
+    }
+
+    foreach ($line in Get-Content -LiteralPath $FilePath) {
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            continue
+        }
+        $trimmed = $line.Trim()
+        if ($trimmed.StartsWith('#')) {
+            continue
+        }
+        if ($trimmed -match "^\s*$([regex]::Escape($Key))\s*=\s*(.*)\s*$") {
+            $value = $matches[1].Trim()
+            if (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'"))) {
+                return $value.Substring(1, $value.Length - 2)
+            }
+            return $value
+        }
+    }
+
+    return $null
+}
+
+function Get-DbPasswordFromDatabaseUrl {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$DatabaseUrl
+    )
+
+    try {
+        $uri = [Uri]$DatabaseUrl
+    } catch {
+        return $null
+    }
+
+    if ([string]::IsNullOrWhiteSpace($uri.UserInfo)) {
+        return $null
+    }
+
+    $userInfoParts = $uri.UserInfo.Split(':', 2)
+    if ($userInfoParts.Length -lt 2) {
+        return $null
+    }
+
+    return [System.Uri]::UnescapeDataString($userInfoParts[1])
+}
+
+if ([string]::IsNullOrWhiteSpace($DbPassword)) {
+    $scriptRoot = Split-Path -Parent $PSScriptRoot
+    $projectRoot = Split-Path -Parent $scriptRoot
+    $candidateEnvFiles = @()
+
+    if (-not [string]::IsNullOrWhiteSpace($EnvFilePath)) {
+        $candidateEnvFiles += $EnvFilePath
+    } else {
+        $candidateEnvFiles += (Join-Path $projectRoot '.env.prod')
+        $candidateEnvFiles += (Join-Path $projectRoot '.env')
+    }
+
+    foreach ($envFile in $candidateEnvFiles) {
+        $databaseUrl = Get-EnvValueFromFile -FilePath $envFile -Key 'DATABASE_URL'
+        if ([string]::IsNullOrWhiteSpace($databaseUrl)) {
+            continue
+        }
+
+        $dbPasswordFromEnv = Get-DbPasswordFromDatabaseUrl -DatabaseUrl $databaseUrl
+        if (-not [string]::IsNullOrWhiteSpace($dbPasswordFromEnv)) {
+            $DbPassword = $dbPasswordFromEnv
+            Write-Host "Mot de passe DB chargé depuis $envFile (DATABASE_URL)." -ForegroundColor DarkGray
+            break
+        }
+    }
+}
 
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "Backup PostgreSQL distant (ProspectLab)" -ForegroundColor Cyan

@@ -667,6 +667,28 @@ class TemplateManager:
                     'opportunite': entreprise.get('opportunite') or '',
                     'statut': entreprise.get('statut') or '',
                 })
+
+            try:
+                latest_landing = db.get_latest_landing_variant_bundle(int(entreprise_id)) or {}
+                variants = latest_landing.get('variants') or []
+            except Exception:
+                variants = []
+            if variants:
+                v0 = variants[0] if isinstance(variants[0], dict) else {}
+                screenshots = v0.get('screenshots') or {}
+                data['landing_variants_count'] = len(variants)
+                data['landing_variant_url'] = v0.get('index_url') or ''
+                data['landing_variant_screenshot_desktop'] = screenshots.get('desktop') or ''
+                data['landing_variant_screenshot_tablet'] = screenshots.get('tablet') or ''
+                data['landing_variant_screenshot_mobile'] = screenshots.get('mobile') or ''
+                data['landing_variant_screenshot'] = (
+                    screenshots.get('desktop')
+                    or screenshots.get('tablet')
+                    or screenshots.get('mobile')
+                    or ''
+                )
+                data['has_landing_variant'] = bool(data['landing_variant_url'])
+                data['has_landing_variant_screenshot'] = bool(data['landing_variant_screenshot'])
             
             # Analyse technique
             tech_analysis = tech_manager.get_technical_analysis(entreprise_id)

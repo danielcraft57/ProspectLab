@@ -8,9 +8,11 @@ from flask import Blueprint, request, jsonify, session
 from services.database import Database
 from services.export_manager import ExportManager
 from services.auth import login_required
-from config import CELERY_FULL_ANALYSIS_QUEUE, SEO_USE_LIGHTHOUSE_DEFAULT
+from config import CELERY_BROKER_URL, CELERY_FULL_ANALYSIS_QUEUE, SEO_USE_LIGHTHOUSE_DEFAULT, LANDING_VARIANTS_ENABLED
 import json
 import pandas as pd
+import socket
+import requests
 from urllib.parse import urlparse
 
 from utils.url_utils import canonical_website_https_url, normalize_website_domain
@@ -1276,6 +1278,48 @@ def _json_safe_celery_result(value):
     return str(value)[:8000]
 
 
+def _to_bool(value, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _validate_website_resolvable(website: str) -> tuple[bool, str | None]:
+    """
+    Vérifie rapidement qu'un domaine est résolvable avant de lancer des jobs lourds.
+    Évite de démarrer des tâches landing variants sur un site inexistant.
+    """
+    parsed = urlparse(str(website or '').strip())
+    host = (parsed.hostname or '').strip()
+    if not host:
+        return False, "URL invalide (hôte introuvable)."
+
+    # 1) Validation DNS primaire (rapide)
+    dns_error: Exception | None = None
+    try:
+        socket.getaddrinfo(host, parsed.port or 443, type=socket.SOCK_STREAM)
+        return True, None
+    except Exception as e:
+        dns_error = e
+
+    # 2) Fallback HTTP(S): certains environnements DNS/stack réseau sont capricieux.
+    # Si la requête répond, on considère le site atteignable.
+    try:
+        resp = requests.get(str(website), timeout=6, allow_redirects=True)
+        if resp is not None and resp.status_code:
+            return True, None
+    except Exception:
+        pass
+
+    if isinstance(dns_error, socket.gaierror):
+        return False, "Domaine introuvable (DNS). Vérifiez l'URL du site."
+    if dns_error is not None:
+        return False, f"Impossible de valider le domaine ({type(dns_error).__name__}). Vérifiez l'URL du site."
+    return False, "Impossible de valider le domaine. Vérifiez l'URL du site."
+
+
 def _format_celery_failure_message(async_res):
     """
     Message d'échec Celery lisible (info / traceback).
@@ -1423,6 +1467,220 @@ def website_full_analysis_start():
         'website': website,
         'message': 'Analyse complète démarrée. Interroger /api/celery-task/<task_id> jusqu\'à state=SUCCESS.',
     }), 202
+
+
+@api_extended_bp.route('/landing-variants/start', methods=['POST'])
+@login_required
+def landing_variants_start():
+    """
+    Démarre une génération de landing variants via tâche Celery dédiée.
+
+    Corps JSON:
+      - url (str, requis)
+      - variants (int, optionnel, défaut 4)
+      - free_mode (bool, optionnel, défaut true)
+      - output_dir (str, optionnel)
+      - extra_instructions (str, optionnel)
+      - screenshot_desktop_only (bool, optionnel)
+      - skip_screenshots (bool, optionnel)
+    """
+    if not session.get('user_id'):
+        return jsonify({'error': 'Authentification requise'}), 401
+    if not LANDING_VARIANTS_ENABLED:
+        return jsonify({'success': False, 'error': 'Feature landing variants désactivée côté serveur'}), 503
+
+    payload = request.get_json(silent=True) or {}
+    entreprise_id = payload.get('entreprise_id', None)
+    if entreprise_id is not None:
+        try:
+            entreprise_id = int(entreprise_id)
+        except Exception:
+            return jsonify({'success': False, 'error': 'entreprise_id invalide'}), 400
+    website = _normalize_url_for_analysis((payload.get('url') or payload.get('website') or '').strip())
+    if not website and entreprise_id:
+        ent = database.get_entreprise(int(entreprise_id))
+        website = _normalize_url_for_analysis((ent or {}).get('website'))
+    if not website:
+        return jsonify({'success': False, 'error': 'Le champ "url" est requis (URL ou domaine).'}), 400
+    ok_site, site_err = _validate_website_resolvable(website)
+    if not ok_site:
+        return jsonify({'success': False, 'error': 'unreachable_site', 'message': site_err}), 400
+
+    variants = int(payload.get('variants', 4) or 4)
+    variants = max(1, min(variants, 4))
+
+    free_mode = _to_bool(payload.get('free_mode'), True)
+    screenshot_desktop_only = _to_bool(payload.get('screenshot_desktop_only'), False)
+    skip_screenshots = _to_bool(payload.get('skip_screenshots'), False)
+    output_dir = (payload.get('output_dir') or '').strip() or None
+    extra_instructions = (payload.get('extra_instructions') or '').strip() or None
+
+    try:
+        # Bloquer une nouvelle tâche si un run est déjà en cours (évite de boucher serv1).
+        lock_key = None
+        if entreprise_id:
+            lock_key = f"prospectlab:landing:variants:lock:{int(entreprise_id)}"
+        else:
+            lock_key = "prospectlab:landing:variants:lock:global"
+        try:
+            import redis
+
+            r = redis.Redis.from_url(
+                CELERY_BROKER_URL,
+                decode_responses=True,
+                socket_connect_timeout=2.0,
+                socket_timeout=2.0,
+            )
+            # TTL large: si worker plante, le lock se libère tout seul.
+            ttl_sec = 60 * 60 * 2
+            ok = r.set(lock_key, "1", nx=True, ex=ttl_sec)
+            if not ok:
+                return jsonify(
+                    {
+                        "success": False,
+                        "error": "already_running",
+                        "message": "Une génération landing variants est déjà en cours. Attendez la fin avant de relancer.",
+                    }
+                ), 409
+        except Exception:
+            # Si Redis indisponible, on n'empêche pas le lancement (fallback).
+            lock_key = None
+
+        from tasks.landing_variant_tasks import generate_landing_variants_remote_task
+
+        async_res = generate_landing_variants_remote_task.apply_async(
+            kwargs=dict(
+                url=website,
+                entreprise_id=entreprise_id,
+                variants=variants,
+                free_mode=free_mode,
+                output_dir=output_dir,
+                extra_instructions=extra_instructions,
+                screenshot_desktop_only=screenshot_desktop_only,
+                skip_screenshots=skip_screenshots,
+                launch_lock_key=lock_key,
+            ),
+            queue='landing',
+        )
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+    return jsonify(
+        {
+            'success': True,
+            'task_id': async_res.id,
+            'url': website,
+            'variants': variants,
+            'free_mode': free_mode,
+            'entreprise_id': entreprise_id,
+            'message': 'Génération des variants lancée. Suivre via /api/celery-task/<task_id>.',
+        }
+    ), 202
+
+
+@api_extended_bp.route('/entreprise/<int:entreprise_id>/landing-variants', methods=['GET'])
+@login_required
+def entreprise_landing_variants(entreprise_id):
+    """
+    API: Dernier run de landing variants + assets normalisés (UI entreprise).
+    """
+    try:
+        entreprise = database.get_entreprise(int(entreprise_id))
+        if not entreprise:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable'}), 404
+        latest = database.get_latest_landing_variant_bundle(int(entreprise_id)) or {}
+        runs = database.list_landing_variant_runs(int(entreprise_id), limit=10)
+        return jsonify(
+            {
+                'success': True,
+                'entreprise_id': int(entreprise_id),
+                'latest': latest,
+                'runs': runs,
+            }
+        )
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@api_extended_bp.route('/entreprise/<int:entreprise_id>/landing-variants/start', methods=['POST'])
+@login_required
+def entreprise_landing_variants_start(entreprise_id):
+    """
+    API: Wrapper UI entreprise pour démarrer génération variants.
+    """
+    try:
+        if not LANDING_VARIANTS_ENABLED:
+            return jsonify({'success': False, 'error': 'Feature landing variants désactivée côté serveur'}), 503
+        entreprise = database.get_entreprise(int(entreprise_id))
+        if not entreprise:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable'}), 404
+        website = _normalize_url_for_analysis((entreprise or {}).get('website'))
+        if not website:
+            return jsonify({'success': False, 'error': 'Aucun website valide sur cette entreprise'}), 400
+        ok_site, site_err = _validate_website_resolvable(website)
+        if not ok_site:
+            return jsonify({'success': False, 'error': 'unreachable_site', 'message': site_err}), 400
+        payload = request.get_json(silent=True) or {}
+        variants = int(payload.get('variants', 4) or 4)
+        variants = max(1, min(variants, 4))
+        free_mode = _to_bool(payload.get('free_mode'), True)
+        screenshot_desktop_only = _to_bool(payload.get('screenshot_desktop_only'), False)
+        skip_screenshots = _to_bool(payload.get('skip_screenshots'), False)
+        output_dir = (payload.get('output_dir') or '').strip() or None
+        extra_instructions = (payload.get('extra_instructions') or '').strip() or None
+        from tasks.landing_variant_tasks import generate_landing_variants_remote_task
+
+        # Lock Redis par entreprise pour empêcher une relance avant la fin.
+        lock_key = f"prospectlab:landing:variants:lock:{int(entreprise_id)}"
+        try:
+            import redis
+
+            r = redis.Redis.from_url(
+                CELERY_BROKER_URL,
+                decode_responses=True,
+                socket_connect_timeout=2.0,
+                socket_timeout=2.0,
+            )
+            ttl_sec = 60 * 60 * 2
+            ok = r.set(lock_key, "1", nx=True, ex=ttl_sec)
+            if not ok:
+                return jsonify(
+                    {
+                        "success": False,
+                        "error": "already_running",
+                        "message": "Une génération landing variants est déjà en cours. Attendez la fin avant de relancer.",
+                    }
+                ), 409
+        except Exception:
+            lock_key = None
+
+        async_res = generate_landing_variants_remote_task.apply_async(
+            kwargs=dict(
+                url=website,
+                entreprise_id=int(entreprise_id),
+                variants=variants,
+                free_mode=free_mode,
+                output_dir=output_dir,
+                extra_instructions=extra_instructions,
+                screenshot_desktop_only=screenshot_desktop_only,
+                skip_screenshots=skip_screenshots,
+                launch_lock_key=lock_key,
+            ),
+            queue='landing',
+        )
+        return jsonify(
+            {
+                'success': True,
+                'task_id': async_res.id,
+                'url': website,
+                'entreprise_id': int(entreprise_id),
+                'variants': variants,
+                'free_mode': free_mode,
+                'message': 'Génération des variants lancée. Suivre via /api/celery-task/<task_id>.',
+            }
+        ), 202
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @api_extended_bp.route('/entreprise/<int:entreprise_id>/screenshots')

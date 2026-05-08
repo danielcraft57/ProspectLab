@@ -48,7 +48,7 @@ static/js/modules/
 <script src="{{ url_for('static', filename='js/modules/analyses/scraping.js') }}"></script>
 
 <!-- Script principal (chargement différé) -->
-<script src="{{ url_for('static', filename='js/entreprises.refactored.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/entreprises.js') }}" defer></script>
 {% endblock %}
 ```
 
@@ -83,7 +83,8 @@ Le fichier `entreprises.js` (3380 lignes) a été refactorisé en modules :
 
 ## Structure actuelle
 
-- **`entreprises.refactored.js`** : Script principal utilisant les modules
+- **`entreprises.js`** : Point d’entrée (nom cohérent) qui charge l’implémentation actuelle
+- **`entreprises.refactored.js`** : Implémentation principale (à découper progressivement)
 - **`modules/utils/`** : Fonctions utilitaires partagées
 - **`modules/entreprises/api.js`** : Appels API centralisés
 - **`modules/analyses/`** : Affichage des analyses (technique, OSINT, pentest, scraping)

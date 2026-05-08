@@ -133,3 +133,6 @@ scripts/google_maps_tools/.google_maps_api_key
 scripts/google_maps_tools/presets_grand_est.json
 ml_face/
 .cursorrules
+
+# Variantes de landing générées automatiquement
+static/generated/landing_variants/

@@ -452,12 +452,16 @@
 <script src="{{ url_for('static', filename='js/modules/utils/debounce.js') }}"></script>
 <!-- Module API -->
 <script src="{{ url_for('static', filename='js/modules/entreprises/api.js') }}?v=17"></script>
+<!-- Modules entreprises -->
+<script src="{{ url_for('static', filename='js/modules/entreprises/preview_modal.js') }}?v=17"></script>
+<script src="{{ url_for('static', filename='js/modules/entreprises/images_tab.js') }}?v=17"></script>
+<script src="{{ url_for('static', filename='js/modules/entreprises/landing_variants.js') }}?v=17"></script>
 <!-- Modules d'affichage des analyses -->
 <script src="{{ url_for('static', filename='js/modules/analyses/technical.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/analyses/osint.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/analyses/pentest.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/analyses/scraping.js') }}"></script>
 <!-- Script principal (chargement différé) -->
-<script src="{{ url_for('static', filename='js/entreprises.refactored.js') }}?v=17" defer></script>
+<script src="{{ url_for('static', filename='js/entreprises.js') }}?v=17" defer></script>
 {% endblock %}
 

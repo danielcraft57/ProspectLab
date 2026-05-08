@@ -121,6 +121,14 @@ class Database(
                 'Migration entreprise_touchpoints non appliquée', exc_info=True
             )
 
+        try:
+            self.ensure_landing_variants_tables()
+        except Exception:
+            logging.getLogger(__name__).warning(
+                'Migration landing_variant_runs / landing_variant_assets non appliquée',
+                exc_info=True,
+            )
+
         # Initialiser la base de données (créer les tables) une seule fois par process.
         # Permet un contournement explicite via env pour debug/migration forcée.
         force_each_instance = str(os.environ.get('DB_INIT_EACH_INSTANCE', '')).strip().lower() in (

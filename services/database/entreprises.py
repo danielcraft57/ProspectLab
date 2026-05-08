@@ -2666,6 +2666,208 @@ class EntrepriseManager(DatabaseBase):
                 continue
         return out
 
+    def create_landing_variant_run(
+        self,
+        *,
+        entreprise_id: int,
+        website_url: str,
+        website_slug: str,
+        source_task_id: str | None = None,
+        status: str = 'completed',
+        variants_requested: int = 4,
+        variants_generated: int = 0,
+        output_dir: str | None = None,
+        output_base_url: str | None = None,
+    ) -> int:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self.execute_sql(
+            cursor,
+            '''
+            INSERT INTO landing_variant_runs (
+                entreprise_id, website_url, website_slug, source_task_id, status,
+                variants_requested, variants_generated, output_dir, output_base_url, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''',
+            (
+                int(entreprise_id),
+                str(website_url or '').strip()[:1800],
+                str(website_slug or '').strip()[:255],
+                (str(source_task_id).strip()[:255] if source_task_id else None),
+                str(status or 'completed').strip()[:64],
+                int(variants_requested or 0),
+                int(variants_generated or 0),
+                (str(output_dir).strip()[:1800] if output_dir else None),
+                (str(output_base_url).strip()[:1200] if output_base_url else None),
+            ),
+        )
+        run_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return int(run_id or 0)
+
+    def replace_landing_variant_assets(self, run_id: int, entreprise_id: int, assets: list[dict]) -> None:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self.execute_sql(cursor, 'DELETE FROM landing_variant_assets WHERE run_id = ?', (int(run_id),))
+        for asset in assets or []:
+            if not isinstance(asset, dict):
+                continue
+            self.execute_sql(
+                cursor,
+                '''
+                INSERT INTO landing_variant_assets (
+                    run_id, entreprise_id, variant_name, variant_index, asset_kind, device_type,
+                    relative_path, file_path, public_url, mime_type, size_bytes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    int(run_id),
+                    int(entreprise_id),
+                    str(asset.get('variant_name') or '').strip()[:64],
+                    int(asset.get('variant_index')) if asset.get('variant_index') is not None else None,
+                    str(asset.get('asset_kind') or '').strip()[:32],
+                    str(asset.get('device_type') or '').strip()[:32] if asset.get('device_type') else None,
+                    str(asset.get('relative_path') or '').strip()[:1200],
+                    str(asset.get('file_path') or '').strip()[:1800] if asset.get('file_path') else None,
+                    str(asset.get('public_url') or '').strip()[:1200] if asset.get('public_url') else None,
+                    str(asset.get('mime_type') or '').strip()[:120] if asset.get('mime_type') else None,
+                    int(asset.get('size_bytes')) if asset.get('size_bytes') is not None else None,
+                ),
+            )
+        self.execute_sql(
+            cursor,
+            '''
+            UPDATE landing_variant_runs
+            SET variants_generated = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            ''',
+            (
+                len({str((a or {}).get('variant_name') or '').strip() for a in (assets or []) if (a or {}).get('variant_name')}),
+                int(run_id),
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+    def list_landing_variant_runs(self, entreprise_id: int, limit: int = 10) -> list[dict]:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        lim = max(1, min(int(limit or 10), 100))
+        self.execute_sql(
+            cursor,
+            '''
+            SELECT id, entreprise_id, website_url, website_slug, source_task_id, status,
+                   variants_requested, variants_generated, output_dir, output_base_url,
+                   created_at, updated_at
+            FROM landing_variant_runs
+            WHERE entreprise_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            ''',
+            (int(entreprise_id), lim),
+        )
+        rows = cursor.fetchall() or []
+        conn.close()
+        return [self.clean_row_dict(dict(r)) for r in rows]
+
+    def list_landing_variant_assets(self, run_id: int) -> list[dict]:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self.execute_sql(
+            cursor,
+            '''
+            SELECT id, run_id, entreprise_id, variant_name, variant_index, asset_kind, device_type,
+                   relative_path, file_path, public_url, mime_type, size_bytes, created_at
+            FROM landing_variant_assets
+            WHERE run_id = ?
+            ORDER BY variant_index ASC, variant_name ASC, asset_kind ASC, device_type ASC, id ASC
+            ''',
+            (int(run_id),),
+        )
+        rows = cursor.fetchall() or []
+        conn.close()
+        return [self.clean_row_dict(dict(r)) for r in rows]
+
+    def get_landing_variant_run(self, run_id: int) -> dict | None:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self.execute_sql(
+            cursor,
+            '''
+            SELECT id, entreprise_id, website_url, website_slug, source_task_id, status,
+                   variants_requested, variants_generated, output_dir, output_base_url,
+                   created_at, updated_at
+            FROM landing_variant_runs
+            WHERE id = ?
+            LIMIT 1
+            ''',
+            (int(run_id),),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return self.clean_row_dict(dict(row)) if row else None
+
+    def get_landing_variant_run_by_task(self, task_id: str) -> dict | None:
+        if not task_id:
+            return None
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self.execute_sql(
+            cursor,
+            '''
+            SELECT id, entreprise_id, website_url, website_slug, source_task_id, status,
+                   variants_requested, variants_generated, output_dir, output_base_url,
+                   created_at, updated_at
+            FROM landing_variant_runs
+            WHERE source_task_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            ''',
+            (str(task_id).strip(),),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return self.clean_row_dict(dict(row)) if row else None
+
+    def get_latest_landing_variant_bundle(self, entreprise_id: int) -> dict:
+        runs = self.list_landing_variant_runs(entreprise_id=int(entreprise_id), limit=1)
+        if not runs:
+            return {}
+        run = runs[0]
+        assets = self.list_landing_variant_assets(int(run.get('id')))
+        variants: dict[str, dict] = {}
+        for asset in assets:
+            vname = str(asset.get('variant_name') or '').strip()
+            if not vname:
+                continue
+            if vname not in variants:
+                variants[vname] = {
+                    'variant_name': vname,
+                    'variant_index': asset.get('variant_index'),
+                    'index_url': None,
+                    'style_url': None,
+                    'script_url': None,
+                    'screenshots': {},
+                }
+            current = variants[vname]
+            kind = str(asset.get('asset_kind') or '').strip().lower()
+            pub = asset.get('public_url')
+            if kind == 'html':
+                current['index_url'] = pub
+            elif kind == 'css':
+                current['style_url'] = pub
+            elif kind == 'js':
+                current['script_url'] = pub
+            elif kind == 'screenshot':
+                dev = str(asset.get('device_type') or '').strip().lower() or 'desktop'
+                current['screenshots'][dev] = pub
+        out_variants = sorted(
+            variants.values(),
+            key=lambda x: (x.get('variant_index') is None, x.get('variant_index') or 9999, x.get('variant_name') or ''),
+        )
+        return {'run': run, 'variants': out_variants, 'assets_count': len(assets)}
+
     def record_metric_snapshot(self, cursor, entreprise_id, source, analysis_id, metrics_dict):
         """
         Enregistre un snapshot de métriques (même transaction que l'analyse si cursor fourni).

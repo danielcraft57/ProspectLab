@@ -657,7 +657,7 @@
         }
 
         if (emails > 0 && replies === 0) {
-            pushChip('warning', '0 réponse: renforcer l'offre + relances', '/entreprises', 92);
+            pushChip('warning', '0 réponse: renforcer l\'offre + relances', '/entreprises', 92);
         } else if (replies > 0) {
             pushChip('success', `${replies.toLocaleString('fr-FR')} réponse(s) sur la période`, '/entreprises', 18);
         }

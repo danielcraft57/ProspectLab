@@ -1,0 +1,47 @@
+name: CD Node15
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  deploy-node15:
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy on node15
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_APP_HOST }}
+          username: ${{ secrets.PROD_APP_USER }}
+          key: ${{ secrets.PROD_APP_SSH_KEY }}
+          script: |
+            set -e
+            REPO_PATH="${PROD_REPO_PATH:-/opt/prospectlab}"
+            BRANCH="${PROD_GIT_BRANCH:-main}"
+            if [ ! -d "$REPO_PATH/.git" ]; then
+              echo "Repository not found at $REPO_PATH"
+              exit 1
+            fi
+            cd "$REPO_PATH"
+            git fetch --all --prune
+            git checkout "$BRANCH"
+            git pull origin "$BRANCH"
+            if [ -f .env.prod ]; then
+              cp -f .env.prod .env
+              chmod 600 .env .env.prod
+            fi
+            if [ -x scripts/linux/update_services_to_conda.sh ]; then
+              sudo bash scripts/linux/update_services_to_conda.sh
+            fi
+            if [ -x scripts/linux/clear-redis.sh ]; then
+              ./scripts/linux/clear-redis.sh
+            fi
+            if [ -x scripts/linux/clear-logs.sh ]; then
+              ./scripts/linux/clear-logs.sh
+            fi
+            sudo systemctl restart prospectlab
+            sudo systemctl restart prospectlab-celery
+            sudo systemctl restart prospectlab-celerybeat
+          envs: PROD_REPO_PATH,PROD_GIT_BRANCH

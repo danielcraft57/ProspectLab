@@ -468,6 +468,20 @@ class ProspectLabWebSocket {
                 }
             } catch (e) {}
         });
+
+        // Génération landing variants (agent distant / Celery)
+        this.socket.on('landing_variants_progress', (data) => {
+            document.dispatchEvent(new CustomEvent('landing_variants:progress', { detail: data }));
+        });
+        this.socket.on('landing_variants_complete', (data) => {
+            document.dispatchEvent(new CustomEvent('landing_variants:complete', { detail: data }));
+        });
+        this.socket.on('landing_variants_error', (data) => {
+            document.dispatchEvent(new CustomEvent('landing_variants:error', { detail: data }));
+        });
+        this.socket.on('landing_variants_usage_limit', (data) => {
+            document.dispatchEvent(new CustomEvent('landing_variants:usage_limit', { detail: data }));
+        });
     }
 
     // Méthodes de connexion

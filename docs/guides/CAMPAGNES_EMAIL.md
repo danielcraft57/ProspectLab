@@ -81,6 +81,21 @@ Le système de campagnes email permet d'envoyer des emails en masse à des entre
 - **`analysis_url`** est construit au rendu à partir du `website` de l'entreprise (`/analyse?website=...&full=1`).
 - Si un ancien template stocké en BDD contient encore un lien de démo (`exemple.com`), le rendu remplace ce lien par l'URL calculée pour l'entreprise au moment de l'envoi.
 
+#### Variables — landing variants (screenshots + URL)
+- **`landing_variant_url`** : URL publique vers `index.html` de la variante principale (dernier run).
+- **`landing_variant_screenshot`** : screenshot “principal” (fallback : desktop → tablette → mobile).
+- **`landing_variant_screenshot_desktop`** : screenshot desktop de la variante principale.
+- **`landing_variant_screenshot_tablet`** : screenshot tablette de la variante principale.
+- **`landing_variant_screenshot_mobile`** : screenshot mobile de la variante principale.
+
+Exemple d'utilisation (email HTML) :
+
+```html
+<a href="{{ landing_variant_url }}" target="_blank" rel="noopener">
+  <img src="{{ landing_variant_screenshot_mobile }}" alt="Aperçu mobile" style="max-width:100%;border-radius:12px;">
+</a>
+```
+
 ### 5. Multi-domaines (comptes SMTP)
 
 ProspectLab peut envoyer depuis plusieurs domaines (ex. `danielcraft.fr`, `jammy.fr`) avec une base entreprises commune.

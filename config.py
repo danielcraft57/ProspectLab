@@ -229,7 +229,57 @@ CELERY_TASK_ACKS_LATE = os.environ.get('CELERY_TASK_ACKS_LATE', 'true').lower() 
 # (scraping/technical/seo/osint/pentest), sinon les tâches routées ne sont jamais exécutées.
 CELERY_WORKER_QUEUES = os.environ.get(
     'CELERY_WORKER_QUEUES',
-    'celery,scraping,scraping_interactive,mini_scrape,technical,seo,screenshot,osint,pentest,heavy,website_full',
+    'celery,scraping,scraping_interactive,mini_scrape,technical,seo,screenshot,osint,pentest,heavy,website_full,landing',
+)
+
+# Landing variants (Cursor distant / serv1)
+LANDING_VARIANTS_ENABLED = os.environ.get('LANDING_VARIANTS_ENABLED', 'true').lower() in (
+    '1',
+    'true',
+    'yes',
+    'on',
+)
+LANDING_VARIANTS_SCRIPT_PATH = os.environ.get(
+    'LANDING_VARIANTS_SCRIPT_PATH',
+    str(APP_DIR / 'scripts' / 'experiments' / 'gen_new_website' / 'generate_landing_variants_cursor_remote.py'),
+)
+LANDING_VARIANTS_REMOTE_HOST = os.environ.get('LANDING_VARIANTS_REMOTE_HOST', 'loicDaniel@serv1.lan')
+LANDING_VARIANTS_REMOTE_WORKSPACE = os.environ.get('LANDING_VARIANTS_REMOTE_WORKSPACE', '')
+LANDING_VARIANTS_REMOTE_CURSOR_COMMAND = os.environ.get('LANDING_VARIANTS_REMOTE_CURSOR_COMMAND', 'agent.cmd')
+LANDING_VARIANTS_MODEL = os.environ.get('LANDING_VARIANTS_MODEL', 'auto')
+LANDING_VARIANTS_REMOTE_TEMP_ROOT = os.environ.get('LANDING_VARIANTS_REMOTE_TEMP_ROOT', 'C:\\Temp\\cursor_prompt_runner')
+LANDING_VARIANTS_REMOTE_OUTPUT_ROOT = os.environ.get('LANDING_VARIANTS_REMOTE_OUTPUT_ROOT', 'C:\\Temp\\cursor_generated_landings')
+LANDING_VARIANTS_SSH_KEY_PATH = os.environ.get('LANDING_VARIANTS_SSH_KEY_PATH', '')
+LANDING_VARIANTS_AGENT_TIMEOUT = int(os.environ.get('LANDING_VARIANTS_AGENT_TIMEOUT', '420'))
+LANDING_VARIANTS_SERV1_MAX_CONCURRENT = max(
+    1, int(os.environ.get('LANDING_VARIANTS_SERV1_MAX_CONCURRENT', '1'))
+)
+LANDING_VARIANTS_SERV1_SEMAPHORE_KEY = (
+    os.environ.get('LANDING_VARIANTS_SERV1_SEMAPHORE_KEY', 'prospectlab:landing:serv1:inflight').strip()
+    or 'prospectlab:landing:serv1:inflight'
+)
+LANDING_VARIANTS_SERV1_SEMAPHORE_TTL_SEC = max(
+    60, int(os.environ.get('LANDING_VARIANTS_SERV1_SEMAPHORE_TTL_SEC', '7200'))
+)
+LANDING_VARIANTS_SERV1_WAIT_RETRY_SEC = max(
+    2, int(os.environ.get('LANDING_VARIANTS_SERV1_WAIT_RETRY_SEC', '15'))
+)
+LANDING_VARIANTS_SERV1_WAIT_MAX_SEC = max(
+    30, int(os.environ.get('LANDING_VARIANTS_SERV1_WAIT_MAX_SEC', '3600'))
+)
+LANDING_VARIANTS_USAGE_LIMIT_RETRIES = max(
+    0, int(os.environ.get('LANDING_VARIANTS_USAGE_LIMIT_RETRIES', '2'))
+)
+LANDING_VARIANTS_USAGE_LIMIT_RETRY_DELAY_SEC = max(
+    30, int(os.environ.get('LANDING_VARIANTS_USAGE_LIMIT_RETRY_DELAY_SEC', '900'))
+)
+LANDING_VARIANTS_STATIC_OUTPUT_DIR = os.environ.get(
+    'LANDING_VARIANTS_STATIC_OUTPUT_DIR',
+    str(APP_DIR / 'static' / 'generated' / 'landing_variants'),
+)
+LANDING_VARIANTS_PUBLIC_BASE_URL = (
+    os.environ.get('LANDING_VARIANTS_PUBLIC_BASE_URL', '/static/generated/landing_variants').strip()
+    or '/static/generated/landing_variants'
 )
 
 # File d’enqueue pour le pack « analyse site complet ».

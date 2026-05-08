@@ -19,6 +19,12 @@ param(
 
     [Parameter(Mandatory=$false)]
     [switch]$SkipNfsClient
+,
+    [Parameter(Mandatory=$false)]
+    [switch]$NoRemoteGitClone
+,
+    [Parameter(Mandatory=$false)]
+    [string]$RemoteGitBranch = 'main'
 )
 # Usage: .\deploy_production.ps1 -Server serveur-app.lan -User deploy -ProxyServer serveur-proxy.lan -ProxyUser deploy
 
@@ -49,6 +55,20 @@ Write-Host ""
 
 # Obtenir le répertoire du projet ProspectLab (parent du dossier scripts)
 $PROJECT_DIR = (Get-Item (Split-Path -Parent $PSScriptRoot)).FullName
+$UseRemoteGitClone = -not $NoRemoteGitClone
+
+$RepoUrl = ''
+if ($UseRemoteGitClone) {
+    try {
+        $RepoUrl = (git -C $PROJECT_DIR remote get-url origin 2>$null).Trim()
+    } catch {
+        $RepoUrl = ''
+    }
+    if ([string]::IsNullOrWhiteSpace($RepoUrl)) {
+        Write-Host "⚠️  Remote git origin introuvable localement. Basculage sur transfert de fichiers classique." -ForegroundColor Yellow
+        $UseRemoteGitClone = $false
+    }
+}
 
 # Vérifier la connexion SSH
 Write-Host "[1/9] Vérification de la connexion SSH..." -ForegroundColor Yellow
@@ -68,99 +88,117 @@ try {
 }
 Write-Host ""
 
-# Créer le répertoire de déploiement local
-Write-Host "[2/9] Préparation des fichiers locaux..." -ForegroundColor Yellow
 $deployDir = Join-Path $PROJECT_DIR "deploy"
-if (Test-Path $deployDir) {
-    Remove-Item -Recurse -Force $deployDir
-}
-New-Item -ItemType Directory -Path $deployDir | Out-Null
+if ($UseRemoteGitClone) {
+    Write-Host "[2/9] Reset complet + clone git ($RemoteGitBranch) sur le serveur..." -ForegroundColor Yellow
+    $resetOutput = ssh "$User@$Server" "sudo rm -rf $RemotePath; sudo mkdir -p $RemotePath; sudo chown -R $User`:$User $RemotePath" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "❌ Impossible de réinitialiser le dossier distant $RemotePath" -ForegroundColor Red
+        Write-Host $resetOutput -ForegroundColor Gray
+        exit 1
+    }
+    $cloneOutput = ssh "$User@$Server" "git clone --branch $RemoteGitBranch --single-branch $RepoUrl $RemotePath" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "❌ Impossible de cloner $RemoteGitBranch sur le serveur" -ForegroundColor Red
+        Write-Host $cloneOutput -ForegroundColor Gray
+        exit 1
+    }
+    Write-Host "✅ Clone $RemoteGitBranch effectué depuis $RepoUrl" -ForegroundColor Green
+    Write-Host ""
+} else {
+    # Créer le répertoire de déploiement local
+    Write-Host "[2/9] Préparation des fichiers locaux..." -ForegroundColor Yellow
+    if (Test-Path $deployDir) {
+        Remove-Item -Recurse -Force $deployDir
+    }
+    New-Item -ItemType Directory -Path $deployDir | Out-Null
 
-# Copier les fichiers nécessaires
-$filesToCopy = @(
-    'routes',
-    'services',
-    'tasks',
-    'templates',
-    'static',
-    'utils',
-    'scripts',
-    'app.py',
-    'celery_app.py',
-    'config.py',
-    'requirements.txt',
-    'README.md',
-    'run_celery.py'
-)
+    # Copier les fichiers nécessaires
+    $filesToCopy = @(
+        'routes',
+        'services',
+        'tasks',
+        'templates',
+        'static',
+        'utils',
+        'scripts',
+        'app.py',
+        'celery_app.py',
+        'config.py',
+        'requirements.txt',
+        'README.md',
+        'run_celery.py'
+    )
 
-# Vérifier que templates/pages existe et sera copié avec templates
-Write-Host "   Vérification des templates/pages..." -ForegroundColor Gray
-$templatesPagesPath = Join-Path $PROJECT_DIR "templates\pages"
-if (Test-Path $templatesPagesPath) {
-    Write-Host "  [+] templates/pages détecté" -ForegroundColor Green
-}
+    # Vérifier que templates/pages existe et sera copié avec templates
+    Write-Host "   Vérification des templates/pages..." -ForegroundColor Gray
+    $templatesPagesPath = Join-Path $PROJECT_DIR "templates\pages"
+    if (Test-Path $templatesPagesPath) {
+        Write-Host "  [+] templates/pages détecté" -ForegroundColor Green
+    }
 
-Write-Host "   Copie des fichiers..." -ForegroundColor Gray
-foreach ($item in $filesToCopy) {
-    $sourcePath = Join-Path $PROJECT_DIR $item
-    if (Test-Path $sourcePath) {
-        $destPath = Join-Path $deployDir $item
-        Copy-Item -Recurse -Path $sourcePath -Destination $destPath
-        Write-Host "  [+] $item" -ForegroundColor Green
-        
-        # Vérifications supplémentaires pour les dossiers importants
-        if ($item -eq 'templates') {
-            $pagesPath = Join-Path $destPath "pages"
-            if (Test-Path $pagesPath) {
-                $pageCount = (Get-ChildItem -Path $pagesPath -Filter "*.html" -Recurse -ErrorAction SilentlyContinue).Count
-                Write-Host "     └─ templates/pages/ : $pageCount fichiers HTML" -ForegroundColor Gray
+    Write-Host "   Copie des fichiers..." -ForegroundColor Gray
+    foreach ($item in $filesToCopy) {
+        $sourcePath = Join-Path $PROJECT_DIR $item
+        if (Test-Path $sourcePath) {
+            $destPath = Join-Path $deployDir $item
+            Copy-Item -Recurse -Path $sourcePath -Destination $destPath
+            Write-Host "  [+] $item" -ForegroundColor Green
+            
+            # Vérifications supplémentaires pour les dossiers importants
+            if ($item -eq 'templates') {
+                $pagesPath = Join-Path $destPath "pages"
+                if (Test-Path $pagesPath) {
+                    $pageCount = (Get-ChildItem -Path $pagesPath -Filter "*.html" -Recurse -ErrorAction SilentlyContinue).Count
+                    Write-Host "     └─ templates/pages/ : $pageCount fichiers HTML" -ForegroundColor Gray
+                }
+            }
+            if ($item -eq 'static') {
+                $jsPath = Join-Path $destPath "js"
+                $cssPath = Join-Path $destPath "css"
+                $jsCount = if (Test-Path $jsPath) { (Get-ChildItem -Path $jsPath -Filter "*.js" -Recurse -ErrorAction SilentlyContinue).Count } else { 0 }
+                $cssCount = if (Test-Path $cssPath) { (Get-ChildItem -Path $cssPath -Filter "*.css" -Recurse -ErrorAction SilentlyContinue).Count } else { 0 }
+                Write-Host "     └─ static/ : $jsCount fichiers JS, $cssCount fichiers CSS" -ForegroundColor Gray
             }
         }
-        if ($item -eq 'static') {
-            $jsPath = Join-Path $destPath "js"
-            $cssPath = Join-Path $destPath "css"
-            $jsCount = if (Test-Path $jsPath) { (Get-ChildItem -Path $jsPath -Filter "*.js" -Recurse -ErrorAction SilentlyContinue).Count } else { 0 }
-            $cssCount = if (Test-Path $cssPath) { (Get-ChildItem -Path $cssPath -Filter "*.css" -Recurse -ErrorAction SilentlyContinue).Count } else { 0 }
-            Write-Host "     └─ static/ : $jsCount fichiers JS, $cssCount fichiers CSS" -ForegroundColor Gray
-        }
     }
+
+    # Exclure les fichiers inutiles
+    Write-Host "   Nettoyage des fichiers inutiles..." -ForegroundColor Gray
+    $excludePatterns = @(
+        '__pycache__',
+        '*.pyc',
+        '*.pyo',
+        '.git',
+        'venv',
+        'env',
+        'env',
+        '.env',
+        '*.db',
+        '*.log',
+        'deploy',
+        'logs',
+        'logs_server'
+    )
+
+    # Exclure par nom de dossier pour deploy/logs (éviter de matcher le chemin .../deploy/...)
+    $excludeDirNames = @('deploy', 'logs', 'logs_server')
+    Get-ChildItem -Path $deployDir -Recurse -Force | Where-Object {
+        $exclude = $false
+        foreach ($pattern in $excludePatterns) {
+            if ($pattern -in $excludeDirNames) {
+                if ($_.Name -eq $pattern) { $exclude = $true; break }
+            } elseif ($_.FullName -like "*$pattern*") {
+                $exclude = $true
+                break
+            }
+        }
+        return $exclude
+    } | Remove-Item -Recurse -Force
+
+    Write-Host "✅ Fichiers préparés" -ForegroundColor Green
+    Write-Host ""
 }
-
-# Exclure les fichiers inutiles
-Write-Host "   Nettoyage des fichiers inutiles..." -ForegroundColor Gray
-$excludePatterns = @(
-    '__pycache__',
-    '*.pyc',
-    '*.pyo',
-    '.git',
-    'venv',
-    'env',
-    'env',
-    '.env',
-    '*.db',
-    '*.log',
-    'deploy',
-    'logs',
-    'logs_server'
-)
-
-# Exclure par nom de dossier pour deploy/logs (éviter de matcher le chemin .../deploy/...)
-$excludeDirNames = @('deploy', 'logs', 'logs_server')
-Get-ChildItem -Path $deployDir -Recurse -Force | Where-Object {
-    $exclude = $false
-    foreach ($pattern in $excludePatterns) {
-        if ($pattern -in $excludeDirNames) {
-            if ($_.Name -eq $pattern) { $exclude = $true; break }
-        } elseif ($_.FullName -like "*$pattern*") {
-            $exclude = $true
-            break
-        }
-    }
-    return $exclude
-} | Remove-Item -Recurse -Force
-
-Write-Host "✅ Fichiers préparés" -ForegroundColor Green
-Write-Host ""
 
 # Vérifier Conda sur le serveur
 Write-Host "[3/9] Vérification de Conda..." -ForegroundColor Yellow
@@ -180,6 +218,7 @@ Write-Host "✅ Répertoire créé sur le serveur" -ForegroundColor Green
 Write-Host ""
 
 # Copier les fichiers vers le serveur
+if (-not $UseRemoteGitClone) {
 Write-Host "[5/9] Transfert des fichiers vers le serveur..." -ForegroundColor Yellow
 Write-Host "   Cela peut prendre quelques instants..." -ForegroundColor Gray
 
@@ -258,6 +297,11 @@ foreach ($dir in $dirsToSync) {
 }
 Write-Host "✅ Dossiers synchronisés (routes, services, tasks, templates, static, utils, scripts)" -ForegroundColor Green
 Write-Host ""
+} else {
+    Write-Host "[5/9] Transfert des fichiers vers le serveur..." -ForegroundColor Yellow
+    Write-Host "✅ Étape ignorée (mode clone git actif)." -ForegroundColor Green
+    Write-Host ""
+}
 
 # Montage NFS (uploads + exports partagés) si NFS_SERVER est dans .env.prod — voir docs/configuration/DEPLOIEMENT_PRODUCTION.md
 # Sur la même machine que le stockage : UPLOAD_FOLDER=/srv/nfs/prospectlab/uploads + NFS_SKIP_CLIENT_MOUNT=true
@@ -403,5 +447,9 @@ Write-Host "  docs/configuration/DEPLOIEMENT_PRODUCTION.md" -ForegroundColor Gra
 Write-Host ""
 
 # Nettoyer le répertoire de déploiement local
-Remove-Item -Recurse -Force $deployDir
-Write-Host "✅ Répertoire de déploiement local nettoyé" -ForegroundColor Green
+if (Test-Path $deployDir) {
+    Remove-Item -Recurse -Force $deployDir
+    Write-Host "✅ Répertoire de déploiement local nettoyé" -ForegroundColor Green
+} else {
+    Write-Host "✅ Aucun répertoire de déploiement local à nettoyer (mode clone git)." -ForegroundColor Green
+}

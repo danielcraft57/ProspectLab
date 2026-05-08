@@ -428,6 +428,7 @@
     const relaunchLoadingState = {};
     let currentInfoScreenshotItems = [];
     let currentInfoBrandingItems = [];
+    let currentImagesItems = [];
     let currentPreviewItems = [];
     let currentPreviewIndex = -1;
 
@@ -3413,6 +3414,7 @@
             loadEntrepriseInfoScreenshots(entrepriseId);
             loadEntrepriseImages(entrepriseId);
             loadEntreprisePages(currentModalEntrepriseData);
+            loadEntrepriseLandingVariants(entrepriseId);
             loadScrapingResults(entrepriseId);
             loadTechnicalAnalysis(entrepriseId);
             loadOSINTAnalysis(entrepriseId);
@@ -3515,6 +3517,34 @@
         }
     }
 
+    function setLandingVariantsStatus(message, isError) {
+        if (window.EntrepriseLandingVariants && typeof window.EntrepriseLandingVariants.setStatus === 'function') {
+            window.EntrepriseLandingVariants.setStatus(message, isError);
+            return;
+        }
+        const status = document.getElementById('landing-variants-status');
+        if (!status) return;
+        status.style.display = message ? 'block' : 'none';
+        status.textContent = message || '';
+        status.classList.toggle('is-error', !!isError);
+    }
+
+    async function loadEntrepriseLandingVariants(entrepriseId) {
+        if (window.EntrepriseLandingVariants && typeof window.EntrepriseLandingVariants.load === 'function') {
+            return window.EntrepriseLandingVariants.load(entrepriseId, { Formatters, Notifications });
+        }
+        // Fallback minimal
+        const container = document.getElementById('landing-variants-content');
+        if (container) container.innerHTML = '<p class="empty-state">Module variantes indisponible.</p>';
+    }
+
+    async function startEntrepriseLandingVariants(entrepriseId) {
+        if (window.EntrepriseLandingVariants && typeof window.EntrepriseLandingVariants.start === 'function') {
+            return window.EntrepriseLandingVariants.start(entrepriseId, { Formatters, Notifications });
+        }
+        Notifications.show('Module variantes indisponible.', 'error');
+    }
+
     function setInfoScreenshotsLoading(isLoading, message = '') {
         const btn = document.getElementById('info-screenshots-refresh-btn');
         const status = document.getElementById('info-screenshots-status');
@@ -3546,93 +3576,15 @@
         socket.emit('start_screenshot_capture', { entreprise_id: entrepriseId });
     }
 
-    function ensureScreenshotPreviewModal() {
-        let modal = document.getElementById('screenshot-preview-modal');
-        if (modal) return modal;
-        modal = document.createElement('div');
-        modal.id = 'screenshot-preview-modal';
-        modal.className = 'screenshot-preview-modal';
-        modal.innerHTML = `
-            <div class="screenshot-preview-panel">
-                <div class="screenshot-preview-header">
-                    <h4 id="screenshot-preview-title">Screenshot</h4>
-                    <div class="screenshot-preview-header-actions">
-                        <button type="button" class="screenshot-preview-nav screenshot-preview-prev" aria-label="Précédent"><i class="fas fa-chevron-left"></i></button>
-                        <button type="button" class="screenshot-preview-nav screenshot-preview-next" aria-label="Suivant"><i class="fas fa-chevron-right"></i></button>
-                        <button type="button" class="screenshot-preview-close" aria-label="Fermer">×</button>
-                    </div>
-                </div>
-                <div class="screenshot-preview-body">
-                    <img id="screenshot-preview-image" src="" alt="Screenshot">
-                </div>
-            </div>
-        `;
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                modal.classList.remove('show');
-            }
-        });
-        const closeBtn = modal.querySelector('.screenshot-preview-close');
-        if (closeBtn) {
-            closeBtn.addEventListener('click', () => modal.classList.remove('show'));
-        }
-        const prevBtn = modal.querySelector('.screenshot-preview-prev');
-        if (prevBtn) {
-            prevBtn.addEventListener('click', () => openScreenshotPreviewModalByIndex(currentPreviewIndex - 1));
-        }
-        const nextBtn = modal.querySelector('.screenshot-preview-next');
-        if (nextBtn) {
-            nextBtn.addEventListener('click', () => openScreenshotPreviewModalByIndex(currentPreviewIndex + 1));
-        }
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && modal.classList.contains('show')) {
-                modal.classList.remove('show');
-                return;
-            }
-            if (!modal.classList.contains('show')) return;
-            if (e.key === 'ArrowLeft') {
-                openScreenshotPreviewModalByIndex(currentPreviewIndex - 1);
-            } else if (e.key === 'ArrowRight') {
-                openScreenshotPreviewModalByIndex(currentPreviewIndex + 1);
-            }
-        });
-        document.body.appendChild(modal);
-        return modal;
-    }
-
-    function _updateScreenshotPreviewNav(modal) {
-        const prevBtn = modal.querySelector('.screenshot-preview-prev');
-        const nextBtn = modal.querySelector('.screenshot-preview-next');
-        const hasItems = Array.isArray(currentPreviewItems) && currentPreviewItems.length > 0;
-        const canPrev = hasItems && currentPreviewIndex > 0;
-        const canNext = hasItems && currentPreviewIndex < currentPreviewItems.length - 1;
-        if (prevBtn) prevBtn.disabled = !canPrev;
-        if (nextBtn) nextBtn.disabled = !canNext;
-    }
-
+    // Prévisualisation (carousel/zoom) : délégation au module `window.EntreprisePreviewModal`
     function openPreviewCollection(items, index) {
-        if (!Array.isArray(items) || items.length === 0) return;
-        currentPreviewItems = items;
-        openScreenshotPreviewModalByIndex(index);
-    }
-
-    function openScreenshotPreviewModalByIndex(index) {
-        if (!Array.isArray(currentPreviewItems) || currentPreviewItems.length === 0) return;
-        const bounded = Math.max(0, Math.min(currentPreviewItems.length - 1, Number(index) || 0));
-        currentPreviewIndex = bounded;
-        const item = currentPreviewItems[bounded] || {};
-        openScreenshotPreviewModal(item.url, item.label);
-    }
-
-    function openScreenshotPreviewModal(url, label) {
-        const modal = ensureScreenshotPreviewModal();
-        const img = modal.querySelector('#screenshot-preview-image');
-        const title = modal.querySelector('#screenshot-preview-title');
-        if (img) img.src = String(url || '');
-        if (img) img.alt = `Screenshot ${label || ''}`.trim();
-        if (title) title.textContent = label ? `Screenshot ${label}` : 'Screenshot';
-        _updateScreenshotPreviewNav(modal);
-        modal.classList.add('show');
+        if (window.EntreprisePreviewModal && typeof window.EntreprisePreviewModal.open === 'function') {
+            window.EntreprisePreviewModal.open(items, index);
+            return;
+        }
+        // Fallback minimal (sans carousel) si module absent
+        const it = Array.isArray(items) ? items[Math.max(0, Number(index) || 0)] : null;
+        if (it && it.url) window.open(String(it.url), '_blank');
     }
 
     /**
@@ -4039,7 +3991,6 @@
                     </button>
                     <div class="tabs-header-scroll">
                         <button class="tab-btn active" data-tab="info">Info</button>
-                        <button class="tab-btn" data-tab="prospection">Prospection</button>
                         <button class="tab-btn" data-tab="images">Images (${nbImages})</button>
                         <button class="tab-btn" data-tab="pages">Pages (${nbPages})</button>
                         <button class="tab-btn" data-tab="scraping">Résultats scraping</button>
@@ -4049,6 +4000,8 @@
                         <button class="tab-btn" data-tab="seo">Analyse SEO</button>
                         <button class="tab-btn" data-tab="osint">Analyse OSINT</button>
                         <button class="tab-btn" data-tab="pentest">Analyse Pentest</button>
+                        <button class="tab-btn" data-tab="prospection">Prospection</button>
+                        <button class="tab-btn" data-tab="landing-variants">Variantes</button>
                     </div>
                     <button class="tabs-arrow tabs-arrow-right" type="button" aria-label="Onglets suivants">
                         <i class="fas fa-chevron-right"></i>
@@ -4176,6 +4129,21 @@
                     <div class="tab-panel" id="tab-pages">
                         <div id="entreprise-pages-container" class="pages-tab-content">
                             <p class="empty-state">Aucune donnée OpenGraph disponible pour le moment. Lancez un scraping pour récupérer les métadonnées des pages.</p>
+                        </div>
+                    </div>
+
+                    <div class="tab-panel" id="tab-landing-variants">
+                        <div class="landing-variants-toolbar">
+                            <button type="button" class="btn btn-outline btn-small" id="landing-variants-start-btn">
+                                <i class="fas fa-magic"></i> Lancer / Relancer
+                            </button>
+                            <button type="button" class="btn btn-outline btn-small" id="landing-variants-refresh-btn">
+                                <i class="fas fa-sync-alt"></i> Actualiser
+                            </button>
+                        </div>
+                        <div id="landing-variants-status" class="landing-variants-status" style="display:none;"></div>
+                        <div id="landing-variants-content" class="landing-variants-content">
+                            <p class="loading">Chargement des landing variants...</p>
                         </div>
                     </div>
                     
@@ -4514,6 +4482,33 @@
         if (!window._entrepriseModalWsListenersSetup && window.wsManager && window.wsManager.socket) {
             ensureModalWebSocketListeners();
         }
+        if (!window._entrepriseLandingVariantDomListenersSetup) {
+            window._entrepriseLandingVariantDomListenersSetup = true;
+            document.addEventListener('landing_variants:progress', (ev) => {
+                const d = (ev && ev.detail) || {};
+                if (currentModalEntrepriseId && d.entreprise_id && Number(d.entreprise_id) !== Number(currentModalEntrepriseId)) return;
+                if (d.message) setLandingVariantsStatus(String(d.message), false);
+            });
+            document.addEventListener('landing_variants:complete', (ev) => {
+                const d = (ev && ev.detail) || {};
+                if (currentModalEntrepriseId && d.entreprise_id && Number(d.entreprise_id) !== Number(currentModalEntrepriseId)) return;
+                setLandingVariantsStatus('Génération terminée.', false);
+                const btn = document.getElementById('landing-variants-start-btn');
+                if (btn) btn.disabled = false;
+                if (currentModalEntrepriseId) loadEntrepriseLandingVariants(currentModalEntrepriseId);
+            });
+            document.addEventListener('landing_variants:error', (ev) => {
+                const d = (ev && ev.detail) || {};
+                if (currentModalEntrepriseId && d.entreprise_id && Number(d.entreprise_id) !== Number(currentModalEntrepriseId)) return;
+                setLandingVariantsStatus(d.error || 'Erreur génération variants', true);
+                const btn = document.getElementById('landing-variants-start-btn');
+                if (btn) btn.disabled = false;
+            });
+            document.addEventListener('landing_variants:usage_limit', (ev) => {
+                const d = (ev && ev.detail) || {};
+                setLandingVariantsStatus(d.message || 'Usage limit Cursor atteint, retry en attente.', true);
+            });
+        }
 
         if (closeBtn) {
             closeBtn.onclick = (e) => {
@@ -4551,6 +4546,14 @@
                     e.stopPropagation();
                     const idx = parseInt(brandingBtn.getAttribute('data-branding-index') || '0', 10);
                     openPreviewCollection(currentInfoBrandingItems, Number.isNaN(idx) ? 0 : idx);
+                    return;
+                }
+                const imageBtn = e.target && e.target.closest && e.target.closest('[data-image-open="1"]');
+                if (imageBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const idx = parseInt(imageBtn.getAttribute('data-image-index') || '0', 10);
+                    openPreviewCollection(currentImagesItems, Number.isNaN(idx) ? 0 : idx);
                 }
             });
 
@@ -4561,6 +4564,26 @@
                     e.stopPropagation();
                     if (!currentModalEntrepriseId) return;
                     triggerScreenshotsCapture(currentModalEntrepriseId);
+                };
+            }
+
+            const landingStartBtn = document.getElementById('landing-variants-start-btn');
+            if (landingStartBtn) {
+                landingStartBtn.onclick = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (!currentModalEntrepriseId) return;
+                    startEntrepriseLandingVariants(currentModalEntrepriseId);
+                };
+            }
+
+            const landingRefreshBtn = document.getElementById('landing-variants-refresh-btn');
+            if (landingRefreshBtn) {
+                landingRefreshBtn.onclick = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (!currentModalEntrepriseId) return;
+                    loadEntrepriseLandingVariants(currentModalEntrepriseId);
                 };
             }
 
@@ -4995,6 +5018,15 @@
             pagesTab.addEventListener('click', () => {
                 if (currentModalEntrepriseData) {
                     loadEntreprisePages(currentModalEntrepriseData);
+                }
+            });
+        }
+
+        const landingVariantsTab = document.querySelector('.tab-btn[data-tab="landing-variants"]');
+        if (landingVariantsTab) {
+            landingVariantsTab.addEventListener('click', () => {
+                if (currentModalEntrepriseId) {
+                    loadEntrepriseLandingVariants(currentModalEntrepriseId);
                 }
             });
         }
@@ -5520,44 +5552,16 @@
     }
     
     async function loadEntrepriseImages(entrepriseId) {
-        try {
-            const response = await fetch(`/api/entreprise/${entrepriseId}/images`);
-            if (response.ok) {
-                const images = await response.json();
-                const container = document.getElementById('entreprise-images-container');
-                if (!container) return;
-                
-                if (!images || images.length === 0) {
-                    container.innerHTML = '<p class="empty-state">Aucune image trouvée pour ce site.</p>';
-                    updateModalTabCount('images', 0);
-                    return;
-                }
-            
-                updateModalTabCount('images', images.length);
-                const maxImages = 60;
-                const limited = images.slice(0, maxImages);
-                let html = '<div class="entreprise-images-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px;">';
-                for (const img of limited) {
-                    const url = img.url || img;
-                    const alt = img.alt_text || img.alt || '';
-                    html += `
-                        <div class="entreprise-image-card" style="background: #ffffff; border-radius: 8px; box-shadow: 0 2px 6px rgba(15,23,42,0.08); padding: 8px;">
-                            <div style="width: 100%; height: 120px; border-radius: 6px; overflow: hidden; background: #f3f4f6; display: flex; align-items: center; justify-content: center;">
-                                <img src="${url}" alt="${Formatters.escapeHtml(alt)}" loading="lazy" onerror="this.style.display='none'" style="width: 100%; height: 100%; object-fit: cover;">
-                            </div>
-                            <div style="margin-top: 6px;">
-                                ${alt ? `<div title="${Formatters.escapeHtml(alt)}" style="font-size: 0.8rem; color: #374151; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${Formatters.escapeHtml(alt)}</div>` : '<div style="font-size: 0.8rem; color: #9ca3af; margin-bottom: 4px;">Sans texte alternatif</div>'}
-                                <a href="${url}" target="_blank" style="font-size: 0.8rem; color: #2563eb; text-decoration: none;">Ouvrir l'image</a>
-                            </div>
-                        </div>
-                    `;
-                }
-                html += '</div>';
-                container.innerHTML = html;
+        if (window.EntrepriseImagesTab && typeof window.EntrepriseImagesTab.load === 'function') {
+            await window.EntrepriseImagesTab.load(entrepriseId, { Formatters, updateModalTabCount });
+            if (window.EntrepriseImagesTab && typeof window.EntrepriseImagesTab.getItems === 'function') {
+                currentImagesItems = window.EntrepriseImagesTab.getItems() || [];
             }
-        } catch (e) {
-            console.error('Erreur lors du chargement des images:', e);
+            return;
         }
+        // Fallback minimal
+        const container = document.getElementById('entreprise-images-container');
+        if (container) container.innerHTML = '<p class="empty-state">Module images indisponible.</p>';
     }
     
     function loadEntreprisePages(entreprise) {
