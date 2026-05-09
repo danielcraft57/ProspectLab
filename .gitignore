@@ -76,6 +76,8 @@ scripts/experiments/competitive_intel/exports/*
 celerybeat-schedule
 celerybeat-schedule.*
 celerybeat.pid
+celery_worker.pid
+celery_beat.pid
 
 # Redis
 dump.rdb
@@ -136,3 +138,5 @@ ml_face/
 
 # Variantes de landing générées automatiquement
 static/generated/landing_variants/
+AGENT.md
+
