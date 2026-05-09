@@ -325,7 +325,6 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
     try:
         for idx, recipient in enumerate(recipients or [], start=1):
             recipient_email = recipient.get('email', 'N/A')
-            entreprise_id = recipient.get('entreprise_id')
 
             progress = int((idx / max(total, 1)) * 100)
             logs.append({
@@ -347,32 +346,12 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
                 }
             )
 
-            # Ne jamais renvoyer vers une adresse déjà reconnue en bounce
-            # (même entreprise ou historique global de la même adresse).
-            if campagne_manager.is_email_blocked_for_campaign(recipient_email, entreprise_id=entreprise_id):
-                total_failed += 1
-                campagne_manager.save_email_envoye(
-                    campagne_id=campagne_id,
-                    entreprise_id=entreprise_id,
-                    email=recipient.get('email'),
-                    nom_destinataire=recipient.get('nom', ''),
-                    entreprise=recipient.get('entreprise'),
-                    sujet=subject or 'Prospection',
-                    statut='failed',
-                    erreur='Envoi bloqué: adresse déjà marquée bounced',
-                )
-                logs.append({
-                    'timestamp': time.strftime('%H:%M:%S'),
-                    'level': 'warning',
-                    'message': f'Adresse ignorée (bounce connu): {recipient_email}',
-                })
-                continue
-
             # Formater le nom du destinataire si nécessaire
             from utils.name_formatter import format_name
             recipient_nom = format_name(recipient.get('nom', ''))
             
             # Rendre le template avec les données de l'entreprise
+            entreprise_id = recipient.get('entreprise_id')
             if template_id and template:
                 content, is_html = template_manager.render_template(
                     template_id,
