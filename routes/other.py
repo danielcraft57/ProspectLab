@@ -729,12 +729,20 @@ def api_relaunch_campagne(campagne_id):
     if not campagne:
         return jsonify({'error': 'Campagne introuvable'}), 404
 
-    existing_emails = campagne_manager.get_emails_campagne(campagne_id)
-    if not existing_emails:
-        return jsonify({'error': 'Aucun destinataire trouvé pour cette campagne'}), 400
+    existing_emails = campagne_manager.get_emails_campagne(campagne_id) or []
+
+    params = {}
+    params_json = campagne.get('campaign_params_json')
+    if params_json:
+        try:
+            params = json.loads(params_json) or {}
+        except (ValueError, TypeError):
+            params = {}
 
     recipients = []
     seen = set()
+
+    # 1) Priorité aux emails réellement envoyés (historique).
     for email_row in existing_emails:
         email = (email_row.get('email') or '').strip()
         if not email:
@@ -751,20 +759,32 @@ def api_relaunch_campagne(campagne_id):
             'entreprise_id': entreprise_id
         })
 
+    # 2) Fallback: campagnes programmées / anciennes sans ligne emails_envoyes.
     if not recipients:
-        return jsonify({'error': 'Destinataires invalides pour la relance'}), 400
+        for row in params.get('recipients', []) or []:
+            if not isinstance(row, dict):
+                continue
+            email = (row.get('email') or '').strip()
+            if not email:
+                continue
+            entreprise_id = row.get('entreprise_id')
+            uniq_key = f"{email.lower()}::{entreprise_id or ''}"
+            if uniq_key in seen:
+                continue
+            seen.add(uniq_key)
+            recipients.append({
+                'email': email,
+                'nom': row.get('nom'),
+                'entreprise': row.get('entreprise'),
+                'entreprise_id': entreprise_id
+            })
 
-    template_id = campagne.get('template_id')
-    sujet = campagne.get('sujet')
-    custom_message = None
+    if not recipients:
+        return jsonify({'error': 'Aucun destinataire trouvé pour cette campagne (historique et paramètres vides)'}), 400
 
-    params_json = campagne.get('campaign_params_json')
-    if params_json:
-        try:
-            params = json.loads(params_json)
-            custom_message = params.get('custom_message')
-        except (ValueError, TypeError):
-            custom_message = None
+    template_id = campagne.get('template_id') or params.get('template_id')
+    sujet = campagne.get('sujet') or params.get('subject')
+    custom_message = params.get('custom_message')
 
     if not template_id and not custom_message:
         return jsonify({'error': 'Impossible de relancer: campagne sans template ni message source'}), 400
