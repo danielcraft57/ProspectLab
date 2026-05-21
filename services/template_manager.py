@@ -6,7 +6,7 @@ import json
 import re
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from urllib.parse import quote
 
 
@@ -39,6 +39,53 @@ def _append_email_query_before_fragment(url: str, encoded_email: str) -> str:
         return f'{left}{joiner}email={encoded_email}#{frag}'
     joiner = '&' if '?' in url else '?'
     return f'{url}{joiner}email={encoded_email}'
+
+
+def _vitrine_fields_from_secteur(secteur: str) -> Dict[str, str]:
+    """
+    Associe le libellé secteur (champ entreprise) à une démo catalogue DanielCraft.
+    Les URLs pointent vers danielcraft.fr/vitrines/… (captures longues : prévoir affichage fenêtré côté HTML).
+    """
+    s = (secteur or "").lower()
+    rules: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+        ("technologie", ("tech", "saas", "logiciel", "cloud", "api", "esn", "informatique", "dévelop", "develop", "software", "éditeur", "editeur")),
+        ("services", ("facility", "conciergerie", "nettoyage", "propreté", "proprete", "gestionnaire", "immeuble", "services aux")),
+        ("restauration", ("restaur", "hcr", "brasserie", "café", "cafe", "bar ", "traiteur", "cuisine")),
+        ("commerce", ("commerce", "retail", "magasin", "superm", "drive", "épicerie", "epicerie", "grande distribution", "boulanger", "boulange")),
+        ("education", ("form", "organisme", "cfa", "pédagog", "pedagog", "école", "ecole", "training", "apprentissage")),
+        ("etablissement", ("hôtel", "hotel", "hébergement", "hebergement", "chambre d'hôte", "gîte", "gite", "resort")),
+        ("beaute", ("spa", "institut", "beauté", "beaute", "soin", "esthétique", "esthetique", "massage", "onglerie")),
+        ("automobile", ("garage", "auto ", "véhicule", "vehicule", "carrosserie", "mécanique", "mecanique", "concession")),
+        ("chocolatier", ("chocolat", "confiseur", "patissier", "pâtissier", "torréfact", "torrefact")),
+        ("odontologie", ("dent", "orthodont", "cabinet dent", "odont", "stomatolog")),
+        ("banque", ("banque", "assurance", "courtier", "mutuelle", "épargne", "epargne")),
+        ("industrie", ("industr", "usin", "manufact", "fonderie", "acier", "production", "machin")),
+        ("comptable", ("compta", "expertise comptable", "expert-comptable", "commissaire aux comptes", "cabinet compt")),
+        ("association", ("associat", "ong", "fondation", "solidarité", "solidarite", "bénévolat", "benevolat")),
+    )
+    slug = ""
+    for candidate, needles in rules:
+        if any(n in s for n in needles):
+            slug = candidate
+            break
+    root = "https://danielcraft.fr/vitrines"
+    catalog = f"{root}/"
+    if not slug:
+        return {
+            "vitrine_slug": "",
+            "vitrine_catalog_url": catalog,
+            "vitrine_demo_url": catalog,
+            "vitrine_fiche_url": catalog,
+            "vitrine_screenshot_url": "",
+        }
+    shot = f"{root}/{slug}/screenshots/desktop_1920x2400.webp"
+    return {
+        "vitrine_slug": slug,
+        "vitrine_catalog_url": catalog,
+        "vitrine_demo_url": f"{root}/{slug}/demo/index.html",
+        "vitrine_fiche_url": f"{root}/{slug}/",
+        "vitrine_screenshot_url": shot,
+    }
 
 
 class TemplateManager:
@@ -667,6 +714,7 @@ class TemplateManager:
                     'opportunite': entreprise.get('opportunite') or '',
                     'statut': entreprise.get('statut') or '',
                 })
+                data.update(_vitrine_fields_from_secteur(data.get("secteur") or ""))
 
             try:
                 latest_landing = db.get_latest_landing_variant_bundle(int(entreprise_id)) or {}
@@ -1520,6 +1568,14 @@ class TemplateManager:
                 'html_secteur',
                 0.7,
                 "Secteur identifié, peu de données techniques disponibles."
+            )
+
+        # 5b) Démo catalogue alignée sur le secteur (aperçu vitrine + liens démo)
+        if extended.get("vitrine_slug"):
+            add_suggestion(
+                "html_theme_proche_metier",
+                0.73,
+                "Thème catalogue DanielCraft proche du secteur : capture fenêtrée + démo live prête à parcourir.",
             )
 
         # 6) Aucune donnée particulière => email de découverte

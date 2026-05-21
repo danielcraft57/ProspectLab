@@ -4,18 +4,21 @@ Expose les données d'entreprises et emails pour intégration avec d'autres logi
 Authentification par token API
 """
 
-from flask import Blueprint, request, jsonify
-from config import SEO_USE_LIGHTHOUSE_DEFAULT
+from flask import Blueprint, request, jsonify, make_response
+from config import CELERY_FULL_ANALYSIS_QUEUE, SEO_USE_LIGHTHOUSE_DEFAULT
 from services.database import Database
-from services.api_auth import api_token_required, require_api_permission
+from services.api_auth import api_token_required, require_api_permission, website_audit_public_auth
 import json
 import re
+from typing import Optional
 from urllib.parse import urlparse
 
 from utils.url_utils import canonical_website_https_url
 from services.public_api_response_cache import public_response_cache
+from services.logging_config import setup_logger
 
 api_public_bp = Blueprint('api_public', __name__, url_prefix='/api/public')
+_audit_api_logger = setup_logger(__name__, 'website_audit_api.log')
 
 # Initialiser la base de données
 database = Database()
@@ -1980,4 +1983,449 @@ def expo_push_register():
         return jsonify({'success': False, 'error': str(ve)}), 400
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _normalize_public_email(raw: str) -> str | None:
+    s = (raw or '').strip().lower()
+    if not s or '@' not in s:
+        return None
+    return s
+
+
+def _audit_request_basics(payload: dict):
+    """
+    Valide website + email.
+
+    Returns:
+        ((website, recipient), None) en cas de succès
+        (None, (flask_response, status_code)) en cas d'erreur
+    """
+    website_raw = (payload.get('website') or payload.get('url') or '').strip()
+    website = _normalize_url_for_analysis(website_raw)
+    if not website:
+        return None, (
+            jsonify({'success': False, 'error': 'Le champ "website" est requis (URL ou domaine).'}),
+            400,
+        )
+    recipient = _normalize_public_email(payload.get('email') or payload.get('recipient_email') or '')
+    if not recipient:
+        return None, (
+            jsonify({'success': False, 'error': 'Le champ "email" est requis et doit être valide.'}),
+            400,
+        )
+    return (website, recipient), None
+
+
+def _resolve_entreprise_for_audit(website: str, recipient: str) -> int | None:
+    entreprise_id = _get_entreprise_id_for_website(database, website)
+    if not entreprise_id:
+        entreprise_id = database.save_entreprise(
+            analyse_id=None,
+            entreprise_data={
+                'name': urlparse(website).netloc or website,
+                'website': website,
+                'statut': 'Nouveau',
+                'email_principal': recipient,
+            },
+            skip_duplicates=True,
+        )
+    return entreprise_id
+
+
+@api_public_bp.route('/website-audit-report', methods=['POST'])
+@website_audit_public_auth
+def public_website_audit_report_simple():
+    """
+    API publique — **analyse simple** + PDF local + email.
+
+    Modules : scraping, technique, SEO, pentest (ordre séquentiel).
+    Si les analyses existent déjà en base pour ce site : PDF + email directement.
+    PDF : généré sur le serveur (synthèse automatisée), pas le rapport complet payant.
+
+    Corps JSON:
+        - website (requis), email (requis)
+        - enable_nmap, use_lighthouse, max_depth, max_workers, max_time, max_pages (optionnels)
+    """
+    payload = request.get_json(silent=True) or {}
+    basics, err = _audit_request_basics(payload)
+    if err is not None:
+        return err
+    website, recipient = basics
+
+    entreprise_id = _resolve_entreprise_for_audit(website, recipient)
+    enable_nmap = bool(payload.get('enable_nmap', False))
+    use_lighthouse = bool(payload.get('use_lighthouse', SEO_USE_LIGHTHOUSE_DEFAULT))
+    max_depth = int(payload.get('max_depth', 2) or 2)
+    max_workers = int(payload.get('max_workers', 5) or 5)
+    max_time = int(payload.get('max_time', 300) or 300)
+    max_pages = int(payload.get('max_pages', 40) or 40)
+
+    try:
+        from tasks.website_audit_report_tasks import website_audit_simple_report_task
+
+        _audit_api_logger.info(
+            'POST website-audit-report simple: website=%s email=%s entreprise_id=%s enable_nmap=%s',
+            website, recipient, entreprise_id, enable_nmap,
+        )
+        async_res = website_audit_simple_report_task.apply_async(
+            kwargs=dict(
+                website=website,
+                recipient_email=recipient,
+                entreprise_id=entreprise_id,
+                enable_nmap=enable_nmap,
+                use_lighthouse=use_lighthouse,
+                max_depth=max_depth,
+                max_workers=max_workers,
+                max_time=max_time,
+                max_pages=max_pages,
+            ),
+            queue='technical',
+        )
+        _audit_api_logger.info(
+            'Tâche audit simple enfilée: task_id=%s queue=technical', async_res.id,
+        )
+    except Exception as e:
+        _audit_api_logger.exception('Échec enqueue audit simple: %s', e)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+    return jsonify({
+        'success': True,
+        'accepted': True,
+        'mode': 'simple',
+        'website': website,
+        'email': recipient,
+        'entreprise_id': entreprise_id,
+        'task_id': async_res.id,
+        'pdf_engine': 'local',
+        'analysis_modules': ['scraping', 'technical', 'seo', 'pentest'],
+        'message': (
+            'Analyse simple en cours (scraping puis technique, SEO, pentest). '
+            'Si le site est déjà analysé : PDF et email sans relance. '
+            'Suivi : GET /api/public/website-audit-report/<task_id>'
+        ),
+    }), 202
+
+
+@api_public_bp.route('/website-audit-report/complete', methods=['POST'])
+@website_audit_public_auth
+def public_website_audit_report_complete():
+    """
+    API publique — **analyse complète** + rapport expert PDF + email.
+
+    Modules : scraping, technique, SEO, screenshots, OSINT, pentest.
+    PDF : synthèse experte ; en cas d'échec : pause + email admin avec lien de reprise (pas d'envoi client).
+
+    Corps JSON:
+        - website, email (requis)
+        - extra_instructions (optionnel) : consignes pour la rédaction du rapport
+        - max_depth, max_workers, max_time, max_pages, enable_nmap, use_lighthouse
+    """
+    payload = request.get_json(silent=True) or {}
+    basics, err = _audit_request_basics(payload)
+    if err is not None:
+        return err
+    website, recipient = basics
+
+    entreprise_id = _resolve_entreprise_for_audit(website, recipient)
+    already_analyzed = False
+    missing_modules: list = []
+    if entreprise_id:
+        try:
+            from services.database import Database
+            from services.website_audit_data import audit_data_ready, audit_missing_modules, build_audit_pipeline
+
+            pipeline = build_audit_pipeline(Database(), entreprise_id)
+            already_analyzed = audit_data_ready(pipeline, 'complete')
+            missing_modules = audit_missing_modules(pipeline, 'complete')
+        except Exception:
+            pass
+    max_depth = int(payload.get('max_depth', 2) or 2)
+    max_workers = int(payload.get('max_workers', 5) or 5)
+    max_time = int(payload.get('max_time', 300) or 300)
+    max_pages = int(payload.get('max_pages', 40) or 40)
+    enable_nmap = bool(payload.get('enable_nmap', False))
+    use_lighthouse = bool(payload.get('use_lighthouse', SEO_USE_LIGHTHOUSE_DEFAULT))
+    extra_instructions = (payload.get('extra_instructions') or '').strip() or None
+
+    try:
+        from tasks.website_audit_report_tasks import website_audit_complete_report_task
+
+        _audit_api_logger.info(
+            'POST website-audit-report/complete: website=%s email=%s entreprise_id=%s '
+            'max_depth=%s max_pages=%s',
+            website, recipient, entreprise_id, max_depth, max_pages,
+        )
+        async_res = website_audit_complete_report_task.apply_async(
+            kwargs=dict(
+                website=website,
+                recipient_email=recipient,
+                entreprise_id=entreprise_id,
+                max_depth=max_depth,
+                max_workers=max_workers,
+                max_time=max_time,
+                max_pages=max_pages,
+                enable_nmap=enable_nmap,
+                use_lighthouse=use_lighthouse,
+                extra_instructions=extra_instructions,
+            ),
+            queue=CELERY_FULL_ANALYSIS_QUEUE,
+        )
+        _audit_api_logger.info(
+            'Tâche audit complète enfilée: task_id=%s queue=%s',
+            async_res.id, CELERY_FULL_ANALYSIS_QUEUE,
+        )
+    except Exception as e:
+        _audit_api_logger.exception('Échec enqueue audit complet: %s', e)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+    cache_msg = (
+        ' Analyses déjà en base — pas de relance des modules, rapport complet + email uniquement.'
+        if already_analyzed
+        else (
+            f' Modules à exécuter : {", ".join(missing_modules)}.'
+            if missing_modules
+            else ''
+        )
+    )
+    return jsonify({
+        'success': True,
+        'accepted': True,
+        'mode': 'complete',
+        'website': website,
+        'email': recipient,
+        'entreprise_id': entreprise_id,
+        'task_id': async_res.id,
+        'pdf_engine': 'expert',
+        'already_analyzed': already_analyzed,
+        'missing_modules': missing_modules,
+        'analysis_modules': [
+            'scraping', 'technical', 'seo', 'screenshot', 'osint', 'pentest',
+        ],
+        'message': (
+            'Analyse complète en cours. Production du rapport expert puis envoi par email.'
+            + cache_msg
+            + ' Suivi : GET /api/public/website-audit-report/<task_id>'
+        ),
+    }), 202
+
+
+def _enqueue_audit_complete_resume(
+    *,
+    pending_id: Optional[str] = None,
+    website_raw: str = '',
+    email_raw: str = '',
+    extra_instructions: Optional[str] = None,
+):
+    from services.website_audit_pending import load_pending_agent_job
+
+    pending = load_pending_agent_job(
+        pending_id=pending_id,
+        website=canonical_website_https_url(website_raw) if website_raw else None,
+    )
+    if not pending:
+        return None, (
+            jsonify({
+                'success': False,
+                'error': 'Aucun audit en pause trouvé pour cette demande',
+            }),
+            404,
+        )
+    pid = (pending.get('pending_id') or '').strip()
+    from services.website_audit_pending import (
+        claim_audit_resume_enqueue,
+        get_audit_resume_task_id,
+        bind_audit_resume_task_id,
+    )
+
+    def _resume_celery_still_running(task_id: str) -> bool:
+        tid = (task_id or '').strip()
+        if not tid:
+            return False
+        try:
+            from celery.result import AsyncResult
+            from celery_app import celery as celery_app
+
+            state = (AsyncResult(tid, app=celery_app).state or '').upper()
+            return state in ('PENDING', 'STARTED', 'RETRY', 'PROGRESS')
+        except Exception:
+            return False
+
+    existing_tid = get_audit_resume_task_id(pid) or (pending.get('resume_celery_task_id') or '').strip()
+    if existing_tid and _resume_celery_still_running(existing_tid):
+        website = canonical_website_https_url((pending.get('website') or website_raw or '').strip())
+        recipient = _normalize_public_email(email_raw or pending.get('recipient_email') or '')
+        body = {
+            'success': True,
+            'accepted': True,
+            'mode': 'complete',
+            'action': 'resume',
+            'website': website,
+            'email': recipient,
+            'pending_id': pid,
+            'task_id': existing_tid or None,
+            'duplicate': True,
+            'message': 'Reprise déjà en cours — ne pas rafraîchir la page. Suivi : GET /api/public/website-audit-report/<task_id>',
+        }
+        return body, None
+    if pending.get('status') == 'resume_queued' and existing_tid and not _resume_celery_still_running(existing_tid):
+        from services.website_audit_pending import release_audit_resume_lock, reopen_pending_after_failed_resume
+
+        release_audit_resume_lock(pid)
+        pending = reopen_pending_after_failed_resume(pending)
+
+    if pending.get('status') not in ('paused_agent', 'paused_cursor'):
+        return None, (
+            jsonify({'success': False, 'error': 'Ce job n\'est pas en pause'}),
+            409,
+        )
+
+    website = canonical_website_https_url((pending.get('website') or website_raw or '').strip())
+    recipient = _normalize_public_email(email_raw or pending.get('recipient_email') or '')
+    if not website or not recipient:
+        return None, (jsonify({'success': False, 'error': 'website et email requis'}), 400)
+
+    can_enqueue, locked_tid = claim_audit_resume_enqueue(pid)
+    if not can_enqueue:
+        body = {
+            'success': True,
+            'accepted': True,
+            'mode': 'complete',
+            'action': 'resume',
+            'website': website,
+            'email': recipient,
+            'pending_id': pid,
+            'task_id': locked_tid,
+            'duplicate': True,
+            'message': 'Reprise déjà lancée (double clic ignoré). Suivi : GET /api/public/website-audit-report/<task_id>',
+        }
+        return body, None
+
+    try:
+        from tasks.website_audit_report_tasks import website_audit_complete_resume_task
+
+        async_res = website_audit_complete_resume_task.apply_async(
+            kwargs=dict(
+                pending_id=pending.get('pending_id'),
+                website=website,
+                recipient_email=recipient,
+                extra_instructions=extra_instructions,
+            ),
+            queue=CELERY_FULL_ANALYSIS_QUEUE,
+        )
+        from services.website_audit_pending import mark_pending_resume_queued
+
+        bind_audit_resume_task_id(pid, async_res.id)
+        mark_pending_resume_queued(pending, celery_task_id=async_res.id)
+    except Exception as e:
+        from services.website_audit_pending import release_audit_resume_lock
+
+        release_audit_resume_lock(pid)
+        _audit_api_logger.exception('Échec enqueue reprise audit: %s', e)
+        return None, (jsonify({'success': False, 'error': str(e)}), 500)
+
+    body = {
+        'success': True,
+        'accepted': True,
+        'mode': 'complete',
+        'action': 'resume',
+        'website': website,
+        'email': recipient,
+        'pending_id': pending.get('pending_id'),
+        'task_id': async_res.id,
+        'message': (
+            'Reprise production du rapport + envoi email. '
+            'Suivi : GET /api/public/website-audit-report/<task_id>'
+        ),
+    }
+    return body, None
+
+
+@api_public_bp.route('/website-audit-report/complete/resume', methods=['GET', 'POST'])
+@website_audit_public_auth
+def public_website_audit_report_complete_resume():
+    """
+    Reprise après pause (quota ou indisponibilité de production).
+
+    GET (lien email admin) : ?pending_id=...&audit_key=... (optionnel si clé lead configurée).
+    POST JSON : pending_id et/ou website + email.
+    """
+    if request.method == 'GET':
+        pending_id = (request.args.get('pending_id') or '').strip() or None
+        website_raw = (request.args.get('website') or '').strip()
+        email_raw = (request.args.get('email') or '').strip()
+        extra_instructions = (request.args.get('extra_instructions') or '').strip() or None
+    else:
+        payload = request.get_json(silent=True) or {}
+        pending_id = (payload.get('pending_id') or '').strip() or None
+        website_raw = (payload.get('website') or '').strip()
+        email_raw = (payload.get('email') or '').strip()
+        extra_instructions = (payload.get('extra_instructions') or '').strip() or None
+
+    result, err = _enqueue_audit_complete_resume(
+        pending_id=pending_id,
+        website_raw=website_raw,
+        email_raw=email_raw,
+        extra_instructions=extra_instructions,
+    )
+    if err is not None:
+        return err
+    if request.method == 'GET' and (request.args.get('pending_id') or '').strip():
+        task_id = (result or {}).get('task_id') or ''
+        duplicate = (result or {}).get('duplicate')
+        status_url = f'/api/public/website-audit-report/{task_id}' if task_id else ''
+        title = 'Reprise déjà en cours' if duplicate else 'Reprise lancée'
+        hint = (
+            'Ne rechargez pas cette page (cela relançait l’agent en double). '
+            'Suivez l’avancement via l’API de statut ci-dessous.'
+        )
+        html = (
+            f'<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8">'
+            f'<meta name="robots" content="noindex"><title>{title}</title></head>'
+            f'<body style="font-family:system-ui,sans-serif;max-width:42rem;margin:2rem auto;padding:0 1rem;">'
+            f'<h1>{title}</h1><p>{hint}</p>'
+            f'<p><strong>pending_id</strong> : {(result or {}).get("pending_id", "")}</p>'
+            f'<p><strong>task_id</strong> : {task_id or "—"}</p>'
+        )
+        if status_url:
+            html += f'<p><a href="{status_url}">Voir le statut de la tâche</a></p>'
+        html += '</body></html>'
+        resp = make_response(html, 202 if not duplicate else 200)
+        resp.headers['Content-Type'] = 'text/html; charset=utf-8'
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp
+    return jsonify(result), 202
+
+
+@api_public_bp.route('/website-audit-report/<task_id>', methods=['GET'])
+@website_audit_public_auth
+def public_website_audit_report_status(task_id: str):
+    """
+    API publique : état d'une demande de rapport d'audit (tâche Celery).
+    """
+    from celery.result import AsyncResult
+    from celery_app import celery as celery_app
+
+    if not (task_id or '').strip():
+        return jsonify({'success': False, 'error': 'task_id requis'}), 400
+
+    res = AsyncResult(task_id.strip(), app=celery_app)
+    state = res.state or 'PENDING'
+    payload: dict = {
+        'success': True,
+        'task_id': task_id,
+        'state': state,
+        'ready': res.ready(),
+        'successful': res.successful() if res.ready() else None,
+    }
+    if state == 'PROGRESS':
+        try:
+            payload['meta'] = res.info
+        except Exception:
+            payload['meta'] = {}
+    elif res.ready():
+        if res.successful():
+            payload['result'] = res.result
+        else:
+            payload['error'] = str(res.info) if res.info else 'Échec de la tâche'
+    return jsonify(payload)
 

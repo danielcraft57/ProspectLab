@@ -119,10 +119,22 @@ class DatabaseBase:
         retry_delay = max(0.1, float(os.environ.get('DATABASE_CONNECT_RETRY_DELAY_SEC', '0.75')))
         last_exc = None
 
+        from services.database.postgresql_pool import PooledConnection, get_postgresql_pool
+
+        pool = get_postgresql_pool(self.database_url)
+        connect_timeout = max(3, int(os.environ.get('DATABASE_CONNECT_TIMEOUT_SEC', '10')))
+        stmt_ms = (os.environ.get('DATABASE_STATEMENT_TIMEOUT_MS') or '').strip()
+        connect_kwargs: dict = {'connect_timeout': connect_timeout}
+        if stmt_ms.isdigit() and int(stmt_ms) > 0:
+            connect_kwargs['options'] = f'-c statement_timeout={int(stmt_ms)}'
+
         for attempt in range(1, retries + 1):
             try:
-                conn = psycopg2.connect(self.database_url)
-                # Utiliser RealDictCursor pour avoir un comportement similaire à sqlite3.Row
+                if pool is not None:
+                    conn = pool.getconn()
+                    conn.cursor_factory = RealDictCursor
+                    return PooledConnection(conn, pool)
+                conn = psycopg2.connect(self.database_url, **connect_kwargs)
                 conn.cursor_factory = RealDictCursor
                 return conn
             except Exception as exc:

@@ -586,6 +586,52 @@ sudo pkill -f gunicorn
 sudo systemctl restart prospectlab
 ```
 
+### Problème : audit complet en pause (`agent_unavailable`)
+
+Le mode `/api/public/website-audit-report/complete` génère un PDF expert via **SSH vers serv1**. Voir le guide dédié : [SSH_SERV1_ET_AUDIT.md](SSH_SERV1_ET_AUDIT.md).
+
+Checklist minimale sur **SERVEUR_APP** :
+
+```bash
+sudo apt install -y openssh-client
+cd /opt/prospectlab
+bash scripts/linux/fix_env_crlf.sh
+bash scripts/linux/test_audit_agent_ssh.sh
+# .env doit contenir :
+#   LANDING_VARIANTS_REMOTE_HOST=loicDaniel@serv1.lan
+#   LANDING_VARIANTS_SSH_KEY_PATH=/home/pi/.ssh/id_rsa
+sudo systemctl restart prospectlab-celery
+```
+
+### Problème : 404 sur `/static/` (CSS, JS, favicon)
+
+Le tableau de bord s’affiche mais la console navigateur signale `404` sur `style.css`, `dashboard.js`, `manifest.json`, etc.
+
+**Cause la plus fréquente** : le dossier `static/` est absent ou incomplet sur le serveur application (`/opt/prospectlab/static`), par exemple après un `git pull` ignoré (repo « dirty ») ou un déploiement partiel.
+
+**Vérification sur SERVEUR_APP :**
+
+```bash
+cd /opt/prospectlab
+bash scripts/linux/verify_static_deploy.sh
+# ou manuellement :
+test -f static/css/style.css && echo OK || echo MANQUANT
+```
+
+**Correction :**
+
+```bash
+# Depuis la machine de dev (Windows), sans tout redéployer :
+.\scripts\sync_templates_static.ps1 prospectlab.danielcraft.fr deploy /opt/prospectlab
+
+# Sur le serveur, après sync ou deploy complet :
+sudo systemctl restart prospectlab
+```
+
+Vérifier aussi les logs Gunicorn au démarrage : un avertissement `Dossier static introuvable ou incomplet` confirme le diagnostic.
+
+**Nginx** : la config recommandée proxyfie tout (`location /` → port 5000). Ne pas ajouter de `location /static` avec un `alias` vers un chemin vide — cela provoque des 404 même si Flask a les fichiers.
+
 ### Problème : Erreurs Nginx
 
 ```bash

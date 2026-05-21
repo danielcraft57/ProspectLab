@@ -129,6 +129,14 @@ class Database(
                 exc_info=True,
             )
 
+        try:
+            self.ensure_api_tokens_columns()
+        except Exception:
+            logging.getLogger(__name__).warning(
+                'Migration api_tokens (can_delete_entreprises, etc.) non appliquée',
+                exc_info=True,
+            )
+
         # Initialiser la base de données (créer les tables) une seule fois par process.
         # Permet un contournement explicite via env pour debug/migration forcée.
         force_each_instance = str(os.environ.get('DB_INIT_EACH_INSTANCE', '')).strip().lower() in (
@@ -176,8 +184,35 @@ class Database(
                 exc_info=True,
             )
 
+        _log_db_mode_once(self)
+
         if force_each_instance:
             return
+
+
+def _log_db_mode_once(db: DatabaseBase) -> None:
+    """Avertissement unique par process si prod configurée sans PostgreSQL."""
+    if getattr(Database, '_db_mode_logged', False):
+        return
+    Database._db_mode_logged = True
+    log = logging.getLogger(__name__)
+    app_env = (os.environ.get('APP_ENV') or '').strip().lower()
+    if app_env in ('production', 'prod') and not db.is_postgresql():
+        log.warning(
+            'APP_ENV=%s mais DATABASE_URL PostgreSQL absent — SQLite utilisé (%s). '
+            'Définissez DATABASE_URL=postgresql://... en production.',
+            app_env,
+            getattr(db, 'db_path', '?'),
+        )
+    elif db.is_postgresql():
+        from services.database.postgresql_pool import postgresql_pool_enabled
+
+        db_url = os.environ.get('DATABASE_URL') or ''
+        url_hint = db_url if len(db_url) <= 64 else db_url[:64] + '...'
+        log.info('Base PostgreSQL (%s) — pool=%s', url_hint, 'on' if postgresql_pool_enabled() else 'off')
+
+
+Database._db_mode_logged = False
 
 
 # Exposer Database pour compatibilité avec l'import existant

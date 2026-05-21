@@ -40,6 +40,14 @@ try:
         'tasks.analysis_tasks.analyze_entreprise_task',
         'tasks.scraping_tasks.scrape_emails_task',
     ]
+    try:
+        import reportlab  # noqa: F401
+        required_tasks.extend([
+            'tasks.website_audit_report_tasks.website_audit_simple_report_task',
+            'tasks.website_audit_report_tasks.website_audit_complete_report_task',
+        ])
+    except ImportError:
+        print('  (skip tâches audit : reportlab non installé)')
     
     missing_tasks = []
     for task_name in required_tasks:

@@ -44,14 +44,41 @@
                 escapeHtml(label) + '</button>';
         }).join('');
 
+        function renderParamsTable(title, params, opts) {
+            if (!params || !params.length) return '';
+            opts = opts || {};
+            var showRequired = opts.showRequired !== false && params.some(function(p) {
+                return p.required === true || p.required === false;
+            });
+            var head = '<thead><tr><th>Nom</th><th>Type</th>';
+            if (showRequired) head += '<th>Requis</th>';
+            head += '<th>Description</th></tr></thead>';
+            var rows = params.map(function(p) {
+                var reqCell = '';
+                if (showRequired) {
+                    if (p.required === true) reqCell = 'oui';
+                    else if (p.required === false) reqCell = 'non';
+                    else reqCell = '—';
+                }
+                var row = '<tr><td><code>' + escapeHtml(p.name) + '</code></td><td>' + escapeHtml(p.type || '') + '</td>';
+                if (showRequired) row += '<td>' + escapeHtml(reqCell) + '</td>';
+                row += '<td>' + escapeHtml(p.desc || '') + '</td></tr>';
+                return row;
+            }).join('');
+            var hint = opts.hint ? '<p class="api-doc-params-hint">' + escapeHtml(opts.hint) + '</p>' : '';
+            return '<div class="api-doc-params">' + hint + '<strong>' + escapeHtml(title) + '</strong><table>' + head + '<tbody>' + rows + '</tbody></table></div>';
+        }
+
         function renderEndpointHtml(ep, f) {
             var paramsHtml = '';
-            if (ep.params && ep.params.length) {
-                paramsHtml = '<div class="api-doc-params"><strong>Paramètres</strong><table><thead><tr><th>Nom</th><th>Type</th><th>Description</th></tr></thead><tbody>' +
-                    ep.params.map(function(p) { return '<tr><td><code>' + escapeHtml(p.name) + '</code></td><td>' + escapeHtml(p.type || '') + '</td><td>' + escapeHtml(p.desc || '') + '</td></tr>'; }).join('') +
-                    '</tbody></table></div>';
+            paramsHtml += renderParamsTable('Paramètres', ep.params, { showRequired: false });
+            paramsHtml += renderParamsTable('Corps JSON (POST)', ep.bodyParams, {
+                hint: ep.bodyContentType ? ('Content-Type : ' + ep.bodyContentType) : (ep.bodyParams && ep.bodyParams.length ? 'Content-Type : application/json' : ''),
+                showRequired: true,
+            });
+            if (ep.body && !(ep.bodyParams && ep.bodyParams.length)) {
+                paramsHtml += '<div class="api-doc-params"><strong>Corps JSON</strong> : ' + escapeHtml(ep.body) + '</div>';
             }
-            if (ep.body) paramsHtml += '<div class="api-doc-params"><strong>Body</strong> : ' + escapeHtml(ep.body) + '</div>';
             var permHtml = ep.permission ? '<div class="api-doc-params" style="margin-top:6px"><strong>Permission(s)</strong> : ' + escapeHtml(ep.permission) + '</div>' : '';
             var authHtml = f.auth ? '<div class="api-doc-auth"><i class="fas fa-lock"></i> ' + escapeHtml(f.auth) + '</div>' : '';
             var fullPath = f.basePath + (ep.path || '');

@@ -219,12 +219,12 @@ if [ -f "$ENV_PROD_LOCAL" ]; then
         echo "❌ Erreur lors de l'envoi de .env.prod"
         exit 1
     fi
-    ssh "$USER@$SERVER" "cd $REMOTE_PATH && cp -f .env.prod .env && chmod 600 .env .env.prod"
+    ssh "$USER@$SERVER" "cd $REMOTE_PATH && cp -f .env.prod .env && chmod 600 .env .env.prod && bash scripts/linux/fix_env_crlf.sh \"$REMOTE_PATH/.env\" 2>/dev/null || sed -i 's/\r\$//' .env"
     if [ $? -ne 0 ]; then
         echo "❌ Erreur lors de la copie .env.prod → .env sur le serveur"
         exit 1
     fi
-    echo "✅ .env mis à jour sur $REMOTE_PATH (depuis .env.prod)"
+    echo "✅ .env mis à jour sur $REMOTE_PATH (depuis .env.prod, CRLF corrigés si besoin)"
 else
     echo "⚠️  Fichier .env.prod introuvable à la racine du projet ($ENV_PROD_LOCAL)"
     echo "   Le .env existant sur le serveur n'a pas été modifié."

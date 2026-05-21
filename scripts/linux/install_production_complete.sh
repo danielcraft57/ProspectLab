@@ -79,7 +79,8 @@ sudo apt-get install -y \
     libpq-dev \
     libssl-dev \
     libffi-dev \
-    pkg-config
+    pkg-config \
+    openssh-client
 
 echo "[✓] Dépendances système installées"
 

@@ -14,20 +14,20 @@ cd /opt/prospectlab || exit 1
 CELERY_WORKERS="${CELERY_WORKERS:-6}"
 # Liste par défaut selon preset (surchargée par CELERY_WORKER_QUEUES dans .env).
 # scraping_interactive : scrape unitaire Socket.IO (ne pas rester derrière scrape_analysis bulk sur scraping).
-_DEFAULT_Q="celery,scraping,scraping_interactive,technical,seo,screenshot,osint,pentest,heavy,website_full"
+_DEFAULT_Q="celery,scraping,scraping_interactive,mini_scrape,technical,seo,screenshot,osint,pentest,heavy,website_full,landing"
 case "${CELERY_WORKER_QUEUE_PRESET:-}" in
     scraping_only)
         _DEFAULT_Q="scraping,scraping_interactive"
         ;;
     non_scraping)
-        _DEFAULT_Q="celery,technical,seo,screenshot,osint,pentest,heavy,website_full"
+        _DEFAULT_Q="celery,technical,seo,screenshot,osint,pentest,heavy,website_full,landing"
         ;;
 esac
 CELERY_WORKER_QUEUES="${CELERY_WORKER_QUEUES:-$_DEFAULT_Q}"
 # Option -Q : pas d'espaces (si .env = uniquement des espaces, tr donne "" → Celery démarre avec « -Q » vide et ne consomme rien correctement)
 CELERY_Q=$(echo "${CELERY_WORKER_QUEUES}" | tr -d ' ')
 if [ -z "$CELERY_Q" ]; then
-    CELERY_Q="celery,scraping,scraping_interactive,technical,seo,screenshot,osint,pentest,heavy,website_full"
+    CELERY_Q="celery,scraping,scraping_interactive,mini_scrape,technical,seo,screenshot,osint,pentest,heavy,website_full,landing"
 fi
 
 # Aide au diagnostic cluster : si « scraping » n’est pas dans -Q, les bulk (scrape_analysis_*)

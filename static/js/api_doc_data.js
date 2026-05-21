@@ -195,63 +195,83 @@ const API_DOC_FAMILIES = [
                         path: '/entreprises/<id>/statut',
                         desc: 'Mise à jour du statut (+ note optionnelle).',
                         permission: 'Entreprises',
-                        body: 'JSON: { "statut": "<string>", "note": "<optionnel>" }'
+                        bodyParams: [
+                            { name: 'statut', type: 'str', required: true, desc: 'Valeur cible (voir GET /entreprises/statuses)' },
+                            { name: 'note', type: 'str', required: false, desc: 'Commentaire interne optionnel' }
+                        ]
                     },
                     {
                         method: 'POST',
                         path: '/entreprises/<id>/statut',
                         desc: 'Identique à PATCH (alias).',
                         permission: 'Entreprises',
-                        body: 'JSON: { "statut": "<string>", "note": "<optionnel>" }'
+                        bodyParams: [
+                            { name: 'statut', type: 'str', required: true, desc: 'Valeur cible (voir GET /entreprises/statuses)' },
+                            { name: 'note', type: 'str', required: false, desc: 'Commentaire interne optionnel' }
+                        ]
                     },
                     {
                         method: 'POST',
                         path: '/entreprises/<id>/unsubscribe',
                         desc: 'Raccourci : Désabonné.',
                         permission: 'Entreprises',
-                        body: 'JSON optionnel: { "note": "..." }'
+                        bodyParams: [
+                            { name: 'note', type: 'str', required: false, desc: 'Corps entièrement optionnel' }
+                        ]
                     },
                     {
                         method: 'POST',
                         path: '/entreprises/<id>/negative-reply',
                         desc: 'Raccourci : Réponse négative.',
                         permission: 'Entreprises',
-                        body: 'JSON optionnel: { "note": "..." }'
+                        bodyParams: [
+                            { name: 'note', type: 'str', required: false, desc: 'Corps entièrement optionnel' }
+                        ]
                     },
                     {
                         method: 'POST',
                         path: '/entreprises/<id>/bounce',
                         desc: 'Raccourci : Bounce.',
                         permission: 'Entreprises',
-                        body: 'JSON optionnel: { "note": "..." }'
+                        bodyParams: [
+                            { name: 'note', type: 'str', required: false, desc: 'Corps entièrement optionnel' }
+                        ]
                     },
                     {
                         method: 'POST',
                         path: '/entreprises/<id>/positive-reply',
                         desc: 'Raccourci : Réponse positive.',
                         permission: 'Entreprises',
-                        body: 'JSON optionnel: { "note": "..." }'
+                        bodyParams: [
+                            { name: 'note', type: 'str', required: false, desc: 'Corps entièrement optionnel' }
+                        ]
                     },
                     {
                         method: 'POST',
                         path: '/entreprises/<id>/spam-complaint',
                         desc: 'Raccourci : Plainte spam.',
                         permission: 'Entreprises',
-                        body: 'JSON optionnel: { "note": "..." }'
+                        bodyParams: [
+                            { name: 'note', type: 'str', required: false, desc: 'Corps entièrement optionnel' }
+                        ]
                     },
                     {
                         method: 'POST',
                         path: '/entreprises/<id>/do-not-contact',
                         desc: 'Raccourci : Ne pas contacter.',
                         permission: 'Entreprises',
-                        body: 'JSON optionnel: { "note": "..." }'
+                        bodyParams: [
+                            { name: 'note', type: 'str', required: false, desc: 'Corps entièrement optionnel' }
+                        ]
                     },
                     {
                         method: 'POST',
                         path: '/entreprises/<id>/callback',
                         desc: 'Raccourci : À rappeler (auto-réponse).',
                         permission: 'Entreprises',
-                        body: 'JSON optionnel: { "note": "..." }'
+                        bodyParams: [
+                            { name: 'note', type: 'str', required: false, desc: 'Corps entièrement optionnel' }
+                        ]
                     }
                 ]
             },
@@ -326,9 +346,68 @@ const API_DOC_FAMILIES = [
                     {
                         method: 'POST',
                         path: '/website-analysis',
-                        desc: 'Déclenche les analyses (Celery). Corps : website (requis), force, full, profondeur, workers, Lighthouse, Nmap, etc.',
+                        desc: 'Déclenche les analyses (Celery). Réponse typique 202 avec task_id par module ; sinon 200 si rapport déjà en base et force=false.',
                         permission: 'Entreprises',
-                        body: 'JSON: website (requis), force?, full?, max_depth?, max_workers?, max_time?, max_pages?, enable_nmap?, use_lighthouse?, …'
+                        bodyParams: [
+                            { name: 'website', type: 'str', required: true, desc: 'URL ou domaine à analyser' },
+                            { name: 'force', type: 'bool', required: false, desc: 'Relancer même si un rapport existe déjà (défaut false)' },
+                            { name: 'full', type: 'bool', required: false, desc: 'Inclure l’historique scraping dans la réponse immédiate si rapport existant' },
+                            { name: 'max_depth', type: 'int', required: false, desc: 'Profondeur scraping (défaut 2)' },
+                            { name: 'max_workers', type: 'int', required: false, desc: 'Workers scraping (défaut 5)' },
+                            { name: 'max_time', type: 'int', required: false, desc: 'Timeout scraping en secondes (défaut 180)' },
+                            { name: 'max_pages', type: 'int', required: false, desc: 'Pages max scraping (défaut 30)' },
+                            { name: 'enable_nmap', type: 'bool', required: false, desc: 'Active Nmap sur l’analyse technique (défaut false)' },
+                            { name: 'use_lighthouse', type: 'bool', required: false, desc: 'Lighthouse SEO (défaut config serveur)' }
+                        ]
+                    }
+                ]
+            },
+            {
+                id: 'audit-report-pdf',
+                name: 'Rapport d\'audit PDF (email)',
+                categoryDesc: 'Analyse + PDF + envoi email. Auth : Bearer token API ou header X-Website-Audit-Key (PUBLIC_WEBSITE_AUDIT_LEAD_KEY). Ne nécessite pas la permission Entreprises.',
+                endpoints: [
+                    {
+                        method: 'POST',
+                        path: '/website-audit-report',
+                        desc: 'Scraping → technique → SEO → pentest, puis PDF local + email. Si déjà analysé en base : PDF + email direct (skipped_analysis).',
+                        permission: 'Auth audit (Bearer ou X-Website-Audit-Key)',
+                        bodyParams: [
+                            { name: 'website', type: 'str', required: true, desc: 'URL ou domaine (alias url)' },
+                            { name: 'email', type: 'str', required: true, desc: 'Destinataire du PDF (alias recipient_email)' },
+                            { name: 'max_depth', type: 'int', required: false, desc: 'Profondeur scraping (défaut 2)' },
+                            { name: 'max_workers', type: 'int', required: false, desc: 'Workers scraping (défaut 5)' },
+                            { name: 'max_time', type: 'int', required: false, desc: 'Timeout scraping en secondes (défaut 300)' },
+                            { name: 'max_pages', type: 'int', required: false, desc: 'Pages max scraping (défaut 40)' },
+                            { name: 'enable_nmap', type: 'bool', required: false, desc: 'Nmap sur l’analyse technique (défaut false)' },
+                            { name: 'use_lighthouse', type: 'bool', required: false, desc: 'Lighthouse SEO (défaut config serveur)' }
+                        ]
+                    },
+                    {
+                        method: 'POST',
+                        path: '/website-audit-report/complete',
+                        desc: 'Mode complet : scraping, technique, SEO, screenshots, OSINT, pentest ; PDF serv1 (repli local). Réponse 202.',
+                        permission: 'Auth audit (Bearer ou X-Website-Audit-Key)',
+                        bodyParams: [
+                            { name: 'website', type: 'str', required: true, desc: 'URL ou domaine (alias url)' },
+                            { name: 'email', type: 'str', required: true, desc: 'Destinataire du PDF (alias recipient_email)' },
+                            { name: 'max_depth', type: 'int', required: false, desc: 'Profondeur scraping (défaut 2)' },
+                            { name: 'max_workers', type: 'int', required: false, desc: 'Workers scraping (défaut 5)' },
+                            { name: 'max_time', type: 'int', required: false, desc: 'Timeout scraping en secondes (défaut 300)' },
+                            { name: 'max_pages', type: 'int', required: false, desc: 'Pages max scraping (défaut 40)' },
+                            { name: 'enable_nmap', type: 'bool', required: false, desc: 'Nmap (défaut false)' },
+                            { name: 'use_lighthouse', type: 'bool', required: false, desc: 'Lighthouse SEO (défaut config serveur)' },
+                            { name: 'extra_instructions', type: 'str', required: false, desc: 'Consignes additionnelles pour l’agent Cursor sur serv1' }
+                        ]
+                    },
+                    {
+                        method: 'GET',
+                        path: '/website-audit-report/<task_id>',
+                        desc: 'État Celery (PENDING, STARTED, SUCCESS, FAILURE) ; champ result si terminé avec succès.',
+                        permission: 'Auth audit (Bearer ou X-Website-Audit-Key)',
+                        params: [
+                            { name: 'task_id', type: 'str', desc: 'Identifiant Celery renvoyé par le POST (segment d’URL)' }
+                        ]
                     }
                 ]
             }

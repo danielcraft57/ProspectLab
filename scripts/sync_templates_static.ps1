@@ -1,6 +1,8 @@
 # Envoie uniquement templates/ et static/ vers le serveur (sans refaire tout le déploiement)
-# Usage: .\scripts\sync_templates_static.ps1 [serveur] [utilisateur]
+# Usage: .\scripts\sync_templates_static.ps1 [serveur] [utilisateur] [chemin_distant]
 # Exemple: .\scripts\sync_templates_static.ps1 serveur-app.lan deploy
+# Exemple (prod): .\scripts\sync_templates_static.ps1 prospectlab.danielcraft.fr deploy /opt/prospectlab
+# Puis sur le serveur: sudo systemctl restart prospectlab
 
 param(
     [Parameter(Mandatory=$false)]

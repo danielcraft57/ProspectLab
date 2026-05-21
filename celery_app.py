@@ -92,6 +92,9 @@ celery.conf.update(
         # Pack site unique : même file que les analyses techniques par défaut (voir CELERY_FULL_ANALYSIS_QUEUE).
         # La queue « website_full » reste disponible pour un worker dédié (isolation / charge).
         'tasks.full_website_analysis.*': {'queue': 'technical'},
+        'tasks.website_audit_report_tasks.website_audit_simple_report_task': {'queue': 'technical'},
+        'tasks.website_audit_report_tasks.website_audit_complete_report_task': {'queue': 'technical'},
+        'tasks.website_audit_report_tasks.website_audit_report_task': {'queue': 'technical'},
         # Orchestrateur léger : enqueue technique + SEO (snapshots métriques)
         'tasks.metric_rescan_tasks.*': {'queue': 'celery'},
         # Génération de variantes de landing via agent distant.
@@ -116,6 +119,7 @@ celery.conf.update(
         'tasks.cleanup_tasks',
         'tasks.metric_rescan_tasks',
         'tasks.landing_variant_tasks',
+        'tasks.website_audit_report_tasks',
     ),
     # Configuration pour Windows : utiliser solo au lieu de prefork
     # Le mode prefork n'est pas supporté sur Windows

@@ -123,7 +123,11 @@ templates_local/
 
 # Données locales / expérimentations (non versionnées)
 Data/
-scripts/experiments/
+scripts/experiments/*
+!scripts/experiments/gen_audit_report/
+scripts/experiments/gen_audit_report/prompts_cursor_remote/
+scripts/experiments/gen_audit_report/generated_audit_reports/
+scripts/experiments/gen_audit_report/__pycache__/
 deploy_cluster_worker/
 
 # Mobile / outillage local

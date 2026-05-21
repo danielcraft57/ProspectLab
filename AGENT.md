@@ -42,6 +42,12 @@ bash scripts/linux/setup_git_pull_cron.sh
 crontab -l
 ```
 
+Log de sync:
+
+```bash
+tail -n 100 /opt/prospectlab/logs/prospectlab_git_sync.log
+```
+
 ### Sur le noeud Nginx (`pi@node2.lan`)
 
 ```bash
@@ -54,3 +60,6 @@ sudo systemctl status nginx
 - La conf Nginx doit proxyfier vers `http://node15.lan:5000`.
 - Les certificats SSL sont geres sur le noeud proxy `node2.lan`.
 - Le fichier `.env.prod` local est copie sur le serveur app en `.env` pendant le deploiement si present.
+- Attention aux assets screenshots:
+  - ne pas supprimer `static/screenshots/` ni `static/generated/landing_variants/` en prod;
+  - conserver une sync non destructive (pas de `git reset --hard`, pas de `git clean -fdx`).

@@ -65,6 +65,31 @@ def normalize_website_domain(raw: object) -> Optional[str]:
     return host or None
 
 
+def website_lookup_candidates(raw: object) -> list[str]:
+    """
+    Variantes de ``entreprises.website`` pour une recherche indexée PostgreSQL
+    (évite le scan complet de la table en prod).
+    """
+    host = normalize_website_domain(raw)
+    if not host:
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for variant in (
+        host,
+        f'www.{host}',
+        f'https://{host}',
+        f'http://{host}',
+        f'https://www.{host}',
+        f'http://www.{host}',
+    ):
+        key = variant.lower().strip()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(key)
+    return out
+
+
 def canonical_website_https_url(raw: object) -> Optional[str]:
     """
     URL HTTPS unique pour lancer les analyses et stocker `entreprises.website` :

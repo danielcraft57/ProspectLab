@@ -503,6 +503,68 @@ def client_api_key_required(f):
     return decorated_function
 
 
+def website_audit_public_auth(f):
+    """
+    Authentification pour l'API rapport d'audit site :
+    - Token API Bearer (comme api_token_required), ou
+    - Header X-Website-Audit-Key si PUBLIC_WEBSITE_AUDIT_LEAD_KEY est configuré (formulaires lead).
+    """
+    import secrets
+    from functools import wraps as _wraps
+    from config import PUBLIC_WEBSITE_AUDIT_LEAD_KEY
+
+    @_wraps(f)
+    def decorated_function(*args, **kwargs):
+        token_manager = APITokenManager()
+        token = None
+        auth_header = request.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            token = auth_header[7:].strip()
+        if not token:
+            token = request.args.get('api_token') or request.form.get('api_token')
+
+        if token:
+            token_data = token_manager.validate_token(token)
+            if token_data:
+                request.api_token = token_data
+                return f(*args, **kwargs)
+
+        lead_key = (
+            request.headers.get('X-Website-Audit-Key')
+            or request.headers.get('X-ProspectLab-Audit-Key')
+            or request.args.get('audit_key')
+            or ''
+        ).strip()
+        if PUBLIC_WEBSITE_AUDIT_LEAD_KEY and lead_key:
+            if secrets.compare_digest(lead_key, PUBLIC_WEBSITE_AUDIT_LEAD_KEY):
+                request.api_token = {'source': 'website_audit_lead_key'}
+                return f(*args, **kwargs)
+
+        from services.website_audit_pending import validate_pending_resume_token
+
+        resume_token = (request.args.get('resume_token') or request.form.get('resume_token') or '').strip()
+        pending_id = (request.args.get('pending_id') or request.form.get('pending_id') or '').strip()
+        website_hint = (request.args.get('website') or request.form.get('website') or '').strip() or None
+        if resume_token and pending_id and validate_pending_resume_token(
+            pending_id=pending_id,
+            resume_token=resume_token,
+            website=website_hint,
+        ):
+            request.api_token = {'source': 'audit_resume_token', 'pending_id': pending_id}
+            return f(*args, **kwargs)
+
+        return jsonify({
+            'error': 'Authentification requise',
+            'message': (
+                'Fournissez Authorization: Bearer <token API>, le header X-Website-Audit-Key, '
+                'audit_key=…, api_token=…, ou le lien complet de reprise '
+                '(pending_id + resume_token depuis l’email admin).'
+            ),
+        }), 401
+
+    return decorated_function
+
+
 def require_api_permission(permission_key: str):
     """
     Decorator à utiliser APRES api_token_required pour vérifier une permission fine.

@@ -161,10 +161,37 @@ class EntrepriseManager(DatabaseBase):
         # Critère 1: domaine du site unique (indépendamment du nom/adresse)
         if website_norm:
             try:
-                self.execute_sql(cursor, 'SELECT id, website FROM entreprises WHERE website IS NOT NULL')
+                from utils.url_utils import website_lookup_candidates
+
+                candidates = website_lookup_candidates(website)
+                if candidates and self.is_postgresql():
+                    ph = ', '.join(['%s'] * len(candidates))
+                    self.execute_sql(
+                        cursor,
+                        f'''
+                        SELECT id, website FROM entreprises
+                        WHERE website IS NOT NULL AND btrim(website) <> ''
+                        AND lower(btrim(website)) IN ({ph})
+                        LIMIT 20
+                        ''',
+                        tuple(candidates),
+                    )
+                elif candidates and self.is_sqlite():
+                    ph = ', '.join(['?'] * len(candidates))
+                    self.execute_sql(
+                        cursor,
+                        f'''
+                        SELECT id, website FROM entreprises
+                        WHERE website IS NOT NULL AND trim(website) <> ''
+                        AND lower(trim(website)) IN ({ph})
+                        LIMIT 20
+                        ''',
+                        tuple(candidates),
+                    )
+                else:
+                    self.execute_sql(cursor, 'SELECT id, website FROM entreprises WHERE website IS NOT NULL')
                 rows = cursor.fetchall()
                 for row in rows:
-                    # sqlite3.Row / tuple / dict (RealDictRow) -> normaliser l'accès
                     try:
                         if isinstance(row, dict):
                             existing_id = row.get('id')
@@ -179,7 +206,6 @@ class EntrepriseManager(DatabaseBase):
                         conn.close()
                         return existing_id
             except Exception:
-                # En cas de problème de lecture, on retombe sur les critères suivants
                 pass
         
         # Critère 2: Nom + address_1 + address_2 identiques (si pas de website ou website différent)

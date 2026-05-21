@@ -6,9 +6,11 @@ import smtplib
 from contextlib import contextmanager
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 # Ajouter le répertoire parent au path pour importer config
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -89,6 +91,7 @@ class EmailSender:
         html_body=None,
         tracking_token=None,
         reply_to=None,
+        attachments=None,
     ):
         """
         Envoie un email
@@ -101,12 +104,15 @@ class EmailSender:
             html_body: Corps HTML (optionnel)
             tracking_token: Token de tracking (optionnel, déjà injecté dans html_body)
             reply_to: Reply-To pour ce message (optionnel, sinon self.reply_to)
+            attachments: Liste de dicts {'path': str, 'filename': str} (optionnel)
 
         Returns:
             dict: {'success': bool, 'message': str}
         """
         try:
-            msg = MIMEMultipart("alternative")
+            has_attachments = bool(attachments)
+            msg = MIMEMultipart("mixed" if has_attachments else "alternative")
+            body_root = MIMEMultipart("alternative") if has_attachments else msg
             msg["From"] = self.default_sender
             msg["To"] = to
             msg["Subject"] = subject
@@ -115,11 +121,28 @@ class EmailSender:
                 msg["Reply-To"] = rt
 
             text_part = MIMEText(body, "plain", "utf-8")
-            msg.attach(text_part)
+            body_root.attach(text_part)
 
             if html_body:
                 html_part = MIMEText(html_body, "html", "utf-8")
-                msg.attach(html_part)
+                body_root.attach(html_part)
+
+            if has_attachments:
+                msg.attach(body_root)
+                for item in attachments or []:
+                    path = (item or {}).get("path")
+                    if not path:
+                        continue
+                    p = Path(path)
+                    if not p.is_file():
+                        continue
+                    fname = (item or {}).get("filename") or p.name
+                    with open(p, "rb") as f:
+                        part = MIMEBase("application", "octet-stream")
+                        part.set_payload(f.read())
+                    encoders.encode_base64(part)
+                    part.add_header("Content-Disposition", f'attachment; filename="{fname}"')
+                    msg.attach(part)
 
             with self._smtp_session() as server:
                 server.send_message(msg)

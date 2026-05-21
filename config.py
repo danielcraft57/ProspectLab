@@ -36,6 +36,79 @@ RESTRICT_TO_LOCAL_NETWORK = os.environ.get('RESTRICT_TO_LOCAL_NETWORK', 'false')
 UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
 EXPORT_FOLDER.mkdir(parents=True, exist_ok=True)
 
+# Rapports PDF d'audit site (API publique)
+AUDIT_REPORTS_DIR = Path(os.environ.get('AUDIT_REPORTS_DIR', str(APP_DIR / 'exports' / 'audit_reports')))
+AUDIT_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+WEBSITE_AUDIT_EMAIL_SUBJECT = os.environ.get(
+    'WEBSITE_AUDIT_EMAIL_SUBJECT',
+    'Votre rapport d\'audit web — {company}',
+)
+# Clé optionnelle pour formulaires lead (header X-Website-Audit-Key) sans token API Bearer
+PUBLIC_WEBSITE_AUDIT_LEAD_KEY = (os.environ.get('PUBLIC_WEBSITE_AUDIT_LEAD_KEY') or '').strip()
+
+def _audit_env(*keys: str, default: str = '') -> str:
+    for key in keys:
+        val = os.environ.get(key)
+        if val is not None and str(val).strip() != '':
+            return str(val).strip()
+    return default
+
+
+# Rapport d'audit PDF via agent Cursor distant (infra SSH partagée avec landing variants)
+WEBSITE_AUDIT_AGENT_ENABLED = _audit_env('WEBSITE_AUDIT_AGENT_ENABLED', 'WEBSITE_AUDIT_SERV1_ENABLED', default='true').lower() in (
+    '1', 'true', 'yes', 'on',
+)
+WEBSITE_AUDIT_AGENT_SCRIPT_PATH = _audit_env(
+    'WEBSITE_AUDIT_AGENT_SCRIPT_PATH',
+    'WEBSITE_AUDIT_SERV1_SCRIPT_PATH',
+    default=str(APP_DIR / 'scripts' / 'experiments' / 'gen_audit_report' / 'generate_website_audit_cursor_remote.py'),
+)
+WEBSITE_AUDIT_AGENT_TIMEOUT = int(_audit_env('WEBSITE_AUDIT_AGENT_TIMEOUT', 'WEBSITE_AUDIT_SERV1_AGENT_TIMEOUT', default='1500') or '1500')
+WEBSITE_AUDIT_AGENT_REMOTE_TEMP_ROOT = _audit_env(
+    'WEBSITE_AUDIT_AGENT_REMOTE_TEMP_ROOT',
+    'WEBSITE_AUDIT_SERV1_REMOTE_TEMP_ROOT',
+    default=_audit_env('LANDING_VARIANTS_REMOTE_TEMP_ROOT', default='C:\\Temp\\cursor_prompt_runner'),
+)
+WEBSITE_AUDIT_AGENT_REMOTE_OUTPUT_ROOT = _audit_env(
+    'WEBSITE_AUDIT_AGENT_REMOTE_OUTPUT_ROOT',
+    'WEBSITE_AUDIT_SERV1_REMOTE_OUTPUT_ROOT',
+    default='C:\\Temp\\cursor_generated_audit_reports',
+)
+# Alias rétrocompatibilité
+WEBSITE_AUDIT_SERV1_ENABLED = WEBSITE_AUDIT_AGENT_ENABLED
+WEBSITE_AUDIT_SERV1_SCRIPT_PATH = WEBSITE_AUDIT_AGENT_SCRIPT_PATH
+WEBSITE_AUDIT_SERV1_AGENT_TIMEOUT = WEBSITE_AUDIT_AGENT_TIMEOUT
+WEBSITE_AUDIT_SERV1_REMOTE_TEMP_ROOT = WEBSITE_AUDIT_AGENT_REMOTE_TEMP_ROOT
+WEBSITE_AUDIT_SERV1_REMOTE_OUTPUT_ROOT = WEBSITE_AUDIT_AGENT_REMOTE_OUTPUT_ROOT
+# Rapport audit : timeouts par module (secondes, 0 = illimité) et poursuite si échec
+WEBSITE_AUDIT_SOFT_FAIL_MODULES = os.environ.get('WEBSITE_AUDIT_SOFT_FAIL_MODULES', 'true').lower() in (
+    '1', 'true', 'yes', 'on',
+)
+WEBSITE_AUDIT_TECHNICAL_TIMEOUT_SEC = max(0, int(os.environ.get('WEBSITE_AUDIT_TECHNICAL_TIMEOUT_SEC', '600')))
+WEBSITE_AUDIT_SEO_TIMEOUT_SEC = max(0, int(os.environ.get('WEBSITE_AUDIT_SEO_TIMEOUT_SEC', '900')))
+WEBSITE_AUDIT_PENTEST_TIMEOUT_SEC = max(0, int(os.environ.get('WEBSITE_AUDIT_PENTEST_TIMEOUT_SEC', '1200')))
+WEBSITE_AUDIT_SCRAPING_TIMEOUT_SEC = max(0, int(os.environ.get('WEBSITE_AUDIT_SCRAPING_TIMEOUT_SEC', '600')))
+# Pause + email de reprise si l'agent PDF échoue (pas de PDF local envoyé au client)
+WEBSITE_AUDIT_AGENT_PAUSE_ON_AGENT_FAILURE = _audit_env(
+    'WEBSITE_AUDIT_AGENT_PAUSE_ON_AGENT_FAILURE',
+    'WEBSITE_AUDIT_AGENT_PAUSE_ON_USAGE_LIMIT',
+    'WEBSITE_AUDIT_SERV1_PAUSE_ON_USAGE_LIMIT',
+    default='true',
+).lower() in ('1', 'true', 'yes', 'on')
+WEBSITE_AUDIT_AGENT_FALLBACK_LOCAL = _audit_env(
+    'WEBSITE_AUDIT_AGENT_FALLBACK_LOCAL', 'WEBSITE_AUDIT_SERV1_FALLBACK_LOCAL', default='false'
+).lower() in ('1', 'true', 'yes', 'on')
+WEBSITE_AUDIT_AGENT_PAUSE_ON_USAGE_LIMIT = WEBSITE_AUDIT_AGENT_PAUSE_ON_AGENT_FAILURE
+WEBSITE_AUDIT_SERV1_PAUSE_ON_USAGE_LIMIT = WEBSITE_AUDIT_AGENT_PAUSE_ON_USAGE_LIMIT
+WEBSITE_AUDIT_SERV1_FALLBACK_LOCAL = WEBSITE_AUDIT_AGENT_FALLBACK_LOCAL
+WEBSITE_AUDIT_CURSOR_ALERT_EMAIL = (
+    os.environ.get('WEBSITE_AUDIT_CURSOR_ALERT_EMAIL') or os.environ.get('MAIL_DEFAULT_RECIPIENT') or ''
+).strip()
+WEBSITE_AUDIT_USAGE_LIMIT_RETRIES = max(0, int(os.environ.get('WEBSITE_AUDIT_USAGE_LIMIT_RETRIES', '1')))
+WEBSITE_AUDIT_USAGE_LIMIT_RETRY_DELAY_SEC = max(
+    60, int(os.environ.get('WEBSITE_AUDIT_USAGE_LIMIT_RETRY_DELAY_SEC', '300'))
+)
+
 # Configuration email (à configurer selon ton serveur)
 MAIL_SERVER = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
 MAIL_PORT = int(os.environ.get('MAIL_PORT', 587))
@@ -143,7 +216,15 @@ WEBSITE_SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 ALLOWED_EXTENSIONS = {'xlsx', 'xls'}
 
 # Configuration base de données
+APP_ENV = (os.environ.get('APP_ENV') or 'development').strip().lower()
+IS_PRODUCTION = APP_ENV in ('production', 'prod')
+DATABASE_URL = (os.environ.get('DATABASE_URL') or '').strip()
 DATABASE_PATH = os.environ.get('DATABASE_PATH', None)  # None = chemin par défaut
+# Pool PostgreSQL (activé en prod via APP_ENV=production ou DATABASE_POOL_ENABLED=true)
+DATABASE_POOL_MIN = max(1, int(os.environ.get('DATABASE_POOL_MIN', '2') or '2'))
+DATABASE_POOL_MAX = max(DATABASE_POOL_MIN, int(os.environ.get('DATABASE_POOL_MAX', '20') or '20'))
+DATABASE_CONNECT_TIMEOUT_SEC = max(3, int(os.environ.get('DATABASE_CONNECT_TIMEOUT_SEC', '10') or '10'))
+DATABASE_STATEMENT_TIMEOUT_MS = int(os.environ.get('DATABASE_STATEMENT_TIMEOUT_MS', '0') or '0')
 
 # Configuration API Sirene (data.gouv.fr)
 # L'API publique ne nécessite pas de clé, mais une clé permet plus de requêtes
@@ -243,13 +324,15 @@ LANDING_VARIANTS_SCRIPT_PATH = os.environ.get(
     'LANDING_VARIANTS_SCRIPT_PATH',
     str(APP_DIR / 'scripts' / 'experiments' / 'gen_new_website' / 'generate_landing_variants_cursor_remote.py'),
 )
-LANDING_VARIANTS_REMOTE_HOST = os.environ.get('LANDING_VARIANTS_REMOTE_HOST', 'loicDaniel@serv1.lan')
+LANDING_VARIANTS_REMOTE_HOST = (
+    os.environ.get('LANDING_VARIANTS_REMOTE_HOST', 'loicDaniel@serv1.lan') or 'loicDaniel@serv1.lan'
+).strip().strip('\r')
 LANDING_VARIANTS_REMOTE_WORKSPACE = os.environ.get('LANDING_VARIANTS_REMOTE_WORKSPACE', '')
 LANDING_VARIANTS_REMOTE_CURSOR_COMMAND = os.environ.get('LANDING_VARIANTS_REMOTE_CURSOR_COMMAND', 'agent.cmd')
 LANDING_VARIANTS_MODEL = os.environ.get('LANDING_VARIANTS_MODEL', 'auto')
 LANDING_VARIANTS_REMOTE_TEMP_ROOT = os.environ.get('LANDING_VARIANTS_REMOTE_TEMP_ROOT', 'C:\\Temp\\cursor_prompt_runner')
 LANDING_VARIANTS_REMOTE_OUTPUT_ROOT = os.environ.get('LANDING_VARIANTS_REMOTE_OUTPUT_ROOT', 'C:\\Temp\\cursor_generated_landings')
-LANDING_VARIANTS_SSH_KEY_PATH = os.environ.get('LANDING_VARIANTS_SSH_KEY_PATH', '')
+LANDING_VARIANTS_SSH_KEY_PATH = (os.environ.get('LANDING_VARIANTS_SSH_KEY_PATH', '') or '').strip().strip('\r')
 LANDING_VARIANTS_AGENT_TIMEOUT = int(os.environ.get('LANDING_VARIANTS_AGENT_TIMEOUT', '420'))
 LANDING_VARIANTS_SERV1_MAX_CONCURRENT = max(
     1, int(os.environ.get('LANDING_VARIANTS_SERV1_MAX_CONCURRENT', '1'))
@@ -294,9 +377,38 @@ CELERY_FULL_ANALYSIS_QUEUE = (
 # Pas de variable « nombre de workers » côté app : chaque nœud définit CELERY_WORKERS localement.
 # Surveiller Redis (mémoire) et PostgreSQL max_connections — voir docs/configuration/DEPLOIEMENT_PRODUCTION.md.
 
-# URL de base pour le tracking des emails (doit être accessible publiquement)
-# Exemple: https://votre-domaine.com ou http://votre-ip:5000
-BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5000')
+def _resolve_public_base_url() -> str:
+    """
+    URL publique pour liens email / API (tracking, reprise audit agent).
+
+    Si BASE_URL est déclaré plusieurs fois dans .env, python-dotenv ne garde que la
+    première entrée : on relit le fichier pour prendre la dernière valeur non commentée.
+    Priorité : WEBSITE_AUDIT_PUBLIC_BASE_URL > dernière BASE_URL dans .env > os.environ.
+    """
+    for key in ('WEBSITE_AUDIT_PUBLIC_BASE_URL', 'WEBSITE_AUDIT_RESUME_BASE_URL'):
+        val = (os.environ.get(key) or '').strip()
+        if val:
+            return val.rstrip('/')
+
+    env_file = APP_DIR / '.env'
+    last_from_file = ''
+    if env_file.is_file():
+        for raw in env_file.read_text(encoding='utf-8', errors='replace').splitlines():
+            line = raw.strip()
+            if not line or line.startswith('#'):
+                continue
+            if line.startswith('export '):
+                line = line[7:].strip()
+            if line.startswith('BASE_URL='):
+                last_from_file = line.split('=', 1)[1].strip().strip('"').strip("'")
+    if last_from_file:
+        return last_from_file.rstrip('/')
+
+    return (os.environ.get('BASE_URL') or 'http://localhost:5000').strip().rstrip('/')
+
+
+# URL de base pour le tracking des emails et liens publics (doit être accessible publiquement)
+BASE_URL = _resolve_public_base_url()
 
 # Scan automatique des bounces (IMAP -> tags/statuts)
 BOUNCE_SCAN_ENABLED = os.environ.get('BOUNCE_SCAN_ENABLED', 'true').lower() in ('1', 'true', 'yes', 'on')

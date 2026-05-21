@@ -345,6 +345,33 @@ class DatabaseSchema(DatabaseBase):
         finally:
             conn.close()
 
+    def ensure_api_tokens_columns(self):
+        """
+        Migration idempotente des colonnes api_tokens (permissions, suppression entreprises).
+        init_database() ne s'exécute qu'une fois par processus : sans cet ensure, une base
+        créée avant l'ajout de can_delete_entreprises reste incompatible après redéploiement.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            self.safe_execute_sql(cursor, 'ALTER TABLE api_tokens ADD COLUMN app_url TEXT')
+            self.safe_execute_sql(
+                cursor, 'ALTER TABLE api_tokens ADD COLUMN can_read_entreprises INTEGER DEFAULT 1'
+            )
+            self.safe_execute_sql(cursor, 'ALTER TABLE api_tokens ADD COLUMN can_read_emails INTEGER DEFAULT 1')
+            self.safe_execute_sql(
+                cursor, 'ALTER TABLE api_tokens ADD COLUMN can_read_statistics INTEGER DEFAULT 1'
+            )
+            self.safe_execute_sql(
+                cursor, 'ALTER TABLE api_tokens ADD COLUMN can_read_campagnes INTEGER DEFAULT 1'
+            )
+            self.safe_execute_sql(
+                cursor, 'ALTER TABLE api_tokens ADD COLUMN can_delete_entreprises INTEGER DEFAULT 0'
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def ensure_mail_accounts_table(self):
         """
         Comptes SMTP multi-domaines + rattachement optionnel campagnes / templates.

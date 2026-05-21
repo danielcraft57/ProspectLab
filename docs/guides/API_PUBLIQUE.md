@@ -141,6 +141,9 @@ Tous les chemins ci‑dessous sont **relatifs** à `/api/public`.
 | **GET** | `/campagnes/<id>/statistics` | Campagnes | Tracking (ouvertures, clics) |
 | **GET** | `/website-analysis` | Entreprises | Rapport agrégé (`website`, `full`) |
 | **POST** | `/website-analysis` | Entreprises | Lance les analyses asynchrones (réponse typique **202**) |
+| **POST** | `/website-audit-report` | Auth audit (voir ci‑dessous) | Analyse **simple** (technique + SEO) → PDF local → email |
+| **POST** | `/website-audit-report/complete` | Auth audit | Analyse **complète** (6 modules) → PDF serv1 → email |
+| **GET** | `/website-audit-report/<task_id>` | Auth audit | Suivi tâche Celery (état, résultat si terminé) |
 | **POST** | `/push/register` | Token valide | Enregistre un jeton Expo Push (corps JSON, voir ci‑dessous) |
 | **DELETE** | `/push/register` | Token valide | Retire un jeton Expo Push enregistré |
 
@@ -235,7 +238,108 @@ Pour `statut` : si la valeur est `Gagné`, `Perdu` ou `Relance`, le filtre inclu
 
 **GET** `/website-analysis?website=&full=`** — rapport SEO / technique / OSINT / pentest (agrégation existante en base). Réponse **404** si aucune entreprise associée au site.
 
-**POST** `/website-analysis` — corps JSON : `website`, `force`, `full`, options de profondeur / workers / Lighthouse / Nmap, etc. Déclenche des tâches Celery ; réponse typique **202** avec identifiants de tâches. Puis interroger le **GET** pour récupérer le rapport.
+**POST** `/website-analysis` — `Content-Type: application/json`. Déclenche des tâches Celery ; réponse typique **202** avec identifiants de tâches (ou **200** si un rapport existe déjà et `force` est absent/false). Puis interroger le **GET** pour récupérer le rapport.
+
+| Champ | Requis | Type | Défaut | Description |
+|-------|--------|------|--------|-------------|
+| `website` | oui | string | — | URL ou domaine |
+| `force` | non | bool | `false` | Relancer les analyses même si des données existent |
+| `full` | non | bool | `false` | Historique scraping dans la réponse immédiate (si rapport existant) |
+| `max_depth` | non | int | `2` | Profondeur scraping |
+| `max_workers` | non | int | `5` | Workers scraping |
+| `max_time` | non | int | `180` | Timeout scraping (secondes) |
+| `max_pages` | non | int | `30` | Pages max scraping |
+| `enable_nmap` | non | bool | `false` | Active Nmap (analyse technique) |
+| `use_lighthouse` | non | bool | config serveur | Lighthouse SEO |
+
+---
+
+### Rapports d'audit PDF par email
+
+Ces routes sont destinées aux **formulaires lead** ou intégrations externes qui demandent un **rapport PDF stylé** envoyé par email. Elles ne remplacent pas `/website-analysis` (lecture / lancement d'analyses pour l'app mobile avec permissions entreprises).
+
+#### Authentification
+
+Deux modes (au moins un requis) :
+
+1. **`Authorization: Bearer <token API>`** — comme le reste de l'API publique (token valide suffit ; pas de permission « entreprises » spécifique).
+2. **`X-Website-Audit-Key: <clé>`** — si `PUBLIC_WEBSITE_AUDIT_LEAD_KEY` est défini côté serveur (formulaire vitrine sans token Bearer). Alias accepté : `X-ProspectLab-Audit-Key`.
+
+#### POST `/website-audit-report` — mode simple
+
+- **Modules** (ordre) : scraping → technique → SEO → pentest.
+- **Cache** : si ces quatre modules sont déjà en base pour l’entreprise du site, **pas de relance** : PDF local + email (`skipped_analysis: true` dans le résultat Celery).
+- **PDF** : généré sur le serveur ProspectLab (ReportLab / graphiques), pas d'agent serv1.
+- **File Celery** : queue `technical`.
+
+Corps JSON (`Content-Type: application/json`) :
+
+| Champ | Requis | Type | Défaut | Description |
+|-------|--------|------|--------|-------------|
+| `website` | oui | string | — | URL ou domaine (alias `url`) |
+| `email` | oui | string | — | Destinataire du rapport (alias `recipient_email`) |
+| `max_depth` | non | int | `2` | Profondeur scraping |
+| `max_workers` | non | int | `5` | Workers scraping |
+| `max_time` | non | int | `300` | Timeout scraping (secondes) |
+| `max_pages` | non | int | `40` | Pages max scraping |
+| `enable_nmap` | non | bool | `false` | Active Nmap côté analyse technique |
+| `use_lighthouse` | non | bool | config serveur | Lighthouse SEO |
+
+Réponse **202** type :
+
+```json
+{
+  "success": true,
+  "accepted": true,
+  "mode": "simple",
+  "website": "https://example.com",
+  "email": "lead@example.com",
+  "entreprise_id": 123,
+  "task_id": "uuid-celery",
+  "pdf_engine": "local",
+  "analysis_modules": ["scraping", "technical", "seo", "pentest"],
+  "message": "..."
+}
+```
+
+#### POST `/website-audit-report/complete` — mode complet
+
+- **Modules** : scraping, technique, SEO, screenshots, OSINT, pentest (pipeline `run_full_website_analysis_impl`, scraping en premier).
+- **Cache** : si les six modules sont déjà en base, PDF + email sans relancer le pack (`skipped_analysis: true`).
+- **PDF** : PDF de base ProspectLab (ReportLab) puis **agent Cursor distant** qui combine et réagence le livrable ; repli PDF local si agent indisponible (sauf **limite Cursor**).
+- **Limite Cursor** : pause (`paused: true`, `pending_id`), email admin (`WEBSITE_AUDIT_CURSOR_ALERT_EMAIL`), pas d'envoi au lead ; reprise via **POST `/website-audit-report/complete/resume`** après recharge du compte.
+- **File Celery** : queue analyse complète (`CELERY_FULL_ANALYSIS_QUEUE`, souvent `full_analysis`).
+
+Corps JSON : champs du mode simple, plus :
+
+| Champ | Requis | Type | Défaut | Description |
+|-------|--------|------|--------|-------------|
+| `max_depth` | non | int | `2` | Profondeur scraping |
+| `max_workers` | non | int | `5` | Workers scraping |
+| `max_time` | non | int | `300` | Timeout scraping (secondes) |
+| `max_pages` | non | int | `40` | Pages max scraping |
+| `extra_instructions` | non | string | — | Consignes additionnelles pour l'agent serv1 |
+
+Réponse **202** : `mode: "complete"`, `pdf_engine: "agent"`, `already_analyzed`, `missing_modules`, `analysis_modules` (six modules).
+
+#### POST `/website-audit-report/complete/resume` — reprise après pause Cursor
+
+Corps JSON : `pending_id` (recommandé) et/ou `website` + `email` ; `extra_instructions` optionnel.
+
+#### GET `/website-audit-report/<task_id>`
+
+Suivi de la tâche Celery (`state`, `ready`, `successful`, `result` si terminé).
+
+| Paramètre | Emplacement | Requis | Description |
+|-----------|-------------|--------|-------------|
+| `task_id` | chemin URL | oui | Identifiant Celery renvoyé par le POST (uuid) |
+
+#### Prérequis serveur
+
+- **SMTP** : `MAIL_*` pour l'envoi du PDF.
+- **Workers** : queue `technical` (simple) ; pour le complet, workers sur la queue d'analyse complète **et** queues screenshots / osint / pentest selon déploiement.
+- **Agent Cursor** (complet) : variables `LANDING_VARIANTS_REMOTE_*` + section `WEBSITE_AUDIT_AGENT_*` dans `env.example` / `config.py`.
+- **Tests** : `python scripts/tests/test_website_audit_report.py`
 
 ---
 

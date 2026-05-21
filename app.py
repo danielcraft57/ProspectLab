@@ -90,8 +90,16 @@ class SafeJSONProvider(DefaultJSONProvider):
                 return None
         return super().default(obj)
 
+# Racine projet : chemin absolu pour static/templates (Gunicorn cwd peut varier)
+_APP_ROOT = Path(__file__).resolve().parent
+_STATIC_DIR = _APP_ROOT / 'static'
+
 # Créer l'application Flask
-app = Flask(__name__)
+app = Flask(
+    __name__,
+    static_folder=str(_STATIC_DIR),
+    static_url_path='/static',
+)
 app.json = SafeJSONProvider(app)
 app.config['UPLOAD_FOLDER'] = str(UPLOAD_FOLDER)
 app.config['EXPORT_FOLDER'] = str(EXPORT_FOLDER)
@@ -102,6 +110,13 @@ app.config['TESTING'] = False
 
 # Configurer les logs de l'application Flask (après création de l'app)
 setup_root_logger(app)
+
+if not (_STATIC_DIR / 'css' / 'style.css').is_file():
+    logging.getLogger(__name__).warning(
+        'Dossier static introuvable ou incomplet sur le serveur (%s) — '
+        'les assets /static/ renverront 404. Relancez deploy_production ou sync_templates_static.',
+        _STATIC_DIR,
+    )
 
 # Initialiser Celery
 celery = make_celery(app)
@@ -308,6 +323,9 @@ def restrict_to_local_network():
     is_private_api = path.startswith('/api/') and not path.startswith('/api/public')
 
     try:
+        # Assets et favicons (CSS/JS) : toujours servis, même si l'UI est restreinte au LAN
+        if path.startswith('/static/'):
+            return None
         # Tracking et API publique restent accessibles depuis l'extérieur
         if path.startswith('/track/'):
             return None
