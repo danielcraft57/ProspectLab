@@ -14,6 +14,40 @@ from .base import DatabaseBase
 
 logger = logging.getLogger(__name__)
 
+# Seuils de recherche dans les champs secondaires (website, tags JSON).
+SEARCH_WEBSITE_MIN_TOKEN_LEN = 3
+SEARCH_TAGS_MIN_TOKEN_LEN = 5
+
+# Fragments trop fréquents dans les domaines (TLD, stacks, génériques).
+SEARCH_WEBSITE_BLOCKLIST = frozenset({
+    'web', 'www', 'seo', 'cms', 'api', 'php', 'css', 'xml', 'sql', 'wp',
+    'com', 'net', 'org', 'pro', 'biz', 'io', 'app', 'dev', 'site', 'blog',
+    'mail', 'shop', 'ssl', 'cdn', 'gpu', 'ia', 'ai', 'ux', 'ui', 'js', 'ts',
+})
+
+# Sous-chaînes fréquentes dans les tags JSON (hérite website + pièges métier/tech).
+SEARCH_TAGS_BLOCKLIST = SEARCH_WEBSITE_BLOCKLIST | frozenset({
+    'press', 'script', 'theme', 'plugin', 'cloud', 'host', 'node', 'react',
+    'angular', 'docker', 'linux', 'azure', 'store', 'admin', 'login', 'form',
+})
+
+# Scores de pertinence pour le tri des résultats de recherche (ORDER BY CASE).
+SEARCH_SCORE_NOM_EXACT = 100
+SEARCH_SCORE_NOM_PREFIX = 95
+SEARCH_SCORE_NOM_FIRST_TOKEN = 88
+SEARCH_SCORE_NOM_PHRASE = 82
+SEARCH_SCORE_NOM_ALL_TOKENS = 70
+SEARCH_SCORE_SECTEUR_PHRASE = 55
+SEARCH_SCORE_RESPONSABLE_PHRASE = 48
+SEARCH_SCORE_WEBSITE_PHRASE = 35
+SEARCH_SCORE_ADDRESS_PHRASE = 25
+SEARCH_SCORE_EMAIL_PHRASE = 15
+SEARCH_SCORE_TAGS_PHRASE = 8
+SEARCH_SCORE_FALLBACK = 0
+
+# Rétrocompatibilité tests / imports externes.
+SEARCH_SECONDARY_BLOCKLIST = SEARCH_WEBSITE_BLOCKLIST
+
 # Statuts "métier" supportés pour le suivi commercial et la délivrabilité.
 # IMPORTANT: ces valeurs sont consommées par l'UI (filtres) et par l'API publique.
 ENTERPRISE_STATUSES: set[str] = {
@@ -119,6 +153,212 @@ class EntrepriseManager(DatabaseBase):
         if v is None:
             return False
         return str(v).lower() in ('1', 'true', 'yes')
+
+    @staticmethod
+    def _tokenize_search(raw_search):
+        """
+        Découpe une recherche utilisateur en tokens normalisés (minuscules).
+
+        @param raw_search: Texte saisi dans le champ de recherche
+        @returns: Liste de mots non vides
+        """
+        return [t.lower() for t in re.split(r'\s+', str(raw_search).strip()) if t.strip()]
+
+    @staticmethod
+    def _token_allows_website_search(token):
+        """
+        Indique si un token peut être recherché dans la colonne website.
+
+        @param token: Mot-clé normalisé
+        @returns: True si le champ website est autorisé pour ce token
+        """
+        return (
+            len(token) >= SEARCH_WEBSITE_MIN_TOKEN_LEN
+            and token not in SEARCH_WEBSITE_BLOCKLIST
+        )
+
+    @staticmethod
+    def _token_allows_tags_search(token):
+        """
+        Indique si un token peut être recherché dans la colonne tags.
+
+        @param token: Mot-clé normalisé
+        @returns: True si le champ tags est autorisé pour ce token
+        """
+        return (
+            len(token) >= SEARCH_TAGS_MIN_TOKEN_LEN
+            and token not in SEARCH_TAGS_BLOCKLIST
+        )
+
+    @staticmethod
+    def _build_token_field_clause(table_alias, like_param, token, *, include_tags, include_website, include_scraper_emails):
+        """
+        Construit une clause OR pour un token sur les champs autorisés.
+
+        Website et tags ont des seuils distincts ; certains tokens courts ambigus
+        (« web », « seo ») sont toujours exclus de ces champs.
+
+        @param table_alias: Alias SQL de la table entreprises (ex. « e »)
+        @param like_param: Paramètre LIKE déjà formaté (ex. « %web% »)
+        @param token: Token recherché (détermine les champs secondaires autorisés)
+        @param include_tags: Inclure la colonne tags si le token est éligible
+        @param include_website: Inclure la colonne website si le token est éligible
+        @param include_scraper_emails: Inclure la sous-requête scraper_emails
+        @returns: Tuple (fragment SQL entre parenthèses, liste de paramètres)
+        """
+        e = table_alias
+        parts = [
+            f'LOWER({e}.nom) LIKE ?',
+            f'LOWER({e}.secteur) LIKE ?',
+            f'LOWER(COALESCE({e}.email_principal, \'\')) LIKE ?',
+            f'LOWER(COALESCE({e}.responsable, \'\')) LIKE ?',
+            f'LOWER(COALESCE({e}.address_1, \'\')) LIKE ?',
+            f'LOWER(COALESCE({e}.address_2, \'\')) LIKE ?',
+        ]
+        params = [like_param] * len(parts)
+
+        if include_scraper_emails:
+            parts.append(f'''
+                EXISTS (
+                    SELECT 1
+                    FROM scraper_emails se
+                    WHERE se.entreprise_id = {e}.id
+                      AND se.email IS NOT NULL
+                      AND LOWER(se.email) LIKE ?
+                )
+            ''')
+            params.append(like_param)
+
+        if include_website and EntrepriseManager._token_allows_website_search(token):
+            parts.append(f'LOWER(COALESCE({e}.website, \'\')) LIKE ?')
+            params.append(like_param)
+        if include_tags and EntrepriseManager._token_allows_tags_search(token):
+            parts.append(f'LOWER(COALESCE({e}.tags, \'\')) LIKE ?')
+            params.append(like_param)
+
+        return '(' + ' OR '.join(parts) + ')', params
+
+    @staticmethod
+    def _build_search_order_sql(column_prefix, raw_search):
+        """
+        Construit la clause ORDER BY orientée pertinence pour une recherche textuelle.
+
+        Les scores sont définis par les constantes SEARCH_SCORE_* en tête de module.
+
+        @param column_prefix: Préfixe des colonnes SQL (« e. » ou « sub. »)
+        @param raw_search: Texte de recherche brut
+        @returns: Tuple (fragment « ORDER BY ... », liste de paramètres)
+        """
+        search_full = str(raw_search).strip().lower()
+        tokens = EntrepriseManager._tokenize_search(raw_search)
+        p = column_prefix
+
+        if not search_full:
+            return f' ORDER BY {p}favori DESC, {p}date_analyse DESC', []
+
+        phrase_like = f'%{search_full}%'
+        prefix_like = f'{search_full}%'
+        params = [search_full, prefix_like]
+
+        case_lines = [
+            f'WHEN LOWER({p}nom) = ? THEN {SEARCH_SCORE_NOM_EXACT}',
+            f'WHEN LOWER({p}nom) LIKE ? THEN {SEARCH_SCORE_NOM_PREFIX}',
+        ]
+
+        if len(tokens) > 1:
+            first_token_prefix = f'{tokens[0]}%'
+            case_lines.append(f'WHEN LOWER({p}nom) LIKE ? THEN {SEARCH_SCORE_NOM_FIRST_TOKEN}')
+            params.append(first_token_prefix)
+
+        case_lines.append(f'WHEN LOWER({p}nom) LIKE ? THEN {SEARCH_SCORE_NOM_PHRASE}')
+        params.append(phrase_like)
+
+        if len(tokens) > 1:
+            token_nom_checks = ' AND '.join([f'LOWER({p}nom) LIKE ?' for _ in tokens])
+            case_lines.append(f'WHEN ({token_nom_checks}) THEN {SEARCH_SCORE_NOM_ALL_TOKENS}')
+            params.extend([f'%{t}%' for t in tokens])
+
+        case_lines.extend([
+            f'WHEN LOWER(COALESCE({p}secteur, \'\')) LIKE ? THEN {SEARCH_SCORE_SECTEUR_PHRASE}',
+            f'WHEN LOWER(COALESCE({p}responsable, \'\')) LIKE ? THEN {SEARCH_SCORE_RESPONSABLE_PHRASE}',
+            f'WHEN LOWER(COALESCE({p}website, \'\')) LIKE ? THEN {SEARCH_SCORE_WEBSITE_PHRASE}',
+            f'WHEN LOWER(COALESCE({p}address_1, \'\')) LIKE ?'
+            f' OR LOWER(COALESCE({p}address_2, \'\')) LIKE ? THEN {SEARCH_SCORE_ADDRESS_PHRASE}',
+            f'WHEN LOWER(COALESCE({p}email_principal, \'\')) LIKE ? THEN {SEARCH_SCORE_EMAIL_PHRASE}',
+            f'WHEN LOWER(COALESCE({p}tags, \'\')) LIKE ? THEN {SEARCH_SCORE_TAGS_PHRASE}',
+            f'ELSE {SEARCH_SCORE_FALLBACK}',
+        ])
+        params.extend([
+            phrase_like, phrase_like, phrase_like, phrase_like, phrase_like, phrase_like, phrase_like,
+        ])
+
+        sql = f'''
+            ORDER BY
+                {p}favori DESC,
+                CASE
+                    {' '.join(case_lines)}
+                END DESC,
+                {p}date_analyse DESC
+        '''
+        return sql, params
+
+    @staticmethod
+    def _build_search_filter_sql(
+        raw_search,
+        table_alias='e',
+        *,
+        include_tags=True,
+        include_scraper_emails=True,
+        include_website=True,
+    ):
+        """
+        Construit la clause SQL AND pour le filtre « search ».
+
+        Stratégie :
+        - Recherche multi-mots : la phrase complète dans nom/secteur/responsable,
+          OU chaque token doit matcher (dans au moins un champ adapté).
+        - Recherche mono-mot : le token doit matcher dans au moins un champ adapté.
+
+        @param raw_search: Texte de recherche brut
+        @param table_alias: Alias SQL de la table entreprises
+        @param include_tags: Autoriser la recherche dans les tags (seuil dédié)
+        @param include_scraper_emails: Autoriser la recherche dans scraper_emails
+        @param include_website: Autoriser la recherche dans website (seuil dédié)
+        @returns: Tuple (fragment SQL commençant par « AND (...) », liste de paramètres)
+        """
+        tokens = EntrepriseManager._tokenize_search(raw_search)
+        if not tokens:
+            return '', []
+
+        e = table_alias
+        params = []
+        token_clauses = []
+        for token in tokens:
+            like = f'%{token}%'
+            clause, clause_params = EntrepriseManager._build_token_field_clause(
+                table_alias,
+                like,
+                token,
+                include_tags=include_tags,
+                include_website=include_website,
+                include_scraper_emails=include_scraper_emails,
+            )
+            token_clauses.append(clause)
+            params.extend(clause_params)
+
+        if len(tokens) > 1:
+            phrase_like = f'%{" ".join(tokens)}%'
+            phrase_clause = f'''(
+                LOWER({e}.nom) LIKE ?
+                OR LOWER({e}.secteur) LIKE ?
+                OR LOWER(COALESCE({e}.responsable, '')) LIKE ?
+            )'''
+            sql = ' AND (' + phrase_clause + ' OR (' + ' AND '.join(token_clauses) + '))'
+            params = [phrase_like, phrase_like, phrase_like] + params
+        else:
+            sql = ' AND (' + token_clauses[0] + ')'
+
+        return sql, params
     
     def find_duplicate_entreprise(self, nom, website=None, address_1=None, address_2=None):
         """
@@ -862,33 +1102,14 @@ class EntrepriseManager(DatabaseBase):
                 inner_query += ' AND e.performance_score IS NOT NULL AND e.performance_score <= ?'
                 params.append(int(filters['performance_max']))
             if filters.get('search'):
-                # Recherche full-text simple, insensible à la casse, multi-mots.
-                # Exemple: "boulanger metz" doit matcher nom + ville/adresse.
-                raw_search = str(filters['search']).strip()
-                tokens = [t.lower() for t in re.split(r'\s+', raw_search) if t.strip()]
-                for token in tokens:
-                    like = f"%{token}%"
-                    inner_query += '''
-                        AND (
-                            LOWER(e.nom) LIKE ?
-                            OR LOWER(e.secteur) LIKE ?
-                            OR LOWER(COALESCE(e.email_principal, '')) LIKE ?
-                            OR EXISTS (
-                                SELECT 1
-                                FROM scraper_emails se
-                                WHERE se.entreprise_id = e.id
-                                  AND se.email IS NOT NULL
-                                  AND LOWER(se.email) LIKE ?
-                            )
-                            OR LOWER(COALESCE(e.responsable, '')) LIKE ?
-                            OR LOWER(COALESCE(e.website, '')) LIKE ?
-                            OR LOWER(COALESCE(e.address_1, '')) LIKE ?
-                            OR LOWER(COALESCE(e.address_2, '')) LIKE ?
-                            OR LOWER(COALESCE(e.tags, '')) LIKE ?
-                        )
-                    '''
-                    # Même token appliqué sur tous les champs cibles
-                    params.extend([like] * 9)
+                search_sql, search_params = EntrepriseManager._build_search_filter_sql(
+                    filters['search'],
+                    include_tags=True,
+                    include_scraper_emails=True,
+                    include_website=True,
+                )
+                inner_query += search_sql
+                params.extend(search_params)
 
             # Filtres sur les tags (JSON/texte)
             if filters.get('tags_contains'):
@@ -949,45 +1170,17 @@ class EntrepriseManager(DatabaseBase):
 
             # Tri par pertinence si recherche textuelle présente
             if filters and filters.get('search'):
-                search_full = str(filters['search']).strip().lower()
-                prefix = f"{search_full}%"
-                like_full = f"%{search_full}%"
-                query += '''
-                    ORDER BY
-                        sub.favori DESC,
-                        CASE
-                            WHEN LOWER(sub.nom) = ? THEN 5
-                            WHEN LOWER(sub.nom) LIKE ? THEN 4
-                            WHEN LOWER(COALESCE(sub.website, '')) LIKE ? THEN 3
-                            WHEN LOWER(COALESCE(sub.address_1, '')) LIKE ?
-                                 OR LOWER(COALESCE(sub.address_2, '')) LIKE ? THEN 2
-                            ELSE 0
-                        END DESC,
-                        sub.date_analyse DESC
-                '''
-                params.extend([search_full, prefix, like_full, like_full, like_full])
+                order_sql, order_params = EntrepriseManager._build_search_order_sql('sub.', filters['search'])
+                query += order_sql
+                params.extend(order_params)
             else:
                 query += ' ORDER BY sub.favori DESC, sub.date_analyse DESC'
         else:
             # Pas de sous-requête: mêmes règles de tri mais en se basant directement sur e.*
             if filters and filters.get('search'):
-                search_full = str(filters['search']).strip().lower()
-                prefix = f"{search_full}%"
-                like_full = f"%{search_full}%"
-                query = inner_query + '''
-                    ORDER BY
-                        e.favori DESC,
-                        CASE
-                            WHEN LOWER(e.nom) = ? THEN 5
-                            WHEN LOWER(e.nom) LIKE ? THEN 4
-                            WHEN LOWER(COALESCE(e.website, '')) LIKE ? THEN 3
-                            WHEN LOWER(COALESCE(e.address_1, '')) LIKE ?
-                                 OR LOWER(COALESCE(e.address_2, '')) LIKE ? THEN 2
-                            ELSE 0
-                        END DESC,
-                        e.date_analyse DESC
-                '''
-                params.extend([search_full, prefix, like_full, like_full, like_full])
+                order_sql, order_params = EntrepriseManager._build_search_order_sql('e.', filters['search'])
+                query = inner_query + order_sql
+                params.extend(order_params)
             else:
                 query = inner_query + ' ORDER BY e.favori DESC, e.date_analyse DESC'
 
@@ -1170,30 +1363,14 @@ class EntrepriseManager(DatabaseBase):
                 inner_query += ' AND e.performance_score IS NOT NULL AND e.performance_score <= ?'
                 params.append(int(filters['performance_max']))
             if filters.get('search'):
-                raw_search = str(filters['search']).strip()
-                tokens = [t.lower() for t in re.split(r'\s+', raw_search) if t.strip()]
-                for token in tokens:
-                    like = f"%{token}%"
-                    inner_query += '''
-                        AND (
-                            LOWER(e.nom) LIKE ?
-                            OR LOWER(e.secteur) LIKE ?
-                            OR LOWER(COALESCE(e.email_principal, '')) LIKE ?
-                            OR EXISTS (
-                                SELECT 1
-                                FROM scraper_emails se
-                                WHERE se.entreprise_id = e.id
-                                  AND se.email IS NOT NULL
-                                  AND LOWER(se.email) LIKE ?
-                            )
-                            OR LOWER(COALESCE(e.responsable, '')) LIKE ?
-                            OR LOWER(COALESCE(e.website, '')) LIKE ?
-                            OR LOWER(COALESCE(e.address_1, '')) LIKE ?
-                            OR LOWER(COALESCE(e.address_2, '')) LIKE ?
-                            OR LOWER(COALESCE(e.tags, '')) LIKE ?
-                        )
-                    '''
-                    params.extend([like] * 9)
+                search_sql, search_params = EntrepriseManager._build_search_filter_sql(
+                    filters['search'],
+                    include_tags=True,
+                    include_scraper_emails=True,
+                    include_website=True,
+                )
+                inner_query += search_sql
+                params.extend(search_params)
 
             if filters.get('tags_contains'):
                 inner_query += ' AND e.tags LIKE ?'
@@ -4575,24 +4752,14 @@ class EntrepriseManager(DatabaseBase):
                 base_sql += ' AND e.performance_score IS NOT NULL AND e.performance_score <= ?'
                 params.append(int(filters['performance_max']))
             if filters.get('search'):
-                # Même logique de recherche que sur la liste d'entreprises :
-                # insensible à la casse, multi-mots, plusieurs colonnes.
-                raw_search = str(filters['search']).strip()
-                tokens = [t.lower() for t in re.split(r'\s+', raw_search) if t.strip()]
-                for token in tokens:
-                    like = f"%{token}%"
-                    base_sql += '''
-                        AND (
-                            LOWER(e.nom) LIKE ?
-                            OR LOWER(e.secteur) LIKE ?
-                            OR LOWER(COALESCE(e.email_principal, '')) LIKE ?
-                            OR LOWER(COALESCE(e.responsable, '')) LIKE ?
-                            OR LOWER(COALESCE(e.website, '')) LIKE ?
-                            OR LOWER(COALESCE(e.address_1, '')) LIKE ?
-                            OR LOWER(COALESCE(e.address_2, '')) LIKE ?
-                        )
-                    '''
-                    params.extend([like] * 7)
+                search_sql, search_params = EntrepriseManager._build_search_filter_sql(
+                    filters['search'],
+                    include_tags=False,
+                    include_scraper_emails=False,
+                    include_website=True,
+                )
+                base_sql += search_sql
+                params.extend(search_params)
             if filters.get('score_securite_max') is not None:
                 base_sql += ' AND e.score_securite IS NOT NULL AND e.score_securite <= ?'
                 params.append(int(filters['score_securite_max']))
