@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Facturation pro — {entreprise}</title>
+    <style type="text/css">
+        @media only screen and (max-width: 760px) { .mobile-pad { padding: 16px 12px !important; } }
+    </style>
+</head>
+<body style="margin:0;padding:0;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:#f0fdfa;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        Devis, factures, encaissement — sans Excel. Beta agences : MAIL26.
+    </div>
+    <table role="presentation" style="width:100%;border-collapse:collapse;">
+        <tr>
+            <td style="padding:24px 16px;" class="mobile-pad">
+                <table role="presentation" style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #ccfbf1;">
+                    <tr>
+                        <td style="padding:0;line-height:0;">
+                            <a href="https://facturio.danielcraft.fr/signup" style="text-decoration:none;">
+                                <img src="{base_url}/static/email/facturio/facturio_hero_pro_workflow.png" alt="Facturio — devis, facture, encaissement" width="600" style="display:block;width:100%;max-width:600px;height:auto;border:0;">
+                            </a>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:28px 28px 20px;">
+                            <p style="margin:0 0 12px 0;color:#1e293b;font-size:17px;line-height:1.5;">Bonjour <strong>{nom}</strong>,</p>
+                            <p style="margin:0 0 16px 0;color:#334155;font-size:15px;line-height:1.55;">
+                                {#if_website}Pour <strong>{entreprise}</strong> ({website}),{#else}<strong>{entreprise}</strong> —{#endif} un compte <strong>Pro Facturio</strong> remplace Excel : catalogue dev, devis en ligne, factures, Stripe, FEC.
+                            </p>
+                            <p style="margin:0 0 4px 0;color:#64748b;font-size:14px;">Premier devis en 10 min · code <strong>MAIL26</strong> = 3 mois offerts</p>
+                            {#include:facturio_cta_beta_mail26}
+                            {#include:facturio_signature_standard}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:14px 28px 20px;background:#f8fafc;text-align:center;">
+                            {#include:facturio_footer_standard}
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

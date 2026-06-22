@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E-facture 2026 — {entreprise}</title>
+    <style type="text/css">
+        @media only screen and (max-width: 760px) { .mobile-pad { padding: 16px 12px !important; } }
+    </style>
+</head>
+<body style="margin:0;padding:0;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:#f1f5f9;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">
+        Réception e-facture obligatoire sept. 2026. Testez Facturio Pro 3 mois — MAIL26.
+    </div>
+    <table role="presentation" style="width:100%;border-collapse:collapse;">
+        <tr>
+            <td style="padding:24px 16px;" class="mobile-pad">
+                <table role="presentation" style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;">
+                    <tr>
+                        <td style="padding:0;line-height:0;">
+                            <a href="https://facturio.danielcraft.fr" style="text-decoration:none;">
+                                <img src="{base_url}/static/email/facturio/facturio_hero_reforme2026.png" alt="E-facture 2026 — Facturio" width="600" style="display:block;width:100%;max-width:600px;height:auto;border:0;">
+                            </a>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:28px 28px 20px;">
+                            <p style="margin:0 0 12px 0;color:#1e293b;font-size:17px;line-height:1.5;">Bonjour <strong>{nom}</strong>,</p>
+                            <p style="margin:0 0 16px 0;color:#334155;font-size:15px;line-height:1.55;">
+                                Septembre 2026, toutes les agences doivent <strong>recevoir des e-factures B2B</strong>. Facturio gère ça + votre facturation quotidienne.
+                            </p>
+                            {#if_tech_data}
+                            <p style="margin:0 0 14px 0;color:#64748b;font-size:13px;line-height:1.5;">{framework_info}{cms_info}</p>
+                            {#endif}
+                            <p style="margin:0 0 4px 0;color:#0f766e;font-size:14px;font-weight:700;">Beta 20 places · 3 mois Pro offerts</p>
+                            {#include:facturio_cta_beta_mail26}
+                            {#include:facturio_signature_standard}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:14px 28px 20px;background:#f8fafc;text-align:center;">
+                            {#include:facturio_footer_standard}
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

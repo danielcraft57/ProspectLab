@@ -382,44 +382,75 @@ class TemplateManager:
             if template.get('id') == template_id:
                 d = template.copy()
                 if d.get('is_html') and isinstance(d.get('content'), str):
-                    # Pour l'envoi réel d'emails, on applique seulement les includes ici.
-                    # Les liens "cliquables" de preview (exemple.com) sont réservés à list_templates()
-                    # pour l'UI, pas pour les campagnes.
                     d['content'] = self._apply_includes(
                         d['content'],
                         mail_account_id=mail_account_id,
                         brand_slug=resolved_brand,
                     )
+                    if for_preview:
+                        brand_host = 'danielcraft.fr'
+                        if mail_account_id is not None:
+                            try:
+                                from services.database.mail_accounts import MailAccountManager
+                                mam = MailAccountManager()
+                                acc = mam.get_mail_account(int(mail_account_id))
+                                if acc and acc.get('domain_name'):
+                                    brand_host = acc.get('domain_name')
+                            except Exception:
+                                pass
+                        d['content'] = self._make_ui_preview_links_clickable(d['content'], brand_host=brand_host)
                 return d
         return None
+
+    @staticmethod
+    def _get_app_base_url() -> str:
+        """URL publique de l'app (images static/email/, tracking)."""
+        try:
+            from config import BASE_URL
+            return (BASE_URL or '').rstrip('/') or 'http://localhost:5000'
+        except Exception:
+            return 'http://localhost:5000'
 
     @staticmethod
     def _make_ui_preview_links_clickable(content: str, brand_host: str = 'danielcraft.fr') -> str:
         """
         Dans la page "modèles d'email", on affiche souvent le HTML sans rendre les variables.
-        On remplace donc quelques href placeholders par des URLs de fallback cliquables.
+        On remplace donc quelques href placeholders par des URLs de fallback cliquables,
+        et on inline les images locales static/email/ pour l'aperçu iframe.
         """
-        if not isinstance(content, str) or 'href="' not in content:
+        if not isinstance(content, str):
             return content
 
-        brand_host = (brand_host or 'danielcraft.fr').strip().lower()
-        brand_host = re.sub(r'^https?://', '', brand_host).rstrip('/')
-        brand_base_url = f'https://{brand_host}'.rstrip('/')
+        app_base_url = TemplateManager._get_app_base_url()
+        content = content.replace('{base_url}', app_base_url)
 
-        # CTA principal
-        content = content.replace('href="{dc_contact_url}"', f'href="{brand_base_url}/#contact"')
+        if 'href="' not in content and 'href=\'' not in content:
+            pass
+        else:
+            brand_host = (brand_host or 'danielcraft.fr').strip().lower()
+            brand_host = re.sub(r'^https?://', '', brand_host).rstrip('/')
+            brand_base_url = f'https://{brand_host}'.rstrip('/')
 
-        # Analyse (fallback "exemple.com" pour que le lien soit valide en UI)
-        content = content.replace(
-            'href="{analysis_url}"',
-            f'href="{brand_base_url}/analyse?website=https%3A%2F%2Fexemple.com&full=1"',
-        )
+            # CTA principal
+            content = content.replace('href="{dc_contact_url}"', f'href="{brand_base_url}/#contact"')
 
-        # Désabonnement (fallback "exemple.com")
-        content = content.replace(
-            'href="{unsubscribe_url}"',
-            f'href="{brand_base_url}/desabonnement?website=https%3A%2F%2Fexemple.com"',
-        )
+            # Analyse (fallback "exemple.com" pour que le lien soit valide en UI)
+            content = content.replace(
+                'href="{analysis_url}"',
+                f'href="{brand_base_url}/analyse?website=https%3A%2F%2Fexemple.com&full=1"',
+            )
+
+            # Désabonnement (fallback "exemple.com")
+            content = content.replace(
+                'href="{unsubscribe_url}"',
+                f'href="{brand_base_url}/desabonnement?website=https%3A%2F%2Fexemple.com"',
+            )
+
+        try:
+            from services.email_inline_images import inline_images_for_browser_preview
+            content = inline_images_for_browser_preview(content)
+        except Exception:
+            pass
 
         return content
 

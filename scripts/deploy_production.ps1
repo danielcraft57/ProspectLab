@@ -122,6 +122,7 @@ if ($UseRemoteGitClone) {
         'static',
         'utils',
         'scripts',
+        'template_studio',
         'app.py',
         'celery_app.py',
         'config.py',
@@ -286,7 +287,7 @@ if (-not $transferSuccess) {
 Write-Host "✅ Fichiers transférés" -ForegroundColor Green
 
 # Envoi explicite de chaque dossier (garantit leur présence, notamment si tar sous Windows mal extrait)
-$dirsToSync = @('routes', 'services', 'tasks', 'templates', 'static', 'utils', 'scripts')
+$dirsToSync = @('routes', 'services', 'tasks', 'templates', 'static', 'utils', 'scripts', 'template_studio')
 foreach ($dir in $dirsToSync) {
     $dirPath = Join-Path $deployDir $dir
     if (Test-Path $dirPath -PathType Container) {
@@ -397,6 +398,17 @@ Write-Host ""
 Write-Host "[7.6/9] Mise à jour des services systemd (Conda)..." -ForegroundColor Yellow
 $updateServices = ssh "$User@$Server" "test -x $RemotePath/scripts/linux/update_services_to_conda.sh && cd $RemotePath && sudo bash scripts/linux/update_services_to_conda.sh" 2>&1
 if ($LASTEXITCODE -eq 0) { Write-Host "✅ Services systemd mis à jour" -ForegroundColor Green } else { Write-Host "⚠️  Mise à jour des services ignorée (vérifiez sudo)" -ForegroundColor Yellow }
+Write-Host ""
+
+# Synchroniser les modèles email Facturio (sources HTML -> JSON -> BDD)
+Write-Host "[7.7/9] Synchronisation Template Studio (modèles email)..." -ForegroundColor Yellow
+$syncTplOut = ssh "$User@$Server" "cd $RemotePath && if [ -f env/bin/python ]; then env/bin/python scripts/linux/sync_template_studio_to_db.py html_facturio_beta_places html_facturio_beta_reforme2026 html_facturio_beta_dev_vertical; elif command -v python3 >/dev/null 2>&1; then python3 scripts/linux/sync_template_studio_to_db.py html_facturio_beta_places html_facturio_beta_reforme2026 html_facturio_beta_dev_vertical; else echo 'Python introuvable pour sync templates'; fi" 2>&1
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "✅ Modèles email synchronisés" -ForegroundColor Green
+} else {
+    Write-Host "⚠️  Sync templates ignorée ou partielle" -ForegroundColor Yellow
+    Write-Host $syncTplOut -ForegroundColor Gray
+}
 Write-Host ""
 
 # Nettoyage du cache et redémarrage des services

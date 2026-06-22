@@ -122,6 +122,12 @@ def render_and_preview(
         extended_overrides=extended_overrides,
     )
     rendered = content or ""
+    if is_html and rendered:
+        try:
+            from services.email_inline_images import inline_images_for_browser_preview
+            rendered = inline_images_for_browser_preview(rendered)
+        except Exception:
+            pass
     if not is_html:
         print("Alerte: le template ne semble pas être du HTML (is_html=False). La preview tentera quand même d'afficher le rendu.")
 

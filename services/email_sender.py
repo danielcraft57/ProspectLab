@@ -8,6 +8,8 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
+
+from services.email_inline_images import embed_images_as_cid
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -124,8 +126,15 @@ class EmailSender:
             body_root.attach(text_part)
 
             if html_body:
-                html_part = MIMEText(html_body, "html", "utf-8")
-                body_root.attach(html_part)
+                html_for_send, inline_images = embed_images_as_cid(html_body)
+                if inline_images:
+                    related = MIMEMultipart("related")
+                    related.attach(MIMEText(html_for_send, "html", "utf-8"))
+                    for img_part in inline_images:
+                        related.attach(img_part)
+                    body_root.attach(related)
+                else:
+                    body_root.attach(MIMEText(html_for_send, "html", "utf-8"))
 
             if has_attachments:
                 msg.attach(body_root)

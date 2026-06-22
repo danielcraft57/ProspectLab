@@ -35,6 +35,13 @@ jobs:
             if [ -x scripts/linux/update_services_to_conda.sh ]; then
               sudo bash scripts/linux/update_services_to_conda.sh
             fi
+            if [ -f env/bin/python ]; then
+              env/bin/python scripts/linux/sync_template_studio_to_db.py \
+                html_facturio_beta_places html_facturio_beta_reforme2026 html_facturio_beta_dev_vertical
+            elif command -v python3 >/dev/null 2>&1; then
+              python3 scripts/linux/sync_template_studio_to_db.py \
+                html_facturio_beta_places html_facturio_beta_reforme2026 html_facturio_beta_dev_vertical
+            fi
             if [ -x scripts/linux/clear-redis.sh ]; then
               ./scripts/linux/clear-redis.sh
             fi
