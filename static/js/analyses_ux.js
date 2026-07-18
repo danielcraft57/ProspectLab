@@ -319,7 +319,8 @@
                 </div>
                 <p style="margin:0.4rem 0;color:#475569;">${escapeHtml(f.message || '')}</p>
                 ${f.recommendation ? `<p style="margin:0;font-size:0.9rem;"><em>Reco :</em> ${escapeHtml(f.recommendation)}</p>` : ''}
-                ${f.chapter_title ? `<p style="margin:0.35rem 0 0;font-size:0.8rem;color:#94a3b8;">Ch.${f.chapter || ''} — ${escapeHtml(f.chapter_title)}</p>` : ''}
+                ${f.corpus_best_quote ? `<blockquote style="margin:0.5rem 0 0;padding:0.5rem 0.75rem;border-left:3px solid #94a3b8;color:#64748b;font-size:0.85rem;">« ${escapeHtml(f.corpus_best_quote)} »${f.corpus_best_source ? ` <cite>— ${escapeHtml(f.corpus_best_source)}</cite>` : ''}</blockquote>` : ''}
+                ${f.chapter_title ? `<p style="margin:0.35rem 0 0;font-size:0.8rem;color:#94a3b8;">Ch.${f.chapter || ''} — ${escapeHtml(f.chapter_title)}${f.corpus_docs_scanned ? ` · corpus ${f.corpus_docs_scanned} transcripts` : ''}</p>` : ''}
             </div>
         `).join('');
 

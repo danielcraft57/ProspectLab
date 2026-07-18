@@ -19,16 +19,21 @@ Contrairement au pentest (binaires CLI), les « outils » UX sont des **heuristi
 | `services/database/ux.py` | Persistance `analyses_ux` / `analysis_ux_findings` |
 | `tasks/ux_tasks.py` | Celery `ux_analysis_task` (queue `seo`) |
 
-## Catalogue d'outils (35)
+## Catalogue d'outils (37)
 
 ### Corpus
 
 | Outil | Description |
 |-------|-------------|
-| `corpus_index` | Stats du dossier transcripts |
-| `corpus_search` | Recherche plein texte (H1 / title) |
+| `corpus_index` | Stats du dossier transcripts (163/164, règles, coverage) |
+| `corpus_search` | Recherche plein texte indexée (tous les transcripts) |
 | `chapter_map` | Grille des 14 chapitres |
-| `corpus_principle_match` | Relie les findings aux citations |
+| `corpus_rules_extract` | Grille de ~2000 règles extraites de tous les .txt |
+| `page_corpus_relevance` | Croise le texte page vs tout le corpus (gaps/forces) |
+| `corpus_principle_match` | Match chaque finding contre les 163 transcripts |
+
+Chaque finding enrichi contient `corpus_quotes`, `corpus_rules`, `corpus_best_quote`
+et `corpus_docs_scanned` (scan intégral du corpus).
 
 ### Landing / conversion
 

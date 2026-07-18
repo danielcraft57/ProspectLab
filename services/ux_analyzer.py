@@ -95,6 +95,8 @@ class UXAnalyzer:
             'corpus_index',
             'corpus_search',
             'chapter_map',
+            'corpus_rules_extract',
+            'page_corpus_relevance',
             'hick_law',
             'ctv_call_to_value',
             'contrast_pricing',
@@ -132,6 +134,8 @@ class UXAnalyzer:
         self.tools['corpus_index'] = corpus_ok
         self.tools['corpus_search'] = corpus_ok
         self.tools['chapter_map'] = True
+        self.tools['corpus_rules_extract'] = corpus_ok
+        self.tools['page_corpus_relevance'] = corpus_ok
         self.tools['corpus_principle_match'] = corpus_ok
 
     def get_diagnostic(self) -> Dict[str, Any]:
@@ -227,10 +231,9 @@ class UXAnalyzer:
         evidence: Optional[Dict[str, Any]] = None,
         score_delta: int = 0,
     ) -> Dict[str, Any]:
-        """Construit un finding standard + refs corpus."""
+        """Construit un finding standard + match contre tout le corpus."""
         ch = next((c for c in CLEA_UX_CHAPTERS if c['id'] == chapter), None)
-        refs = self.corpus.refs_for_chapter(chapter, limit=3) if self.tools.get('corpus_index') else []
-        return {
+        finding: Dict[str, Any] = {
             'tool': tool,
             'chapter': chapter,
             'chapter_title': (ch or {}).get('title'),
@@ -240,9 +243,39 @@ class UXAnalyzer:
             'message': message,
             'recommendation': recommendation,
             'score_delta': score_delta,
-            'corpus_refs': refs,
+            'corpus_refs': [],
+            'corpus_quotes': [],
+            'corpus_rules': [],
             'evidence': evidence or {},
         }
+        if self.tools.get('corpus_index'):
+            try:
+                matched = self.corpus.match_finding(finding, limit=5)
+                finding['corpus_refs'] = [
+                    h.get('title') for h in (matched.get('hits') or []) if h.get('title')
+                ]
+                finding['corpus_quotes'] = [
+                    {
+                        'source': h.get('title'),
+                        'excerpt': h.get('excerpt'),
+                        'score': h.get('score'),
+                    }
+                    for h in (matched.get('hits') or [])[:3]
+                ]
+                finding['corpus_rules'] = [
+                    {
+                        'rule': r.get('rule'),
+                        'source': r.get('source_title'),
+                    }
+                    for r in (matched.get('rules') or [])[:3]
+                ]
+                finding['corpus_best_quote'] = matched.get('best_quote')
+                finding['corpus_best_source'] = matched.get('best_source')
+                finding['corpus_docs_scanned'] = matched.get('corpus_docs_scanned')
+            except Exception as exc:
+                logger.debug('match_finding échoué: %s', exc)
+                finding['corpus_refs'] = self.corpus.refs_for_chapter(chapter, limit=5)
+        return finding
 
     # ------------------------------------------------------------------
     # Outils corpus
@@ -290,6 +323,54 @@ class UXAnalyzer:
             'chapters': CLEA_UX_CHAPTERS,
             'findings': [],
             'summary': f'{len(CLEA_UX_CHAPTERS)} chapitres de référence',
+        }
+
+    def tool_corpus_rules_extract(self, _ctx: Dict[str, Any]) -> Dict[str, Any]:
+        """Extrait la grille de règles depuis tous les transcripts indexés."""
+        if not self.tools.get('corpus_rules_extract'):
+            return {'error': 'Corpus indisponible', 'scan_completed': False}
+        grid = self.corpus.get_rules_grid(limit_per_chapter=8)
+        return {
+            'scan_completed': True,
+            'rules_total': grid.get('rules_total', 0),
+            'transcript_count': grid.get('transcript_count', 0),
+            'chapters': grid.get('chapters', []),
+            'findings': [],
+            'summary': (
+                f'{grid.get("rules_total", 0)} règles extraites de '
+                f'{grid.get("transcript_count", 0)} transcripts'
+            ),
+        }
+
+    def tool_page_corpus_relevance(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
+        """Croise le texte de la page avec tout le corpus (gaps / forces)."""
+        if not self.tools.get('page_corpus_relevance'):
+            return {'error': 'Corpus indisponible', 'scan_completed': False}
+        relevance = self.corpus.score_page_against_corpus(ctx.get('text') or '')
+        findings: List[Dict[str, Any]] = []
+        for gap in (relevance.get('gaps') or [])[:3]:
+            findings.append(self._finding(
+                tool='page_corpus_relevance',
+                chapter=int(gap.get('chapter') or 14),
+                severity='low',
+                title=f'Angle @clea_ux peu couvert : {gap.get("title")}',
+                message=(
+                    f'Peu de signaux page liés au chapitre « {gap.get("title")} » '
+                    f'({gap.get("transcripts_in_chapter", 0)} transcripts corpus).'
+                ),
+                recommendation=gap.get('principle') or 'Renforce cet angle UX sur la page.',
+                evidence={'gap': gap},
+                score_delta=-3,
+            ))
+        return {
+            'scan_completed': True,
+            'relevance': relevance,
+            'findings': findings,
+            'summary': (
+                f'Corpus {relevance.get("corpus_docs", 0)} docs — '
+                f'{len(relevance.get("gaps") or [])} gaps, '
+                f'{len(relevance.get("strengths") or [])} forces'
+            ),
         }
 
     # ------------------------------------------------------------------
@@ -1116,24 +1197,48 @@ class UXAnalyzer:
         }
 
     def tool_corpus_principle_match(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
-        """Rattache les findings déjà collectés à des citations corpus."""
+        """Rattache chaque finding à des citations / règles sur tout le corpus."""
         if not self.tools.get('corpus_principle_match'):
             return {'error': 'Corpus indisponible', 'scan_completed': False}
         prior: List[Dict[str, Any]] = ctx.get('findings_so_far') or []
         enriched = []
-        for f in prior[:20]:
-            q = f.get('title') or f.get('chapter_title') or ''
-            hits = self.corpus.search(q, limit=2)
+        for f in prior:
+            matched = self.corpus.match_finding(f, limit=5)
+            # Enrichit le finding en place pour le résultat final
+            f['corpus_refs'] = [
+                h.get('title') for h in (matched.get('hits') or []) if h.get('title')
+            ] or f.get('corpus_refs') or []
+            f['corpus_quotes'] = [
+                {
+                    'source': h.get('title'),
+                    'excerpt': h.get('excerpt'),
+                    'score': h.get('score'),
+                }
+                for h in (matched.get('hits') or [])[:3]
+            ]
+            f['corpus_rules'] = [
+                {'rule': r.get('rule'), 'source': r.get('source_title')}
+                for r in (matched.get('rules') or [])[:3]
+            ]
+            f['corpus_best_quote'] = matched.get('best_quote')
+            f['corpus_best_source'] = matched.get('best_source')
+            f['corpus_docs_scanned'] = matched.get('corpus_docs_scanned')
             enriched.append({
                 'finding_title': f.get('title'),
                 'chapter': f.get('chapter'),
-                'corpus_hits': hits,
+                'hits_count': len(matched.get('hits') or []),
+                'rules_count': len(matched.get('rules') or []),
+                'best_source': matched.get('best_source'),
+                'corpus_hits': matched.get('hits') or [],
             })
         return {
             'scan_completed': True,
             'matches': enriched,
             'findings': [],
-            'summary': f'{len(enriched)} findings reliés au corpus',
+            'summary': (
+                f'{len(enriched)} findings matchés sur '
+                f'{self.corpus.get_stats().get("transcript_count", 0)} transcripts'
+            ),
         }
 
     # ------------------------------------------------------------------
@@ -1200,6 +1305,8 @@ class UXAnalyzer:
             ('corpus_index', self.tool_corpus_index),
             ('chapter_map', self.tool_chapter_map),
             ('corpus_search', self.tool_corpus_search),
+            ('corpus_rules_extract', self.tool_corpus_rules_extract),
+            ('page_corpus_relevance', self.tool_page_corpus_relevance),
             ('hick_law', self.tool_hick_law),
             ('ctv_call_to_value', self.tool_ctv_call_to_value),
             ('contrast_pricing', self.tool_contrast_pricing),
@@ -1274,6 +1381,11 @@ class UXAnalyzer:
             'tools_results': tools_results,
             'tools_run': [n for n, _ in tool_map if opts.get(n)],
             'corpus': self.corpus.build_knowledge_pack() if self.tools.get('corpus_index') else {},
+            'rules_grid': (
+                self.corpus.get_rules_grid(limit_per_chapter=5)
+                if self.tools.get('corpus_rules_extract')
+                else {}
+            ),
             'summary': summary,
             'diagnostic': self.get_diagnostic(),
         }
