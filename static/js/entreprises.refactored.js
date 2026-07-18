@@ -2277,7 +2277,7 @@
         ensureModalWebSocketListeners();
         setScoreRelaunchLoading(entrepriseId, analysisType, true);
 
-        const launchLabels = { technique: 'technique', seo: 'SEO', osint: 'OSINT', pentest: 'Pentest' };
+        const launchLabels = { technique: 'technique', seo: 'SEO', ux: 'UX', osint: 'OSINT', pentest: 'Pentest' };
         const nom = entreprise && entreprise.nom ? entreprise.nom : getEntrepriseNom(entrepriseId);
         if (notify) {
             Notifications.show(nom + ' — Analyse ' + (launchLabels[analysisType] || analysisType) + ' lancée...', 'info', 'fa-play-circle');
@@ -2287,6 +2287,8 @@
             socket.emit('start_technical_analysis', { url, entreprise_id: entrepriseId });
         } else if (analysisType === 'seo') {
             socket.emit('start_seo_analysis', { url, entreprise_id: entrepriseId, use_lighthouse: true });
+        } else if (analysisType === 'ux') {
+            socket.emit('start_ux_analysis', { url, entreprise_id: entrepriseId });
         } else if (analysisType === 'osint') {
             socket.emit('start_osint_analysis', { url, entreprise_id: entrepriseId });
         } else if (analysisType === 'pentest') {
@@ -3620,6 +3622,7 @@
             { key: 'scraping', label: 'Scraping', icon: 'fa-spider' },
             { key: 'technical', label: 'Analyse technique', icon: 'fa-microchip' },
             { key: 'seo', label: 'Analyse SEO', icon: 'fa-search' },
+            { key: 'ux', label: 'Analyse UX', icon: 'fa-user-check' },
             { key: 'osint', label: 'Analyse OSINT', icon: 'fa-user-secret' },
             { key: 'pentest', label: 'Analyse Pentest', icon: 'fa-shield-alt' }
         ];
@@ -3664,6 +3667,9 @@
                 if (typeof item.performance_score === 'number') metaParts.push(`Perf: ${item.performance_score}/100`);
             } else if (step.key === 'seo' && status === 'done') {
                 if (typeof item.score === 'number') metaParts.push(`Score SEO: ${item.score}/100`);
+            } else if (step.key === 'ux' && status === 'done') {
+                if (typeof item.score === 'number') metaParts.push(`Score UX: ${item.score}/100`);
+                if (typeof item.findings_count === 'number') metaParts.push(`${item.findings_count} finding(s)`);
             } else if (step.key === 'osint' && status === 'done') {
                 if (typeof item.emails_count === 'number') metaParts.push(`${item.emails_count} email(s) OSINT`);
                 if (typeof item.people_count === 'number') metaParts.push(`${item.people_count} personne(s) enrichie(s)`);
@@ -3998,6 +4004,7 @@
                         <button class="tab-btn" data-tab="evolution-metrics">Évolution</button>
                         <button class="tab-btn" data-tab="technique">Analyse technique</button>
                         <button class="tab-btn" data-tab="seo">Analyse SEO</button>
+                        <button class="tab-btn" data-tab="ux">Analyse UX</button>
                         <button class="tab-btn" data-tab="osint">Analyse OSINT</button>
                         <button class="tab-btn" data-tab="pentest">Analyse Pentest</button>
                         <button class="tab-btn" data-tab="prospection">Prospection</button>
@@ -4231,6 +4238,16 @@
                             <div id="seo-results-content">Chargement de l'analyse SEO...</div>
                         </div>
                     </div>
+
+                    <div class="tab-panel" id="tab-ux">
+                        <div class="analysis-tab-toolbar" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:0.5rem;">
+                            <span class="analysis-tab-label" style="font-weight:600;color:#334155;">Analyse UX (@clea_ux)</span>
+                            <button type="button" class="btn btn-outline btn-relancer-analysis" data-analysis-type="ux" title="Relancer l\'analyse UX"><i class="fas fa-sync-alt"></i> Relancer</button>
+                        </div>
+                        <div id="ux-results" class="analysis-results">
+                            <div id="ux-results-content">Chargement de l'analyse UX...</div>
+                        </div>
+                    </div>
                     
                     <div class="tab-panel" id="tab-osint">
                         <div class="analysis-tab-toolbar" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:0.5rem;">
@@ -4336,6 +4353,30 @@
             }
             if (data && data.entreprise_id != null && data.entreprise_id === currentModalEntrepriseId) {
                 loadSEOAnalysis(currentModalEntrepriseId);
+            }
+        });
+        s.on('ux_analysis_complete', function(data) {
+            if (!data || data.entreprise_id == null) return;
+            setScoreRelaunchLoading(data.entreprise_id, 'ux', false);
+            refreshEntrepriseFromServer(data.entreprise_id, { animateOnlyMetric: 'ux' });
+            if (isEntrepriseCurrentlyRendered(data.entreprise_id)) {
+                scheduleApplyFilters();
+            }
+            const nom = getEntrepriseNom(data.entreprise_id);
+            Notifications.show(nom + ' — Analyse UX terminée', 'success', 'fa-check-circle');
+            if (data.entreprise_id === currentModalEntrepriseId) {
+                setTimeout(() => loadUXAnalysis(currentModalEntrepriseId, { skipClear: true }), 400);
+                setTimeout(() => loadMetricEvolutionTab(currentModalEntrepriseId), 650);
+            }
+        });
+        s.on('ux_analysis_error', function(data) {
+            if (data && data.entreprise_id != null) {
+                setScoreRelaunchLoading(data.entreprise_id, 'ux', false);
+                const nom = getEntrepriseNom(data.entreprise_id);
+                Notifications.show(nom + ' — ' + (data.error || 'Erreur analyse UX'), 'error', 'fa-exclamation-circle');
+            }
+            if (data && data.entreprise_id != null && data.entreprise_id === currentModalEntrepriseId) {
+                loadUXAnalysis(currentModalEntrepriseId);
             }
         });
         s.on('osint_analysis_complete', function(data) {
@@ -4910,15 +4951,17 @@
                         return;
                     }
                     ensureModalWebSocketListeners();
-                    const contentIds = { technique: 'technique-results-content', seo: 'seo-results-content', osint: 'osint-results-content', pentest: 'pentest-results-content' };
+                    const contentIds = { technique: 'technique-results-content', seo: 'seo-results-content', ux: 'ux-results-content', osint: 'osint-results-content', pentest: 'pentest-results-content' };
                     const contentEl = document.getElementById(contentIds[analysisType]);
                     if (contentEl) contentEl.innerHTML = '<p class="loading" style="padding:1.5rem;text-align:center;color:#64748b;"><i class="fas fa-spinner fa-spin"></i> Analyse en cours...</p>';
-                    const launchLabels = { technique: 'technique', seo: 'SEO', osint: 'OSINT', pentest: 'Pentest' };
+                    const launchLabels = { technique: 'technique', seo: 'SEO', ux: 'UX', osint: 'OSINT', pentest: 'Pentest' };
                     Notifications.show('Analyse ' + (launchLabels[analysisType] || analysisType) + ' lancée...', 'info', 'fa-play-circle');
                     if (analysisType === 'technique') {
                         socket.emit('start_technical_analysis', { url: url, entreprise_id: currentModalEntrepriseId });
                     } else if (analysisType === 'seo') {
                         socket.emit('start_seo_analysis', { url: url, entreprise_id: currentModalEntrepriseId, use_lighthouse: true });
+                    } else if (analysisType === 'ux') {
+                        socket.emit('start_ux_analysis', { url: url, entreprise_id: currentModalEntrepriseId });
                     } else if (analysisType === 'osint') {
                         socket.emit('start_osint_analysis', { url: url, entreprise_id: currentModalEntrepriseId });
                     } else if (analysisType === 'pentest') {
@@ -4973,6 +5016,15 @@
             seoTab.addEventListener('click', () => {
                 if (currentModalEntrepriseId) {
                     loadSEOAnalysis(currentModalEntrepriseId);
+                }
+            });
+        }
+
+        const uxTab = document.querySelector('.tab-btn[data-tab="ux"]');
+        if (uxTab) {
+            uxTab.addEventListener('click', () => {
+                if (currentModalEntrepriseId) {
+                    loadUXAnalysis(currentModalEntrepriseId);
                 }
             });
         }
@@ -5262,6 +5314,94 @@
             resultsContent.innerHTML = '<p class="error">Erreur lors du chargement de l\'analyse SEO</p>';
         }
     }
+
+    /**
+     * Charge et affiche la dernière analyse UX d'une entreprise.
+     * @param {number} entrepriseId
+     * @param {{skipClear?: boolean}} [opts]
+     * @returns {Promise<void>}
+     */
+    async function loadUXAnalysis(entrepriseId, opts) {
+        const resultsContent = document.getElementById('ux-results-content');
+        if (!resultsContent) return;
+        const skipClear = opts && opts.skipClear === true;
+
+        try {
+            if (!skipClear) resultsContent.innerHTML = 'Chargement...';
+            const response = await fetch(`/api/entreprise/${entrepriseId}/analyse-ux`);
+            if (!response.ok) {
+                if (response.status === 404) {
+                    resultsContent.innerHTML = '<p class="empty-state">Aucune analyse UX disponible pour le moment.</p>';
+                } else {
+                    resultsContent.innerHTML = '<p class="error">Erreur lors du chargement de l\'analyse UX</p>';
+                }
+                return;
+            }
+            const analysis = await response.json();
+            resultsContent.innerHTML = renderUXExpertise(analysis);
+        } catch (error) {
+            console.error('Erreur chargement analyse UX:', error);
+            resultsContent.innerHTML = '<p class="error">Erreur lors du chargement de l\'analyse UX</p>';
+        }
+    }
+
+    /**
+     * Rendu HTML des findings UX (@clea_ux).
+     * @param {Object} analysis
+     * @returns {string}
+     */
+    function renderUXExpertise(analysis) {
+        let findings = analysis.findings || [];
+        let summary = analysis.summary || {};
+        try {
+            if ((!findings || !findings.length) && analysis.findings_json) {
+                findings = typeof analysis.findings_json === 'string'
+                    ? JSON.parse(analysis.findings_json)
+                    : analysis.findings_json;
+            }
+            if ((!summary || !Object.keys(summary).length) && analysis.summary_json) {
+                summary = typeof analysis.summary_json === 'string'
+                    ? JSON.parse(analysis.summary_json)
+                    : analysis.summary_json;
+            }
+        } catch (e) {
+            findings = [];
+        }
+        if (!Array.isArray(findings)) findings = [];
+
+        const score = analysis.score || 0;
+        const scoreClass = score >= 80 ? 'score-excellent' : score >= 60 ? 'score-good' : score >= 40 ? 'score-medium' : 'score-low';
+        const esc = (t) => (Formatters && typeof Formatters.escapeHtml === 'function')
+            ? Formatters.escapeHtml(t)
+            : String(t == null ? '' : t);
+
+        const findingsHtml = findings.map((f) => `
+            <div class="ux-finding" style="border:1px solid #e2e8f0;border-radius:8px;padding:0.75rem 1rem;margin-bottom:0.5rem;">
+                <div style="display:flex;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;">
+                    <strong>${esc(f.title || f.tool || 'Finding')}</strong>
+                    <span>${esc(f.severity || '')}</span>
+                </div>
+                <p style="margin:0.4rem 0;color:#475569;">${esc(f.message || '')}</p>
+                ${f.recommendation ? `<p style="margin:0;font-size:0.9rem;"><em>Reco :</em> ${esc(f.recommendation)}</p>` : ''}
+                ${f.chapter_title ? `<p style="margin:0.35rem 0 0;font-size:0.8rem;color:#94a3b8;">Ch.${esc(f.chapter)} — ${esc(f.chapter_title)}</p>` : ''}
+            </div>
+        `).join('');
+
+        return `
+            <div class="ux-details">
+                <div class="seo-score-section">
+                    <h3>Score UX (@clea_ux)</h3>
+                    <div class="score-display ${scoreClass}"><span class="score-value">${score}/100</span></div>
+                    ${summary.verdict ? `<p class="seo-summary-main">${esc(summary.verdict)}</p>` : ''}
+                </div>
+                <div class="seo-section">
+                    <h3>Findings (${findings.length})</h3>
+                    ${findingsHtml || '<p class="empty-state">Aucun finding</p>'}
+                </div>
+            </div>
+        `;
+    }
+
     /**
      * Génère le HTML de l'expertise SEO détaillée pour une analyse.
      * Reprend la logique principale de rendu de la page d'analyses SEO,

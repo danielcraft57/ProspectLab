@@ -392,6 +392,21 @@ def analyses_seo():
         return jsonify({'error': str(e)}), 500
 
 
+@api_extended_bp.route('/analyses-ux')
+@login_required
+def analyses_ux():
+    """
+    API: Liste toutes les analyses UX.
+
+    @returns: JSON liste analyses UX.
+    """
+    try:
+        analyses = database.get_all_ux_analyses()
+        return jsonify(analyses)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @api_extended_bp.route('/analyse-seo/<int:analysis_id>', methods=['GET', 'DELETE'])
 @login_required
 def analyse_seo_detail(analysis_id):
@@ -419,6 +434,29 @@ def analyse_seo_detail(analysis_id):
             return jsonify({'success': True, 'message': 'Analyse SEO supprimée avec succès'})
         except Exception as e:
             return jsonify({'error': str(e)}), 500
+
+
+@api_extended_bp.route('/analyse-ux/<int:analysis_id>', methods=['GET', 'DELETE'])
+@login_required
+def analyse_ux_detail(analysis_id):
+    """
+    API: Détails ou suppression d'une analyse UX.
+
+    @param analysis_id: ID de l'analyse.
+    """
+    if request.method == 'DELETE':
+        try:
+            database.delete_ux_analysis(analysis_id)
+            return jsonify({'success': True, 'message': 'Analyse UX supprimée avec succès'})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    try:
+        analysis = database.get_ux_analysis_by_id(analysis_id)
+        if not analysis:
+            return jsonify({'error': 'Analyse UX introuvable'}), 404
+        return jsonify(analysis)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @api_extended_bp.route('/google-maps/import', methods=['POST'])
@@ -625,6 +663,24 @@ def entreprise_seo_analysis(entreprise_id):
         return jsonify({'error': str(e)}), 500
 
 
+@api_extended_bp.route('/entreprise/<int:entreprise_id>/analyse-ux')
+@login_required
+def entreprise_ux_analysis(entreprise_id):
+    """
+    API: Dernière analyse UX d'une entreprise.
+
+    @param entreprise_id: ID entreprise.
+    @returns: JSON analyse UX ou 404.
+    """
+    try:
+        analysis = database.get_ux_analysis_by_entreprise(entreprise_id)
+        if analysis:
+            return jsonify(analysis)
+        return jsonify({'error': 'Aucune analyse UX trouvée'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @api_extended_bp.route('/entreprise/<int:entreprise_id>/audit-pipeline')
 @login_required
 def entreprise_audit_pipeline(entreprise_id):
@@ -689,6 +745,23 @@ def entreprise_audit_pipeline(entreprise_id):
         except Exception:
             pass
         pipeline['seo'] = seo_summary
+
+        # Analyse UX (@clea_ux)
+        ux_summary = {'status': 'never'}
+        try:
+            ux = database.get_ux_analysis_by_entreprise(entreprise_id)
+            if ux:
+                findings = ux.get('findings') or []
+                ux_summary = {
+                    'status': 'done',
+                    'last_date': ux.get('date_analyse'),
+                    'url': ux.get('url'),
+                    'score': ux.get('score'),
+                    'findings_count': len(findings) if isinstance(findings, list) else 0,
+                }
+        except Exception:
+            pass
+        pipeline['ux'] = ux_summary
 
         screenshots_latest = {}
         try:

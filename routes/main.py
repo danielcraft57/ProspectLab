@@ -134,6 +134,17 @@ def liste_analyses_seo():
     return render_page('analyses_seo.html')
 
 
+@main_bp.route('/analyses-ux')
+@login_required
+def liste_analyses_ux():
+    """
+    Page de liste des analyses UX (@clea_ux).
+
+    @returns: Template HTML analyses_ux.
+    """
+    return render_page('analyses_ux.html')
+
+
 @main_bp.route('/analyse-site-complet')
 @login_required
 def analyse_site_complet():

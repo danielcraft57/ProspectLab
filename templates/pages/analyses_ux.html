@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}Analyses UX - ProspectLab{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Analyses UX</h1>
+    <p>Audit conversion calé sur le corpus @clea_ux (transcripts TikTok)</p>
+</div>
+
+<div class="new-analysis-section">
+    <div class="card">
+        <div class="card-header">
+            <h2>Nouvelle analyse UX</h2>
+        </div>
+        <div class="card-body">
+            <form id="form-new-ux" class="form-inline">
+                <div class="form-group">
+                    <label for="ux-url">URL</label>
+                    <input type="text" id="ux-url" class="form-input" placeholder="https://example.com" required>
+                </div>
+                <div class="form-group">
+                    <button type="submit" id="btn-start-ux" class="btn btn-primary">
+                        <span id="btn-text">Lancer l'analyse UX</span>
+                        <span id="btn-loading" style="display: none;">Analyse en cours...</span>
+                    </button>
+                </div>
+            </form>
+
+            <div id="ux-progress" style="display: none;" class="progress-section">
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="ux-progress-bar" style="width: 0%"></div>
+                </div>
+                <p id="ux-progress-message" class="progress-message">Initialisation...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="results-section">
+    <div class="results-header">
+        <h3 id="results-count">Chargement...</h3>
+    </div>
+
+    <div id="analyses-container" class="analyses-techniques-grid">
+        <p>Chargement des analyses...</p>
+    </div>
+</div>
+
+<div id="ux-modal" class="modal">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 id="ux-modal-title">Détails de l'analyse UX</h2>
+            <button class="modal-close" id="ux-modal-close" aria-label="Fermer"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body" id="ux-modal-body">
+            <div class="loading">Chargement des détails...</div>
+        </div>
+        <div class="modal-footer" id="ux-modal-footer"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/analyses_ux.js') }}" defer></script>
+{% endblock %}
