@@ -188,7 +188,8 @@ class OpportunityCalculator:
                                    pentest_analysis: Optional[Dict] = None,
                                    osint_analysis: Optional[Dict] = None,
                                    scraping_data: Optional[Dict] = None,
-                                   seo_analysis: Optional[Dict] = None) -> Dict:
+                                   seo_analysis: Optional[Dict] = None,
+                                   ux_analysis: Optional[Dict] = None) -> Dict:
         """
         Calcule le score d'opportunité global en combinant tous les facteurs
         
@@ -199,6 +200,8 @@ class OpportunityCalculator:
             pentest_analysis: Analyse pentest (dict avec risk_score, vulnerabilities, etc.)
             osint_analysis: Analyse OSINT (dict avec people, emails, etc.)
             scraping_data: Données de scraping (dict avec emails, people, phones, etc.)
+            seo_analysis: Analyse SEO
+            ux_analysis: Analyse UX (@clea_ux)
         
         Returns:
             dict: {
@@ -246,6 +249,13 @@ class OpportunityCalculator:
                             seo_analysis = seo_list[0]
                     except Exception:
                         seo_analysis = None
+
+            if ux_analysis is None:
+                if hasattr(self.database, 'get_ux_analysis_by_entreprise'):
+                    try:
+                        ux_analysis = self.database.get_ux_analysis_by_entreprise(entreprise_id)
+                    except Exception:
+                        ux_analysis = None
         
         ent_data = None
         if self.database and hasattr(self.database, 'get_entreprise'):
@@ -400,6 +410,23 @@ class OpportunityCalculator:
                         indicators.append('SEO faible détecté')
                     elif s < 70:
                         indicators.append('SEO perfectible')
+                except Exception:
+                    pass
+
+        # 7b. Score UX (@clea_ux) — score bas = opportunité (0-10 points)
+        if ux_analysis:
+            ux_score = ux_analysis.get('score')
+            if ux_score is not None:
+                try:
+                    s = max(0, min(100, int(ux_score)))
+                    ux_opportunity = max(0, (100 - s) / 10.0)
+                    breakdown['ux'] = ux_opportunity
+                    total_score += ux_opportunity
+                    max_score += 10
+                    if s < 50:
+                        indicators.append('UX / conversion à risque (@clea_ux)')
+                    elif s < 70:
+                        indicators.append('UX perfectible (@clea_ux)')
                 except Exception:
                     pass
 

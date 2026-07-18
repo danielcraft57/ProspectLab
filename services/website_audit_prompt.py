@@ -101,9 +101,10 @@ Le livrable doit être un **audit complet** avec **solutions détaillées** pour
 - Ce que disent les données (contacts, sous-domaines, etc.) sans dépasser le cadre d'un rapport client.
 - Recommandations de **réduction de surface**, classification des données, bonnes pratiques.
 
-### G. UX / conversion (à partir du site parcouru + captures si fournies)
-- Parcours utilisateur, friction, confiance, CTA, mobile.
-- **Liste de recommandations** avec maquettes textuelles ou wireframes ASCII si utile.
+### G. UX / conversion (données automatisées + site parcouru)
+- Utilise le bloc `pipeline.ux` s'il est présent (score, findings, verdict, corpus @clea_ux).
+- Corréle avec ta revue live : parcours, friction, confiance, CTA/CTV, mobile, loi de Hick, empty states.
+- **Liste de recommandations** calées sur les principes @clea_ux (onboarding, TTV, CTV, erreurs qui guident, Peak-End, etc.) avec maquettes textuelles ou wireframes ASCII si utile.
 
 ### H. Plan de remédiation global
 - Tableau **priorisé** : id, thème, action, priorité (P0–P3), effort, dépendances, indicateur de succès.

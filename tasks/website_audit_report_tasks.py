@@ -54,8 +54,8 @@ logger = setup_logger(__name__, 'website_audit_report.log')
 
 _EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
-SIMPLE_MODULES = ['scraping', 'technical', 'seo', 'pentest']
-COMPLETE_MODULES = ['scraping', 'technical', 'seo', 'screenshot', 'osint', 'pentest']
+SIMPLE_MODULES = ['scraping', 'technical', 'seo', 'ux', 'pentest']
+COMPLETE_MODULES = ['scraping', 'technical', 'seo', 'ux', 'screenshot', 'osint', 'pentest']
 SIMPLE_MODULE_ORDER = SIMPLE_MODULES
 
 
@@ -544,12 +544,13 @@ def _run_simple_analysis(
     """Scraping puis technique, SEO, pentest — uniquement les modules manquants."""
     from tasks.technical_analysis_tasks import technical_analysis_task
     from tasks.seo_tasks import seo_analysis_task
+    from tasks.ux_tasks import ux_analysis_task
     from tasks.pentest_tasks import pentest_analysis_task
 
     soft = WEBSITE_AUDIT_SOFT_FAIL_MODULES
     steps: Dict[str, str] = {m: 'cached' for m in SIMPLE_MODULE_ORDER if m not in missing_modules}
     forms_pentest: Optional[List[Dict[str, Any]]] = None
-    progress_map = {'scraping': 20, 'technical': 40, 'seo': 55, 'pentest': 70}
+    progress_map = {'scraping': 20, 'technical': 35, 'seo': 50, 'ux': 60, 'pentest': 75}
 
     for module in SIMPLE_MODULE_ORDER:
         if module not in missing_modules:
@@ -610,6 +611,18 @@ def _run_simple_analysis(
                 use_lighthouse=use_lighthouse,
             )
             steps['seo'] = status
+        elif module == 'ux':
+            status, _ = _run_audit_module(
+                self,
+                'ux',
+                ux_analysis_task,
+                url=url,
+                mode='simple',
+                timeout_sec=WEBSITE_AUDIT_SEO_TIMEOUT_SEC,
+                soft_fail=soft,
+                entreprise_id=entreprise_id,
+            )
+            steps['ux'] = status
         elif module == 'pentest':
             status, _ = _run_audit_module(
                 self,
@@ -1347,6 +1360,7 @@ def website_audit_complete_report_task(
                 use_lighthouse=bool(use_lighthouse),
                 enable_technical=True,
                 enable_seo=True,
+                enable_ux=True,
                 enable_screenshot=True,
                 enable_osint=True,
                 enable_pentest=True,

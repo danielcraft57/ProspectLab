@@ -17,6 +17,7 @@ from services.logging_config import setup_logger
 from tasks.scraping_tasks import run_scrape_emails_inline
 from tasks.technical_analysis_tasks import technical_analysis_task
 from tasks.seo_tasks import seo_analysis_task
+from tasks.ux_tasks import ux_analysis_task
 from tasks.screenshot_tasks import website_screenshot_task
 from tasks.osint_tasks import osint_analysis_task
 from tasks.phone_tasks import analyze_phones_task
@@ -440,12 +441,13 @@ def run_full_website_analysis_impl(
     use_lighthouse: bool = False,
     enable_technical: bool = True,
     enable_seo: bool = True,
+    enable_ux: bool = True,
     enable_screenshot: bool = True,
     enable_osint: bool = True,
     enable_pentest: bool = True,
 ):
     """
-    Corps du pack d’analyses (appelé par la tâche Celery enregistrée dans analysis_tasks).
+    Corps du pack d'analyses (appelé par la tâche Celery enregistrée dans analysis_tasks).
     """
     t0 = time.monotonic()
     database = Database()
@@ -574,6 +576,7 @@ def run_full_website_analysis_impl(
         for n, on in (
             ('technique', enable_technical),
             ('SEO', enable_seo),
+            ('UX', enable_ux),
             ('screenshot', enable_screenshot),
             ('OSINT', enable_osint),
             ('pentest', enable_pentest),
@@ -594,7 +597,10 @@ def run_full_website_analysis_impl(
         )
 
     # Réduit les HTTP 429 avant la prochaine salve HTTP (technique / SEO / …).
-    any_post_scrape = enable_technical or enable_seo or enable_screenshot or enable_osint or enable_pentest
+    any_post_scrape = (
+        enable_technical or enable_seo or enable_ux
+        or enable_screenshot or enable_osint or enable_pentest
+    )
     if any_post_scrape and FULL_ANALYSIS_INTER_STEP_PAUSE_SEC > 0:
         logger.info(
             'Pause %.1fs avant les analyses (FULL_ANALYSIS_INTER_STEP_PAUSE_SEC).',
@@ -690,6 +696,22 @@ def run_full_website_analysis_impl(
             steps['seo'] = f'erreur: {e!s}'[:200]
     else:
         steps['seo'] = 'désactivé'
+
+    # 3b) UX (@clea_ux)
+    if enable_ux:
+        try:
+            progress('ux', 52, 'Analyse UX (@clea_ux)…')
+            _run_subtask_eager(
+                ux_analysis_task,
+                url=url,
+                entreprise_id=entreprise_id,
+            )
+            steps['ux'] = 'ok'
+        except Exception as e:
+            logger.exception('Full analysis: UX échouée')
+            steps['ux'] = f'erreur: {e!s}'[:200]
+    else:
+        steps['ux'] = 'désactivé'
 
     # 4) Screenshot site (si non lancé en parallèle avec la technique)
     if not run_technical_and_screenshot_parallel:

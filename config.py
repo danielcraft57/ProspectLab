@@ -270,6 +270,15 @@ SEO_FETCH_RATE_LIMIT_MAX_RETRIES = max(
 SEO_FETCH_RATE_LIMIT_BASE_DELAY_SEC = float(
     os.environ.get('SEO_FETCH_RATE_LIMIT_BASE_DELAY_SEC', '4')
 )
+
+# Analyse UX (@clea_ux / transcripts TikTok)
+UX_TRANSCRIPTS_DIR = (
+    os.environ.get('UX_TRANSCRIPTS_DIR')
+    or r'C:\Users\loicDaniel\Videos\tiktokUX\transcripts'
+)
+UX_FETCH_CONNECT_TIMEOUT = float(os.environ.get('UX_FETCH_CONNECT_TIMEOUT', '12'))
+UX_FETCH_READ_TIMEOUT = float(os.environ.get('UX_FETCH_READ_TIMEOUT', '25'))
+UX_TOOL_TIMEOUT = int(os.environ.get('UX_TOOL_TIMEOUT', '120'))
 # Pack « analyse site complète » : pause après le scraping avant technique/SEO (réduit le rafale sur l’hôte)
 FULL_ANALYSIS_INTER_STEP_PAUSE_SEC = float(
     os.environ.get('FULL_ANALYSIS_INTER_STEP_PAUSE_SEC', '3')

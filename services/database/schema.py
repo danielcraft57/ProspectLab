@@ -1631,6 +1631,45 @@ class DatabaseSchema(DatabaseBase):
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_seo_issues_analysis_id ON analysis_seo_issues(analysis_id)')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_seo_entreprise ON analyses_seo(entreprise_id)')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_seo_url ON analyses_seo(url)')
+
+        # Tables analyses UX (@clea_ux)
+        self.execute_sql(cursor,'''
+            CREATE TABLE IF NOT EXISTS analyses_ux (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entreprise_id INTEGER,
+                url TEXT NOT NULL,
+                domain TEXT,
+                score INTEGER,
+                findings_json TEXT,
+                tools_json TEXT,
+                corpus_json TEXT,
+                summary_json TEXT,
+                ux_details TEXT,
+                date_analyse TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE
+            )
+        ''')
+
+        self.execute_sql(cursor,'''
+            CREATE TABLE IF NOT EXISTS analysis_ux_findings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                analysis_id INTEGER NOT NULL,
+                tool_name TEXT,
+                chapter INTEGER,
+                severity TEXT,
+                title TEXT,
+                message TEXT,
+                recommendation TEXT,
+                score_delta INTEGER,
+                evidence_json TEXT,
+                date_found TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (analysis_id) REFERENCES analyses_ux(id) ON DELETE CASCADE
+            )
+        ''')
+
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_ux_entreprise ON analyses_ux(entreprise_id)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_ux_url ON analyses_ux(url)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_ux_findings_analysis_id ON analysis_ux_findings(analysis_id)')
         
         # Table des scrapers
         self.execute_sql(cursor,'''

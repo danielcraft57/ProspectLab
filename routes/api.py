@@ -150,6 +150,46 @@ def seo_diagnostic():
         return jsonify({'error': str(e)}), 500
 
 
+@api_bp.route('/ux/diagnostic')
+@login_required
+def ux_diagnostic():
+    """
+    API: Diagnostic de l'environnement UX (outils heuristiques + corpus transcripts).
+
+    @returns: JSON tools_available, tools_missing, corpus, message
+    """
+    try:
+        from services.ux_analyzer import UXAnalyzer
+        analyzer = UXAnalyzer()
+        return jsonify(analyzer.get_diagnostic())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/ux/corpus/search')
+@login_required
+def ux_corpus_search():
+    """
+    API: Recherche dans le corpus transcripts @clea_ux.
+
+    Query params:
+        q (str): requête
+        limit (int): max résultats (défaut 8)
+    """
+    try:
+        from services.ux_corpus import get_ux_corpus
+        q = (request.args.get('q') or '').strip()
+        limit = request.args.get('limit', 8, type=int)
+        corpus = get_ux_corpus()
+        return jsonify({
+            'query': q,
+            'results': corpus.search(q, limit=max(1, min(limit or 8, 30))),
+            'stats': corpus.get_stats(),
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @api_bp.route('/statistics')
 @login_required
 def statistics():

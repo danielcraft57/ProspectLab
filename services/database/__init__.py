@@ -29,6 +29,7 @@ from .osint import OSINTManager
 from .technical import TechnicalManager
 from .pentest import PentestManager
 from .seo import SEOManager
+from .ux import UXManager
 from .email_templates import EmailTemplateManager
 from .mail_accounts import MailAccountManager
 from .external_links import ExternalLinksManager
@@ -52,6 +53,7 @@ class Database(
     TechnicalManager,
     PentestManager,
     SEOManager,
+    UXManager,
     ExternalLinksManager,
     DatabaseBase  # DatabaseBase en dernier pour résoudre le MRO
 ):

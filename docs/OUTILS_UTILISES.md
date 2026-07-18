@@ -6,11 +6,12 @@ Ce document répertorie tous les outils CLI et bibliothèques utilisés par le p
 
 | Catégorie | Nombre d'outils | Statut |
 |-----------|----------------|--------|
-| OSINT | 27 | ✅ Complet |
-| Pentest | 10 | ✅ Complet |
-| SEO | 3 | ✅ Complet |
-| Social OSINT | 3 | ✅ Complet |
-| Technique | 2 | ✅ Complet |
+| OSINT | 27 | Complet |
+| Pentest | 37 | Complet (base + catalogue THR web) |
+| SEO | 3 | Complet |
+| UX | 35 | Complet (heuristiques + corpus @clea_ux) |
+| Social OSINT | 3 | Complet |
+| Technique | 2 | Complet |
 
 ---
 
@@ -104,6 +105,24 @@ Ce document répertorie tous les outils CLI et bibliothèques utilisés par le p
 
 ---
 
+
+## UX (corpus @clea_ux)
+
+### Outils (heuristiques Python + corpus transcripts)
+35 outils documentes dans `docs/techniques/UX_TOOLS.md` :
+loi de Hick, CTV, contraste pricing, onboarding, Time to Value, aha moment,
+erreurs qui guident, empty states, paywall vitrine, Peak-End, Zeigarnik,
+Fogg, social proof, viewport mobile, etc. + index / recherche corpus.
+
+### Donnees
+- Transcripts locaux (`UX_TRANSCRIPTS_DIR`) — ~164 videos @clea_ux
+- Playbook chapitres 1-14 (`services/ux_corpus.py`)
+
+### Fichiers sources
+- `services/ux_analyzer.py` - Service principal UX
+- `services/ux_corpus.py` - Index transcripts
+- `tasks/ux_tasks.py` - Tache Celery
+
 ## 👥 Social OSINT
 
 ### Outils CLI
@@ -195,6 +214,10 @@ Scripts de test disponibles :
 ### SEO
 - ✅ Tous les outils utilisés dans `seo_analyzer.py` sont couverts par les scripts d'installation
 - ✅ Lighthouse installé via npm
+
+### UX
+- Heuristiques Python dans `ux_analyzer.py` (pas de CLI systeme)
+- Corpus transcripts via `UX_TRANSCRIPTS_DIR`
 
 ### Social OSINT
 - ✅ Tous les outils utilisés sont couverts par les scripts d'installation

@@ -20,6 +20,7 @@ from tasks.screenshot_tasks import website_screenshot_task
 from tasks.pentest_tasks import pentest_analysis_task
 from tasks.osint_tasks import osint_analysis_task
 from tasks.seo_tasks import seo_analysis_task
+from tasks.ux_tasks import ux_analysis_task
 from tasks.heavy_schedule import next_websocket_stagger_countdown
 from utils.celery_health import broker_ping_ok
 from utils.cluster_files import cluster_copy_upload_to_workers, is_windows_path
@@ -1994,6 +1995,154 @@ def register_websocket_handlers(socketio, app):
                     'error': f'Erreur lors du démarrage de l\'analyse SEO: {str(e)}'
                 }, room=request.sid)
             except:
+                pass
+
+    @socketio.on('start_ux_analysis')
+    def handle_start_ux_analysis(data):
+        """
+        Démarre une analyse UX via Celery (corpus @clea_ux).
+
+        @param data: Dict avec url, entreprise_id, options (outils).
+        """
+        try:
+            url = data.get('url')
+            entreprise_id = data.get('entreprise_id')
+            options = data.get('options')
+            session_id = request.sid
+
+            try:
+                app.logger.info(
+                    '[Socket.IO] start_ux_analysis sid=%s entreprise_id=%s url=%s',
+                    session_id,
+                    entreprise_id,
+                    (url[:100] + '…') if isinstance(url, str) and len(url) > 100 else url,
+                )
+            except Exception:
+                pass
+
+            if not url and entreprise_id:
+                try:
+                    entreprise = database.get_entreprise(entreprise_id)
+                    if entreprise:
+                        url = entreprise.get('website') or entreprise.get('url')
+                except Exception as e:
+                    try:
+                        app.logger.warning(
+                            '[Socket.IO] ux fallback url échoué via entreprise_id=%s: %s',
+                            entreprise_id,
+                            str(e),
+                        )
+                    except Exception:
+                        pass
+
+            if not url:
+                safe_emit(socketio, 'ux_analysis_error', {'error': 'URL requise'}, room=session_id)
+                return
+
+            if not broker_ping_ok():
+                app.logger.warning('[Socket.IO] start_ux_analysis: broker Redis injoignable sid=%s', session_id)
+                safe_emit(socketio, 'ux_analysis_error', {
+                    'error': _CELERY_BROKER_UNREACHABLE_MSG
+                }, room=session_id)
+                return
+
+            cd = next_websocket_stagger_countdown(session_id)
+            try:
+                task = ux_analysis_task.apply_async(
+                    kwargs=dict(
+                        url=url,
+                        entreprise_id=entreprise_id,
+                        options=options,
+                    ),
+                    countdown=cd,
+                    queue='seo',
+                )
+            except Exception as e:
+                app.logger.exception('[Socket.IO] apply_async UX échoué sid=%s: %s', session_id, e)
+                safe_emit(socketio, 'ux_analysis_error', {
+                    'error': f'Erreur lors du démarrage de la tâche: {str(e)}'
+                }, room=session_id)
+                return
+
+            app.logger.info(
+                '[Socket.IO] UX enfilée task_id=%s entreprise_id=%s countdown=%.2fs queue=seo url=%s',
+                task.id, entreprise_id, cd, url,
+            )
+            with tasks_lock:
+                active_tasks[session_id] = {'task_id': task.id, 'type': 'ux', 'url': url}
+
+            safe_emit(
+                socketio,
+                'ux_analysis_started',
+                {'message': 'Analyse UX démarrée...', 'task_id': task.id},
+                room=session_id,
+            )
+
+            def monitor_ux_task():
+                try:
+                    _sleep_before_monitor_poll(cd)
+                    last_meta = None
+                    while True:
+                        try:
+                            task_result = celery.AsyncResult(task.id)
+                            current_state = task_result.state
+
+                            if current_state == 'PROGRESS':
+                                meta = _celery_progress_meta_as_dict(task_result.info)
+                                if meta != last_meta:
+                                    safe_emit(socketio, 'ux_analysis_progress', {
+                                        'progress': meta.get('progress', 0),
+                                        'message': meta.get('message', '')
+                                    }, room=session_id)
+                                    last_meta = meta
+                            elif current_state == 'SUCCESS':
+                                result = _celery_success_result_as_dict(task_result.result)
+                                safe_emit(socketio, 'ux_analysis_complete', {
+                                    'success': True,
+                                    'analysis_id': result.get('analysis_id') if result else None,
+                                    'url': url,
+                                    'entreprise_id': entreprise_id,
+                                    'summary': result.get('summary', {}) if result else {},
+                                    'score': result.get('score', 0) if result else 0,
+                                    'findings_count': result.get('findings_count', 0) if result else 0,
+                                    'updated': result.get('updated', False) if result else False
+                                }, room=session_id)
+                                with tasks_lock:
+                                    if session_id in active_tasks:
+                                        del active_tasks[session_id]
+                                break
+                            elif current_state == 'FAILURE':
+                                safe_emit(socketio, 'ux_analysis_error', {
+                                    'error': str(task_result.info),
+                                    'entreprise_id': entreprise_id
+                                }, room=session_id)
+                                with tasks_lock:
+                                    if session_id in active_tasks:
+                                        del active_tasks[session_id]
+                                break
+                        except Exception as e:
+                            safe_emit(socketio, 'ux_analysis_error', {
+                                'error': f'Erreur lors du suivi de la tâche: {str(e)}',
+                                'entreprise_id': entreprise_id
+                            }, room=session_id)
+                            with tasks_lock:
+                                if session_id in active_tasks:
+                                    del active_tasks[session_id]
+                            break
+                        time.sleep(_WS_MONITOR_POLL_SEC)
+                except Exception as e:
+                    safe_emit(socketio, 'ux_analysis_error', {
+                        'error': f'Erreur dans le suivi: {str(e)}',
+                        'entreprise_id': entreprise_id
+                    }, room=session_id)
+
+            _start_monitor_background(socketio, monitor_ux_task)
+        except Exception as e:
+            try:
+                safe_emit(socketio, 'ux_analysis_error', {
+                    'error': f'Erreur lors du démarrage de l\'analyse UX: {str(e)}'
+                }, room=request.sid)
+            except Exception:
                 pass
 
     @socketio.on('start_technical_analysis')

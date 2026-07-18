@@ -35,8 +35,8 @@ def _score_status(value: Optional[float], *, high_good: bool = True) -> str:
 
 
 AUDIT_MODULES_BY_MODE: Dict[str, List[str]] = {
-    'simple': ['scraping', 'technical', 'seo', 'pentest'],
-    'complete': ['scraping', 'technical', 'seo', 'screenshot', 'osint', 'pentest'],
+    'simple': ['scraping', 'technical', 'seo', 'ux', 'pentest'],
+    'complete': ['scraping', 'technical', 'seo', 'ux', 'screenshot', 'osint', 'pentest'],
 }
 
 
@@ -218,6 +218,35 @@ def build_audit_pipeline(database: Database, entreprise_id: int) -> Dict[str, An
         }
     else:
         pipeline['seo'] = {'status': 'never'}
+
+    try:
+        ux = None
+        if hasattr(database, 'get_ux_analysis_by_entreprise'):
+            ux = database.get_ux_analysis_by_entreprise(entreprise_id)
+    except Exception:
+        ux = None
+    if ux:
+        findings = ux.get('findings') or []
+        if isinstance(ux.get('findings_json'), list):
+            findings = ux['findings_json']
+        summary = ux.get('summary') or ux.get('summary_json') or {}
+        if isinstance(summary, str):
+            try:
+                summary = json.loads(summary)
+            except Exception:
+                summary = {}
+        pipeline['ux'] = {
+            'status': 'done',
+            'last_date': ux.get('date_analyse'),
+            'url': ux.get('url'),
+            'score': ux.get('score'),
+            'findings_count': len(findings) if isinstance(findings, list) else 0,
+            'findings': findings if isinstance(findings, list) else [],
+            'summary': summary,
+            'verdict': (summary.get('verdict') if isinstance(summary, dict) else '') or '',
+        }
+    else:
+        pipeline['ux'] = {'status': 'never'}
 
     try:
         screenshots = database.get_latest_entreprise_screenshots(entreprise_id) or {}
@@ -467,6 +496,20 @@ def build_health_rows(pipeline: Dict[str, Any], opportunity: Optional[Dict[str, 
         f'Score SEO : {int(seo_score)}/100' if seo_score is not None else 'Analyse non disponible',
     )
 
+    ux = pipeline.get('ux') or {}
+    ux_score = ux.get('score') if ux.get('status') == 'done' else None
+    st = _score_status(ux_score, high_good=True)
+    ux_n = ux.get('findings_count', 0)
+    add(
+        'UX & conversion (@clea_ux)',
+        st,
+        (
+            f'Score UX : {int(ux_score)}/100 — {ux_n} finding(s)'
+            if ux_score is not None
+            else 'Analyse non disponible'
+        ),
+    )
+
     sec = tech.get('security_score') if tech.get('status') == 'done' else None
     st = _score_status(sec, high_good=True)
     add(
@@ -549,6 +592,16 @@ def build_executive_summary(
             lines.append(f'Le référencement naturel est faible (SEO ~{s}/100).')
         elif s < 70:
             lines.append(f'Le SEO est perfectible (score ~{s}/100).')
+    ux = pipeline.get('ux') or {}
+    if ux.get('status') == 'done' and ux.get('score') is not None:
+        s = int(ux['score'])
+        n = ux.get('findings_count') or 0
+        if s < 50:
+            lines.append(f'L\'UX / conversion est à risque (score ~{s}/100, {n} finding(s) @clea_ux).')
+        elif s < 70:
+            lines.append(f'L\'UX est perfectible (score ~{s}/100, corpus @clea_ux).')
+        else:
+            lines.append(f'L\'UX est globalement saine (score ~{s}/100).')
     pentest = pipeline.get('pentest') or {}
     if pentest.get('status') == 'done' and pentest.get('risk_score') is not None:
         r = int(pentest['risk_score'])

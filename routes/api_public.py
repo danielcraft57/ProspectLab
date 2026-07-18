@@ -476,6 +476,13 @@ def _build_website_analysis_report(database: Database, entreprise_id: int, full:
     except Exception:
         seo = None
 
+    ux = None
+    try:
+        if hasattr(database, 'get_ux_analysis_by_entreprise'):
+            ux = database.get_ux_analysis_by_entreprise(entreprise_id)
+    except Exception:
+        ux = None
+
     screenshots_latest = {}
     try:
         screenshots_latest = database.get_latest_entreprise_screenshots(entreprise_id) or {}
@@ -509,6 +516,10 @@ def _build_website_analysis_report(database: Database, entreprise_id: int, full:
         'seo': {
             'status': 'done' if seo else 'never',
             'latest': seo,
+        },
+        'ux': {
+            'status': 'done' if ux else 'never',
+            'latest': ux,
         },
         'screenshots': {
             'status': 'done' if screenshots_latest else 'never',
@@ -2097,7 +2108,7 @@ def public_website_audit_report_simple():
         'entreprise_id': entreprise_id,
         'task_id': async_res.id,
         'pdf_engine': 'local',
-        'analysis_modules': ['scraping', 'technical', 'seo', 'pentest'],
+        'analysis_modules': ['scraping', 'technical', 'seo', 'ux', 'pentest'],
         'message': (
             'Analyse simple en cours (scraping puis technique, SEO, pentest). '
             'Si le site est déjà analysé : PDF et email sans relance. '
@@ -2199,7 +2210,7 @@ def public_website_audit_report_complete():
         'already_analyzed': already_analyzed,
         'missing_modules': missing_modules,
         'analysis_modules': [
-            'scraping', 'technical', 'seo', 'screenshot', 'osint', 'pentest',
+            'scraping', 'technical', 'seo', 'ux', 'screenshot', 'osint', 'pentest',
         ],
         'message': (
             'Analyse complète en cours. Production du rapport expert puis envoi par email.'
