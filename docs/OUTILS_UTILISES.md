@@ -9,7 +9,7 @@ Ce document répertorie tous les outils CLI et bibliothèques utilisés par le p
 | OSINT | 27 | Complet |
 | Pentest | 37 | Complet (base + catalogue THR web) |
 | SEO | 3 | Complet |
-| UX | 35 | Complet (heuristiques + corpus @clea_ux) |
+| UX | 37 | Complet (heuristiques + corpus @clea_ux) |
 | Social OSINT | 3 | Complet |
 | Technique | 2 | Complet |
 
@@ -109,7 +109,7 @@ Ce document répertorie tous les outils CLI et bibliothèques utilisés par le p
 ## UX (corpus @clea_ux)
 
 ### Outils (heuristiques Python + corpus transcripts)
-35 outils documentes dans `docs/techniques/UX_TOOLS.md` :
+37 outils documentes dans `docs/techniques/UX_TOOLS.md` :
 loi de Hick, CTV, contraste pricing, onboarding, Time to Value, aha moment,
 erreurs qui guident, empty states, paywall vitrine, Peak-End, Zeigarnik,
 Fogg, social proof, viewport mobile, etc. + index / recherche corpus.
