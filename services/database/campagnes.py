@@ -398,7 +398,7 @@ class CampagneManager(DatabaseBase):
         Sauvegarde un email envoyé dans la base.
 
         Args:
-            campagne_id (int): ID de la campagne
+            campagne_id (int|None): ID de la campagne (None pour un envoi rapide hors campagne)
             entreprise_id (int|None): ID de l'entreprise (optionnel)
             email (str|None): Adresse email du destinataire
             nom_destinataire (str|None): Nom du destinataire (optionnel)
@@ -1354,3 +1354,175 @@ class CampagneManager(DatabaseBase):
         deleted = cursor.rowcount > 0
         conn.close()
         return deleted
+
+    def list_recent_emails_envoyes(self, days=7, limit=50, filter_type='all', quick_only=True):
+        """
+        Liste les emails envoyés récents avec compteurs d'ouvertures et de clics.
+
+        Args:
+            days (int): Fenêtre en jours (depuis maintenant)
+            limit (int): Nombre max de lignes
+            filter_type (str): 'all' | 'opened' | 'clicked' | 'failed' | 'sent'
+            quick_only (bool): Si True, uniquement les envois hors campagne (campagne_id IS NULL)
+
+        Returns:
+            list[dict]: Emails enrichis (opens, clicks, first_open, last_open, last_click)
+        """
+        from datetime import datetime, timedelta, timezone
+
+        days = max(1, min(int(days or 7), 90))
+        limit = max(1, min(int(limit or 50), 200))
+        filter_type = (filter_type or 'all').strip().lower()
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        where = ['e.date_envoi >= ?']
+        params = [since]
+        if quick_only:
+            where.append('(e.campagne_id IS NULL)')
+
+        if filter_type == 'failed':
+            where.append("e.statut = 'failed'")
+        elif filter_type == 'sent':
+            where.append("e.statut = 'sent'")
+        elif filter_type == 'opened':
+            where.append(
+                "EXISTS (SELECT 1 FROM email_tracking_events t "
+                "WHERE t.email_id = e.id AND t.event_type = 'open')"
+            )
+        elif filter_type == 'clicked':
+            where.append(
+                "EXISTS (SELECT 1 FROM email_tracking_events t "
+                "WHERE t.email_id = e.id AND t.event_type = 'click')"
+            )
+
+        where_sql = ' AND '.join(where)
+        self.execute_sql(
+            cursor,
+            f'''
+            SELECT
+                e.id,
+                e.campagne_id,
+                e.entreprise_id,
+                e.email,
+                e.nom_destinataire,
+                e.entreprise,
+                e.sujet,
+                e.date_envoi,
+                e.statut,
+                e.erreur,
+                (
+                    SELECT COUNT(*) FROM email_tracking_events t
+                    WHERE t.email_id = e.id AND t.event_type = 'open'
+                ) AS opens,
+                (
+                    SELECT COUNT(*) FROM email_tracking_events t
+                    WHERE t.email_id = e.id AND t.event_type = 'click'
+                ) AS clicks,
+                (
+                    SELECT MIN(t.date_event) FROM email_tracking_events t
+                    WHERE t.email_id = e.id AND t.event_type = 'open'
+                ) AS first_open,
+                (
+                    SELECT MAX(t.date_event) FROM email_tracking_events t
+                    WHERE t.email_id = e.id AND t.event_type = 'open'
+                ) AS last_open,
+                (
+                    SELECT MAX(t.date_event) FROM email_tracking_events t
+                    WHERE t.email_id = e.id AND t.event_type = 'click'
+                ) AS last_click
+            FROM emails_envoyes e
+            WHERE {where_sql}
+            ORDER BY e.date_envoi DESC
+            LIMIT ?
+            ''',
+            tuple(params + [limit]),
+        )
+        rows = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+
+        for row in rows:
+            opens = int(row.get('opens') or 0)
+            clicks = int(row.get('clicks') or 0)
+            row['opens'] = opens
+            row['clicks'] = clicks
+            row['has_opened'] = opens > 0
+            row['has_clicked'] = clicks > 0
+            row['is_quick'] = row.get('campagne_id') is None
+        return rows
+
+    def get_quick_send_stats(self, days=7):
+        """
+        KPI agrégés pour les envois rapides (hors campagne).
+
+        Args:
+            days (int): Fenêtre en jours
+
+        Returns:
+            dict: total_sent, total_failed, total_opened, total_clicked, open_rate, click_rate
+        """
+        from datetime import datetime, timedelta, timezone
+
+        days = max(1, min(int(days or 7), 90))
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        self.execute_sql(
+            cursor,
+            '''
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN statut = 'sent' THEN 1 ELSE 0 END) AS total_sent,
+                SUM(CASE WHEN statut = 'failed' THEN 1 ELSE 0 END) AS total_failed
+            FROM emails_envoyes
+            WHERE campagne_id IS NULL AND date_envoi >= ?
+            ''',
+            (since,),
+        )
+        counts = dict(cursor.fetchone() or {})
+        total_sent = int(counts.get('total_sent') or 0)
+        total_failed = int(counts.get('total_failed') or 0)
+
+        self.execute_sql(
+            cursor,
+            '''
+            SELECT COUNT(DISTINCT e.id) AS c
+            FROM emails_envoyes e
+            JOIN email_tracking_events t ON t.email_id = e.id AND t.event_type = 'open'
+            WHERE e.campagne_id IS NULL AND e.date_envoi >= ? AND e.statut = 'sent'
+            ''',
+            (since,),
+        )
+        opened_row = cursor.fetchone()
+        total_opened = int((opened_row['c'] if opened_row else 0) or 0)
+
+        self.execute_sql(
+            cursor,
+            '''
+            SELECT COUNT(DISTINCT e.id) AS c
+            FROM emails_envoyes e
+            JOIN email_tracking_events t ON t.email_id = e.id AND t.event_type = 'click'
+            WHERE e.campagne_id IS NULL AND e.date_envoi >= ? AND e.statut = 'sent'
+            ''',
+            (since,),
+        )
+        clicked_row = cursor.fetchone()
+        total_clicked = int((clicked_row['c'] if clicked_row else 0) or 0)
+        conn.close()
+
+        open_rate = round((total_opened / total_sent) * 100, 1) if total_sent else 0.0
+        click_rate = round((total_clicked / total_sent) * 100, 1) if total_sent else 0.0
+
+        return {
+            'days': days,
+            'total_sent': total_sent,
+            'total_failed': total_failed,
+            'total_opened': total_opened,
+            'total_clicked': total_clicked,
+            'open_rate': open_rate,
+            'click_rate': click_rate,
+        }

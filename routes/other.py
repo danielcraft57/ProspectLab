@@ -63,20 +63,19 @@ def scrape_emails():
 @login_required
 def send_emails():
     """
-    Envoi d'emails de prospection
-    
+    Envoi rapide d'emails de prospection (hors campagne).
+
     Methods:
-        GET: Affiche le formulaire d'envoi
-        POST: Envoie les emails
-        
+        GET: Affiche le poste d'envoi (composer + historique + KPI)
+        POST: Envoie les emails, enregistre le tracking et l'historique
+
     Returns:
         str ou JSON: Template HTML ou résultats JSON
     """
     if request.method == 'POST':
-        data = request.get_json()
-        
-        # Récupérer les données
-        recipients = data.get('recipients', [])  # Liste de {email, nom, entreprise}
+        data = request.get_json() or {}
+
+        recipients = data.get('recipients', [])
         template_id = data.get('template_id')
         subject = data.get('subject')
         custom_message = data.get('custom_message')
@@ -88,12 +87,17 @@ def send_emails():
                 mail_account_id = None
         except Exception:
             mail_account_id = None
-        
+
         if not recipients:
             return jsonify({'error': 'Aucun destinataire'}), 400
-        
+
         try:
-            # Expéditeur SMTP sélectionné (multi-domaines) via session
+            import re
+            from config import BASE_URL
+            from services.email_tracker import EmailTracker
+            from services.database.campagnes import CampagneManager
+            from utils.name_formatter import format_name
+
             brand_domain = 'danielcraft.fr'
             email_sender = EmailSender()
             if mail_account_id is not None:
@@ -106,10 +110,8 @@ def send_emails():
                         email_sender = EmailSender.from_mail_account(acc)
                         brand_domain = acc.get('domain_name') or brand_domain
                 except Exception:
-                    # Repli silencieux vers MAIL_* (.env) si compte indisponible
                     pass
-            
-            # Charger le template si fourni
+
             template = None
             if template_id:
                 template = template_manager.get_template(
@@ -118,69 +120,256 @@ def send_emails():
                 )
                 if not template:
                     return jsonify({'error': 'Template introuvable'}), 404
-            
+
+            if not template_id and not custom_message:
+                return jsonify({'error': 'Template ou message requis'}), 400
+
+            tracker = EmailTracker(base_url=BASE_URL or 'http://localhost:5000')
+            campagne_manager = CampagneManager()
             results = []
+
             for recipient in recipients:
-                # Personnaliser le message
+                recipient_email = (recipient.get('email') or '').strip()
+                if not recipient_email:
+                    results.append({
+                        'email': '',
+                        'success': False,
+                        'message': 'Email manquant',
+                        'email_id': None,
+                    })
+                    continue
+
+                recipient_nom = format_name(recipient.get('nom', '') or '')
                 html_body = None
+                text_body = None
+
                 if template_id and template:
                     message, is_html = template_manager.render_template(
                         template_id,
-                        recipient.get('nom', ''),
+                        recipient_nom,
                         recipient.get('entreprise', ''),
-                        recipient.get('email', ''),
-                        recipient.get('entreprise_id'),  # Passer l'ID si disponible
+                        recipient_email,
+                        recipient.get('entreprise_id'),
                         brand_domain=brand_domain,
                         mail_account_id=mail_account_id,
                     )
                     if is_html:
                         html_body = message
-                        # Pour HTML, créer une version texte simplifiée
-                        import re
-                        message = re.sub(r'<[^>]+>', '', message)  # Enlever les balises HTML
-                        message = re.sub(r'\s+', ' ', message).strip()  # Nettoyer les espaces
-                elif custom_message:
-                    message = custom_message
+                        text_body = re.sub(r'<[^>]+>', '', message)
+                        text_body = re.sub(r'\s+', ' ', text_body).strip()
+                    else:
+                        text_body = message
+                        html_body = tracker.convert_text_to_html(message)
                 else:
-                    return jsonify({'error': 'Template ou message requis'}), 400
-                
-                # Personnaliser le sujet
-                subject_template = subject or (template.get('subject', 'Prospection') if template else 'Prospection')
+                    try:
+                        text_body = custom_message.format(
+                            nom=recipient_nom or 'Monsieur/Madame',
+                            entreprise=recipient.get('entreprise', 'votre entreprise'),
+                            email=recipient_email,
+                        )
+                    except Exception:
+                        text_body = custom_message
+                    html_body = tracker.convert_text_to_html(text_body)
+
+                subject_template = subject or (
+                    template.get('subject', 'Prospection') if template else 'Prospection'
+                )
                 try:
                     personalized_subject = subject_template.format(
-                        nom=recipient.get('nom', ''),
-                        entreprise=recipient.get('entreprise', '')
+                        nom=recipient_nom or '',
+                        entreprise=recipient.get('entreprise', ''),
                     )
-                except:
+                except Exception:
                     personalized_subject = subject_template
-                
-                # Envoyer l'email
+
+                tracking_token = tracker.generate_tracking_token()
+                if html_body:
+                    html_body = tracker.process_email_content(html_body, tracking_token)
+
                 result = email_sender.send_email(
-                    to=recipient['email'],
+                    to=recipient_email,
                     subject=personalized_subject,
-                    body=message,
-                    recipient_name=recipient.get('nom', ''),
-                    html_body=html_body
+                    body=text_body or 'Email HTML',
+                    recipient_name=recipient_nom or '',
+                    html_body=html_body,
+                    tracking_token=tracking_token,
                 )
-                
+
+                email_id = campagne_manager.save_email_envoye(
+                    campagne_id=None,
+                    entreprise_id=recipient.get('entreprise_id'),
+                    email=recipient_email,
+                    nom_destinataire=recipient_nom or recipient.get('nom', ''),
+                    entreprise=recipient.get('entreprise'),
+                    sujet=personalized_subject,
+                    statut='sent' if result.get('success') else 'failed',
+                    erreur=None if result.get('success') else result.get('message', 'Erreur inconnue'),
+                    tracking_token=tracking_token,
+                    contenu_envoye=html_body or text_body,
+                )
+
                 results.append({
-                    'email': recipient['email'],
-                    'success': result['success'],
-                    'message': result.get('message', '')
+                    'email': recipient_email,
+                    'success': bool(result.get('success')),
+                    'message': result.get('message', ''),
+                    'email_id': email_id,
+                    'sujet': personalized_subject,
                 })
-            
+
             return jsonify({
                 'success': True,
                 'results': results,
                 'total_sent': sum(1 for r in results if r['success']),
-                'total_failed': sum(1 for r in results if not r['success'])
+                'total_failed': sum(1 for r in results if not r['success']),
             })
         except Exception as e:
             return jsonify({'error': str(e)}), 500
-    
-    # GET: Afficher le formulaire
+
     templates = template_manager.list_templates(mail_account_id=session.get('mail_account_id'))
     return render_page('send_emails.html', templates=templates)
+
+
+@other_bp.route('/api/send-emails/history', methods=['GET'])
+@login_required
+def api_send_emails_history():
+    """
+    API: historique des envois rapides (hors campagne).
+
+    Query:
+        days (int): Fenêtre en jours (défaut 7)
+        limit (int): Nombre max de lignes (défaut 50)
+        filter (str): all | opened | clicked | failed | sent
+
+    Returns:
+        JSON: { emails: [...] }
+    """
+    from services.database.campagnes import CampagneManager
+
+    days = request.args.get('days', 7, type=int)
+    limit = request.args.get('limit', 50, type=int)
+    filter_type = request.args.get('filter', 'all', type=str)
+    campagne_manager = CampagneManager()
+    emails = campagne_manager.list_recent_emails_envoyes(
+        days=days,
+        limit=limit,
+        filter_type=filter_type,
+        quick_only=True,
+    )
+    return jsonify({'emails': emails, 'days': days, 'filter': filter_type})
+
+
+@other_bp.route('/api/send-emails/stats', methods=['GET'])
+@login_required
+def api_send_emails_stats():
+    """
+    API: KPI des envois rapides (envoyés, ouverts, cliqués, échecs).
+
+    Query:
+        days (int): Fenêtre en jours (défaut 7)
+
+    Returns:
+        JSON: Stats agrégées
+    """
+    from services.database.campagnes import CampagneManager
+
+    days = request.args.get('days', 7, type=int)
+    campagne_manager = CampagneManager()
+    stats = campagne_manager.get_quick_send_stats(days=days)
+    return jsonify(stats)
+
+
+@other_bp.route('/api/send-emails/preview', methods=['POST'])
+@login_required
+def api_send_emails_preview():
+    """
+    API: aperçu HTML d'un email avant envoi (sans tracking).
+
+    Body JSON:
+        template_id, subject, custom_message, recipient {email, nom, entreprise}
+
+    Returns:
+        JSON: { subject, html }
+    """
+    data = request.get_json() or {}
+    template_id = data.get('template_id')
+    subject = data.get('subject') or ''
+    custom_message = data.get('custom_message') or ''
+    recipient = data.get('recipient') or {}
+    mail_account_id = data.get('mail_account_id')
+    if mail_account_id is None:
+        mail_account_id = session.get('mail_account_id', None)
+    try:
+        if mail_account_id is not None and str(mail_account_id).strip() == '0':
+            mail_account_id = None
+    except Exception:
+        mail_account_id = None
+
+    try:
+        from utils.name_formatter import format_name
+        from services.email_tracker import EmailTracker
+
+        brand_domain = 'danielcraft.fr'
+        if mail_account_id is not None:
+            try:
+                from services.database.mail_accounts import MailAccountManager
+                mam = MailAccountManager()
+                acc = mam.get_mail_account(int(mail_account_id))
+                if acc and acc.get('domain_name'):
+                    brand_domain = acc.get('domain_name')
+            except Exception:
+                pass
+
+        nom = format_name(recipient.get('nom', '') or '')
+        entreprise = recipient.get('entreprise', '') or ''
+        email = recipient.get('email', '') or 'preview@example.com'
+
+        html_body = None
+        template = None
+        if template_id:
+            template = template_manager.get_template(
+                template_id,
+                for_preview=True,
+                mail_account_id=mail_account_id,
+            )
+            if not template:
+                return jsonify({'error': 'Template introuvable'}), 404
+            message, is_html = template_manager.render_template(
+                template_id,
+                nom,
+                entreprise,
+                email,
+                recipient.get('entreprise_id'),
+                brand_domain=brand_domain,
+                mail_account_id=mail_account_id,
+            )
+            html_body = message if is_html else EmailTracker().convert_text_to_html(message)
+        elif custom_message:
+            try:
+                text_body = custom_message.format(
+                    nom=nom or 'Monsieur/Madame',
+                    entreprise=entreprise or 'votre entreprise',
+                    email=email,
+                )
+            except Exception:
+                text_body = custom_message
+            html_body = EmailTracker().convert_text_to_html(text_body)
+        else:
+            return jsonify({'error': 'Template ou message requis'}), 400
+
+        subject_template = subject or (template.get('subject', 'Prospection') if template else 'Prospection')
+        try:
+            personalized_subject = subject_template.format(nom=nom, entreprise=entreprise)
+        except Exception:
+            personalized_subject = subject_template
+
+        return jsonify({
+            'subject': personalized_subject,
+            'html': html_body,
+            'to': email,
+            'nom': nom,
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @other_bp.route('/templates', methods=['GET', 'POST'])

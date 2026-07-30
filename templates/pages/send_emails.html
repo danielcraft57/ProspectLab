@@ -2,121 +2,196 @@
 
 {% block title %}Envoyer Emails - ProspectLab{% endblock %}
 
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/modules/pages/send_emails.css') }}?v={{ asset_version }}">
+{% endblock %}
+
 {% block content %}
-<div class="page-header">
-    <h1>Envoyer des emails de prospection</h1>
-    <p>Envoyez des campagnes personnalisées à vos prospects</p>
+<div class="senddesk" id="senddesk" data-days="7">
+    <header class="senddesk-header">
+        <div class="senddesk-header-text">
+            <h1>Poste d'envoi</h1>
+            <p>Compose, envoie, puis suis ouvertures et clics en direct</p>
+        </div>
+        <div class="senddesk-period" role="group" aria-label="Période des statistiques">
+            <button type="button" class="period-btn is-active" data-days="1">Aujourd'hui</button>
+            <button type="button" class="period-btn" data-days="7">7 jours</button>
+            <button type="button" class="period-btn" data-days="30">30 jours</button>
+        </div>
+    </header>
+
+    <section class="senddesk-kpi" aria-label="Indicateurs d'envoi">
+        <article class="kpi-card kpi-sent" data-kpi="sent" data-filter="sent" title="Filtrer les envoyés">
+            <div class="kpi-icon"><i class="fa-solid fa-paper-plane"></i></div>
+            <div class="kpi-body">
+                <div class="kpi-value" id="kpi-sent">0</div>
+                <div class="kpi-label">Envoyés</div>
+            </div>
+        </article>
+        <article class="kpi-card kpi-opened" data-kpi="opened" data-filter="opened" title="Filtrer les ouverts">
+            <div class="kpi-icon"><i class="fa-solid fa-envelope-open"></i></div>
+            <div class="kpi-body">
+                <div class="kpi-value" id="kpi-opened">0</div>
+                <div class="kpi-label">Ouverts <span class="kpi-rate" id="kpi-open-rate">0%</span></div>
+            </div>
+            <div class="kpi-bar"><span id="kpi-open-bar" style="width:0%"></span></div>
+        </article>
+        <article class="kpi-card kpi-clicked" data-kpi="clicked" data-filter="clicked" title="Filtrer les cliqués">
+            <div class="kpi-icon"><i class="fa-solid fa-arrow-pointer"></i></div>
+            <div class="kpi-body">
+                <div class="kpi-value" id="kpi-clicked">0</div>
+                <div class="kpi-label">Cliqués <span class="kpi-rate" id="kpi-click-rate">0%</span></div>
+            </div>
+            <div class="kpi-bar"><span id="kpi-click-bar" style="width:0%"></span></div>
+        </article>
+        <article class="kpi-card kpi-failed" data-kpi="failed" data-filter="failed" title="Filtrer les échecs">
+            <div class="kpi-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+            <div class="kpi-body">
+                <div class="kpi-value" id="kpi-failed">0</div>
+                <div class="kpi-label">Échecs</div>
+            </div>
+        </article>
+    </section>
+
+    <div class="senddesk-grid">
+        <section class="senddesk-compose panel">
+            <div class="panel-head">
+                <h2><i class="fa-solid fa-pen-to-square"></i> Composer</h2>
+            </div>
+
+            <form id="send-emails-form" class="compose-form" novalidate>
+                <div class="form-group">
+                    <label for="template-select">Modèle</label>
+                    <select id="template-select" name="template_id">
+                        <option value="">Aucun (message libre)</option>
+                        {% for template in templates %}
+                        <option value="{{ template.id }}" data-subject="{{ (template.subject or '')|e }}">{{ template.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="subject">Sujet</label>
+                    <input type="text" id="subject" name="subject" required placeholder="Ex: Proposition pour {entreprise}">
+                    <div class="var-chips" aria-label="Variables sujet">
+                        <button type="button" class="var-chip" data-target="subject" data-var="{nom}">{nom}</button>
+                        <button type="button" class="var-chip" data-target="subject" data-var="{entreprise}">{entreprise}</button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="recipient-email">Destinataires</label>
+                    <div class="recipient-add-row">
+                        <input type="email" id="recipient-email" placeholder="email@exemple.com" autocomplete="off">
+                        <input type="text" id="recipient-nom" placeholder="Nom (opt.)" autocomplete="off">
+                        <input type="text" id="recipient-entreprise" placeholder="Entreprise (opt.)" autocomplete="off">
+                        <button type="button" id="btn-add-recipient" class="btn-icon" title="Ajouter">
+                            <i class="fa-solid fa-plus"></i>
+                        </button>
+                    </div>
+                    <div id="recipients-chips" class="recipients-chips" aria-live="polite"></div>
+                    <details class="paste-details">
+                        <summary>Coller une liste (email, nom, entreprise)</summary>
+                        <textarea id="recipients-paste" rows="4" placeholder="contact@exemple.com, Jean Dupont, Example Corp&#10;autre@exemple.com"></textarea>
+                        <button type="button" id="btn-parse-paste" class="btn btn-secondary btn-sm">Importer la liste</button>
+                    </details>
+                    <small id="recipients-count">0 destinataire</small>
+                </div>
+
+                <div class="form-group" id="custom-message-group">
+                    <label for="custom-message">Message</label>
+                    <textarea id="custom-message" name="custom_message" rows="8" placeholder="Bonjour {nom},&#10;&#10;Je me permets de vous contacter au sujet de {entreprise}..."></textarea>
+                    <div class="var-chips" aria-label="Variables message">
+                        <button type="button" class="var-chip" data-target="custom-message" data-var="{nom}">{nom}</button>
+                        <button type="button" class="var-chip" data-target="custom-message" data-var="{entreprise}">{entreprise}</button>
+                        <button type="button" class="var-chip" data-target="custom-message" data-var="{email}">{email}</button>
+                    </div>
+                </div>
+
+                <div class="compose-actions">
+                    <button type="button" id="btn-preview" class="btn btn-secondary">
+                        <i class="fa-solid fa-eye"></i> Aperçu
+                    </button>
+                    <button type="submit" id="btn-send" class="btn btn-primary">
+                        <i class="fa-solid fa-paper-plane"></i> Envoyer
+                    </button>
+                </div>
+
+                <div id="send-progress" class="send-progress" hidden>
+                    <div class="send-progress-track"><span id="send-progress-fill"></span></div>
+                    <p id="send-progress-label">Envoi en cours...</p>
+                </div>
+                <div id="send-status" class="status-message" hidden></div>
+            </form>
+        </section>
+
+        <aside class="senddesk-side">
+            <section class="panel senddesk-preview">
+                <div class="panel-head">
+                    <h2><i class="fa-solid fa-inbox"></i> Aperçu</h2>
+                    <div class="preview-viewport" role="group" aria-label="Format d'aperçu">
+                        <button type="button" class="viewport-btn is-active" data-viewport="desktop" title="Desktop">
+                            <i class="fa-solid fa-desktop"></i>
+                        </button>
+                        <button type="button" class="viewport-btn" data-viewport="mobile" title="Mobile">
+                            <i class="fa-solid fa-mobile-screen"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="mail-frame" id="mail-frame" data-viewport="desktop">
+                    <div class="mail-chrome">
+                        <div class="mail-chrome-dots"><span></span><span></span><span></span></div>
+                        <div class="mail-meta">
+                            <div><span class="meta-k">À</span> <span id="preview-to">destinataire@exemple.com</span></div>
+                            <div><span class="meta-k">Sujet</span> <span id="preview-subject">Votre sujet</span></div>
+                        </div>
+                    </div>
+                    <iframe id="preview-iframe" class="preview-iframe" title="Aperçu de l'email" sandbox=""></iframe>
+                    <div id="preview-empty" class="preview-empty">
+                        <i class="fa-regular fa-envelope"></i>
+                        <p>Choisis un modèle ou écris un message pour voir l'aperçu ici.</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="panel senddesk-history">
+                <div class="panel-head">
+                    <h2><i class="fa-solid fa-clock-rotate-left"></i> Historique</h2>
+                    <button type="button" id="btn-refresh-history" class="btn-icon" title="Actualiser">
+                        <i class="fa-solid fa-rotate"></i>
+                    </button>
+                </div>
+                <div class="history-filters" role="tablist">
+                    <button type="button" class="hist-filter is-active" data-filter="all">Tous</button>
+                    <button type="button" class="hist-filter" data-filter="sent">Envoyés</button>
+                    <button type="button" class="hist-filter" data-filter="opened">Ouverts</button>
+                    <button type="button" class="hist-filter" data-filter="clicked">Cliqués</button>
+                    <button type="button" class="hist-filter" data-filter="failed">Échecs</button>
+                </div>
+                <div id="history-list" class="history-list">
+                    <div class="history-empty">Chargement...</div>
+                </div>
+            </section>
+        </aside>
+    </div>
 </div>
 
-<div class="send-emails-section">
-    <form id="send-emails-form" class="send-emails-form">
-        <div class="form-group">
-            <label for="template-select">Modèle de message (optionnel)</label>
-            <select id="template-select" name="template_id">
-                <option value="">Aucun (message personnalisé)</option>
-                {% for template in templates %}
-                <option value="{{ template.id }}">{{ template.name }}</option>
-                {% endfor %}
-            </select>
+<aside id="email-detail-drawer" class="email-drawer" aria-hidden="true">
+    <div class="email-drawer-backdrop" id="drawer-backdrop"></div>
+    <div class="email-drawer-panel" role="dialog" aria-labelledby="drawer-title">
+        <div class="email-drawer-head">
+            <h2 id="drawer-title">Détail de l'email</h2>
+            <button type="button" class="btn-icon" id="drawer-close" aria-label="Fermer">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
         </div>
-        
-        <div class="form-group">
-            <label for="subject">Sujet de l'email</label>
-            <input type="text" id="subject" name="subject" required>
+        <div id="drawer-body" class="email-drawer-body">
+            <div class="history-empty">Sélectionne un envoi</div>
         </div>
-        
-        <div class="form-group">
-            <label for="recipients">Destinataires (JSON)</label>
-            <textarea id="recipients" name="recipients" rows="10" required placeholder='[{"email": "contact@example.com", "nom": "Jean Dupont", "entreprise": "Example Corp"}]'></textarea>
-            <small>Format JSON : liste d'objets avec email, nom (optionnel), entreprise (optionnel)</small>
-        </div>
-        
-        <div class="form-group">
-            <label for="custom-message">Message personnalisé (si aucun modèle sélectionné)</label>
-            <textarea id="custom-message" name="custom_message" rows="10" placeholder="Votre message... (peut contenir {nom} et {entreprise})"></textarea>
-        </div>
-        
-        <button type="submit" class="btn btn-primary">Envoyer les emails</button>
-    </form>
-    
-    <div id="send-status" class="status-message" style="display: none;"></div>
-    <div id="send-results" class="results-section" style="display: none;"></div>
-</div>
-
-<div class="info-box">
-    <h3>Configuration requise</h3>
-    <p>Pour envoyer des emails, configurez les paramètres SMTP dans <code>config.py</code> ou via les variables d'environnement :</p>
-    <ul>
-        <li>MAIL_SERVER</li>
-        <li>MAIL_PORT</li>
-        <li>MAIL_USERNAME</li>
-        <li>MAIL_PASSWORD</li>
-    </ul>
-</div>
+    </div>
+</aside>
 {% endblock %}
 
 {% block extra_js %}
-<script>
-document.getElementById('send-emails-form').addEventListener('submit', async function(e) {
-    e.preventDefault();
-    
-    let recipients;
-    try {
-        recipients = JSON.parse(document.getElementById('recipients').value);
-    } catch (error) {
-        alert('Erreur dans le format JSON des destinataires');
-        return;
-    }
-    
-    const formData = {
-        recipients: recipients,
-        template_id: document.getElementById('template-select').value || null,
-        subject: document.getElementById('subject').value,
-        custom_message: document.getElementById('custom-message').value || null
-    };
-    
-    const statusDiv = document.getElementById('send-status');
-    const resultsDiv = document.getElementById('send-results');
-    
-    statusDiv.style.display = 'block';
-    statusDiv.className = 'status-message status-info';
-    statusDiv.textContent = 'Envoi en cours...';
-    resultsDiv.style.display = 'none';
-    
-    try {
-        const response = await fetch('{{ url_for("other.send_emails") }}', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(formData)
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            statusDiv.className = 'status-message status-success';
-            statusDiv.textContent = `Envoi terminé ! ${data.total_sent} emails envoyés, ${data.total_failed} échecs.`;
-            
-            if (data.results) {
-                let resultsHtml = '<h3>Détails par destinataire</h3><ul>';
-                data.results.forEach(result => {
-                    const status = result.success ? '✅' : '❌';
-                    resultsHtml += `<li>${status} ${result.email}: ${result.message}</li>`;
-                });
-                resultsHtml += '</ul>';
-                resultsDiv.innerHTML = resultsHtml;
-                resultsDiv.style.display = 'block';
-            }
-        } else {
-            statusDiv.className = 'status-message status-error';
-            statusDiv.textContent = 'Erreur : ' + (data.error || 'Erreur inconnue');
-        }
-    } catch (error) {
-        statusDiv.className = 'status-message status-error';
-        statusDiv.textContent = 'Erreur : ' + error.message;
-    }
-});
-</script>
+<script src="{{ url_for('static', filename='js/send_emails.js') }}?v={{ asset_version }}"></script>
 {% endblock %}
-
