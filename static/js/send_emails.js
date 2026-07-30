@@ -835,7 +835,13 @@
     function init() {
         const root = document.getElementById('senddesk');
         if (!root) return;
-        currentDays = Number(root.getAttribute('data-days') || 7);
+        const activePeriod = document.querySelector('.period-btn.is-active');
+        currentDays = Number(
+            (activePeriod && activePeriod.getAttribute('data-days')) ||
+            root.getAttribute('data-days') ||
+            7
+        );
+        root.setAttribute('data-days', String(currentDays));
         bindEvents();
         syncMessageVisibility();
         renderRecipients();
