@@ -32,6 +32,11 @@ MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
 # (tracking / API publique).
 RESTRICT_TO_LOCAL_NETWORK = os.environ.get('RESTRICT_TO_LOCAL_NETWORK', 'false').lower() == 'true'
 
+# CIDR supplémentaires autorisés (VPN custom, CGNAT, etc.), séparés par des virgules.
+# Exemple: ALLOWED_NETWORKS=100.64.0.0/10,fd00::/8
+_allowed_networks_raw = os.environ.get('ALLOWED_NETWORKS', '')
+ALLOWED_NETWORKS = [n.strip() for n in _allowed_networks_raw.split(',') if n.strip()]
+
 # Créer les dossiers si nécessaire
 UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
 EXPORT_FOLDER.mkdir(parents=True, exist_ok=True)
@@ -119,6 +124,14 @@ MAIL_DEFAULT_SENDER = os.environ.get('MAIL_DEFAULT_SENDER', 'Loic Daniel <loic@e
 
 # Destinataire par défaut pour les rapports internes (campagnes, diagnostics, etc.)
 MAIL_DEFAULT_RECIPIENT = os.environ.get('MAIL_DEFAULT_RECIPIENT', 'contact@danielcraft.fr')
+
+# Brevo (Sendinblue) : clé API pour quota / compte (l'envoi SMTP utilise MAIL_* ci-dessus)
+BREVO_API_KEY = os.environ.get('BREVO_API_KEY', '')
+# Limite journalière indicative du plan Brevo (pause / reprise campagne)
+try:
+    BREVO_DAILY_EMAIL_LIMIT = int(os.environ.get('BREVO_DAILY_EMAIL_LIMIT', '300') or 300)
+except ValueError:
+    BREVO_DAILY_EMAIL_LIMIT = 300
 
 # Configuration scraping
 SCRAPING_DELAY = 2.0  # Délai entre requêtes (secondes)

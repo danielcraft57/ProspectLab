@@ -13,6 +13,201 @@
     border-bottom: 2px solid #e0e0e0;
 }
 
+.brevo-status-panel {
+    margin: -10px 0 24px;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    background: #f8fafc;
+    padding: 14px 16px;
+}
+
+.brevo-status-panel.is-ok {
+    border-color: #bbf7d0;
+    background: #f0fdf4;
+}
+
+.brevo-status-panel.is-warn {
+    border-color: #fde68a;
+    background: #fffbeb;
+}
+
+.brevo-status-panel.is-error {
+    border-color: #fecaca;
+    background: #fef2f2;
+}
+
+.brevo-status-loading,
+.brevo-status-error-msg {
+    color: #6b7280;
+    font-size: 0.92em;
+}
+
+.brevo-status-top {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 20px;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.brevo-status-title {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    align-items: center;
+    font-weight: 600;
+    color: #111827;
+}
+
+.brevo-status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.75em;
+    font-weight: 600;
+    background: #e5e7eb;
+    color: #374151;
+}
+
+.brevo-status-badge.is-ok { background: #dcfce7; color: #166534; }
+.brevo-status-badge.is-warn { background: #fef3c7; color: #92400e; }
+.brevo-status-badge.is-error { background: #fee2e2; color: #991b1b; }
+
+.brevo-quota {
+    min-width: 180px;
+    flex: 1 1 220px;
+    max-width: 320px;
+}
+
+.brevo-quota-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.82em;
+    color: #4b5563;
+    margin-bottom: 4px;
+}
+
+.brevo-quota-bar {
+    height: 8px;
+    border-radius: 999px;
+    background: #e5e7eb;
+    overflow: hidden;
+}
+
+.brevo-quota-fill {
+    height: 100%;
+    background: #16a34a;
+    border-radius: 999px;
+    transition: width 0.25s ease;
+}
+
+.brevo-quota-fill.is-low { background: #d97706; }
+.brevo-quota-fill.is-empty { background: #dc2626; }
+
+.brevo-status-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    margin-top: 10px;
+    font-size: 0.82em;
+    color: #4b5563;
+}
+
+.brevo-status-meta span strong {
+    color: #111827;
+    font-weight: 600;
+}
+
+.brevo-status-alerts {
+    margin-top: 10px;
+    display: grid;
+    gap: 6px;
+}
+
+.brevo-alert {
+    font-size: 0.85em;
+    padding: 6px 10px;
+    border-radius: 8px;
+}
+
+.brevo-alert.is-warn {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.brevo-alert.is-error {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.brevo-status-details {
+    margin-top: 10px;
+}
+
+.brevo-status-details summary {
+    cursor: pointer;
+    font-size: 0.85em;
+    color: #374151;
+    user-select: none;
+}
+
+.brevo-status-details-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    margin-top: 10px;
+}
+
+.brevo-status-card h4 {
+    margin: 0 0 6px;
+    font-size: 0.85em;
+    color: #111827;
+}
+
+.brevo-status-card ul {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 0.8em;
+    color: #4b5563;
+}
+
+.brevo-status-card li {
+    margin-bottom: 4px;
+}
+
+.brevo-refresh-btn {
+    border: 1px solid #d1d5db;
+    background: #fff;
+    color: #374151;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 0.82em;
+    cursor: pointer;
+}
+
+.brevo-refresh-btn:hover {
+    background: #f3f4f6;
+}
+
+body[data-theme="dark"] .brevo-status-panel {
+    background: #111827;
+    border-color: #374151;
+}
+body[data-theme="dark"] .brevo-status-panel.is-ok { background: #052e16; border-color: #166534; }
+body[data-theme="dark"] .brevo-status-panel.is-warn { background: #422006; border-color: #a16207; }
+body[data-theme="dark"] .brevo-status-panel.is-error { background: #450a0a; border-color: #991b1b; }
+body[data-theme="dark"] .brevo-status-title,
+body[data-theme="dark"] .brevo-status-card h4,
+body[data-theme="dark"] .brevo-status-meta span strong { color: #f9fafb; }
+body[data-theme="dark"] .brevo-status-meta,
+body[data-theme="dark"] .brevo-status-card ul,
+body[data-theme="dark"] .brevo-status-details summary { color: #d1d5db; }
+body[data-theme="dark"] .brevo-refresh-btn {
+    background: #1f2937;
+    border-color: #4b5563;
+    color: #e5e7eb;
+}
+
 .page-header h1 {
     margin: 0;
     color: #1f2937;
@@ -1255,6 +1450,39 @@ body[data-theme="dark"] .campagnes-search-input i {
     max-height: 400px;
     overflow-y: auto;
     background: #f8f9fa;
+}
+
+.entreprises-load-more-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+}
+
+.entreprises-load-more-hint {
+    font-size: 0.85em;
+    color: #6b7280;
+}
+
+.email-filters-quick {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 20px;
+    margin-bottom: 10px;
+}
+
+.email-badge-principal {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    font-size: 0.72em;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: #1d4ed8;
+    background: #dbeafe;
+    border-radius: 4px;
+    vertical-align: middle;
 }
 
 .entreprise-item {

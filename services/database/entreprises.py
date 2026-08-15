@@ -431,6 +431,40 @@ class EntrepriseManager(DatabaseBase):
                 else:
                     self.execute_sql(cursor, 'SELECT id, website FROM entreprises WHERE website IS NOT NULL')
                 rows = cursor.fetchall()
+                if not rows and website_norm:
+                    # Fallback index-friendly : préfixe domaine (slash final, query string, etc.)
+                    prefixes = (
+                        f'https://{website_norm}',
+                        f'http://{website_norm}',
+                        f'https://www.{website_norm}',
+                        f'http://www.{website_norm}',
+                        website_norm,
+                    )
+                    if self.is_postgresql():
+                        clause = ' OR '.join(['lower(btrim(website)) LIKE %s'] * len(prefixes))
+                        self.execute_sql(
+                            cursor,
+                            f'''
+                            SELECT id, website FROM entreprises
+                            WHERE website IS NOT NULL AND btrim(website) <> ''
+                            AND ({clause})
+                            LIMIT 20
+                            ''',
+                            tuple(f'{p}%' for p in prefixes),
+                        )
+                    elif self.is_sqlite():
+                        clause = ' OR '.join(['lower(trim(website)) LIKE ?'] * len(prefixes))
+                        self.execute_sql(
+                            cursor,
+                            f'''
+                            SELECT id, website FROM entreprises
+                            WHERE website IS NOT NULL AND trim(website) <> ''
+                            AND ({clause})
+                            LIMIT 20
+                            ''',
+                            tuple(f'{p}%' for p in prefixes),
+                        )
+                    rows = cursor.fetchall()
                 for row in rows:
                     try:
                         if isinstance(row, dict):
@@ -4538,243 +4572,133 @@ class EntrepriseManager(DatabaseBase):
         conn.close()
         return result
 
-    def get_entreprises_with_emails(self):
+    def get_entreprises_with_emails(self, filters=None, limit=None, offset=0):
         """
-        Récupère toutes les entreprises avec leurs emails disponibles pour les campagnes.
+        Récupère les entreprises avec leurs emails disponibles pour les campagnes.
 
-        Returns:
-            list[dict]: Liste des entreprises avec leurs emails (depuis scraper_emails)
+        @param filters: Filtres optionnels (mêmes clefs que get_entreprises_for_campagne)
+        @param limit: Taille de page (None = tout charger, compatibilité)
+        @param offset: Décalage pour la pagination
+        @returns: Liste d'entreprises, ou dict {items, total, limit, offset} si limit fourni
         """
-        conn = self.get_connection()
-        # row_factory est déjà configuré dans get_connection() (SQLite) ou via RealDictCursor (PostgreSQL)
-        cursor = conn.cursor()
+        return self.get_entreprises_for_campagne(filters=filters, limit=limit, offset=offset)
 
-        # Récupérer les entreprises avec leurs emails (tri: personne en priorité, puis date)
-        self.execute_sql(cursor,'''
-            SELECT
-                e.id,
-                e.nom,
-                e.secteur,
-                e.responsable,
-                se.email,
-                se.name_info as email_nom,
-                se.page_url as source,
-                se.entreprise_id,
-                COALESCE(se.is_person, 0) as is_person,
-                se.domain,
-                se.date_found
-            FROM entreprises e
-            INNER JOIN scraper_emails se ON e.id = se.entreprise_id
-            WHERE se.email IS NOT NULL AND se.email != ''
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM emails_envoyes ee
-                  WHERE ee.statut = 'bounced'
-                    AND LOWER(TRIM(ee.email)) = LOWER(TRIM(se.email))
-              )
-            ORDER BY e.nom, COALESCE(se.is_person, 0) DESC, se.date_found DESC, se.id
-        ''')
-
-        rows = cursor.fetchall()
-        conn.close()
-
-        # Grouper par entreprise
-        entreprises_dict = {}
-        for row in rows:
-            entreprise_id = row['id']
-            if entreprise_id not in entreprises_dict:
-                entreprises_dict[entreprise_id] = {
-                    'id': entreprise_id,
-                    'nom': row['nom'],
-                    'secteur': row['secteur'],
-                    'responsable': row['responsable'] or None,
-                    'emails': []
-                }
-
-            # Utiliser page_url comme source si disponible, sinon 'scraper'
-            source = row['source'] if row['source'] else 'scraper'
-            if source == 'scraper' and row['source']:
-                source = row['source']
-            
-            # Formater le nom depuis name_info (JSON)
-            from utils.name_formatter import format_name
-            email_nom = format_name(row['email_nom'])
-
-            # Éviter les doublons (même email pour une entreprise) en gardant le premier (prioritaire)
-            emails_list = entreprises_dict[entreprise_id]['emails']
-            if not any(em['email'] == row['email'] for em in emails_list):
-                is_person = bool(row['is_person']) if 'is_person' in row.keys() else False
-                domain = row['domain'] if 'domain' in row.keys() and row['domain'] else None
-                if not domain and row['email']:
-                    domain = row['email'].split('@')[-1] if '@' in row['email'] else None
-                emails_list.append({
-                    'email': row['email'],
-                    'nom': email_nom,
-                    'source': source,
-                    'entreprise_id': row['entreprise_id'],
-                    'is_person': is_person,
-                    'domain': domain
-                })
-
-        result = list(entreprises_dict.values())
-        
-        # Nettoyer les valeurs NaN pour la sérialisation JSON
-        from utils.helpers import clean_json_dict
-        result = clean_json_dict(result)
-        
-        return result
-    
-    def get_entreprises_for_campagne(self, filters=None):
+    def _append_campagne_entreprise_filters(self, base_sql, params, filters):
         """
-        Récupère les entreprises avec emails pour une campagne, avec filtres de ciblage.
-        
-        Args:
-            filters: Dictionnaire optionnel de filtres :
-                - secteur: valeur exacte
-                - secteur_contains: sous-chaîne (LIKE)
-                - opportunite: liste de valeurs (ex. ["Très élevée", "Élevée"])
-                - statut: valeur exacte
-                - tags_contains: sous-chaîne dans les tags (JSON)
-                - favori: True pour favoris uniquement
-                - search: recherche dans nom, secteur, email_principal, responsable
-                - score_securite_max: score sécurité <= cette valeur
-                - exclude_already_contacted: True pour exclure les entreprises déjà contactées
-                - groupe_ids: liste d'IDs de groupes d'entreprises (filtre par appartenance à au moins un groupe)
-                - etape_prospection: filtre étape CRM Kanban
-                - sort_commercial: True pour trier par score de priorité pondéré décroissant
-                - priority_min: seuil minimal sur priority_score (affiche le champ sur chaque ligne)
-                - commercial_profile_id: ID profil `commercial_priority_profiles` pour les poids
-                - commercial_limit: tronque la liste après tri (ex. 50)
-        
-        Returns:
-            list[dict]: Même format que get_entreprises_with_emails (id, nom, secteur, emails) ;
-                avec tri/filtre commercial : clef optionnelle `priority_score`.
+        Ajoute les clauses WHERE de ciblage campagne sur l'alias `e` (entreprises).
+
+        @param base_sql: SQL déjà commencé
+        @param params: Liste de paramètres à enrichir
+        @param filters: Dict de filtres (peut être None)
+        @returns: SQL enrichi
         """
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
-        base_sql = '''
-            SELECT
-                e.id,
-                e.nom,
-                e.secteur,
-                e.responsable,
-                se.email,
-                se.name_info as email_nom,
-                se.page_url as source,
-                se.entreprise_id,
-                COALESCE(se.is_person, 0) as is_person,
-                se.domain,
-                se.date_found
-            FROM entreprises e
-            INNER JOIN scraper_emails se ON e.id = se.entreprise_id
-            WHERE se.email IS NOT NULL AND se.email != ''
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM emails_envoyes ee
-                  WHERE ee.statut = 'bounced'
-                    AND LOWER(TRIM(ee.email)) = LOWER(TRIM(se.email))
-              )
-        '''
-        params = []
-        
-        if filters:
-            # Filtre par groupes d'entreprises (si groupe_ids fourni)
-            if filters.get('groupe_ids') and isinstance(filters['groupe_ids'], list) and len(filters['groupe_ids']) > 0:
-                placeholders = ','.join(['?' for _ in filters['groupe_ids']])
-                base_sql += f' AND e.id IN (SELECT entreprise_id FROM entreprise_groupes WHERE groupe_id IN ({placeholders}))'
-                params.extend(filters['groupe_ids'])
-            if filters.get('secteur'):
-                base_sql += ' AND e.secteur = ?'
-                params.append(filters['secteur'])
-            if filters.get('secteur_contains'):
-                base_sql += ' AND e.secteur LIKE ?'
-                params.append('%' + str(filters['secteur_contains']) + '%')
-            if filters.get('opportunite') and isinstance(filters['opportunite'], list):
-                placeholders = ','.join(['?' for _ in filters['opportunite']])
-                base_sql += f' AND e.opportunite IN ({placeholders})'
-                params.extend(filters['opportunite'])
-            elif filters.get('opportunite') and isinstance(filters['opportunite'], str):
-                base_sql += ' AND e.opportunite = ?'
-                params.append(filters['opportunite'])
-            if filters.get('statut'):
-                statut_val = filters['statut']
-                if isinstance(statut_val, (list, tuple, set)):
-                    statut_list = [s for s in statut_val if s is not None and str(s).strip() != '']
-                    if statut_list:
-                        placeholders = ','.join(['?' for _ in statut_list])
-                        base_sql += f' AND e.statut IN ({placeholders})'
-                        params.extend(statut_list)
-                else:
-                    base_sql += ' AND e.statut = ?'
-                    params.append(statut_val)
-            if filters.get('tags_contains'):
-                base_sql += ' AND e.tags LIKE ?'
-                params.append('%' + str(filters['tags_contains']) + '%')
-            if filters.get('tags_any'):
-                values = filters['tags_any']
-                if isinstance(values, str):
-                    values = [v.strip() for v in values.split(',') if v.strip()]
-                conditions = []
-                for v in values:
-                    conditions.append('e.tags LIKE ?')
-                    params.append('%' + str(v) + '%')
-                if conditions:
-                    base_sql += ' AND (' + ' OR '.join(conditions) + ')'
-            if filters.get('favori'):
-                base_sql += ' AND e.favori = 1'
-            # Nouveaux filtres de segmentation réutilisés pour les campagnes
-            if filters.get('cms'):
-                cms_val = filters['cms']
-                if isinstance(cms_val, (list, tuple, set)):
-                    placeholders = ','.join(['?' for _ in cms_val])
-                    base_sql += f' AND e.cms IN ({placeholders})'
-                    params.extend(list(cms_val))
-                else:
-                    base_sql += ' AND e.cms = ?'
-                    params.append(cms_val)
-            if filters.get('framework'):
-                fw_val = filters['framework']
-                if isinstance(fw_val, (list, tuple, set)):
-                    placeholders = ','.join(['?' for _ in fw_val])
-                    base_sql += f' AND e.framework IN ({placeholders})'
-                    params.extend(list(fw_val))
-                else:
-                    base_sql += ' AND e.framework = ?'
-                    params.append(fw_val)
-            if str(filters.get('has_blog', '')).lower() in ('1', 'true', 'yes'):
-                base_sql += ' AND e.has_blog = 1'
-            if str(filters.get('has_form', '')).lower() in ('1', 'true', 'yes'):
-                base_sql += ' AND e.has_contact_form = 1'
-            if str(filters.get('has_tunnel', '')).lower() in ('1', 'true', 'yes'):
-                base_sql += ' AND e.has_checkout = 1'
-            if filters.get('performance_max') is not None:
-                base_sql += ' AND e.performance_score IS NOT NULL AND e.performance_score <= ?'
-                params.append(int(filters['performance_max']))
-            if filters.get('search'):
-                search_sql, search_params = EntrepriseManager._build_search_filter_sql(
-                    filters['search'],
-                    include_tags=False,
-                    include_scraper_emails=False,
-                    include_website=True,
-                )
-                base_sql += search_sql
-                params.extend(search_params)
-            if filters.get('score_securite_max') is not None:
-                base_sql += ' AND e.score_securite IS NOT NULL AND e.score_securite <= ?'
-                params.append(int(filters['score_securite_max']))
-            if filters.get('exclude_already_contacted'):
-                base_sql += ' AND e.id NOT IN (SELECT entreprise_id FROM emails_envoyes WHERE entreprise_id IS NOT NULL)'
-            if filters.get('etape_prospection'):
-                base_sql += ' AND e.etape_prospection = ?'
-                params.append(filters['etape_prospection'])
-        
-        base_sql += ' ORDER BY e.nom, COALESCE(se.is_person, 0) DESC, se.date_found DESC, se.id'
-        
-        self.execute_sql(cursor, base_sql, tuple(params) if params else None)
-        rows = cursor.fetchall()
-        conn.close()
-        
+        if not filters:
+            return base_sql
+
+        if filters.get('groupe_ids') and isinstance(filters['groupe_ids'], list) and len(filters['groupe_ids']) > 0:
+            placeholders = ','.join(['?' for _ in filters['groupe_ids']])
+            base_sql += f' AND e.id IN (SELECT entreprise_id FROM entreprise_groupes WHERE groupe_id IN ({placeholders}))'
+            params.extend(filters['groupe_ids'])
+        if filters.get('secteur'):
+            base_sql += ' AND e.secteur = ?'
+            params.append(filters['secteur'])
+        if filters.get('secteur_contains'):
+            base_sql += ' AND e.secteur LIKE ?'
+            params.append('%' + str(filters['secteur_contains']) + '%')
+        if filters.get('opportunite') and isinstance(filters['opportunite'], list):
+            placeholders = ','.join(['?' for _ in filters['opportunite']])
+            base_sql += f' AND e.opportunite IN ({placeholders})'
+            params.extend(filters['opportunite'])
+        elif filters.get('opportunite') and isinstance(filters['opportunite'], str):
+            base_sql += ' AND e.opportunite = ?'
+            params.append(filters['opportunite'])
+        if filters.get('statut'):
+            statut_val = filters['statut']
+            if isinstance(statut_val, (list, tuple, set)):
+                statut_list = [s for s in statut_val if s is not None and str(s).strip() != '']
+                if statut_list:
+                    placeholders = ','.join(['?' for _ in statut_list])
+                    base_sql += f' AND e.statut IN ({placeholders})'
+                    params.extend(statut_list)
+            else:
+                base_sql += ' AND e.statut = ?'
+                params.append(statut_val)
+        if filters.get('tags_contains'):
+            base_sql += ' AND e.tags LIKE ?'
+            params.append('%' + str(filters['tags_contains']) + '%')
+        if filters.get('tags_any'):
+            values = filters['tags_any']
+            if isinstance(values, str):
+                values = [v.strip() for v in values.split(',') if v.strip()]
+            conditions = []
+            for v in values:
+                conditions.append('e.tags LIKE ?')
+                params.append('%' + str(v) + '%')
+            if conditions:
+                base_sql += ' AND (' + ' OR '.join(conditions) + ')'
+        if filters.get('favori'):
+            base_sql += ' AND e.favori = 1'
+        if filters.get('cms'):
+            cms_val = filters['cms']
+            if isinstance(cms_val, (list, tuple, set)):
+                placeholders = ','.join(['?' for _ in cms_val])
+                base_sql += f' AND e.cms IN ({placeholders})'
+                params.extend(list(cms_val))
+            else:
+                base_sql += ' AND e.cms = ?'
+                params.append(cms_val)
+        if filters.get('framework'):
+            fw_val = filters['framework']
+            if isinstance(fw_val, (list, tuple, set)):
+                placeholders = ','.join(['?' for _ in fw_val])
+                base_sql += f' AND e.framework IN ({placeholders})'
+                params.extend(list(fw_val))
+            else:
+                base_sql += ' AND e.framework = ?'
+                params.append(fw_val)
+        if str(filters.get('has_blog', '')).lower() in ('1', 'true', 'yes'):
+            base_sql += ' AND e.has_blog = 1'
+        if str(filters.get('has_form', '')).lower() in ('1', 'true', 'yes'):
+            base_sql += ' AND e.has_contact_form = 1'
+        if str(filters.get('has_tunnel', '')).lower() in ('1', 'true', 'yes'):
+            base_sql += ' AND e.has_checkout = 1'
+        if filters.get('performance_max') is not None:
+            base_sql += ' AND e.performance_score IS NOT NULL AND e.performance_score <= ?'
+            params.append(int(filters['performance_max']))
+        if filters.get('search'):
+            search_sql, search_params = EntrepriseManager._build_search_filter_sql(
+                filters['search'],
+                include_tags=False,
+                include_scraper_emails=True,
+                include_website=True,
+            )
+            base_sql += search_sql
+            params.extend(search_params)
+        if filters.get('score_securite_max') is not None:
+            base_sql += ' AND e.score_securite IS NOT NULL AND e.score_securite <= ?'
+            params.append(int(filters['score_securite_max']))
+        if filters.get('exclude_already_contacted'):
+            base_sql += ' AND e.id NOT IN (SELECT entreprise_id FROM emails_envoyes WHERE entreprise_id IS NOT NULL)'
+        if filters.get('etape_prospection'):
+            base_sql += ' AND e.etape_prospection = ?'
+            params.append(filters['etape_prospection'])
+        return base_sql
+
+    def _group_campagne_email_rows(self, rows, *, exclude_placeholders=False, principal_only=False):
+        """
+        Groupe les lignes SQL campagne en entreprises + liste d'emails.
+
+        Inclut `email_principal` (source=principal, is_principal=True) et filtre
+        les adresses fictives / templates si demandé.
+
+        @param rows: Lignes SQL (scraper + éventuel principal)
+        @param exclude_placeholders: Écarter emails fictifs (exemple.fr, IONOS, etc.)
+        @param principal_only: Ne garder que l'email principal
+        @returns: Liste d'entreprises {id, nom, secteur, responsable, emails}
+        """
+        from utils.email_quality import is_placeholder_email
+        from utils.name_formatter import format_name
+
         entreprises_dict = {}
         for row in rows:
             r = dict(row)
@@ -4785,29 +4709,218 @@ class EntrepriseManager(DatabaseBase):
                     'nom': r['nom'],
                     'secteur': r['secteur'],
                     'responsable': r.get('responsable') or None,
-                    'emails': []
+                    'email_principal': (r.get('email_principal') or '').strip() or None,
+                    'emails': [],
                 }
-            source = r['source'] if r['source'] else 'scraper'
-            from utils.name_formatter import format_name
-            email_nom = format_name(r['email_nom'])
-            emails_list = entreprises_dict[entreprise_id]['emails']
-            if not any(em['email'] == r['email'] for em in emails_list):
-                domain = r.get('domain') or (r['email'].split('@')[-1] if r.get('email') else None)
-                emails_list.append({
-                    'email': r['email'],
-                    'nom': email_nom,
-                    'source': source,
-                    'entreprise_id': r['entreprise_id'],
-                    'is_person': bool(r.get('is_person')),
-                    'domain': domain
-                })
-        
-        result = list(entreprises_dict.values())
 
-        if filters and (
+            email_addr = (r.get('email') or '').strip()
+            if not email_addr:
+                continue
+
+            source = r.get('source') or 'scraper'
+            is_principal = bool(r.get('is_principal')) or source == 'principal'
+            if exclude_placeholders and is_placeholder_email(email_addr, source if not is_principal else None):
+                continue
+            if principal_only and not is_principal:
+                continue
+
+            email_nom = format_name(r.get('email_nom')) if not is_principal else (r.get('responsable') or 'Principal')
+            emails_list = entreprises_dict[entreprise_id]['emails']
+            if any((em.get('email') or '').lower() == email_addr.lower() for em in emails_list):
+                # Si doublon scraper / principal : marquer le principal
+                if is_principal:
+                    for em in emails_list:
+                        if (em.get('email') or '').lower() == email_addr.lower():
+                            em['is_principal'] = True
+                            if em.get('source') != 'principal':
+                                em['source'] = 'principal'
+                            break
+                continue
+
+            domain = r.get('domain') or (email_addr.split('@')[-1] if '@' in email_addr else None)
+            emails_list.append({
+                'email': email_addr,
+                'nom': email_nom,
+                'source': 'principal' if is_principal else source,
+                'entreprise_id': entreprise_id,
+                'is_person': bool(r.get('is_person')),
+                'is_principal': is_principal,
+                'domain': domain,
+            })
+
+        # Entreprises sans aucun email après filtres : on les retire
+        return [e for e in entreprises_dict.values() if e.get('emails')]
+
+    def get_entreprises_for_campagne(self, filters=None, limit=None, offset=0):
+        """
+        Récupère les entreprises avec emails pour une campagne, avec filtres de ciblage.
+
+        Inclut l'email principal (`entreprises.email_principal`) en plus de `scraper_emails`.
+        Pagination optionnelle par entreprise (limit/offset) pour le lazy-load UI.
+
+        @param filters: Dictionnaire optionnel de filtres (secteur, search, principal_only,
+            exclude_placeholders, sort_commercial, commercial_limit, etc.)
+        @param limit: Nombre max d'entreprises à retourner (None = toutes)
+        @param offset: Décalage (utilisé seulement si limit est fourni)
+        @returns: list[dict] si limit is None ; sinon dict {items, total, limit, offset}
+        """
+        filters = filters or {}
+        exclude_placeholders = bool(filters.get('exclude_placeholders'))
+        principal_only = bool(filters.get('principal_only'))
+        use_pagination = limit is not None
+        try:
+            offset = max(0, int(offset or 0))
+        except (TypeError, ValueError):
+            offset = 0
+        if use_pagination:
+            try:
+                limit = max(1, min(int(limit), 200))
+            except (TypeError, ValueError):
+                limit = 50
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        # Entreprises ayant au moins un email (scraper non bounce OU principal non bounce)
+        bounce_email_sql = '''
+            NOT EXISTS (
+                SELECT 1
+                FROM emails_envoyes ee
+                WHERE ee.statut = 'bounced'
+                  AND LOWER(TRIM(ee.email)) = LOWER(TRIM({email_expr}))
+            )
+        '''
+        id_sql = f'''
+            SELECT e.id, e.nom, e.secteur, e.responsable, e.email_principal
+            FROM entreprises e
+            WHERE (
+                EXISTS (
+                    SELECT 1
+                    FROM scraper_emails se
+                    WHERE se.entreprise_id = e.id
+                      AND se.email IS NOT NULL AND TRIM(se.email) <> ''
+                      AND {bounce_email_sql.format(email_expr='se.email')}
+                )
+                OR (
+                    e.email_principal IS NOT NULL AND TRIM(e.email_principal) <> ''
+                    AND {bounce_email_sql.format(email_expr='e.email_principal')}
+                )
+            )
+        '''
+        params = []
+        id_sql = self._append_campagne_entreprise_filters(id_sql, params, filters)
+        id_sql += ' ORDER BY e.nom, e.id'
+
+        self.execute_sql(cursor, id_sql, tuple(params) if params else None)
+        id_rows = [dict(r) for r in cursor.fetchall()]
+
+        # Si principal_only : ne garder que celles avec un email_principal non bounce
+        if principal_only:
+            id_rows = [
+                r for r in id_rows
+                if (r.get('email_principal') or '').strip()
+            ]
+
+        needs_full_scan = bool(
             filters.get('sort_commercial')
             or filters.get('priority_min') is not None
-        ):
+            or filters.get('commercial_limit') is not None
+        )
+
+        def _fetch_email_rows_for_ids(ids_subset, meta_map):
+            """Charge scraper_emails + email_principal pour une liste d'IDs."""
+            rows_out = []
+            if not ids_subset:
+                return rows_out
+            chunk_size = 500
+            for i in range(0, len(ids_subset), chunk_size):
+                chunk = ids_subset[i:i + chunk_size]
+                placeholders = ','.join(['?' for _ in chunk])
+                email_sql = f'''
+                    SELECT
+                        e.id,
+                        e.nom,
+                        e.secteur,
+                        e.responsable,
+                        e.email_principal,
+                        se.email,
+                        se.name_info as email_nom,
+                        se.page_url as source,
+                        se.entreprise_id,
+                        COALESCE(se.is_person, 0) as is_person,
+                        se.domain,
+                        se.date_found,
+                        0 as is_principal
+                    FROM entreprises e
+                    INNER JOIN scraper_emails se ON e.id = se.entreprise_id
+                    WHERE e.id IN ({placeholders})
+                      AND se.email IS NOT NULL AND TRIM(se.email) <> ''
+                      AND {bounce_email_sql.format(email_expr='se.email')}
+                    ORDER BY e.nom, COALESCE(se.is_person, 0) DESC, se.date_found DESC, se.id
+                '''
+                self.execute_sql(cursor, email_sql, tuple(chunk))
+                rows_out.extend([dict(r) for r in cursor.fetchall()])
+
+            for eid in ids_subset:
+                meta = meta_map.get(eid) or {}
+                principal = (meta.get('email_principal') or '').strip()
+                if not principal:
+                    continue
+                rows_out.append({
+                    'id': eid,
+                    'nom': meta.get('nom'),
+                    'secteur': meta.get('secteur'),
+                    'responsable': meta.get('responsable'),
+                    'email_principal': principal,
+                    'email': principal,
+                    'email_nom': None,
+                    'source': 'principal',
+                    'entreprise_id': eid,
+                    'is_person': 0,
+                    'domain': principal.split('@')[-1] if '@' in principal else None,
+                    'date_found': None,
+                    'is_principal': 1,
+                })
+            return rows_out
+
+        all_ids = [r['id'] for r in id_rows]
+        meta_by_id = {r['id']: r for r in id_rows}
+
+        # Lazy-load : emails seulement pour la page demandée (sauf tri commercial)
+        if use_pagination and not needs_full_scan:
+            total_approx = len(all_ids)
+            page_ids = all_ids[offset: offset + limit]
+            email_rows = _fetch_email_rows_for_ids(page_ids, meta_by_id)
+            conn.close()
+            items = self._group_campagne_email_rows(
+                email_rows,
+                exclude_placeholders=exclude_placeholders,
+                principal_only=principal_only,
+            )
+            order_index = {eid: idx for idx, eid in enumerate(page_ids)}
+            items.sort(key=lambda e: order_index.get(e['id'], 10**9))
+            from utils.helpers import clean_json_dict
+            return clean_json_dict({
+                'items': items,
+                'total': total_approx,
+                'limit': limit,
+                'offset': offset,
+            })
+
+        email_rows = _fetch_email_rows_for_ids(all_ids, meta_by_id)
+        conn.close()
+
+        result = self._group_campagne_email_rows(
+            email_rows,
+            exclude_placeholders=exclude_placeholders,
+            principal_only=principal_only,
+        )
+
+        # Réordonner selon l'ordre des id_rows (nom)
+        order_index = {eid: idx for idx, eid in enumerate(all_ids)}
+        result.sort(key=lambda e: order_index.get(e['id'], 10**9))
+
+        if needs_full_scan:
             weights = None
             cpid = filters.get('commercial_profile_id')
             if cpid is not None:
@@ -4846,5 +4959,14 @@ class EntrepriseManager(DatabaseBase):
                         pass
 
         from utils.helpers import clean_json_dict
-        result = clean_json_dict(result)
-        return result
+        total = len(result)
+        if use_pagination:
+            items = result[offset: offset + limit]
+            return clean_json_dict({
+                'items': items,
+                'total': total,
+                'limit': limit,
+                'offset': offset,
+            })
+
+        return clean_json_dict(result)

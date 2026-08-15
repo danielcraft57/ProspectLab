@@ -19,6 +19,14 @@ let displayedEntreprisesData = [];
 let selectedEntrepriseIds = [];
 /** Terme de recherche pour les entreprises (étape 1). */
 let step1SearchTerm = '';
+/** Pagination lazy-load étape 1. */
+let entreprisesPage = 1;
+const ENTREPRISES_PAGE_SIZE = 50;
+let entreprisesTotal = 0;
+let entreprisesLoadingMore = false;
+let entreprisesHasMore = false;
+/** Derniers filtres de ciblage utilisés pour le lazy-load (null = mode "toutes"). */
+let lastCiblageFilters = null;
 /** Debounce timer pour chargement auto critères. */
 let ciblageDebounceTimer = null;
 /** Token interne pour ignorer les réponses métriques obsolètes. */
@@ -45,10 +53,135 @@ document.addEventListener('DOMContentLoaded', function() {
     initEmailFiltersListeners();
     initScheduleFields();
     initStep1Search();
+    initEntreprisesLazyLoad();
     initCampagnesFilters();
     initWebSocket();
     initGenerateContactEmailButton();
+    loadBrevoStatus();
 });
+
+/**
+ * Charge et affiche le statut Brevo (quota, erreurs, stats) sur la page campagnes.
+ */
+async function loadBrevoStatus() {
+    var panel = document.getElementById('brevo-status-panel');
+    if (!panel) return;
+    panel.innerHTML = '<div class="brevo-status-loading">Vérification Brevo…</div>';
+    try {
+        var res = await fetch('/api/brevo/status');
+        var data = await res.json();
+        renderBrevoStatus(panel, data);
+    } catch (e) {
+        panel.className = 'brevo-status-panel is-error';
+        panel.innerHTML = '<div class="brevo-status-error-msg">Impossible de joindre le statut Brevo.</div>';
+    }
+}
+
+/**
+ * Rend le bandeau Brevo.
+ * @param {HTMLElement} panel
+ * @param {Object} data
+ */
+function renderBrevoStatus(panel, data) {
+    if (!panel) return;
+    data = data || {};
+    var hasErrors = Array.isArray(data.errors) && data.errors.length > 0;
+    var hasWarnings = Array.isArray(data.warnings) && data.warnings.length > 0;
+    var stateClass = hasErrors ? 'is-error' : (hasWarnings || !data.ok ? 'is-warn' : 'is-ok');
+    panel.className = 'brevo-status-panel ' + stateClass;
+
+    if (!data.configured) {
+        panel.innerHTML =
+            '<div class="brevo-status-top">' +
+            '<div class="brevo-status-title">Brevo <span class="brevo-status-badge is-error">Non configuré</span></div>' +
+            '<button type="button" class="brevo-refresh-btn" onclick="loadBrevoStatus()">Actualiser</button>' +
+            '</div>' +
+            '<div class="brevo-status-alerts">' +
+            (data.errors || []).map(function(m) {
+                return '<div class="brevo-alert is-error">' + escapeHtml(m) + '</div>';
+            }).join('') +
+            '</div>';
+        return;
+    }
+
+    var plan = data.plan || {};
+    var stats = data.stats || {};
+    var smtp = data.smtp || {};
+    var credits = plan.credits_remaining;
+    var limit = plan.daily_limit_config || 300;
+    var usedPct = null;
+    if (credits != null && limit > 0) {
+        usedPct = Math.max(0, Math.min(100, Math.round(((limit - credits) / limit) * 100)));
+    }
+    var fillClass = '';
+    if (credits != null && credits <= 0) fillClass = 'is-empty';
+    else if (credits != null && credits <= 20) fillClass = 'is-low';
+
+    var badgeLabel = hasErrors ? 'Attention' : (hasWarnings ? 'À surveiller' : 'OK');
+    var badgeClass = hasErrors ? 'is-error' : (hasWarnings ? 'is-warn' : 'is-ok');
+
+    var alertsHtml = '';
+    (data.errors || []).forEach(function(m) {
+        alertsHtml += '<div class="brevo-alert is-error">' + escapeHtml(m) + '</div>';
+    });
+    (data.warnings || []).forEach(function(m) {
+        alertsHtml += '<div class="brevo-alert is-warn">' + escapeHtml(m) + '</div>';
+    });
+
+    var events = Array.isArray(data.recent_events) ? data.recent_events : [];
+    var blocked = Array.isArray(data.blocked_contacts) ? data.blocked_contacts : [];
+    var eventsHtml = events.length
+        ? '<ul>' + events.map(function(ev) {
+            return '<li><strong>' + escapeHtml(ev.event || '') + '</strong> — ' +
+                escapeHtml(ev.email || '') +
+                (ev.subject ? ' · ' + escapeHtml(ev.subject) : '') +
+                (ev.date ? ' <em>(' + escapeHtml(ev.date) + ')</em>' : '') +
+                '</li>';
+        }).join('') + '</ul>'
+        : '<ul><li>Aucun événement récent</li></ul>';
+    var blockedHtml = blocked.length
+        ? '<ul>' + blocked.map(function(c) {
+            return '<li>' + escapeHtml(c.email || '') +
+                (c.reason ? ' — ' + escapeHtml(c.reason) : '') +
+                '</li>';
+        }).join('') + '</ul>'
+        : '<ul><li>Aucun contact bloqué</li></ul>';
+
+    panel.innerHTML =
+        '<div class="brevo-status-top">' +
+        '<div class="brevo-status-title">' +
+        'Brevo <span class="brevo-status-badge ' + badgeClass + '">' + badgeLabel + '</span>' +
+        '<span style="font-weight:500;color:#6b7280;font-size:0.85em;">' +
+        escapeHtml(data.company || '') +
+        (data.account_email ? ' · ' + escapeHtml(data.account_email) : '') +
+        '</span></div>' +
+        '<button type="button" class="brevo-refresh-btn" onclick="loadBrevoStatus()">Actualiser</button>' +
+        '</div>' +
+        '<div class="brevo-quota">' +
+        '<div class="brevo-quota-label"><span>Crédits restants</span><span>' +
+        (credits != null ? credits : '?') + ' / ~' + limit +
+        '</span></div>' +
+        '<div class="brevo-quota-bar"><div class="brevo-quota-fill ' + fillClass + '" style="width:' +
+        (usedPct != null ? usedPct : 0) + '%"></div></div>' +
+        '</div>' +
+        '<div class="brevo-status-meta">' +
+        '<span>Plan <strong>' + escapeHtml(String(plan.type || '?')) + '</strong></span>' +
+        '<span>Expéditeur <strong>' + escapeHtml(String(data.sender || '')) + '</strong></span>' +
+        '<span>SMTP <strong>' + escapeHtml(String(smtp.host || '')) + '</strong></span>' +
+        '<span>Délivrés <strong>' + escapeHtml(String(stats.delivered != null ? stats.delivered : '-')) + '</strong></span>' +
+        '<span>Hard bounce <strong>' + escapeHtml(String(stats.hard_bounces != null ? stats.hard_bounces : '-')) + '</strong></span>' +
+        '<span>Soft bounce <strong>' + escapeHtml(String(stats.soft_bounces != null ? stats.soft_bounces : '-')) + '</strong></span>' +
+        '<span>Spam <strong>' + escapeHtml(String(stats.spam_reports != null ? stats.spam_reports : '-')) + '</strong></span>' +
+        '<span>Erreurs envoi <strong>' + escapeHtml(String(stats.errors != null ? stats.errors : '-')) + '</strong></span>' +
+        '</div>' +
+        (alertsHtml ? '<div class="brevo-status-alerts">' + alertsHtml + '</div>' : '') +
+        '<details class="brevo-status-details">' +
+        '<summary>Détails (événements récents, contacts bloqués)</summary>' +
+        '<div class="brevo-status-details-grid">' +
+        '<div class="brevo-status-card"><h4>Derniers événements</h4>' + eventsHtml + '</div>' +
+        '<div class="brevo-status-card"><h4>Contacts bloqués</h4>' + blockedHtml + '</div>' +
+        '</div></details>';
+}
 
 // Charger les campagnes
 async function loadCampagnes() {
@@ -857,11 +990,87 @@ function initCiblageAutoLoad() {
 
 // Listeners sur les filtres emails (partie 2) : réafficher la liste
 function initEmailFiltersListeners() {
-    var ids = ['filter-email-person-only', 'filter-email-with-name', 'filter-email-exclude-domains', 'filter-email-exclude-contains'];
+    var ids = [
+        'filter-email-person-only',
+        'filter-email-with-name',
+        'filter-email-exclude-domains',
+        'filter-email-exclude-contains',
+        'filter-email-principal-only',
+        'filter-email-exclude-placeholders'
+    ];
     ids.forEach(function(id) {
         var el = document.getElementById(id);
-        if (el) el.addEventListener('change', applyEmailFiltersAndDisplay);
-        if (el) el.addEventListener('input', applyEmailFiltersAndDisplay);
+        if (!el) return;
+        el.addEventListener('change', function() {
+            // principal / fictifs : recharger côté API pour que l'étape 1 reste cohérente
+            if (id === 'filter-email-principal-only' || id === 'filter-email-exclude-placeholders') {
+                reloadEntreprisesFromCurrentMode();
+                return;
+            }
+            applyEmailFiltersAndDisplay();
+        });
+        el.addEventListener('input', applyEmailFiltersAndDisplay);
+    });
+}
+
+/**
+ * Domaines / sources fictives (aligné avec utils/email_quality.py).
+ * @param {string} email
+ * @param {string} [source]
+ * @returns {boolean}
+ */
+function isPlaceholderEmailClient(email, source) {
+    var domain = ((email || '').split('@')[1] || '').toLowerCase().trim();
+    var badDomains = {
+        'exemple.fr': 1, 'exemple.com': 1, 'example.com': 1, 'example.fr': 1, 'example.org': 1,
+        'votre-domaine.fr': 1, 'votre-domaine.com': 1, 'votredomaine.fr': 1,
+        'votreentreprise.fr': 1, 'votreentreprise.com': 1, 'monentreprise.fr': 1,
+        'mondomaine.fr': 1, 'domain.com': 1, 'domaine.fr': 1, 'email.com': 1,
+        'test.com': 1, 'test.fr': 1, 'mailinator.com': 1, 'yopmail.com': 1
+    };
+    if (domain && badDomains[domain]) return true;
+    var src = String(source || '').toLowerCase();
+    if (!src || src === 'principal' || src === 'scraper') return false;
+    var markers = [
+        'ionos.fr/site-internet', 'ionos.fr/tools/', 'ionos.com/website',
+        'wix.com/website-template', 'wordpress.com/themes', 'jimdo.com', 'webflow.io/templates'
+    ];
+    return markers.some(function(m) { return src.indexOf(m) !== -1; });
+}
+
+/**
+ * Lit les options de filtrage email (étape 2 + params API).
+ * @returns {{principalOnly: boolean, excludePlaceholders: boolean, personOnly: boolean, withName: boolean, excludeDomains: string[], excludeContains: string}}
+ */
+function getEmailFilterFlags() {
+    var excludeDomainsRaw = (document.getElementById('filter-email-exclude-domains') && document.getElementById('filter-email-exclude-domains').value) || '';
+    return {
+        principalOnly: !!(document.getElementById('filter-email-principal-only') && document.getElementById('filter-email-principal-only').checked),
+        excludePlaceholders: !!(document.getElementById('filter-email-exclude-placeholders') && document.getElementById('filter-email-exclude-placeholders').checked),
+        personOnly: !!(document.getElementById('filter-email-person-only') && document.getElementById('filter-email-person-only').checked),
+        withName: !!(document.getElementById('filter-email-with-name') && document.getElementById('filter-email-with-name').checked),
+        excludeDomains: excludeDomainsRaw.split(',').map(function(s) { return s.trim().toLowerCase(); }).filter(Boolean),
+        excludeContains: ((document.getElementById('filter-email-exclude-contains') && document.getElementById('filter-email-exclude-contains').value) || '').trim().toLowerCase()
+    };
+}
+
+/**
+ * Recharge la liste entreprises selon le mode de ciblage courant.
+ */
+function reloadEntreprisesFromCurrentMode() {
+    // On conserve la sélection d'entreprises si possible après rechargement
+    var kept = (selectedEntrepriseIds || []).slice();
+    var done = lastCiblageFilters
+        ? loadEntreprisesWithFilters(lastCiblageFilters, { reset: true, keepSelection: true })
+        : loadEntreprises({ reset: true, keepSelection: true });
+    Promise.resolve(done).then(function() {
+        selectedEntrepriseIds = kept.filter(function(id) {
+            return (entreprisesData || []).some(function(e) { return e.id === id; });
+        });
+        displayEntreprisesStep1(true);
+        if (campagneModalStep === 2) {
+            displayEntreprisesStep2();
+        }
     });
 }
 
@@ -889,7 +1098,7 @@ function applyEmailFiltersAndDisplay() {
     displayEntreprises();
 }
 
-// Recherche entreprise (étape 1) : filtre nom / secteur / email
+// Recherche entreprise (étape 1) : relance l'API (lazy-load)
 function initStep1Search() {
     var input = document.getElementById('entreprise-search');
     var clearBtn = document.getElementById('entreprise-search-clear');
@@ -900,14 +1109,14 @@ function initStep1Search() {
         if (debounce) clearTimeout(debounce);
         debounce = setTimeout(function() {
             step1SearchTerm = value.trim().toLowerCase();
-            displayEntreprisesStep1();
-        }, 250);
+            reloadEntreprisesFromCurrentMode();
+        }, 280);
     });
     if (clearBtn) {
         clearBtn.addEventListener('click', function() {
             input.value = '';
             step1SearchTerm = '';
-            displayEntreprisesStep1();
+            reloadEntreprisesFromCurrentMode();
             input.focus();
         });
     }
@@ -916,22 +1125,27 @@ function initStep1Search() {
 // Applique les critères de filtrage emails et retourne une copie (source = liste d'entreprises)
 function applyEmailFilters(sourceData) {
     var source = sourceData || entreprisesData || [];
-    var personOnly = document.getElementById('filter-email-person-only') && document.getElementById('filter-email-person-only').checked;
-    var withName = document.getElementById('filter-email-with-name') && document.getElementById('filter-email-with-name').checked;
-    var excludeDomainsRaw = (document.getElementById('filter-email-exclude-domains') && document.getElementById('filter-email-exclude-domains').value) || '';
-    var excludeContains = (document.getElementById('filter-email-exclude-contains') && document.getElementById('filter-email-exclude-contains').value.trim().toLowerCase()) || '';
-    var excludeDomains = excludeDomainsRaw.split(',').map(function(s) { return s.trim().toLowerCase(); }).filter(Boolean);
+    var flags = getEmailFilterFlags();
 
     return source.map(function(ent) {
         var emails = (ent.emails || []).filter(function(em) {
-            if (personOnly && !em.is_person) return false;
-            if (withName && (!em.nom || em.nom === 'N/A' || !em.nom.trim())) return false;
+            if (flags.principalOnly && !em.is_principal) return false;
+            if (flags.excludePlaceholders && isPlaceholderEmailClient(em.email, em.source)) return false;
+            if (flags.personOnly && !em.is_person) return false;
+            if (flags.withName && (!em.nom || em.nom === 'N/A' || !em.nom.trim())) return false;
             var domain = (em.domain || (em.email && em.email.split('@')[1]) || '').toLowerCase();
-            if (domain && excludeDomains.some(function(d) { return domain === d || domain.endsWith('.' + d); })) return false;
-            if (excludeContains && (em.email || '').toLowerCase().indexOf(excludeContains) !== -1) return false;
+            if (domain && flags.excludeDomains.some(function(d) { return domain === d || domain.endsWith('.' + d); })) return false;
+            if (flags.excludeContains && (em.email || '').toLowerCase().indexOf(flags.excludeContains) !== -1) return false;
             return true;
         });
-        return { id: ent.id, nom: ent.nom, secteur: ent.secteur, emails: emails };
+        return {
+            id: ent.id,
+            nom: ent.nom,
+            secteur: ent.secteur,
+            responsable: ent.responsable,
+            priority_score: ent.priority_score,
+            emails: emails
+        };
     }).filter(function(ent) { return ent.emails.length > 0; });
 }
 
@@ -1332,19 +1546,117 @@ function getStep1Container() {
     return document.getElementById('entreprises-selector') || document.getElementById('recipients-selector');
 }
 
+/**
+ * Initialise le bouton "Charger plus" et le scroll infini de la liste entreprises.
+ */
+function initEntreprisesLazyLoad() {
+    var btn = document.getElementById('entreprises-load-more-btn');
+    if (btn) {
+        btn.addEventListener('click', function() {
+            loadNextEntreprisesPage();
+        });
+    }
+    var container = getStep1Container();
+    if (container) {
+        container.addEventListener('scroll', function() {
+            if (!entreprisesHasMore || entreprisesLoadingMore) return;
+            if (container.scrollTop + container.clientHeight >= container.scrollHeight - 80) {
+                loadNextEntreprisesPage();
+            }
+        });
+    }
+}
+
+/**
+ * Ajoute les params communs de pagination / filtres email à une URLSearchParams.
+ * @param {URLSearchParams} params
+ * @param {number} page
+ */
+function appendCampagneEntreprisesPagingParams(params, page) {
+    params.set('page', String(page || 1));
+    params.set('page_size', String(ENTREPRISES_PAGE_SIZE));
+    var flags = getEmailFilterFlags();
+    if (flags.principalOnly) params.set('principal_only', '1');
+    if (flags.excludePlaceholders) params.set('exclude_placeholders', '1');
+    if (step1SearchTerm) params.set('search', step1SearchTerm);
+}
+
+/**
+ * Normalise la réponse API (liste legacy ou {items, total}).
+ * @param {*} data
+ * @returns {{items: Array, total: number}}
+ */
+function normalizeEntreprisesPagePayload(data) {
+    if (Array.isArray(data)) {
+        return { items: data, total: data.length };
+    }
+    if (data && Array.isArray(data.items)) {
+        return { items: data.items, total: Number(data.total) || data.items.length };
+    }
+    return { items: [], total: 0 };
+}
+
+/**
+ * Met à jour le bouton / hint "Charger plus".
+ */
+function updateEntreprisesLoadMoreUi() {
+    var wrap = document.getElementById('entreprises-load-more-wrap');
+    var hint = document.getElementById('entreprises-load-more-hint');
+    var btn = document.getElementById('entreprises-load-more-btn');
+    if (!wrap) return;
+    if (!entreprisesHasMore) {
+        wrap.style.display = 'none';
+        return;
+    }
+    wrap.style.display = 'flex';
+    if (btn) btn.disabled = !!entreprisesLoadingMore;
+    if (hint) {
+        hint.textContent = (entreprisesData.length || 0) + ' / ' + (entreprisesTotal || 0) + ' affichée(s)';
+    }
+}
+
+/**
+ * Charge la page suivante d'entreprises (lazy-load).
+ */
+function loadNextEntreprisesPage() {
+    if (!entreprisesHasMore || entreprisesLoadingMore) return;
+    if (lastCiblageFilters) {
+        loadEntreprisesWithFilters(lastCiblageFilters, { reset: false });
+    } else {
+        loadEntreprises({ reset: false });
+    }
+}
+
 // Appel API ciblage et mise à jour de la liste (étape 1 : entreprises uniquement)
-function loadEntreprisesWithFilters(filters) {
+function loadEntreprisesWithFilters(filters, options) {
+    options = options || {};
+    var reset = options.reset !== false;
     const container = getStep1Container();
-    if (!container) return;
-    container.innerHTML = '<div class="loading">Chargement des prospects...</div>';
+    if (!container) return Promise.resolve();
+
+    lastCiblageFilters = filters || {};
+    if (reset) {
+        entreprisesPage = 1;
+        if (!options.keepSelection) {
+            selectedEntrepriseIds = [];
+        }
+        container.innerHTML = '<div class="loading">Chargement des prospects...</div>';
+    } else {
+        entreprisesPage += 1;
+    }
+
+    entreprisesLoadingMore = true;
+    updateEntreprisesLoadMoreUi();
+
     const params = new URLSearchParams();
+    appendCampagneEntreprisesPagingParams(params, entreprisesPage);
     if (filters.secteur) params.set('secteur', filters.secteur);
     if (filters.secteur_contains) params.set('secteur_contains', filters.secteur_contains);
     if (filters.opportunite && filters.opportunite.length) params.set('opportunite', filters.opportunite.join(','));
     if (filters.statut) params.set('statut', filters.statut);
     if (filters.tags_contains) params.set('tags_contains', filters.tags_contains);
     if (filters.favori) params.set('favori', '1');
-    if (filters.search) params.set('search', filters.search);
+    if (filters.search && !step1SearchTerm) params.set('search', filters.search);
     if (filters.score_securite_max != null) params.set('score_securite_max', String(filters.score_securite_max));
     if (filters.exclude_already_contacted) params.set('exclude_already_contacted', '1');
     if (filters.groupe_ids && Array.isArray(filters.groupe_ids) && filters.groupe_ids.length > 0) {
@@ -1365,59 +1677,96 @@ function loadEntreprisesWithFilters(filters) {
     return fetch(url)
         .then(function(r) { return r.json(); })
         .then(function(data) {
-            entreprisesData = data;
-            selectedEntrepriseIds = [];
-            displayEntreprisesStep1();
+            var page = normalizeEntreprisesPagePayload(data);
+            if (reset) {
+                entreprisesData = page.items;
+            } else {
+                entreprisesData = (entreprisesData || []).concat(page.items);
+            }
+            entreprisesTotal = page.total;
+            entreprisesHasMore = entreprisesData.length < entreprisesTotal;
+            displayEntreprisesStep1(reset);
         })
         .catch(function() {
-            container.innerHTML = '<div class="empty-state"><p>Erreur lors du chargement des prospects</p></div>';
+            if (reset) {
+                container.innerHTML = '<div class="empty-state"><p>Erreur lors du chargement des prospects</p></div>';
+            }
+            entreprisesHasMore = false;
+        })
+        .finally(function() {
+            entreprisesLoadingMore = false;
+            updateEntreprisesLoadMoreUi();
         });
 }
 
-// Charger les entreprises avec emails (toutes, pas de filtre) - étape 1
-async function loadEntreprises() {
+// Charger les entreprises avec emails (lazy-load) - étape 1
+async function loadEntreprises(options) {
+    options = options || {};
+    var reset = options.reset !== false;
     const container = getStep1Container();
     if (!container) return;
+
+    lastCiblageFilters = null;
+    if (reset) {
+        entreprisesPage = 1;
+        if (!options.keepSelection) {
+            selectedEntrepriseIds = [];
+        }
+        container.innerHTML = '<div class="loading">Chargement des entreprises...</div>';
+    } else {
+        entreprisesPage += 1;
+    }
+
+    entreprisesLoadingMore = true;
+    updateEntreprisesLoadMoreUi();
+
     try {
-        const response = await fetch('/api/entreprises/emails');
-        entreprisesData = await response.json();
-        selectedEntrepriseIds = [];
-        displayEntreprisesStep1();
+        const params = new URLSearchParams();
+        appendCampagneEntreprisesPagingParams(params, entreprisesPage);
+        const response = await fetch('/api/entreprises/emails?' + params.toString());
+        const data = await response.json();
+        const page = normalizeEntreprisesPagePayload(data);
+        if (reset) {
+            entreprisesData = page.items;
+        } else {
+            entreprisesData = (entreprisesData || []).concat(page.items);
+        }
+        entreprisesTotal = page.total;
+        entreprisesHasMore = entreprisesData.length < entreprisesTotal;
+        displayEntreprisesStep1(reset);
     } catch (error) {
-        container.innerHTML = '<div class="empty-state"><p>Erreur lors du chargement des entreprises</p></div>';
+        if (reset) {
+            container.innerHTML = '<div class="empty-state"><p>Erreur lors du chargement des entreprises</p></div>';
+        }
+        entreprisesHasMore = false;
+    } finally {
+        entreprisesLoadingMore = false;
+        updateEntreprisesLoadMoreUi();
     }
 }
 
 // Étape 1 : afficher la liste des entreprises (checkboxes, sans détail des emails)
-function displayEntreprisesStep1() {
+function displayEntreprisesStep1(reset) {
     const container = getStep1Container();
     const countEl = document.getElementById('step1-results-count');
     if (!container) return;
 
-    var list = (entreprisesData || []).slice();
-
-    if (step1SearchTerm) {
-        list = list.filter(function(ent) {
-            var nom = (ent.nom || '').toLowerCase();
-            var secteur = (ent.secteur || '').toLowerCase();
-            var hasEmailMatch = (ent.emails || []).some(function(em) {
-                return (em.email || '').toLowerCase().indexOf(step1SearchTerm) !== -1;
-            });
-            return nom.indexOf(step1SearchTerm) !== -1 ||
-                   secteur.indexOf(step1SearchTerm) !== -1 ||
-                   hasEmailMatch;
-        });
-    }
+    var filteredForCount = applyEmailFilters(entreprisesData || []);
+    var list = filteredForCount.slice();
 
     if (!list || list.length === 0) {
-        container.innerHTML = '<div class="empty-state"><p>Aucune entreprise avec email disponible</p></div>';
+        if (reset !== false) {
+            container.innerHTML = '<div class="empty-state"><p>Aucune entreprise avec email disponible</p></div>';
+        }
         if (countEl) countEl.style.display = 'none';
+        updateEntreprisesLoadMoreUi();
         return;
     }
 
     var totalEmails = list.reduce(function(sum, e) { return sum + (e.emails && e.emails.length); }, 0);
     if (countEl) {
-        countEl.textContent = list.length + ' entreprise(s), ' + totalEmails + ' email(s)';
+        var totalLabel = entreprisesTotal ? (' sur ~' + entreprisesTotal) : '';
+        countEl.textContent = list.length + ' entreprise(s) chargée(s)' + totalLabel + ', ' + totalEmails + ' email(s) utiles';
         countEl.style.display = 'block';
     }
 
@@ -1427,7 +1776,8 @@ function displayEntreprisesStep1() {
         var prioHtml = (ent.priority_score != null && !isNaN(Number(ent.priority_score)))
             ? '<div class="entreprise-priority-score">Priorité ' + Math.round(Number(ent.priority_score)) + '</div>'
             : '';
-        return '<div class="entreprise-item step1-ent-item step1-card-clickable" data-entreprise-id="' + ent.id + '" onclick="toggleEntrepriseStep1ByCard(event, ' + ent.id + ')">' +
+        var checked = selectedEntrepriseIds.indexOf(ent.id) !== -1;
+        return '<div class="entreprise-item step1-ent-item step1-card-clickable' + (checked ? ' selected' : '') + '" data-entreprise-id="' + ent.id + '" onclick="toggleEntrepriseStep1ByCard(event, ' + ent.id + ')">' +
             '<div class="entreprise-header">' +
             '<div><div class="entreprise-name">' + escapeHtml(ent.nom) + '</div>' +
             (ent.secteur ? '<div class="entreprise-secteur">' + escapeHtml(ent.secteur) + '</div>' : '') +
@@ -1435,10 +1785,11 @@ function displayEntreprisesStep1() {
             '<div class="entreprise-email-count">' + nb + ' email(s)</div>' +
             '</div>' +
             '<div class="checkbox-wrapper">' +
-            '<input type="checkbox" id="ent-' + ent.id + '" onchange="toggleEntrepriseStep1(' + ent.id + ', this.checked)">' +
+            '<input type="checkbox" id="ent-' + ent.id + '" ' + (checked ? 'checked ' : '') + 'onchange="toggleEntrepriseStep1(' + ent.id + ', this.checked)">' +
             '<label for="ent-' + ent.id + '">Sélectionner</label>' +
             '</div></div></div>';
     }).filter(Boolean).join('');
+    updateEntreprisesLoadMoreUi();
 }
 
 // Clic sur tout le cadre entreprise (étape 1) : toggle la sélection sauf si clic sur la case/label
@@ -1502,11 +1853,16 @@ function displayEntreprisesStep2() {
             '<div class="emails-list">' +
             emails.map(function(email, idx) {
                 var dataEmail = escapeHtml(JSON.stringify(email));
+                var principalBadge = email.is_principal
+                    ? '<span class="email-badge-principal">Principal</span>'
+                    : '';
+                var sourceLabel = email.is_principal ? 'principal' : (email.source || '');
                 return '<div class="email-item email-row-clickable" onclick="toggleEmailByRow(event, ' + entreprise.id + ', ' + idx + ')">' +
                     '<input type="checkbox" id="email-' + entreprise.id + '-' + idx + '" data-email="' + dataEmail + '" onchange="toggleEmail(' + entreprise.id + ', ' + idx + ', this.checked)">' +
                     '<span class="email-address">' + escapeHtml(email.email) + '</span>' +
+                    principalBadge +
                     (email.nom && email.nom !== 'N/A' ? '<span> (' + escapeHtml(email.nom) + ')</span>' : '') +
-                    '<span class="email-source">' + escapeHtml(email.source || '') + '</span>' +
+                    '<span class="email-source">' + escapeHtml(sourceLabel) + '</span>' +
                     '</div>';
             }).join('') +
             '</div></div>';

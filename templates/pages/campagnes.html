@@ -11,6 +11,10 @@
         </button>
     </div>
 
+    <section id="brevo-status-panel" class="brevo-status-panel" aria-live="polite">
+        <div class="brevo-status-loading">Vérification Brevo…</div>
+    </section>
+
     <div class="campagnes-filters">
         <div class="campagnes-filters-main">
             <label for="campagnes-search" class="filter-label">Recherche</label>
@@ -206,7 +210,15 @@
                                 <div id="step1-results-count" class="results-count" style="display: none;"></div>
                             </div>
                         </div>
-                        <p class="form-hint">Choisissez les entreprises à contacter. À l&apos;étape 2 vous filtrerez les emails.</p>
+                        <p class="form-hint">Choisissez les entreprises à contacter. À l&apos;étape 2 vous affinerez les emails.</p>
+                        <div class="email-filters-quick">
+                            <div class="form-group ciblage-checkbox">
+                                <label><input type="checkbox" id="filter-email-principal-only"> Uniquement emails principaux</label>
+                            </div>
+                            <div class="form-group ciblage-checkbox">
+                                <label><input type="checkbox" id="filter-email-exclude-placeholders" checked> Exclure emails fictifs (templates IONOS, exemple.fr…)</label>
+                            </div>
+                        </div>
                         <div class="form-group entreprise-search-row">
                             <label for="entreprise-search">Rechercher une entreprise</label>
                             <div class="entreprise-search-input search-field">
@@ -226,6 +238,10 @@
                             <div id="entreprises-selector" class="recipients-selector">
                                 <div class="loading">Chargement des entreprises...</div>
                             </div>
+                            <div id="entreprises-load-more-wrap" class="entreprises-load-more-wrap" style="display: none;">
+                                <button type="button" id="entreprises-load-more-btn" class="recipients-action-btn">Charger plus</button>
+                                <span id="entreprises-load-more-hint" class="entreprises-load-more-hint"></span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -239,7 +255,7 @@
                                 Filtres avancés
                             </button>
                         </div>
-                        <p class="form-hint">Affinez les emails affichés pour éviter doublons et adresses techniques.</p>
+                        <p class="form-hint">Affinez les emails affichés pour éviter doublons et adresses techniques. Les options &laquo; principal / fictifs &raquo; sont aussi à l&apos;étape 1.</p>
                         <div class="email-filters-row">
                             <div class="form-group ciblage-checkbox">
                                 <label><input type="checkbox" id="filter-email-person-only"> Uniquement contacts &laquo; personne &raquo; (nom prénom détecté)</label>

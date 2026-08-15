@@ -618,6 +618,25 @@ def list_campagnes():
     return resp
 
 
+@other_bp.route('/api/brevo/status', methods=['GET'])
+@login_required
+def api_brevo_status():
+    """
+    API: Statut Brevo (quota, config SMTP, stats, derniers événements, contacts bloqués).
+
+    Returns:
+        JSON: Résumé prêt pour le bandeau campagnes / monitoring envoi.
+    """
+    from services.brevo_client import get_brevo_status
+    from utils.helpers import clean_json_dict
+
+    status = get_brevo_status()
+    http_code = 200 if status.get('configured') else 503
+    if status.get('configured') and not status.get('ok') and status.get('errors'):
+        http_code = 200  # on renvoie quand même le payload pour l'UI
+    return jsonify(clean_json_dict(status)), http_code
+
+
 @other_bp.route('/api/campagnes', methods=['GET'])
 @login_required
 def api_list_campagnes():
@@ -1241,15 +1260,60 @@ def api_get_entreprises_with_emails():
     """
     API: Liste des entreprises avec leurs emails disponibles.
 
+    Query params optionnels (lazy-load) :
+      - page / page_size (ou limit / offset)
+      - search
+      - principal_only=1
+      - exclude_placeholders=1 (emails fictifs / templates IONOS)
+
     Returns:
-        JSON: Liste des entreprises avec emails
+        JSON: Liste des entreprises avec emails, ou {items, total, page, page_size}
     """
     from services.database.entreprises import EntrepriseManager
     from utils.helpers import clean_json_dict
+
+    filters = {}
+    if request.args.get('search'):
+        filters['search'] = request.args.get('search').strip()
+    if request.args.get('principal_only') in ('1', 'true', 'True'):
+        filters['principal_only'] = True
+    if request.args.get('exclude_placeholders') in ('1', 'true', 'True'):
+        filters['exclude_placeholders'] = True
+
+    page = request.args.get('page', type=int)
+    page_size = request.args.get('page_size', type=int)
+    limit = request.args.get('limit', type=int)
+    offset = request.args.get('offset', type=int)
+
+    use_pagination = False
+    if page is not None or page_size is not None:
+        use_pagination = True
+        page = page or 1
+        page_size = page_size or 50
+        page = max(1, page)
+        page_size = max(1, min(page_size, 200))
+        limit = page_size
+        offset = (page - 1) * page_size
+    elif limit is not None:
+        use_pagination = True
+        offset = offset or 0
+
     entreprise_manager = EntrepriseManager()
-    entreprises = entreprise_manager.get_entreprises_with_emails()
-    entreprises = clean_json_dict(entreprises)
-    return jsonify(entreprises)
+    if use_pagination:
+        payload = entreprise_manager.get_entreprises_with_emails(
+            filters=filters, limit=limit, offset=offset
+        )
+        return jsonify(clean_json_dict({
+            'items': payload.get('items') or [],
+            'total': payload.get('total') or 0,
+            'page': page if page is not None else ((offset or 0) // max(int(limit or 50), 1)) + 1,
+            'page_size': int(limit or 50),
+            'limit': payload.get('limit'),
+            'offset': payload.get('offset'),
+        }))
+
+    entreprises = entreprise_manager.get_entreprises_with_emails(filters=filters)
+    return jsonify(clean_json_dict(entreprises))
 
 
 @other_bp.route('/api/ciblage/objectifs', methods=['GET'])
@@ -1351,7 +1415,43 @@ def api_ciblage_entreprises():
             filters['commercial_limit'] = int(request.args.get('commercial_limit'))
         except ValueError:
             pass
+    if request.args.get('principal_only') in ('1', 'true', 'True'):
+        filters['principal_only'] = True
+    if request.args.get('exclude_placeholders') in ('1', 'true', 'True'):
+        filters['exclude_placeholders'] = True
+
+    page = request.args.get('page', type=int)
+    page_size = request.args.get('page_size', type=int)
+    limit = request.args.get('limit', type=int)
+    offset = request.args.get('offset', type=int)
+
+    use_pagination = False
+    if page is not None or page_size is not None:
+        use_pagination = True
+        page = page or 1
+        page_size = page_size or 50
+        page = max(1, page)
+        page_size = max(1, min(page_size, 200))
+        limit = page_size
+        offset = (page - 1) * page_size
+    elif limit is not None:
+        use_pagination = True
+        offset = offset or 0
+
     entreprise_manager = EntrepriseManager()
+    if use_pagination:
+        payload = entreprise_manager.get_entreprises_for_campagne(
+            filters, limit=limit, offset=offset
+        )
+        return jsonify(clean_json_dict({
+            'items': payload.get('items') or [],
+            'total': payload.get('total') or 0,
+            'page': page if page is not None else ((offset or 0) // max(int(limit or 50), 1)) + 1,
+            'page_size': int(limit or 50),
+            'limit': payload.get('limit'),
+            'offset': payload.get('offset'),
+        }))
+
     entreprises = entreprise_manager.get_entreprises_for_campagne(filters)
     return jsonify(clean_json_dict(entreprises))
 
