@@ -344,7 +344,7 @@ if (-not $SkipNfsClient) {
             Write-Host $nfsClientOut -ForegroundColor Gray
             exit 1
         }
-        Write-Host ("Montage NFS OK ({0}/uploads et exports)" -f $RemotePath) -ForegroundColor Green
+        Write-Host ('Montage NFS OK ({0}/uploads et exports)' -f $RemotePath) -ForegroundColor Green
         Write-Host ""
     }
 }
