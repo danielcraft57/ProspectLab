@@ -315,8 +315,8 @@ if (-not $SkipNfsClient) {
         $nfsSkipClientMount = @('1', 'true', 'yes', 'on') -contains $tskip
     }
     if ($nfsSkipClientMount) {
-        Write-Host "[5b/9] Montage NFS client ignoré (NFS_SKIP_CLIENT_MOUNT dans .env.prod)." -ForegroundColor DarkYellow
-        Write-Host "   Utilise des chemins directs vers l'export (ex. /srv/nfs/prospectlab/uploads) sur ce nœud." -ForegroundColor Gray
+        Write-Host "[5b/9] Montage NFS client ignore (NFS_SKIP_CLIENT_MOUNT dans .env.prod)." -ForegroundColor DarkYellow
+        Write-Host "   Chemins directs vers l export NFS sur ce noeud." -ForegroundColor Gray
         Write-Host ""
     }
     $nfsServerDeploy = Get-DotEnvValue -FilePath $envProdForNfs -Key 'NFS_SERVER'
@@ -344,7 +344,7 @@ if (-not $SkipNfsClient) {
             Write-Host $nfsClientOut -ForegroundColor Gray
             exit 1
         }
-        Write-Host ('Montage NFS OK ({0}/uploads et exports)' -f $RemotePath) -ForegroundColor Green
+        Write-Host "Montage NFS OK (uploads et exports)" -ForegroundColor Green
         Write-Host ""
     }
 }

@@ -118,13 +118,18 @@ ProspectLab peut être protégé non pas par un système de login classique, mai
 - Quand `RESTRICT_TO_LOCAL_NETWORK=false` (dev local) :
   - l'application est accessible depuis n'importe quelle IP qui peut joindre le serveur ;
 - Quand `RESTRICT_TO_LOCAL_NETWORK=true` (recommandé en prod interne) :
-  - toutes les routes HTTP Flask sont bloquées si l'IP cliente n'est pas dans les réseaux privés classiques (`192.168.0.0/16`, `10.0.0.0/8`, `172.16.0.0/12`) ou localhost ;
+  - toutes les routes HTTP Flask sont bloquées si l'IP cliente n'est pas privée (IPv4 RFC1918, IPv6 ULA/link-local, loopback) ;
+  - CIDR supplémentaires possibles via `ALLOWED_NETWORKS` (ex. `100.64.0.0/10` pour Tailscale) ;
   - **exceptions** importantes :
     - `/track/...` (pixel et clics de tracking pour les emails sortants) reste toujours accessible ;
     - `/api/public/...` (API publique protégée par token) reste accessible pour les intégrations externes.
 
 La détection IP côté Flask utilise en priorité les en-têtes `X-Forwarded-For` / `X-Real-IP` envoyés par Nginx, puis `request.remote_addr`.  
 Assure-toi que ta conf Nginx sur le serveur proxy envoie bien ces en-têtes (voir `DEPLOIEMENT_PRODUCTION.md`).
+
+**Piège VPN (IKEv2 / même IP publique)** : si `campaigns.danielcraft.fr` résout vers la même IP que la passerelle VPN, Windows route ce trafic *hors* tunnel. Flask voit alors l'IP box (publique) → page "accès restreint" même VPN allumé. Contournements :
+- ouvrir l'app via le LAN (`https://node12.lan` ou IP privée du reverse-proxy) ;
+- ou forcer le hosts local avec `scripts/enable_vpn_app_hosts.ps1` (admin) pour que le domaine public pointe vers l'IP LAN tant que tu es en VPN.
 
 ### 1.5. Fichiers `.env.prod` / `.env.cluster`
 

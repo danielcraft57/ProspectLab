@@ -65,6 +65,7 @@ from config import (
     MAX_CONTENT_LENGTH,
     SECRET_KEY,
     RESTRICT_TO_LOCAL_NETWORK,
+    ALLOWED_NETWORKS,
     FLASK_DEBUG,
     SOCKETIO_MESSAGE_QUEUE,
 )
@@ -278,7 +279,17 @@ def _get_client_ip() -> str:
 def _client_ip_allowed() -> bool:
     """
     Retourne True si la restriction réseau est désactivée
-    ou si l'IP client appartient au réseau local (LAN / localhost).
+    ou si l'IP client appartient au réseau local / VPN (privé) ou à ALLOWED_NETWORKS.
+
+    Accepte :
+    - IPv4/IPv6 privées, loopback et link-local (via ip.is_private / is_loopback / is_link_local)
+    - CIDR supplémentaires définis dans ALLOWED_NETWORKS
+
+    Note:
+        Si le domaine public pointe vers la même IP que la passerelle VPN,
+        Windows route ce trafic hors tunnel : Flask voit alors l'IP ISP (publique)
+        même avec le VPN connecté. Dans ce cas, passer par l'IP/hostname LAN
+        (ex. node12.lan) ou un split-DNS / hosts local.
     """
     try:
         if not RESTRICT_TO_LOCAL_NETWORK:
@@ -290,15 +301,21 @@ def _client_ip_allowed() -> bool:
 
         ip = ipaddress.ip_address(ip_str)
 
-        # Réseaux privés classiques + localhost
-        allowed_networks = [
-            ipaddress.ip_network('192.168.0.0/16'),
-            ipaddress.ip_network('10.0.0.0/8'),
-            ipaddress.ip_network('172.16.0.0/12'),
-            ipaddress.ip_network('127.0.0.0/8'),
-        ]
+        # Privé / loopback / link-local (IPv4 RFC1918 + IPv6 ULA, etc.)
+        if ip.is_private or ip.is_loopback or ip.is_link_local:
+            return True
 
-        return any(ip in net for net in allowed_networks)
+        # CIDR additionnels (Tailscale CGNAT, plages VPN custom, etc.)
+        for cidr in ALLOWED_NETWORKS:
+            try:
+                if ip in ipaddress.ip_network(cidr, strict=False):
+                    return True
+            except ValueError:
+                logging.getLogger(__name__).warning(
+                    f"Restriction IP: CIDR invalide dans ALLOWED_NETWORKS ({cidr!r})"
+                )
+
+        return False
     except Exception as e:
         logging.getLogger(__name__).warning(
             f"Restriction IP: erreur de vérification ({e}), accès autorisé par sécurité"
@@ -310,12 +327,18 @@ def _client_ip_allowed() -> bool:
 @app.before_request
 def restrict_to_local_network():
     """
-    Bloque l'accès HTTP si l'IP n'est pas dans le réseau local
+    Bloque l'accès HTTP si l'IP n'est pas dans le réseau local / VPN
     quand RESTRICT_TO_LOCAL_NETWORK est activé.
 
     Routes qui restent publiques :
-    - /track/... : tracking emails (appelé par les destinataires externes)
+    - /static/...
+    - /track/... : tracking emails (destinataires externes)
     - /api/public/... : API publique protégée par token
+    - /socket.io : handshake WebSocket
+
+    Note: le login n'est PAS ouvert à Internet. L'accès UI passe uniquement
+    par une IP privée (LAN / tunnel VPN). Si le domaine public partage l'IP
+    du VPN, il faut du split-DNS (dnsmasq sur node13) pour résoudre vers Nginx LAN.
     """
     path = request.path or ''
     # Pour les endpoints API non-publics, on privilégie un comportement "fail-closed"
@@ -339,12 +362,10 @@ def restrict_to_local_network():
         if _client_ip_allowed():
             return None
 
-        # Page de restriction simple
         try:
             client_ip = _get_client_ip()
             return render_template('restricted.html', client_ip=client_ip), 403
         except Exception:
-            # Si le template n'existe pas encore, renvoyer un message texte
             return "Accès restreint au réseau local", 403
     except Exception as e:
         logging.getLogger(__name__).error(

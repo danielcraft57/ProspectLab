@@ -13,166 +13,298 @@
     border-bottom: 2px solid #e0e0e0;
 }
 
-.brevo-status-panel {
-    margin: -10px 0 24px;
-    border: 1px solid #e5e7eb;
-    border-radius: 12px;
-    background: #f8fafc;
-    padding: 14px 16px;
+/* --- Bandeau Brevo (Material Design 3) --- */
+.brevo-status-panel.md-brevo {
+    margin: -6px 0 28px;
+    border: 1px solid #dbe2ea;
+    border-radius: 16px;
+    background: #f5f7fa;
+    padding: 0;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
 }
 
-.brevo-status-panel.is-ok {
-    border-color: #bbf7d0;
-    background: #f0fdf4;
-}
-
-.brevo-status-panel.is-warn {
-    border-color: #fde68a;
-    background: #fffbeb;
-}
-
-.brevo-status-panel.is-error {
-    border-color: #fecaca;
-    background: #fef2f2;
-}
+.brevo-status-panel.md-brevo.is-ok { border-color: rgba(22, 163, 74, 0.35); }
+.brevo-status-panel.md-brevo.is-warn { border-color: rgba(217, 119, 6, 0.4); }
+.brevo-status-panel.md-brevo.is-error { border-color: rgba(220, 38, 38, 0.4); }
 
 .brevo-status-loading,
 .brevo-status-error-msg {
     color: #6b7280;
     font-size: 0.92em;
+    padding: 16px 18px;
 }
 
-.brevo-status-top {
+.md-brevo-header {
     display: flex;
-    flex-wrap: wrap;
-    gap: 12px 20px;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
+    gap: 14px;
+    padding: 18px 20px 10px;
 }
 
-.brevo-status-title {
+.md-brevo-brand {
     display: flex;
-    flex-wrap: wrap;
-    gap: 8px 12px;
+    gap: 12px;
     align-items: center;
-    font-weight: 600;
-    color: #111827;
 }
 
-.brevo-status-badge {
-    display: inline-block;
-    padding: 2px 8px;
+.md-brevo-avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+    font-weight: 700;
+    color: #15803d;
+    background: linear-gradient(145deg, #dcfce7, #bbf7d0);
+    box-shadow: inset 0 0 0 1px rgba(22, 163, 74, 0.2);
+}
+
+.md-brevo-title-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.md-brevo-title {
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 650;
+    color: #0f172a;
+    letter-spacing: -0.01em;
+}
+
+.md-brevo-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
     border-radius: 999px;
-    font-size: 0.75em;
-    font-weight: 600;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
     background: #e5e7eb;
     color: #374151;
 }
 
-.brevo-status-badge.is-ok { background: #dcfce7; color: #166534; }
-.brevo-status-badge.is-warn { background: #fef3c7; color: #92400e; }
-.brevo-status-badge.is-error { background: #fee2e2; color: #991b1b; }
+.md-brevo-chip.is-ok { background: #dcfce7; color: #166534; }
+.md-brevo-chip.is-warn { background: #ffedd5; color: #9a3412; }
+.md-brevo-chip.is-error { background: #fee2e2; color: #991b1b; }
 
-.brevo-quota {
-    min-width: 180px;
-    flex: 1 1 220px;
-    max-width: 320px;
+.md-brevo-subtitle {
+    margin: 4px 0 0;
+    font-size: 0.88rem;
+    color: #64748b;
 }
 
-.brevo-quota-label {
+.md-brevo-icon-btn {
+    width: 40px;
+    height: 40px;
+    border: none;
+    border-radius: 999px;
+    background: #e8eef5;
+    color: #334155;
+    cursor: pointer;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+}
+
+.md-brevo-icon-btn:hover { background: #dbe5f0; }
+
+.md-brevo-body { padding: 6px 20px 18px; }
+
+.md-brevo-quota {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+}
+
+.md-brevo-quota-top {
     display: flex;
     justify-content: space-between;
-    font-size: 0.82em;
-    color: #4b5563;
-    margin-bottom: 4px;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
 }
 
-.brevo-quota-bar {
-    height: 8px;
+.md-brevo-quota-value {
+    font-size: 1.45rem;
+    font-weight: 650;
+    color: #0f172a;
+    letter-spacing: -0.02em;
+}
+
+.md-brevo-quota-value span {
+    font-size: 0.88rem;
+    font-weight: 500;
+    color: #64748b;
+}
+
+.md-brevo-quota-plan {
+    font-size: 0.8rem;
+    color: #64748b;
+}
+
+.md-brevo-linear {
+    height: 10px;
     border-radius: 999px;
-    background: #e5e7eb;
+    background: #e2e8f0;
     overflow: hidden;
 }
 
-.brevo-quota-fill {
+.md-brevo-linear > i {
+    display: block;
     height: 100%;
-    background: #16a34a;
     border-radius: 999px;
+    background: linear-gradient(90deg, #16a34a, #22c55e);
     transition: width 0.25s ease;
 }
 
-.brevo-quota-fill.is-low { background: #d97706; }
-.brevo-quota-fill.is-empty { background: #dc2626; }
+.md-brevo-linear > i.is-low { background: linear-gradient(90deg, #d97706, #f59e0b); }
+.md-brevo-linear > i.is-empty { background: linear-gradient(90deg, #dc2626, #ef4444); }
 
-.brevo-status-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 14px;
-    margin-top: 10px;
-    font-size: 0.82em;
-    color: #4b5563;
+.md-brevo-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
 }
 
-.brevo-status-meta span strong {
-    color: #111827;
+@media (max-width: 800px) {
+    .md-brevo-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.md-brevo-metric {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 12px 14px;
+    min-height: 70px;
+}
+
+.md-brevo-metric-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #64748b;
+    margin-bottom: 6px;
+}
+
+.md-brevo-metric-value {
+    font-size: 1.2rem;
+    font-weight: 650;
+    color: #0f172a;
+}
+
+.md-brevo-metric.is-ok .md-brevo-metric-value { color: #15803d; }
+.md-brevo-metric.is-danger .md-brevo-metric-value { color: #b91c1c; }
+
+.md-brevo-banners {
+    display: grid;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.md-brevo-banner {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    padding: 11px 14px;
+    border-radius: 12px;
+    font-size: 0.88rem;
+    line-height: 1.4;
+}
+
+.md-brevo-banner.is-warn {
+    background: #fff7ed;
+    color: #9a3412;
+    border: 1px solid #fed7aa;
+}
+
+.md-brevo-banner.is-error {
+    background: #fef2f2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+}
+
+.md-brevo-banner-btn {
+    border: 1px solid rgba(154, 52, 18, 0.35);
+    background: transparent;
+    color: #9a3412;
+    border-radius: 999px;
+    padding: 5px 12px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.md-brevo-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    margin-top: 12px;
+    font-size: 0.82rem;
+    color: #64748b;
+}
+
+.md-brevo-meta strong {
+    color: #0f172a;
     font-weight: 600;
 }
 
-.brevo-status-alerts {
-    margin-top: 10px;
-    display: grid;
-    gap: 6px;
+.md-brevo-details {
+    margin-top: 12px;
 }
 
-.brevo-alert {
-    font-size: 0.85em;
-    padding: 6px 10px;
-    border-radius: 8px;
-}
-
-.brevo-alert.is-warn {
-    background: #fef3c7;
-    color: #92400e;
-}
-
-.brevo-alert.is-error {
-    background: #fee2e2;
-    color: #991b1b;
-}
-
-.brevo-status-details {
-    margin-top: 10px;
-}
-
-.brevo-status-details summary {
+.md-brevo-details summary {
     cursor: pointer;
-    font-size: 0.85em;
-    color: #374151;
+    color: #2563eb;
+    font-size: 0.88rem;
     user-select: none;
+    list-style: none;
 }
 
-.brevo-status-details-grid {
+.md-brevo-details summary::-webkit-details-marker { display: none; }
+
+.md-brevo-details-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 12px;
-    margin-top: 10px;
+    margin-top: 12px;
 }
 
-.brevo-status-card h4 {
-    margin: 0 0 6px;
-    font-size: 0.85em;
-    color: #111827;
+.md-brevo-details-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 12px 14px;
 }
 
-.brevo-status-card ul {
+.md-brevo-details-card h4 {
+    margin: 0 0 8px;
+    font-size: 0.86rem;
+    color: #0f172a;
+}
+
+.md-brevo-list {
     margin: 0;
-    padding-left: 18px;
-    font-size: 0.8em;
-    color: #4b5563;
+    padding-left: 16px;
+    font-size: 0.8rem;
+    color: #475569;
 }
 
-.brevo-status-card li {
-    margin-bottom: 4px;
+.md-brevo-list li { margin-bottom: 4px; }
+
+.md-brevo-empty {
+    margin: 0;
+    font-size: 0.82rem;
+    color: #64748b;
 }
 
 .brevo-refresh-btn {
@@ -185,23 +317,128 @@
     cursor: pointer;
 }
 
-.brevo-refresh-btn:hover {
-    background: #f3f4f6;
+.brevo-compare-section {
+    margin: 18px 0 8px;
+    padding: 14px 16px;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    background: #f8fafc;
 }
 
-body[data-theme="dark"] .brevo-status-panel {
+.brevo-compare-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 6px;
+}
+
+.brevo-compare-hint {
+    margin: 0 0 12px;
+    font-size: 0.84em;
+    color: #6b7280;
+}
+
+.brevo-compare-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+}
+
+.brevo-compare-card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 10px 12px;
+}
+
+.brevo-compare-card h4 {
+    margin: 0 0 8px;
+    font-size: 0.9em;
+    color: #111827;
+}
+
+.brevo-compare-card ul {
+    margin: 0;
+    padding-left: 16px;
+    font-size: 0.84em;
+    color: #4b5563;
+}
+
+.brevo-compare-card li {
+    margin-bottom: 4px;
+}
+
+body[data-theme="dark"] .brevo-compare-section {
     background: #111827;
     border-color: #374151;
 }
-body[data-theme="dark"] .brevo-status-panel.is-ok { background: #052e16; border-color: #166534; }
-body[data-theme="dark"] .brevo-status-panel.is-warn { background: #422006; border-color: #a16207; }
-body[data-theme="dark"] .brevo-status-panel.is-error { background: #450a0a; border-color: #991b1b; }
-body[data-theme="dark"] .brevo-status-title,
-body[data-theme="dark"] .brevo-status-card h4,
-body[data-theme="dark"] .brevo-status-meta span strong { color: #f9fafb; }
-body[data-theme="dark"] .brevo-status-meta,
-body[data-theme="dark"] .brevo-status-card ul,
-body[data-theme="dark"] .brevo-status-details summary { color: #d1d5db; }
+body[data-theme="dark"] .brevo-compare-card {
+    background: #1f2937;
+    border-color: #374151;
+}
+body[data-theme="dark"] .brevo-compare-card h4 {
+    color: #f9fafb;
+}
+body[data-theme="dark"] .brevo-compare-card ul,
+body[data-theme="dark"] .brevo-compare-hint {
+    color: #d1d5db;
+}
+
+body[data-theme="dark"] .brevo-status-panel.md-brevo {
+    background: #1a2332;
+    border-color: #3d4a5c;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+body[data-theme="dark"] .brevo-status-panel.md-brevo.is-ok { border-color: rgba(61, 214, 140, 0.35); }
+body[data-theme="dark"] .brevo-status-panel.md-brevo.is-warn { border-color: rgba(255, 183, 77, 0.45); }
+body[data-theme="dark"] .brevo-status-panel.md-brevo.is-error { border-color: rgba(255, 138, 128, 0.4); }
+body[data-theme="dark"] .md-brevo-title,
+body[data-theme="dark"] .md-brevo-quota-value,
+body[data-theme="dark"] .md-brevo-metric-value,
+body[data-theme="dark"] .md-brevo-details-card h4,
+body[data-theme="dark"] .md-brevo-meta strong { color: #e8eaed; }
+body[data-theme="dark"] .md-brevo-subtitle,
+body[data-theme="dark"] .md-brevo-quota-plan,
+body[data-theme="dark"] .md-brevo-metric-label,
+body[data-theme="dark"] .md-brevo-meta,
+body[data-theme="dark"] .md-brevo-empty,
+body[data-theme="dark"] .md-brevo-list { color: #9aa5b5; }
+body[data-theme="dark"] .md-brevo-avatar {
+    background: linear-gradient(145deg, #1a4d3a, #0d3d2a);
+    color: #3dd68c;
+}
+body[data-theme="dark"] .md-brevo-icon-btn {
+    background: #243044;
+    color: #e8eaed;
+}
+body[data-theme="dark"] .md-brevo-quota,
+body[data-theme="dark"] .md-brevo-metric,
+body[data-theme="dark"] .md-brevo-details-card {
+    background: #0f1419;
+    border-color: #3d4a5c;
+}
+body[data-theme="dark"] .md-brevo-linear { background: rgba(255, 255, 255, 0.08); }
+body[data-theme="dark"] .md-brevo-banner.is-warn {
+    background: #4a3410;
+    color: #ffe0a3;
+    border-color: rgba(255, 183, 77, 0.35);
+}
+body[data-theme="dark"] .md-brevo-banner.is-error {
+    background: #4a1c1c;
+    color: #ffc9c4;
+    border-color: rgba(255, 138, 128, 0.35);
+}
+body[data-theme="dark"] .md-brevo-banner-btn {
+    border-color: rgba(255, 183, 77, 0.5);
+    color: #ffb74d;
+}
+body[data-theme="dark"] .md-brevo-details summary { color: #7eb8ff; }
+body[data-theme="dark"] .brevo-refresh-btn {
+    background: #1f2937;
+    border-color: #4b5563;
+    color: #e5e7eb;
+}
 body[data-theme="dark"] .brevo-refresh-btn {
     background: #1f2937;
     border-color: #4b5563;

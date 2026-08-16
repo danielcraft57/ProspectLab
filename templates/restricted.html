@@ -152,8 +152,15 @@
                 Cette instance de ProspectLab est accessible uniquement depuis le réseau interne de DanielCraft.
             </p>
             <p class="restricted-details">
-                Si vous faites partie de l'équipe et que vous voyez ce message depuis l'extérieur,
-                connectez-vous d'abord au VPN ou au réseau local avant de recharger la page.
+                Si tu es dans l'équipe et que tu vois ce message, connecte-toi au VPN puis
+                ouvre l'app via le réseau interne (ex. <strong>https://node12.lan</strong>),
+                pas seulement l'URL publique.
+            </p>
+            <p class="restricted-details">
+                Astuce : si ton VPN et le site public partagent la même IP, Windows envoie
+                le trafic du domaine public <em>hors</em> tunnel. Dans ce cas le serveur
+                voit ton IP box (publique) même avec le VPN allumé. Utilise le hostname
+                LAN, ou le script <code>scripts/enable_vpn_app_hosts.ps1</code>.
             </p>
             <div class="restricted-footer">
                 <span>Besoin d'accès ? Contactez l'administrateur système.</span>

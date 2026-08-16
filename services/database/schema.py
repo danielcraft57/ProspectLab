@@ -824,6 +824,12 @@ class DatabaseSchema(DatabaseBase):
         self.safe_execute_sql(cursor, 'ALTER TABLE emails_envoyes ADD COLUMN tracking_token TEXT')
         # Migration : conserver le contenu réellement envoyé pour prévisualisation future
         self.safe_execute_sql(cursor, 'ALTER TABLE emails_envoyes ADD COLUMN contenu_envoye TEXT')
+        # Migration : Message-ID Brevo (pour rattacher les événements API)
+        self.safe_execute_sql(cursor, 'ALTER TABLE emails_envoyes ADD COLUMN brevo_message_id TEXT')
+        self.safe_execute_sql(
+            cursor,
+            'CREATE INDEX IF NOT EXISTS idx_emails_envoyes_brevo_message_id ON emails_envoyes(brevo_message_id)'
+        )
         
         # Table des utilisateurs (authentification)
         self.execute_sql(cursor,'''

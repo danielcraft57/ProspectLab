@@ -43,6 +43,7 @@ pip install -r requirements.txt
    - **WSL_USER** : Utilisateur WSL (défaut: loupix)
    - **DATABASE_PATH** : (Optionnel) Chemin personnalisé pour la base de données
    - **RESTRICT_TO_LOCAL_NETWORK** : (Optionnel, `true`/`false`) si activé, l'interface HTTP n'est accessible que depuis le réseau local/VPN (les routes `/track/...` et `/api/public/...` restent disponibles pour l'extérieur)
+   - **ALLOWED_NETWORKS** : (Optionnel) CIDR supplémentaires autorisés, séparés par des virgules (ex. `100.64.0.0/10`)
    
    Voir `env.example` pour la liste complète des variables.
 

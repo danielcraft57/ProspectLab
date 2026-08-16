@@ -94,6 +94,9 @@ class EmailSender:
         tracking_token=None,
         reply_to=None,
         attachments=None,
+        message_id=None,
+        brevo_tag=None,
+        extra_headers=None,
     ):
         """
         Envoie un email
@@ -107,9 +110,12 @@ class EmailSender:
             tracking_token: Token de tracking (optionnel, déjà injecté dans html_body)
             reply_to: Reply-To pour ce message (optionnel, sinon self.reply_to)
             attachments: Liste de dicts {'path': str, 'filename': str} (optionnel)
+            message_id: Message-ID explicite (utile pour corréler Brevo)
+            brevo_tag: Tag Brevo (header X-Mailin-Tag)
+            extra_headers: Dict d'en-têtes additionnels
 
         Returns:
-            dict: {'success': bool, 'message': str}
+            dict: {'success': bool, 'message': str, 'message_id': str|None}
         """
         try:
             has_attachments = bool(attachments)
@@ -121,6 +127,16 @@ class EmailSender:
             rt = (reply_to or "").strip() or self.reply_to
             if rt:
                 msg["Reply-To"] = rt
+            mid = (message_id or "").strip()
+            if mid:
+                msg["Message-ID"] = mid
+            tag = (brevo_tag or "").strip()
+            if tag:
+                msg["X-Mailin-Tag"] = tag
+            if isinstance(extra_headers, dict):
+                for hk, hv in extra_headers.items():
+                    if hk and hv is not None and str(hv).strip() != "":
+                        msg[str(hk)] = str(hv)
 
             text_part = MIMEText(body, "plain", "utf-8")
             body_root.attach(text_part)
@@ -159,22 +175,26 @@ class EmailSender:
             return {
                 "success": True,
                 "message": f"Email envoyé avec succès à {to}",
+                "message_id": mid or None,
             }
 
         except smtplib.SMTPAuthenticationError:
             return {
                 "success": False,
                 "message": "Erreur d'authentification. Vérifiez vos identifiants email.",
+                "message_id": None,
             }
         except smtplib.SMTPRecipientsRefused:
             return {
                 "success": False,
                 "message": f"Adresse email invalide: {to}",
+                "message_id": None,
             }
         except Exception as e:
             return {
                 "success": False,
                 "message": f"Erreur lors de l'envoi: {str(e)}",
+                "message_id": None,
             }
 
     def send_bulk_emails(self, recipients, subject_template, body_template, delay=2):

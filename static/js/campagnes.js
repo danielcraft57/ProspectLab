@@ -78,7 +78,7 @@ async function loadBrevoStatus() {
 }
 
 /**
- * Rend le bandeau Brevo.
+ * Rend le bandeau Brevo (layout type Material Design 3).
  * @param {HTMLElement} panel
  * @param {Object} data
  */
@@ -88,17 +88,19 @@ function renderBrevoStatus(panel, data) {
     var hasErrors = Array.isArray(data.errors) && data.errors.length > 0;
     var hasWarnings = Array.isArray(data.warnings) && data.warnings.length > 0;
     var stateClass = hasErrors ? 'is-error' : (hasWarnings || !data.ok ? 'is-warn' : 'is-ok');
-    panel.className = 'brevo-status-panel ' + stateClass;
+    panel.className = 'brevo-status-panel md-brevo ' + stateClass;
 
     if (!data.configured) {
         panel.innerHTML =
-            '<div class="brevo-status-top">' +
-            '<div class="brevo-status-title">Brevo <span class="brevo-status-badge is-error">Non configuré</span></div>' +
-            '<button type="button" class="brevo-refresh-btn" onclick="loadBrevoStatus()">Actualiser</button>' +
+            '<div class="md-brevo-header">' +
+            '<div class="md-brevo-brand"><div class="md-brevo-avatar" aria-hidden="true">B</div>' +
+            '<div><div class="md-brevo-title-row"><h2 class="md-brevo-title">Brevo</h2>' +
+            '<span class="md-brevo-chip is-error">Non configuré</span></div></div></div>' +
+            '<button type="button" class="md-brevo-icon-btn" onclick="loadBrevoStatus()" aria-label="Actualiser">↻</button>' +
             '</div>' +
-            '<div class="brevo-status-alerts">' +
+            '<div class="md-brevo-banners">' +
             (data.errors || []).map(function(m) {
-                return '<div class="brevo-alert is-error">' + escapeHtml(m) + '</div>';
+                return '<div class="md-brevo-banner is-error"><div>' + escapeHtml(m) + '</div></div>';
             }).join('') +
             '</div>';
         return;
@@ -109,7 +111,7 @@ function renderBrevoStatus(panel, data) {
     var smtp = data.smtp || {};
     var credits = plan.credits_remaining;
     var limit = plan.daily_limit_config || 300;
-    var usedPct = null;
+    var usedPct = 0;
     if (credits != null && limit > 0) {
         usedPct = Math.max(0, Math.min(100, Math.round(((limit - credits) / limit) * 100)));
     }
@@ -120,69 +122,92 @@ function renderBrevoStatus(panel, data) {
     var badgeLabel = hasErrors ? 'Attention' : (hasWarnings ? 'À surveiller' : 'OK');
     var badgeClass = hasErrors ? 'is-error' : (hasWarnings ? 'is-warn' : 'is-ok');
 
-    var alertsHtml = '';
+    var bannersHtml = '';
     (data.errors || []).forEach(function(m) {
-        alertsHtml += '<div class="brevo-alert is-error">' + escapeHtml(m) + '</div>';
+        bannersHtml += '<div class="md-brevo-banner is-error"><div>' + escapeHtml(m) + '</div></div>';
     });
     (data.warnings || []).forEach(function(m) {
-        alertsHtml += '<div class="brevo-alert is-warn">' + escapeHtml(m) + '</div>';
+        bannersHtml += '<div class="md-brevo-banner is-warn"><div>' + escapeHtml(m) + '</div>' +
+            '<button type="button" class="md-brevo-banner-btn" onclick="loadBrevoStatus()">Actualiser</button></div>';
     });
 
     var events = Array.isArray(data.recent_events) ? data.recent_events : [];
     var blocked = Array.isArray(data.blocked_contacts) ? data.blocked_contacts : [];
     var eventsHtml = events.length
-        ? '<ul>' + events.map(function(ev) {
+        ? '<ul class="md-brevo-list">' + events.map(function(ev) {
             return '<li><strong>' + escapeHtml(ev.event || '') + '</strong> — ' +
                 escapeHtml(ev.email || '') +
                 (ev.subject ? ' · ' + escapeHtml(ev.subject) : '') +
                 (ev.date ? ' <em>(' + escapeHtml(ev.date) + ')</em>' : '') +
                 '</li>';
         }).join('') + '</ul>'
-        : '<ul><li>Aucun événement récent</li></ul>';
+        : '<p class="md-brevo-empty">Aucun événement récent</p>';
     var blockedHtml = blocked.length
-        ? '<ul>' + blocked.map(function(c) {
+        ? '<ul class="md-brevo-list">' + blocked.map(function(c) {
             return '<li>' + escapeHtml(c.email || '') +
                 (c.reason ? ' — ' + escapeHtml(c.reason) : '') +
                 '</li>';
         }).join('') + '</ul>'
-        : '<ul><li>Aucun contact bloqué</li></ul>';
+        : '<p class="md-brevo-empty">Aucun contact bloqué</p>';
+
+    var hard = stats.hard_bounces != null ? stats.hard_bounces : '-';
+    var soft = stats.soft_bounces != null ? stats.soft_bounces : '-';
+    var deliv = stats.delivered != null ? stats.delivered : '-';
+    var spam = stats.spam_reports != null ? stats.spam_reports : '-';
+    var errs = stats.errors != null ? stats.errors : '-';
 
     panel.innerHTML =
-        '<div class="brevo-status-top">' +
-        '<div class="brevo-status-title">' +
-        'Brevo <span class="brevo-status-badge ' + badgeClass + '">' + badgeLabel + '</span>' +
-        '<span style="font-weight:500;color:#6b7280;font-size:0.85em;">' +
-        escapeHtml(data.company || '') +
-        (data.account_email ? ' · ' + escapeHtml(data.account_email) : '') +
-        '</span></div>' +
-        '<button type="button" class="brevo-refresh-btn" onclick="loadBrevoStatus()">Actualiser</button>' +
+        '<div class="md-brevo-header">' +
+        '<div class="md-brevo-brand">' +
+        '<div class="md-brevo-avatar" aria-hidden="true">B</div>' +
+        '<div><div class="md-brevo-title-row">' +
+        '<h2 class="md-brevo-title">Brevo</h2>' +
+        '<span class="md-brevo-chip ' + badgeClass + '">' + badgeLabel + '</span>' +
         '</div>' +
-        '<div class="brevo-quota">' +
-        '<div class="brevo-quota-label"><span>Crédits restants</span><span>' +
-        (credits != null ? credits : '?') + ' / ~' + limit +
-        '</span></div>' +
-        '<div class="brevo-quota-bar"><div class="brevo-quota-fill ' + fillClass + '" style="width:' +
-        (usedPct != null ? usedPct : 0) + '%"></div></div>' +
+        '<p class="md-brevo-subtitle">' + escapeHtml(data.company || 'Daniel Craft') +
+        ' · ' + escapeHtml(data.display_email || 'contact@danielcraft.fr') + '</p>' +
+        '</div></div>' +
+        '<button type="button" class="md-brevo-icon-btn" onclick="loadBrevoStatus()" title="Actualiser" aria-label="Actualiser">↻</button>' +
         '</div>' +
-        '<div class="brevo-status-meta">' +
-        '<span>Plan <strong>' + escapeHtml(String(plan.type || '?')) + '</strong></span>' +
-        '<span>Expéditeur <strong>' + escapeHtml(String(data.sender || '')) + '</strong></span>' +
+        '<div class="md-brevo-body">' +
+        '<div class="md-brevo-quota">' +
+        '<div class="md-brevo-quota-top">' +
+        '<div class="md-brevo-quota-value">' + (credits != null ? credits : '?') +
+        ' <span>crédits restants</span></div>' +
+        '<div class="md-brevo-quota-plan">Plan ' + escapeHtml(String(plan.type || '?')) +
+        ' · limite ~' + limit + ' / jour</div>' +
+        '</div>' +
+        '<div class="md-brevo-linear" aria-hidden="true"><i class="' + fillClass + '" style="width:' + usedPct + '%"></i></div>' +
+        '</div>' +
+        '<div class="md-brevo-metrics">' +
+        '<div class="md-brevo-metric is-ok"><div class="md-brevo-metric-label">Délivrés</div>' +
+        '<div class="md-brevo-metric-value">' + escapeHtml(String(deliv)) + '</div></div>' +
+        '<div class="md-brevo-metric' + (Number(hard) > 0 ? ' is-danger' : '') + '"><div class="md-brevo-metric-label">Hard bounce</div>' +
+        '<div class="md-brevo-metric-value">' + escapeHtml(String(hard)) + '</div></div>' +
+        '<div class="md-brevo-metric"><div class="md-brevo-metric-label">Soft bounce</div>' +
+        '<div class="md-brevo-metric-value">' + escapeHtml(String(soft)) + '</div></div>' +
+        '<div class="md-brevo-metric' + (Number(spam) > 0 || Number(errs) > 0 ? ' is-danger' : ' is-ok') + '">' +
+        '<div class="md-brevo-metric-label">Spam / erreurs</div>' +
+        '<div class="md-brevo-metric-value">' + escapeHtml(String(spam)) + ' / ' + escapeHtml(String(errs)) + '</div></div>' +
+        '</div>' +
+        (bannersHtml ? '<div class="md-brevo-banners">' + bannersHtml + '</div>' : '') +
+        '<div class="md-brevo-meta">' +
         '<span>SMTP <strong>' + escapeHtml(String(smtp.host || '')) + '</strong></span>' +
-        '<span>Délivrés <strong>' + escapeHtml(String(stats.delivered != null ? stats.delivered : '-')) + '</strong></span>' +
-        '<span>Hard bounce <strong>' + escapeHtml(String(stats.hard_bounces != null ? stats.hard_bounces : '-')) + '</strong></span>' +
-        '<span>Soft bounce <strong>' + escapeHtml(String(stats.soft_bounces != null ? stats.soft_bounces : '-')) + '</strong></span>' +
-        '<span>Spam <strong>' + escapeHtml(String(stats.spam_reports != null ? stats.spam_reports : '-')) + '</strong></span>' +
-        '<span>Erreurs envoi <strong>' + escapeHtml(String(stats.errors != null ? stats.errors : '-')) + '</strong></span>' +
+        '<span>Expéditeur <strong>' + escapeHtml(String(data.sender || '')) + '</strong></span>' +
         '</div>' +
-        (alertsHtml ? '<div class="brevo-status-alerts">' + alertsHtml + '</div>' : '') +
-        '<details class="brevo-status-details">' +
+        '<details class="md-brevo-details">' +
         '<summary>Détails (événements récents, contacts bloqués)</summary>' +
-        '<div class="brevo-status-details-grid">' +
-        '<div class="brevo-status-card"><h4>Derniers événements</h4>' + eventsHtml + '</div>' +
-        '<div class="brevo-status-card"><h4>Contacts bloqués</h4>' + blockedHtml + '</div>' +
-        '</div></details>';
+        '<div class="md-brevo-details-grid">' +
+        '<div class="md-brevo-details-card"><h4>Derniers événements</h4>' + eventsHtml + '</div>' +
+        '<div class="md-brevo-details-card"><h4>Contacts bloqués</h4>' + blockedHtml + '</div>' +
+        (data.account_email
+            ? '<div class="md-brevo-details-card"><h4>Compte Brevo (login API)</h4>' +
+              '<p class="md-brevo-empty">' + escapeHtml(data.account_email) +
+              ' — interne Brevo, pas l\'expéditeur.</p></div>'
+            : '') +
+        '</div></details>' +
+        '</div>';
 }
-
 // Charger les campagnes
 async function loadCampagnes() {
     try {
@@ -2464,6 +2489,19 @@ async function sendResultsReportByEmail() {
 // Charger les résultats de la campagne
 async function loadCampagneResults(campagneId, silent) {
     try {
+        // Sync Brevo en arrière-plan puis stats (sauf refresh silencieux trop fréquent)
+        if (!silent) {
+            try {
+                const syncRes = await fetch(`/api/campagnes/${campagneId}/brevo-sync`, { method: 'POST' });
+                const syncPayload = await syncRes.json();
+                if (syncPayload && syncPayload.stats) {
+                    displayCampagneResults(syncPayload.stats, false);
+                    return;
+                }
+            } catch (e) {
+                // fallback tracking classique
+            }
+        }
         const response = await fetch(`/api/tracking/campagne/${campagneId}`);
         const stats = await response.json();
 
@@ -2732,9 +2770,92 @@ function displayCampagneResults(stats, silentRefresh) {
                 </div>
             </div>
 
+            ${buildBrevoCompareHtml(stats)}
+
             ${emailsTable}
         </div>
     `;
+}
+
+/**
+ * Bloc de comparaison trackers ProspectLab vs événements Brevo.
+ * @param {Object} stats
+ * @returns {string}
+ */
+function buildBrevoCompareHtml(stats) {
+    var cmp = (stats && stats.brevo_compare) || {};
+    var plOpen = Number(cmp.prospectlab_opens || 0);
+    var plClick = Number(cmp.prospectlab_clicks || 0);
+    var brOpen = Number(cmp.brevo_opens || 0);
+    var brClick = Number(cmp.brevo_clicks || 0);
+    var brDeliv = Number(cmp.brevo_delivered || 0);
+    var brHard = Number(cmp.brevo_hard_bounces || 0);
+    var brSoft = Number(cmp.brevo_soft_bounces || 0);
+    var dOpen = Number(cmp.opens_delta || (brOpen - plOpen));
+    var dClick = Number(cmp.clicks_delta || (brClick - plClick));
+    var cid = stats && stats.campagne_id ? Number(stats.campagne_id) : (currentResultsCampagneId || '');
+
+    return `
+        <div class="results-section brevo-compare-section">
+            <div class="brevo-compare-head">
+                <h3 class="results-section-title">Comparaison trackers</h3>
+                <button type="button" class="brevo-refresh-btn" onclick="syncCampagneBrevo(${cid || 'null'})">
+                    Sync Brevo
+                </button>
+            </div>
+            <p class="brevo-compare-hint">
+                ProspectLab = pixel/liens. Brevo = événements fournisseur (ouverts/délivrés/bounces).
+                Un écart est normal (proxies Gmail, images bloquées, etc.).
+            </p>
+            <div class="brevo-compare-grid">
+                <div class="brevo-compare-card">
+                    <h4>ProspectLab</h4>
+                    <ul>
+                        <li>Ouvertures uniques : <strong>${plOpen}</strong></li>
+                        <li>Clics uniques : <strong>${plClick}</strong></li>
+                    </ul>
+                </div>
+                <div class="brevo-compare-card">
+                    <h4>Brevo</h4>
+                    <ul>
+                        <li>Délivrés : <strong>${brDeliv}</strong></li>
+                        <li>Ouvertures uniques : <strong>${brOpen}</strong></li>
+                        <li>Clics uniques : <strong>${brClick}</strong></li>
+                        <li>Hard bounce : <strong>${brHard}</strong></li>
+                        <li>Soft bounce : <strong>${brSoft}</strong></li>
+                    </ul>
+                </div>
+                <div class="brevo-compare-card">
+                    <h4>Écart (Brevo - PL)</h4>
+                    <ul>
+                        <li>Ouvertures : <strong>${dOpen >= 0 ? '+' : ''}${dOpen}</strong></li>
+                        <li>Clics : <strong>${dClick >= 0 ? '+' : ''}${dClick}</strong></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Force une sync Brevo pour la campagne ouverte dans la modale.
+ * @param {number|null} campagneId
+ */
+async function syncCampagneBrevo(campagneId) {
+    var id = campagneId || currentResultsCampagneId;
+    if (!id) return;
+    try {
+        const res = await fetch(`/api/campagnes/${id}/brevo-sync`, { method: 'POST' });
+        const payload = await res.json();
+        if (payload && payload.stats) {
+            displayCampagneResults(payload.stats, false);
+        } else {
+            await loadCampagneResults(id, false);
+        }
+        loadBrevoStatus();
+    } catch (e) {
+        alert('Sync Brevo impossible pour le moment.');
+    }
 }
 
 async function openSentEmailPreview(emailId) {

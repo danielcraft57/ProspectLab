@@ -69,24 +69,30 @@ def website_lookup_candidates(raw: object) -> list[str]:
     """
     Variantes de ``entreprises.website`` pour une recherche indexée PostgreSQL
     (évite le scan complet de la table en prod).
+
+    Inclut les formes avec slash final : beaucoup de fiches en base ont
+    ``https://exemple.fr/`` (scraping / saisie UI) alors que l'API canonise
+    sans slash.
     """
     host = normalize_website_domain(raw)
     if not host:
         return []
     seen: set[str] = set()
     out: list[str] = []
-    for variant in (
+    bases = (
         host,
         f'www.{host}',
         f'https://{host}',
         f'http://{host}',
         f'https://www.{host}',
         f'http://www.{host}',
-    ):
-        key = variant.lower().strip()
-        if key and key not in seen:
-            seen.add(key)
-            out.append(key)
+    )
+    for base in bases:
+        for variant in (base, f'{base}/'):
+            key = variant.lower().strip()
+            if key and key not in seen:
+                seen.add(key)
+                out.append(key)
     return out
 
 

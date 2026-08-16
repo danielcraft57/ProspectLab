@@ -392,7 +392,8 @@ class CampagneManager(DatabaseBase):
         statut='sent',
         erreur=None,
         tracking_token=None,
-        contenu_envoye=None
+        contenu_envoye=None,
+        brevo_message_id=None,
     ):
         """
         Sauvegarde un email envoyé dans la base.
@@ -408,6 +409,7 @@ class CampagneManager(DatabaseBase):
             erreur (str|None): Message d'erreur si échec (optionnel)
             tracking_token (str|None): Token de tracking unique (optionnel)
             contenu_envoye (str|None): Snapshot du contenu envoyé (HTML ou texte)
+            brevo_message_id (str|None): Message-ID / id Brevo pour rattacher les events
 
         Returns:
             int: ID de l'email enregistré
@@ -435,6 +437,9 @@ class CampagneManager(DatabaseBase):
         if 'contenu_envoye' in cols:
             insert_columns.append('contenu_envoye')
             insert_values.append(contenu_envoye)
+        if 'brevo_message_id' in cols and brevo_message_id:
+            insert_columns.append('brevo_message_id')
+            insert_values.append(brevo_message_id)
 
         columns_sql = ', '.join(insert_columns)
         placeholders = ', '.join(['?'] * len(insert_columns))
@@ -689,6 +694,128 @@ class CampagneManager(DatabaseBase):
         updated = cursor.rowcount > 0
         conn.close()
         return updated
+
+    def update_email_brevo_message_id(self, email_id, brevo_message_id):
+        """
+        Enregistre le Message-ID Brevo associé à un email envoyé.
+
+        @param email_id: ID de ``emails_envoyes``
+        @param brevo_message_id: Identifiant message Brevo
+        @returns: True si la ligne a été mise à jour
+        """
+        if not email_id or not brevo_message_id:
+            return False
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        if self.is_postgresql():
+            self.execute_sql(cursor, """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'emails_envoyes'
+            """)
+            cols = {row['column_name'] for row in cursor.fetchall()}
+        else:
+            self.execute_sql(cursor, "PRAGMA table_info(emails_envoyes)")
+            cols = {row[1] for row in cursor.fetchall()}
+        if 'brevo_message_id' not in cols:
+            conn.close()
+            return False
+        self.execute_sql(
+            cursor,
+            'UPDATE emails_envoyes SET brevo_message_id = ? WHERE id = ?',
+            (str(brevo_message_id).strip(), int(email_id)),
+        )
+        conn.commit()
+        updated = cursor.rowcount > 0
+        conn.close()
+        return updated
+
+    def find_email_envoye_for_brevo_event(self, *, email=None, subject=None, message_id=None, campagne_id=None):
+        """
+        Retrouve un ``emails_envoyes`` à partir d'un événement Brevo.
+
+        Priorité : message_id > (email + sujet + campagne) > (email + campagne unique).
+
+        @param email: Destinataire
+        @param subject: Sujet
+        @param message_id: Message-ID Brevo
+        @param campagne_id: Restreindre à une campagne
+        @returns: Dict email envoyé ou None
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        if self.is_postgresql():
+            self.execute_sql(cursor, """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'emails_envoyes'
+            """)
+            cols = {row['column_name'] for row in cursor.fetchall()}
+        else:
+            self.execute_sql(cursor, "PRAGMA table_info(emails_envoyes)")
+            cols = {row[1] for row in cursor.fetchall()}
+
+        mid = (message_id or '').strip()
+        if mid and 'brevo_message_id' in cols:
+            self.execute_sql(
+                cursor,
+                'SELECT * FROM emails_envoyes WHERE brevo_message_id = ? LIMIT 1',
+                (mid,),
+            )
+            row = cursor.fetchone()
+            if row:
+                conn.close()
+                return dict(row)
+
+        em = (email or '').strip().lower()
+        subj = (subject or '').strip()
+        params = []
+        where = ['1=1']
+        if em:
+            where.append('LOWER(TRIM(email)) = ?')
+            params.append(em)
+        if subj:
+            where.append('TRIM(sujet) = ?')
+            params.append(subj)
+        if campagne_id is not None:
+            where.append('campagne_id = ?')
+            params.append(int(campagne_id))
+        if len(params) < 1:
+            conn.close()
+            return None
+        sql = f'''
+            SELECT * FROM emails_envoyes
+            WHERE {' AND '.join(where)}
+            ORDER BY date_envoi DESC
+            LIMIT 2
+        '''
+        self.execute_sql(cursor, sql, tuple(params))
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+        if not rows:
+            # Fallback : email seul dans la campagne
+            if em and campagne_id is not None and subj:
+                conn = self.get_connection()
+                cursor = conn.cursor()
+                self.execute_sql(
+                    cursor,
+                    '''
+                    SELECT * FROM emails_envoyes
+                    WHERE campagne_id = ? AND LOWER(TRIM(email)) = ?
+                    ORDER BY date_envoi DESC
+                    LIMIT 2
+                    ''',
+                    (int(campagne_id), em),
+                )
+                rows = [dict(r) for r in cursor.fetchall()]
+                conn.close()
+        if len(rows) == 1:
+            return rows[0]
+        if len(rows) > 1 and subj:
+            for r in rows:
+                if (r.get('sujet') or '').strip() == subj:
+                    return r
+        return rows[0] if len(rows) == 1 else None
 
     def get_emails_campagne(self, campagne_id):
         """
@@ -1231,12 +1358,25 @@ class CampagneManager(DatabaseBase):
             email['last_open'] = email_stats.get('open', {}).get('last_event')
             email['has_opened'] = email['opens'] > 0
             email['has_clicked'] = email['clicks'] > 0
+            email['brevo_opens'] = email_stats.get('brevo_open', {}).get('count', 0)
+            email['brevo_clicks'] = email_stats.get('brevo_click', {}).get('count', 0)
+            email['brevo_delivered'] = email_stats.get('brevo_delivered', {}).get('count', 0)
+            email['brevo_hard_bounce'] = email_stats.get('brevo_hard_bounce', {}).get('count', 0)
+            email['brevo_soft_bounce'] = email_stats.get('brevo_soft_bounce', {}).get('count', 0)
+            email['has_brevo_opened'] = email['brevo_opens'] > 0
+            email['has_brevo_clicked'] = email['brevo_clicks'] > 0
+            email['has_brevo_delivered'] = email['brevo_delivered'] > 0
 
         conn.close()
 
         total_emails = len(emails)
         total_opens = stats_by_type.get('open', {}).get('unique_emails', 0)
         total_clicks = stats_by_type.get('click', {}).get('unique_emails', 0)
+        brevo_opens = stats_by_type.get('brevo_open', {}).get('unique_emails', 0)
+        brevo_clicks = stats_by_type.get('brevo_click', {}).get('unique_emails', 0)
+        brevo_delivered = stats_by_type.get('brevo_delivered', {}).get('unique_emails', 0)
+        brevo_hard = stats_by_type.get('brevo_hard_bounce', {}).get('unique_emails', 0)
+        brevo_soft = stats_by_type.get('brevo_soft_bounce', {}).get('unique_emails', 0)
 
         # Compteurs campagne (pour délivrabilité stricte)
         td = 0
@@ -1268,6 +1408,17 @@ class CampagneManager(DatabaseBase):
             'deliverability_rate_strict': (delivered_strict / td * 100.0) if td > 0 else 0.0,
             'avg_read_time': avg_read_time,
             'stats_by_type': stats_by_type,
+            'brevo_compare': {
+                'prospectlab_opens': total_opens,
+                'prospectlab_clicks': total_clicks,
+                'brevo_opens': brevo_opens,
+                'brevo_clicks': brevo_clicks,
+                'brevo_delivered': brevo_delivered,
+                'brevo_hard_bounces': brevo_hard,
+                'brevo_soft_bounces': brevo_soft,
+                'opens_delta': int(brevo_opens) - int(total_opens),
+                'clicks_delta': int(brevo_clicks) - int(total_clicks),
+            },
             'emails': emails
         }
     

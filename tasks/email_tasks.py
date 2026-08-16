@@ -404,6 +404,11 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
             if html_message:
                 html_message = tracker.process_email_content(html_message, tracking_token)
 
+            # Tag Brevo + Message-ID ProspectLab pour corrélation des events API
+            import uuid
+            brevo_tag = f'pl-campagne-{campagne_id}'
+            message_id = f'<pl-{campagne_id}-{uuid.uuid4().hex[:16]}@danielcraft.fr>'
+
             # Envoyer l'email
             result = email_sender.send_email(
                 to=recipient.get('email'),
@@ -411,7 +416,12 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
                 body=text_message or 'Email HTML',
                 recipient_name=recipient_nom or '',
                 html_body=html_message,
-                tracking_token=tracking_token
+                tracking_token=tracking_token,
+                message_id=message_id,
+                brevo_tag=brevo_tag,
+                extra_headers={
+                    'X-Mailin-custom': f'campagne_id:{campagne_id}|token:{tracking_token}',
+                },
             )
 
             # Sauvegarder l'email envoyé
@@ -425,7 +435,8 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
                 statut='sent' if result.get('success') else 'failed',
                 erreur=None if result.get('success') else result.get('message', 'Erreur inconnue'),
                 tracking_token=tracking_token,
-                contenu_envoye=html_message or text_message
+                contenu_envoye=html_message or text_message,
+                brevo_message_id=None,  # rempli après sync Brevo (Brevo réécrit souvent le Message-ID)
             )
 
             if result.get('success'):

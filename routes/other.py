@@ -624,17 +624,83 @@ def api_brevo_status():
     """
     API: Statut Brevo (quota, config SMTP, stats, derniers événements, contacts bloqués).
 
+    En développement local, recharge le ``.env`` à la volée pour refléter les changements
+    SMTP sans forcément redémarrer tout le process.
+
     Returns:
         JSON: Résumé prêt pour le bandeau campagnes / monitoring envoi.
     """
+    import os
+    from config import APP_ENV
     from services.brevo_client import get_brevo_status
     from utils.helpers import clean_json_dict
+
+    if str(APP_ENV or '').lower() in ('development', 'dev', 'local'):
+        try:
+            from dotenv import load_dotenv
+            load_dotenv(override=True)
+        except Exception:
+            pass
+        # Forcer la relecture des clefs mail pour le statut (évite le stale import config)
+        os.environ.setdefault('MAIL_SERVER', os.environ.get('MAIL_SERVER') or '')
 
     status = get_brevo_status()
     http_code = 200 if status.get('configured') else 503
     if status.get('configured') and not status.get('ok') and status.get('errors'):
         http_code = 200  # on renvoie quand même le payload pour l'UI
     return jsonify(clean_json_dict(status)), http_code
+
+
+@other_bp.route('/api/brevo/sync', methods=['POST'])
+@login_required
+def api_brevo_sync():
+    """
+    API: Synchronise les événements Brevo vers ``email_tracking_events``.
+
+    Body/query optionnels :
+      - campagne_id : restreindre l'appariement
+      - limit : nb d'événements à tirer (défaut 100)
+
+    Returns:
+        JSON: Résumé de sync (matched / inserted / unmatched)
+    """
+    from services.brevo_client import sync_brevo_events
+    from utils.helpers import clean_json_dict
+
+    data = request.get_json(silent=True) or {}
+    campagne_id = data.get('campagne_id', request.args.get('campagne_id'))
+    limit = data.get('limit', request.args.get('limit', 100))
+    cid = None
+    try:
+        if campagne_id is not None and str(campagne_id).strip() != '':
+            cid = int(campagne_id)
+    except (TypeError, ValueError):
+        cid = None
+    try:
+        lim = int(limit)
+    except (TypeError, ValueError):
+        lim = 100
+
+    result = sync_brevo_events(campagne_id=cid, limit=lim)
+    code = 200 if result.get('ok') else 502
+    return jsonify(clean_json_dict(result)), code
+
+
+@other_bp.route('/api/campagnes/<int:campagne_id>/brevo-sync', methods=['POST'])
+@login_required
+def api_campagne_brevo_sync(campagne_id):
+    """
+    API: Sync Brevo puis renvoie les stats tracking enrichies de la campagne.
+
+    @param campagne_id: ID campagne
+    """
+    from services.brevo_client import sync_brevo_events
+    from services.database.campagnes import CampagneManager
+    from utils.helpers import clean_json_dict
+
+    sync = sync_brevo_events(campagne_id=campagne_id, limit=100)
+    stats = CampagneManager().get_campagne_tracking_stats(campagne_id)
+    return jsonify(clean_json_dict({'sync': sync, 'stats': stats}))
 
 
 @other_bp.route('/api/campagnes', methods=['GET'])
