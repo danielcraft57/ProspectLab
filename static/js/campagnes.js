@@ -13,6 +13,12 @@ let currentResultsCampagneId = null;
 let resultsRefreshTimer = null;
 /** Liste complète des campagnes chargées depuis l'API. */
 let campagnesData = [];
+/** Timer polling Brevo pendant un envoi en cours. */
+let brevoPollTimer = null;
+/** Timer polling liste campagnes (reprise après F5 / filet de sécurité). */
+let campagnesPollTimer = null;
+/** Task IDs déjà suivies via WebSocket (évite les doublons après polling). */
+const monitoredCampagneTaskIds = new Set();
 /** Données affichées après filtrage emails (étape 2). */
 let displayedEntreprisesData = [];
 /** IDs des entreprises sélectionnées à l'étape 1. */
@@ -62,11 +68,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
 /**
  * Charge et affiche le statut Brevo (quota, erreurs, stats) sur la page campagnes.
+ * @param {boolean} [quiet=false] Si true, pas de flash "Vérification…" (polling).
  */
-async function loadBrevoStatus() {
+async function loadBrevoStatus(quiet) {
     var panel = document.getElementById('brevo-status-panel');
     if (!panel) return;
-    panel.innerHTML = '<div class="brevo-status-loading">Vérification Brevo…</div>';
+    if (!quiet) {
+        panel.innerHTML = '<div class="brevo-status-loading">Vérification Brevo…</div>';
+    }
     try {
         var res = await fetch('/api/brevo/status');
         var data = await res.json();
@@ -75,6 +84,74 @@ async function loadBrevoStatus() {
         panel.className = 'brevo-status-panel is-error';
         panel.innerHTML = '<div class="brevo-status-error-msg">Impossible de joindre le statut Brevo.</div>';
     }
+}
+
+/**
+ * Indique s'il y a au moins une campagne en cours / programmée.
+ * @returns {boolean}
+ */
+function hasActiveCampagneSend() {
+    return (campagnesData || []).some(function(c) {
+        var s = getEffectiveCampaignStatus(c);
+        return s === 'running' || s === 'scheduled';
+    });
+}
+
+/**
+ * Démarre / arrête le polling Brevo selon les envois actifs.
+ */
+function syncBrevoPolling() {
+    if (hasActiveCampagneSend()) {
+        if (!brevoPollTimer) {
+            brevoPollTimer = setInterval(function() {
+                loadBrevoStatus(true);
+            }, 12000);
+        }
+        return;
+    }
+    if (brevoPollTimer) {
+        clearInterval(brevoPollTimer);
+        brevoPollTimer = null;
+    }
+}
+
+/**
+ * Démarre / arrête un rechargement léger des campagnes pendant un envoi
+ * (filet de sécurité si le WebSocket a sauté après un F5).
+ */
+function syncCampagnesPolling() {
+    if (hasActiveCampagneSend()) {
+        if (!campagnesPollTimer) {
+            campagnesPollTimer = setInterval(function() {
+                loadCampagnes({ silent: true });
+            }, 8000);
+        }
+        return;
+    }
+    if (campagnesPollTimer) {
+        clearInterval(campagnesPollTimer);
+        campagnesPollTimer = null;
+    }
+}
+
+/**
+ * Reprend le suivi WebSocket des campagnes running/scheduled (ex. après F5).
+ * Idempotent: n'émet qu'une fois par task_id côté client.
+ */
+function resumeRunningCampagnesMonitoring() {
+    if (!socket || !socket.connected) return;
+    (campagnesData || []).forEach(function(c) {
+        var st = getEffectiveCampaignStatus(c);
+        var taskId = (c && c.celery_task_id ? String(c.celery_task_id) : '').trim();
+        if (!taskId) return;
+        if (st !== 'running' && st !== 'scheduled') return;
+        if (monitoredCampagneTaskIds.has(taskId)) return;
+        monitoredCampagneTaskIds.add(taskId);
+        socket.emit('monitor_campagne', {
+            task_id: taskId,
+            campagne_id: c.id
+        });
+    });
 }
 
 /**
@@ -184,7 +261,8 @@ function renderBrevoStatus(panel, data) {
 }
 
 // Charger les campagnes
-async function loadCampagnes() {
+async function loadCampagnes(options) {
+    options = options || {};
     try {
         const mid = window.__MAIL_ACCOUNT_ID__;
         const url = (mid !== null && mid !== undefined)
@@ -193,13 +271,79 @@ async function loadCampagnes() {
         const response = await fetch(url);
         const campagnes = await response.json();
         campagnesData = Array.isArray(campagnes) ? campagnes : [];
-        applyCampagnesFilters();
+        if (options.silent) {
+            // Polling: maj légère des cartes running sans tout redessiner
+            refreshRunningCampagneCardsInPlace();
+        } else {
+            applyCampagnesFilters();
+            resumeRunningCampagnesMonitoring();
+            if (hasActiveCampagneSend()) {
+                loadBrevoStatus(true);
+            }
+        }
+        syncBrevoPolling();
+        syncCampagnesPolling();
     } catch (error) {
+        if (options.silent) return;
         const grid = document.getElementById('campagnes-grid');
         if (grid) {
             grid.innerHTML =
             '<div class="empty-state"><p>Erreur lors du chargement des campagnes</p></div>';
         }
+    }
+}
+
+/**
+ * Met à jour en place les compteurs / barre de progression des campagnes en cours.
+ * Utilisé pendant le polling (évite le flicker d'un re-render complet).
+ */
+function refreshRunningCampagneCardsInPlace() {
+    (campagnesData || []).forEach(function(campagne) {
+        var st = getEffectiveCampaignStatus(campagne);
+        var card = document.querySelector('[data-campagne-id="' + campagne.id + '"]');
+        if (!card) return;
+
+        // Mise à jour du premier bloc "Envoyés" si présent
+        var stats = card.querySelectorAll('.stat-value');
+        if (stats && stats.length > 0 && campagne.total_envoyes != null) {
+            // Ordre UI: destinataires, envoyés, ...
+            if (stats.length >= 2) {
+                stats[1].textContent = String(campagne.total_envoyes || 0);
+            }
+        }
+
+        if (st !== 'running' && st !== 'scheduled') {
+            // Statut changé côté serveur -> rechargement complet au prochain cycle fort
+            return;
+        }
+
+        var dest = Math.max(Number(campagne.total_destinataires) || 1, 1);
+        var sent = Number(campagne.total_envoyes) || 0;
+        var pct = Math.round((sent / dest) * 100);
+        var progressContainer = card.querySelector('.progress-bar-container');
+        if (!progressContainer) {
+            progressContainer = document.createElement('div');
+            progressContainer.className = 'progress-bar-container';
+            card.appendChild(progressContainer);
+        }
+        var fill = progressContainer.querySelector('.progress-fill');
+        var text = progressContainer.querySelector('.progress-text');
+        if (!fill) {
+            progressContainer.innerHTML =
+                '<div class="progress-bar"><div class="progress-fill" style="width: ' + pct + '%">' + pct + '%</div></div>' +
+                '<div class="progress-text">Envoi ' + sent + '/' + dest + '</div>';
+            return;
+        }
+        fill.style.width = pct + '%';
+        fill.textContent = pct + '%';
+        if (text) {
+            text.textContent = 'Envoi ' + sent + '/' + dest;
+        }
+    });
+
+    // Si plus aucune running dans le DOM attendu, forcer un refresh complet
+    if (!hasActiveCampagneSend()) {
+        applyCampagnesFilters();
     }
 }
 
@@ -334,7 +478,7 @@ function displayCampagnes(campagnes) {
         const failedCount = Math.max(0, Number(campagne.total_envoyes || 0) - Number(campagne.total_reussis || 0));
         const bouncedCount = Number(campagne.total_bounced || 0);
         return `
-        <div class="campagne-card" data-campagne-id="${campagne.id}">
+        <div class="campagne-card" data-campagne-id="${campagne.id}" data-task-id="${escapeHtml(campagne.celery_task_id || '')}">
             <div class="campagne-header">
                 <h3 class="campagne-title">${escapeHtml(campagne.nom)}</h3>
                 <span class="campagne-statut statut-${effectiveStatus}">${getCampaignStatusLabel(effectiveStatus)}</span>
@@ -2390,14 +2534,18 @@ async function submitCampagne() {
 
         const data = await response.json();
 
-        if (data.success) {
+            if (data.success) {
             closeModal();
             loadCampagnes();
+            loadBrevoStatus(true);
+            syncBrevoPolling();
 
             // Démarrer le monitoring WebSocket uniquement pour envoi immédiat (task_id présent)
             if (data.task_id && socket && socket.connected) {
+                var tid = String(data.task_id);
+                monitoredCampagneTaskIds.add(tid);
                 socket.emit('monitor_campagne', {
-                    task_id: data.task_id,
+                    task_id: tid,
                     campagne_id: data.campagne_id
                 });
             }
@@ -2953,14 +3101,22 @@ function initWebSocket() {
     socket = io();
 
     socket.on('connect', function() {
-        // Connexion WebSocket établie
+        // Reprendre le suivi des envois en cours (après F5 / reconnexion)
+        resumeRunningCampagnesMonitoring();
     });
 
     socket.on('campagne_progress', function(data) {
         updateCampagneProgress(data);
+        syncBrevoPolling();
     });
 
     socket.on('campagne_complete', function(data) {
+        // Libérer le slot de monitoring pour une éventuelle relance
+        (campagnesData || []).forEach(function(c) {
+            if (c && Number(c.id) === Number(data.campagne_id) && c.celery_task_id) {
+                monitoredCampagneTaskIds.delete(String(c.celery_task_id));
+            }
+        });
         updateCampagneProgress({
             campagne_id: data.campagne_id,
             progress: 100,
@@ -2968,19 +3124,29 @@ function initWebSocket() {
             total: data.result?.total || 0,
             sent: data.result?.total_sent || 0,
             failed: data.result?.total_failed || 0,
-            message: 'Terminé'
+            message: (data.result && data.result.cancelled) ? 'Interrompu' : 'Terminé'
         });
 
         // Recharger pour mettre à jour le statut
         loadCampagnes();
+        loadBrevoStatus(true);
 
         // Afficher une notification de succès
         const totalSent = data.result?.total_sent || 0;
         const totalFailed = data.result?.total_failed || 0;
-        showNotification(`Campagne terminée ! ${totalSent} emails envoyés${totalFailed > 0 ? `, ${totalFailed} échecs` : ''}`, 'success');                                                                                                              
+        if (data.result && data.result.cancelled) {
+            showNotification('Campagne interrompue.', 'info');
+        } else {
+            showNotification(`Campagne terminée ! ${totalSent} emails envoyés${totalFailed > 0 ? `, ${totalFailed} échecs` : ''}`, 'success');
+        }
     });
 
     socket.on('campagne_error', function(data) {
+        (campagnesData || []).forEach(function(c) {
+            if (c && Number(c.id) === Number(data.campagne_id) && c.celery_task_id) {
+                monitoredCampagneTaskIds.delete(String(c.celery_task_id));
+            }
+        });
         // Mettre à jour l'affichage pour montrer l'erreur
         const card = document.querySelector(`[data-campagne-id="${data.campagne_id}"]`);
         if (card) {
@@ -2988,13 +3154,14 @@ function initWebSocket() {
             if (progressContainer) {
                 progressContainer.innerHTML = `
                     <div class="error-message" style="color: #dc3545; padding: 8px; background: #f8d7da; border-radius: 4px; margin-top: 8px;">                                                                                                         
-                        ❌ Erreur: ${escapeHtml(data.error || 'Erreur inconnue')}
+                        Erreur: ${escapeHtml(data.error || 'Erreur inconnue')}
                     </div>
                 `;
             }
         }
         // Recharger pour mettre à jour le statut
         loadCampagnes();
+        loadBrevoStatus(true);
         showNotification('Erreur lors de l\'envoi de la campagne: ' + (data.error || 'Erreur inconnue'), 'error');
     });
 }
@@ -3240,6 +3407,11 @@ function getEffectiveCampaignStatus(campagne) {
 
 function shouldShowRelaunchButton(campagne) {
     const status = String((campagne && campagne.statut) || '').trim().toLowerCase();
+    // Pas de Relancer pendant un envoi / une programmation / une interruption
+    if (status === 'running' || status === 'scheduled' || status === 'draft'
+        || status === 'cancelled' || status === 'canceled' || status === 'stopped') {
+        return false;
+    }
     if (status === 'failed') return true;
 
     const dest = Number(campagne && campagne.total_destinataires) || 0;

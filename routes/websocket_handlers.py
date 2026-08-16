@@ -2361,6 +2361,21 @@ def register_websocket_handlers(socketio, app):
                                     if session_id in active_tasks:
                                         del active_tasks[session_id]
                                 break
+                            elif current_state in ('REVOKED', 'REJECTED'):
+                                safe_emit(socketio, 'campagne_complete', {
+                                    'campagne_id': campagne_id,
+                                    'result': {
+                                        'success': True,
+                                        'cancelled': True,
+                                        'total': 0,
+                                        'total_sent': 0,
+                                        'total_failed': 0,
+                                    }
+                                }, room=session_id)
+                                with tasks_lock:
+                                    if session_id in active_tasks:
+                                        del active_tasks[session_id]
+                                break
                             elif current_state == 'FAILURE':
                                 error_msg = str(task_result) if task_result else 'Erreur inconnue'
                                 safe_emit(socketio, 'campagne_error', {
@@ -2389,7 +2404,18 @@ def register_websocket_handlers(socketio, app):
                     }, room=session_id)
 
             with tasks_lock:
-                active_tasks[session_id] = {'type': 'campagne', 'task_id': task_id}
+                existing = active_tasks.get(session_id) or {}
+                if (
+                    existing.get('type') == 'campagne'
+                    and existing.get('task_id') == task_id
+                    and existing.get('campagne_id') == campagne_id
+                ):
+                    return
+                active_tasks[session_id] = {
+                    'type': 'campagne',
+                    'task_id': task_id,
+                    'campagne_id': campagne_id,
+                }
 
             _start_monitor_background(socketio, monitor_task)
         except Exception as e:
