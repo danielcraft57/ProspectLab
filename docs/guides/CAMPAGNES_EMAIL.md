@@ -4,6 +4,9 @@
 
 Le système de campagnes email permet d'envoyer des emails en masse à des entreprises avec suivi en temps réel, tracking des ouvertures et clics, et personnalisation via templates HTML.
 
+**Marque DanielCraft** (ton, vocabulaire, palette) : voir [DANIELCRAFT_EMAIL_VOICE.md](DANIELCRAFT_EMAIL_VOICE.md).
+Maquettes locales : `design/mockups/emails-audit/`.
+
 ## Fonctionnalités principales
 
 ### 1. Création de campagne

@@ -1,0 +1,30 @@
+{#if_security}
+{#if_risk}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;">
+    <tr>
+        <td width="50%" style="padding:4px;vertical-align:top;">
+            <table role="presentation" width="100%" style="background:#eef8f1;border-radius:12px;border:1px solid #91b98a;">
+                <tr>
+                    <td style="padding:14px 8px;text-align:center;">
+                        <p style="margin:0 0 4px;color:#1f6b48;font-size:11px;font-weight:700;text-transform:uppercase;">Technique</p>
+                        <p style="margin:0;color:#2f9e6a;font-size:26px;font-weight:800;">{security_score}</p>
+                        <p style="margin:4px 0 0;color:#6b7280;font-size:11px;">/ 100</p>
+                    </td>
+                </tr>
+            </table>
+        </td>
+        <td width="50%" style="padding:4px;vertical-align:top;">
+            <table role="presentation" width="100%" style="background:#fef3c7;border-radius:12px;border:1px solid #f59e0b;">
+                <tr>
+                    <td style="padding:14px 8px;text-align:center;">
+                        <p style="margin:0 0 4px;color:#b45309;font-size:11px;font-weight:700;text-transform:uppercase;">Pentest</p>
+                        <p style="margin:0;color:#d97706;font-size:26px;font-weight:800;">{risk_score}</p>
+                        <p style="margin:4px 0 0;color:#6b7280;font-size:11px;">risque / 100</p>
+                    </td>
+                </tr>
+            </table>
+        </td>
+    </tr>
+</table>
+{#endif}
+{#endif}

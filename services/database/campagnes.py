@@ -73,6 +73,7 @@ class CampagneManager(DatabaseBase):
         scheduled_at=None,
         campaign_params_json=None,
         mail_account_id=None,
+        celery_task_id=None,
     ):
         """
         Met à jour une campagne email.
@@ -88,6 +89,8 @@ class CampagneManager(DatabaseBase):
             statut (str|None): Nouveau statut (optionnel)
             scheduled_at (str|None): Date d'envoi programmé (optionnel)
             campaign_params_json (str|None): Paramètres sérialisés (optionnel)
+            mail_account_id (int|None): Compte mail (optionnel)
+            celery_task_id (str|None): ID tâche Celery d'envoi (optionnel)
 
         Returns:
             bool: True si mis à jour, False sinon
@@ -128,6 +131,9 @@ class CampagneManager(DatabaseBase):
         if mail_account_id is not None:
             updates.append('mail_account_id = ?')
             values.append(mail_account_id)
+        if celery_task_id is not None:
+            updates.append('celery_task_id = ?')
+            values.append(celery_task_id)
 
         if not updates:
             conn.close()
@@ -141,6 +147,22 @@ class CampagneManager(DatabaseBase):
         updated = cursor.rowcount > 0
         conn.close()
         return updated
+
+    def is_campagne_cancelled(self, campagne_id) -> bool:
+        """
+        Indique si l'envoi doit s'arrêter (annulé ou campagne supprimée).
+
+        Args:
+            campagne_id (int): ID de la campagne
+
+        Returns:
+            bool: True si plus d'envoi ne doit partir
+        """
+        campagne = self.get_campagne(campagne_id)
+        if not campagne:
+            return True
+        statut = str(campagne.get('statut') or '').strip().lower()
+        return statut in {'cancelled', 'canceled', 'stopped'}
 
     def get_campagne(self, campagne_id):
         """

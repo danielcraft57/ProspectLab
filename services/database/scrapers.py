@@ -385,6 +385,8 @@ class ScraperManager(DatabaseBase):
                         analyses_dict[analysis['email']] = analysis
         
         # Insérer les nouveaux emails avec leurs analyses
+        from utils.email_quality import is_file_like_email
+
         for email in emails:
             if isinstance(email, dict):
                 email_str = email.get('email') or email.get('value') or str(email)
@@ -393,6 +395,9 @@ class ScraperManager(DatabaseBase):
                 email_str = str(email)
                 page_url = None
             
+            if email_str and is_file_like_email(email_str):
+                continue
+
             if email_str:
                 email_key = email_str.strip().lower()
                 analysis = analyses_dict.get(email_str)

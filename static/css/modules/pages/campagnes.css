@@ -731,6 +731,22 @@ body[data-theme="dark"] .campagnes-search-input i {
     background: #c0392b;
 }
 
+.btn-cancel {
+    background: #d97706;
+    color: #ffffff;
+}
+
+.btn-cancel:hover {
+    background: #b45309;
+}
+
+.statut-cancelled,
+.statut-canceled,
+.statut-stopped {
+    background: #fff7ed;
+    color: #c2410c;
+}
+
 .btn-relaunch {
     background: #0ea5e9;
     color: #ffffff;
@@ -1483,6 +1499,18 @@ body[data-theme="dark"] .campagnes-search-input i {
     background: #dbeafe;
     border-radius: 4px;
     vertical-align: middle;
+}
+
+.recipients-action-btn--accent {
+    background: #dbeafe;
+    color: #1d4ed8;
+    border-color: #93c5fd;
+    font-weight: 600;
+}
+
+.recipients-action-btn--accent:hover {
+    background: #bfdbfe;
+    color: #1e40af;
 }
 
 .entreprise-item {
@@ -2463,6 +2491,9 @@ body[data-theme="dark"] .statut-running { background: #0c4a6e; color: #7dd3fc; }
 body[data-theme="dark"] .statut-completed { background: #14532d; color: #86efac; }
 body[data-theme="dark"] .statut-completed_with_errors { background: #3b2a00; color: #fdba74; }
 body[data-theme="dark"] .statut-failed { background: #450a0a; color: #fecaca; }
+body[data-theme="dark"] .statut-cancelled,
+body[data-theme="dark"] .statut-canceled,
+body[data-theme="dark"] .statut-stopped { background: #431407; color: #fdba74; }
 
 body[data-theme="dark"] .btn-relaunch {
     background: #0c4a6e;
@@ -2723,6 +2754,22 @@ body[data-theme="dark"] .ciblage-save-segment-inputs input[type="text"] {
     background: #0f172a;
     border-color: #475569;
     color: #e2e8f0;
+}
+
+body[data-theme="dark"] .email-badge-principal {
+    color: #93c5fd;
+    background: #1e3a8a;
+}
+
+body[data-theme="dark"] .recipients-action-btn--accent {
+    background: #1e3a8a;
+    color: #bfdbfe;
+    border-color: #3b82f6;
+}
+
+body[data-theme="dark"] .recipients-action-btn--accent:hover {
+    background: #1d4ed8;
+    color: #eff6ff;
 }
 
 /* Cadre "Filtrage des emails" en dark (plus de cadre blanc) */

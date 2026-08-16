@@ -248,14 +248,17 @@ class EntrepriseAnalyzer:
         return url_str
     
     def extract_emails(self, text, domain=None):
-        """Extrait les emails d'un texte"""
+        """Extrait les emails d'un texte (ignore les faux positifs type assets)."""
+        from utils.email_quality import is_file_like_email
+
         email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
         emails = set(re.findall(email_pattern, text, re.IGNORECASE))
-        
+        emails = {e for e in emails if e and not is_file_like_email(e)}
+
         # Filtrer les emails du domaine si spécifié
         if domain:
             emails = {e for e in emails if domain.lower() in e.lower()}
-        
+
         return list(emails)
     
     def find_contact_page(self, base_url, soup):

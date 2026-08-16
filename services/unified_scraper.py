@@ -294,8 +294,21 @@ class UnifiedScraper:
             return None
     
     def extract_emails(self, text: str) -> Set[str]:
-        """Extrait les emails d'un texte (optimisé avec regex compilée)"""
-        return set(self.email_pattern.findall(text))
+        """
+        Extrait les emails d'un texte (regex compilée).
+
+        Filtre les faux positifs d'assets (`logo@2x.png`, `plan@150x.webp`, etc.).
+        """
+        from utils.email_quality import is_file_like_email
+
+        found = set()
+        for email in self.email_pattern.findall(text or ''):
+            if not email:
+                continue
+            if is_file_like_email(email):
+                continue
+            found.add(email)
+        return found
     
     def extract_phones(self, text: str) -> Set[str]:
         """Extrait les numéros de téléphone d'un texte (optimisé avec regex compilées)"""

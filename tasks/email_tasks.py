@@ -323,7 +323,19 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
         )
 
     try:
+        cancelled = False
         for idx, recipient in enumerate(recipients or [], start=1):
+            # Stop propre : statut cancelled / campagne supprimée
+            if campagne_manager.is_campagne_cancelled(campagne_id):
+                cancelled = True
+                logs.append({
+                    'timestamp': time.strftime('%H:%M:%S'),
+                    'level': 'warning',
+                    'message': f'Envoi interrompu à {idx - 1}/{total} (annulation)'
+                })
+                logger.info(f'[Campagne {campagne_id}] Annulation détectée avant destinataire {idx}/{total}')
+                break
+
             recipient_email = recipient.get('email', 'N/A')
 
             progress = int((idx / max(total, 1)) * 100)
@@ -385,16 +397,17 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
                 text_message = message
             else:
                 total_failed += 1
-                campagne_manager.save_email_envoye(
-                    campagne_id=campagne_id,
-                    entreprise_id=recipient.get('entreprise_id'),
-                    email=recipient.get('email'),
-                    nom_destinataire=recipient_nom or recipient.get('nom', ''),
-                    entreprise=recipient.get('entreprise'),
-                    sujet=subject or 'Prospection',
-                    statut='failed',
-                    erreur='Template ou message requis'
-                )
+                if not campagne_manager.is_campagne_cancelled(campagne_id):
+                    campagne_manager.save_email_envoye(
+                        campagne_id=campagne_id,
+                        entreprise_id=recipient.get('entreprise_id'),
+                        email=recipient.get('email'),
+                        nom_destinataire=recipient_nom or recipient.get('nom', ''),
+                        entreprise=recipient.get('entreprise'),
+                        sujet=subject or 'Prospection',
+                        statut='failed',
+                        erreur='Template ou message requis'
+                    )
                 continue
 
             # Générer le token de tracking
@@ -403,6 +416,17 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
             # Traiter le contenu HTML pour ajouter le tracking
             if html_message:
                 html_message = tracker.process_email_content(html_message, tracking_token)
+
+            # Re-check juste avant SMTP (évite un envoi après un Stop)
+            if campagne_manager.is_campagne_cancelled(campagne_id):
+                cancelled = True
+                logs.append({
+                    'timestamp': time.strftime('%H:%M:%S'),
+                    'level': 'warning',
+                    'message': f'Envoi interrompu avant SMTP ({recipient_email})'
+                })
+                logger.info(f'[Campagne {campagne_id}] Annulation avant SMTP pour {recipient_email}')
+                break
 
             # Envoyer l'email
             result = email_sender.send_email(
@@ -414,19 +438,22 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
                 tracking_token=tracking_token
             )
 
-            # Sauvegarder l'email envoyé
-            email_id = campagne_manager.save_email_envoye(
-                campagne_id=campagne_id,
-                entreprise_id=recipient.get('entreprise_id'),
-                email=recipient.get('email'),
-                nom_destinataire=recipient_nom or recipient.get('nom', ''),
-                entreprise=recipient.get('entreprise'),
-                sujet=email_subject,
-                statut='sent' if result.get('success') else 'failed',
-                erreur=None if result.get('success') else result.get('message', 'Erreur inconnue'),
-                tracking_token=tracking_token,
-                contenu_envoye=html_message or text_message
-            )
+            # Sauvegarder l'email envoyé (skip si campagne déjà supprimée)
+            if not campagne_manager.is_campagne_cancelled(campagne_id):
+                email_id = campagne_manager.save_email_envoye(
+                    campagne_id=campagne_id,
+                    entreprise_id=recipient.get('entreprise_id'),
+                    email=recipient.get('email'),
+                    nom_destinataire=recipient_nom or recipient.get('nom', ''),
+                    entreprise=recipient.get('entreprise'),
+                    sujet=email_subject,
+                    statut='sent' if result.get('success') else 'failed',
+                    erreur=None if result.get('success') else result.get('message', 'Erreur inconnue'),
+                    tracking_token=tracking_token,
+                    contenu_envoye=html_message or text_message
+                )
+            else:
+                cancelled = True
 
             if result.get('success'):
                 total_sent += 1
@@ -449,42 +476,63 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
             )
 
             if delay > 0 and idx < total:
-                time.sleep(delay)
+                # Sleep découpé pour réagir vite à un Stop
+                remaining = float(delay)
+                while remaining > 0:
+                    if campagne_manager.is_campagne_cancelled(campagne_id):
+                        cancelled = True
+                        break
+                    step = min(0.5, remaining)
+                    time.sleep(step)
+                    remaining -= step
+                if cancelled:
+                    logs.append({
+                        'timestamp': time.strftime('%H:%M:%S'),
+                        'level': 'warning',
+                        'message': f'Envoi interrompu pendant la pause ({idx}/{total})'
+                    })
+                    break
 
         # Statut final campagne:
+        # - cancelled: stop utilisateur (ou suppression pendant l'envoi)
         # - completed: tout est parti sans échec (ou campagne vide)
         # - completed_with_errors: envoi partiel (au moins 1 succès + au moins 1 échec)
         # - failed: aucun email n'a pu être envoyé avec succès
-        if total == 0:
-            final_statut = 'completed'
-        elif total_sent > 0 and total_failed > 0:
-            final_statut = 'completed_with_errors'
-        elif total_sent > 0:
-            final_statut = 'completed'
-        else:
-            final_statut = 'failed'
-        campagne_manager.update_campagne(
-            campagne_id,
-            statut=final_statut,
-            total_envoyes=total,
-            total_reussis=total_sent
-        )
+        still_exists = bool(campagne_manager.get_campagne(campagne_id))
+        if still_exists:
+            if cancelled or campagne_manager.is_campagne_cancelled(campagne_id):
+                final_statut = 'cancelled'
+            elif total == 0:
+                final_statut = 'completed'
+            elif total_sent > 0 and total_failed > 0:
+                final_statut = 'completed_with_errors'
+            elif total_sent > 0:
+                final_statut = 'completed'
+            else:
+                final_statut = 'failed'
+            campagne_manager.update_campagne(
+                campagne_id,
+                statut=final_statut,
+                total_envoyes=total_sent + total_failed,
+                total_reussis=total_sent
+            )
 
-        # En fin de campagne: le passage auto en "Perdu" est désactivé par défaut,
-        # car il peut fausser fortement le pipeline quand le tracking open/click
-        # est partiellement bloqué (Apple MPP, anti-trackers, clients mail).
-        auto_mark_lost = str(os.getenv('AUTO_MARK_LOST_ON_CAMPAIGN_COMPLETE', '')).strip().lower() in {'1', 'true', 'yes', 'on'}
-        if final_statut == 'completed' and auto_mark_lost:
-            try:
-                marked_lost = campagne_manager.mark_campaign_lost_entreprises(campagne_id)
-                if marked_lost:
-                    logger.info(f'[Campagne {campagne_id}] {marked_lost} entreprise(s) passée(s) en statut Perdu (0 open, 0 clic)')
-            except Exception as e:
-                logger.warning(f'[Campagne {campagne_id}] mark_campaign_lost_entreprises: {e}')
+            # En fin de campagne: le passage auto en "Perdu" est désactivé par défaut,
+            # car il peut fausser fortement le pipeline quand le tracking open/click
+            # est partiellement bloqué (Apple MPP, anti-trackers, clients mail).
+            auto_mark_lost = str(os.getenv('AUTO_MARK_LOST_ON_CAMPAIGN_COMPLETE', '')).strip().lower() in {'1', 'true', 'yes', 'on'}
+            if final_statut == 'completed' and auto_mark_lost:
+                try:
+                    marked_lost = campagne_manager.mark_campaign_lost_entreprises(campagne_id)
+                    if marked_lost:
+                        logger.info(f'[Campagne {campagne_id}] {marked_lost} entreprise(s) passée(s) en statut Perdu (0 open, 0 clic)')
+                except Exception as e:
+                    logger.warning(f'[Campagne {campagne_id}] mark_campaign_lost_entreprises: {e}')
 
         return {
             'success': True,
             'campagne_id': campagne_id,
+            'cancelled': cancelled,
             'results': results,
             'total': total,
             'total_sent': total_sent,
@@ -493,7 +541,8 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
         }
     except Exception as e:
         logger.error(f'Erreur campagne {campagne_id}: {e}', exc_info=True)
-        campagne_manager.update_campagne(campagne_id, statut='failed')
+        if campagne_manager.get_campagne(campagne_id) and not campagne_manager.is_campagne_cancelled(campagne_id):
+            campagne_manager.update_campagne(campagne_id, statut='failed')
         raise
 
 
@@ -531,7 +580,7 @@ def start_scheduled_campagnes():
         # Marquer comme en cours pour que le beat ne la reprenne pas
         campagne_manager.update_campagne(campagne_id, statut='running')
 
-        send_campagne_task.delay(
+        task = send_campagne_task.delay(
             campagne_id=campagne_id,
             recipients=recipients,
             template_id=params.get('template_id'),
@@ -540,6 +589,10 @@ def start_scheduled_campagnes():
             delay=params.get('delay', 2),
             mail_account_id=params.get('mail_account_id'),
         )
+        try:
+            campagne_manager.update_campagne(campagne_id, celery_task_id=task.id)
+        except Exception:
+            pass
         logger.info(f'[Beat] Campagne {campagne_id} programmée démarrée ({len(recipients)} destinataires)')
         
 

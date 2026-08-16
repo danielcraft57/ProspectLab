@@ -908,25 +908,24 @@ class TemplateManager:
                     'osint_emails_count': len(osint_analysis.get('emails', [])),
                 })
             
-            # Score sécurité issu de l'analyse technique (avant fusion / écrasement pentest)
+            # Score « Protection » = analyse technique (SSL/headers/WAF), plus haut = mieux.
+            # Ne jamais écraser {security_score} avec le risque pentest (échelle inverse).
             technical_security_score_snapshot = data.get('security_score')
             pentest_score_computed = False
+            pentest_surface_score = None
 
-            # Analyse Pentest
+            # Analyse Pentest (risque / surface) — score dédié, hors {security_score}
             pentest_analysis = pentest_manager.get_pentest_analysis_by_entreprise(entreprise_id)
             if pentest_analysis:
-                # Utiliser risk_score comme security_score pour Pentest
                 risk_score = pentest_analysis.get('risk_score')
                 data['has_pentest'] = True
                 if risk_score is not None:
-                    # Convertir risk_score (0-100) en security_score (inversé : 100-risk_score).
-                    # Attention: risk_score peut valoir 0, on ne doit pas le traiter comme "falsy".
+                    # risk_score : 0-100, plus haut = plus risqué → surface « protection » = 100 - risk
                     try:
                         rs = float(risk_score)
-                        data['security_score'] = max(0, 100 - rs)
+                        pentest_surface_score = max(0, 100 - rs)
                         pentest_score_computed = True
                     except Exception:
-                        # Ne pas écraser un score existant si conversion impossible.
                         pass
                 # Vulnérabilités
                 vulnerabilities = pentest_analysis.get('vulnerabilities', [])
@@ -934,8 +933,7 @@ class TemplateManager:
                     vulnerabilities = []
                 data['vulnerabilities_count'] = len(vulnerabilities)
 
-                # Fallback score: si risk_score est absent mais qu'on a des vulnérabilités,
-                # on estime un risk_score simple via les sévérités, puis on en déduit security_score.
+                # Fallback surface si risk_score absent mais vulns présentes
                 if risk_score is None and vulnerabilities:
                     sev_weights = {'critical': 4.0, 'high': 3.0, 'medium': 2.0, 'low': 1.0}
                     weighted_total = 0.0
@@ -945,14 +943,12 @@ class TemplateManager:
                             sev = str(v.get('severity') or v.get('level') or '').strip().lower()
                         weighted_total += sev_weights.get(sev, 2.0)
 
-                    # Normalisation 0-100 (max théorique par vuln = 4.0).
                     max_total = max(1.0, len(vulnerabilities) * 4.0)
                     est_risk = min(100.0, max(0.0, (weighted_total / max_total) * 100.0))
-                    data['security_score'] = max(0.0, 100.0 - est_risk)
+                    pentest_surface_score = max(0.0, 100.0 - est_risk)
                     pentest_score_computed = True
 
                 # Exposer une liste courte (HTML) pour les templates (top 3).
-                # But: rendre l'email concret, même si le prospect voit "beaucoup" de résultats.
                 if vulnerabilities:
                     top = []
                     for v in vulnerabilities[:3]:
@@ -972,7 +968,6 @@ class TemplateManager:
                         data['vulnerabilities_top'] = "\n".join(top)
                         data['has_vulnerabilities_top'] = True
 
-                # Headers de sécurité (souvent ce que l'UI appelle "vulnérabilités")
                 security_headers = pentest_analysis.get('security_headers') or {}
                 missing_headers = []
                 if isinstance(security_headers, dict):
@@ -990,18 +985,49 @@ class TemplateManager:
                     top_missing = missing_headers[:3]
                     data['security_headers_missing_top'] = "\n".join(f"<li>{h}</li>" for h in top_missing)
                     data['has_security_headers_missing_top'] = True
-                    # Si aucune vulnérabilité "classique" n'est remontée,
-                    # utiliser le nombre de headers manquants comme compteur lisible.
                     if not data.get('vulnerabilities_count'):
                         data['vulnerabilities_count'] = len(missing_headers)
 
-            # Synthèse pentest (surface) sous un libellé distinct des emails ; score technique séparé.
+            # Scores alignés sur les jauges UI Entreprises :
+            # - technique = analyses_techniques.security_score (plus haut = mieux)
+            # - risk_score = analyses_pentest.risk_score brut (plus haut = pire)
+            # Ne JAMAIS remplacer {security_score} par (100 - risk) : ça invente un 62
+            # alors que l'UI affiche 38.
             if technical_security_score_snapshot is not None:
+                data['security_score'] = technical_security_score_snapshot
                 data['technical_security_score'] = technical_security_score_snapshot
                 data['has_technical_security_score'] = True
-            if pentest_analysis and pentest_score_computed and data.get('security_score') is not None:
-                data['pentest_surface_score'] = data['security_score']
+
+            if entreprise and isinstance(entreprise, dict):
+                raw_cible = entreprise.get('score_securite')
+                if raw_cible is not None:
+                    try:
+                        data['score_securite'] = float(raw_cible)
+                    except Exception:
+                        pass
+                # Fallback uniquement si pas d'analyse technique récente
+                if data.get('security_score') is None and data.get('score_securite') is not None:
+                    data['security_score'] = data['score_securite']
+                    data['technical_security_score'] = data['score_securite']
+                    data['has_technical_security_score'] = True
+
+            if pentest_analysis:
+                raw_risk = pentest_analysis.get('risk_score')
+                if raw_risk is not None:
+                    try:
+                        rs = float(raw_risk)
+                        data['risk_score'] = int(rs) if float(rs).is_integer() else rs
+                        data['score_pentest'] = data['risk_score']
+                        data['pentest_score'] = data['risk_score']
+                        data['has_risk'] = True
+                        data['has_pentest_score'] = True
+                    except Exception:
+                        pass
+
+            if pentest_analysis and pentest_score_computed and pentest_surface_score is not None:
+                data['pentest_surface_score'] = pentest_surface_score
                 data['has_pentest_surface_score'] = True
+
             if data.get('has_technical_security_score') and not data.get('has_pentest_surface_score'):
                 data['show_technical_security_score'] = True
 
@@ -1246,17 +1272,27 @@ class TemplateManager:
         if 'total_social' in extended_flat and isinstance(extended_flat.get('total_social'), list):
             extended_flat['total_social_count'] = len(extended_flat['total_social'])
 
-        # Lien direct vers l'analyse en ligne du site
+        # Lien direct vers l'analyse en ligne du site (danielcraft.fr/analyse)
+        # Params utiles pour prefill CTA : website, full=1, email, name
         website_val = extended_flat.get('website') or ''
         encoded_email = quote((email or '').strip(), safe='') if isinstance(email, str) and email.strip() else ''
+        name_for_cta = (formatted_nom or '').strip()
+        if name_for_cta.lower() in {'', 'cher prospect', 'bonjour', 'monsieur/madame'}:
+            name_for_cta = ''
+        encoded_name = quote(name_for_cta, safe='') if name_for_cta else ''
         analysis_url = ''
         if isinstance(website_val, str) and website_val.strip():
             # URL-encode du website pour l'inclure dans la query string
             encoded_website = quote(website_val.strip(), safe='')
+            analysis_parts = [
+                f'website={encoded_website}',
+                'full=1',
+            ]
             if encoded_email:
-                analysis_url = f"{brand_base_url}/analyse?website={encoded_website}&full=1&email={encoded_email}"
-            else:
-                analysis_url = f"{brand_base_url}/analyse?website={encoded_website}&full=1"
+                analysis_parts.append(f'email={encoded_email}')
+            if encoded_name:
+                analysis_parts.append(f'name={encoded_name}')
+            analysis_url = f"{brand_base_url}/analyse?{'&'.join(analysis_parts)}"
         extended_flat['analysis_url'] = analysis_url
 
         # Lien de désabonnement
@@ -1284,10 +1320,12 @@ class TemplateManager:
             'dc_contact_url': dc_contact_url,
             **extended_flat
         }
-        # Aliases booléens pour les conditionnels {#if_security} / {#if_performance}
+        # Aliases booléens pour les conditionnels {#if_security} / {#if_performance} / {#if_risk}
         # qui sont ensuite traités par le moteur générique {#if_<xxx>}.
         variables['security'] = variables.get('security_score') is not None
         variables['performance'] = variables.get('performance_score') is not None
+        variables['risk'] = variables.get('risk_score') is not None
+        variables['pentest'] = variables.get('risk_score') is not None
         
         # Remplacer les conditions {#if_xxx} ... {#endif}
         # Compat: certains templates utilisent {{var}} et {{#if_x}} ... {{#endif}}.

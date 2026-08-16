@@ -398,6 +398,11 @@ function displayCampagnes(campagnes) {
                     Relancer
                 </button>
                 ` : ''}
+                ${['running', 'scheduled', 'draft'].indexOf(effectiveStatus) !== -1 ? `
+                <button class="btn-action btn-cancel" onclick="cancelCampagne(${campagne.id})" title="Interrompre l'envoi (les mails déjà partis restent partis)">
+                    Stop
+                </button>
+                ` : ''}
                 <button class="btn-action btn-delete" onclick="deleteCampagne(${campagne.id})">
                     Supprimer
                 </button>
@@ -1021,6 +1026,21 @@ function initEmailFiltersListeners() {
  */
 function isPlaceholderEmailClient(email, source) {
     var domain = ((email || '').split('@')[1] || '').toLowerCase().trim();
+    if (!domain) return true;
+    if (domain.indexOf('.') === -1) return true;
+    var last = domain.split('.').pop() || '';
+    var fileLike = {
+        png:1, jpg:1, jpeg:1, gif:1, webp:1, svg:1, ico:1, bmp:1, tif:1, tiff:1, avif:1, heic:1,
+        css:1, js:1, mjs:1, cjs:1, map:1, json:1, xml:1, html:1, htm:1, php:1, asp:1, aspx:1, jsp:1,
+        pdf:1, doc:1, docx:1, xls:1, xlsx:1, ppt:1, pptx:1, csv:1, txt:1, rtf:1, odt:1,
+        zip:1, rar:1, '7z':1, gz:1, tar:1, tgz:1, bz2:1,
+        mp3:1, mp4:1, avi:1, mov:1, webm:1, mkv:1, wav:1, ogg:1,
+        woff:1, woff2:1, ttf:1, eot:1, otf:1,
+        scss:1, less:1, sass:1, vue:1, jsx:1, ts:1, tsx:1,
+        py:1, rb:1, java:1, class:1, jar:1, dll:1, exe:1, bin:1, dat:1,
+        sql:1, bak:1, log:1, md:1, yml:1, yaml:1, toml:1, ini:1, cfg:1, conf:1
+    };
+    if (fileLike[last] || /^\d+$/.test(last)) return true;
     var badDomains = {
         'exemple.fr': 1, 'exemple.com': 1, 'example.com': 1, 'example.fr': 1, 'example.org': 1,
         'votre-domaine.fr': 1, 'votre-domaine.com': 1, 'votredomaine.fr': 1,
@@ -2092,10 +2112,45 @@ function recipientsQuickSelect(mode) {
                 toggleEmail(ent.id, idx, newChecked);
             });
             updateEntrepriseItemStyle(ent.id);
+            _syncEntrepriseHeaderCheckbox(ent.id);
+        });
+    } else if (mode === 'principal' || mode === 'person') {
+        // Ne garder que les emails principaux / personnes (désélectionne le reste)
+        displayedEntreprisesData.forEach(function(ent) {
+            var emails = ent.emails || [];
+            emails.forEach(function(email, idx) {
+                var cb = document.getElementById('email-' + ent.id + '-' + idx);
+                if (!cb) return;
+                var shouldCheck = (mode === 'principal')
+                    ? !!email.is_principal
+                    : !!email.is_person;
+                if (cb.checked !== shouldCheck) {
+                    cb.checked = shouldCheck;
+                    toggleEmail(ent.id, idx, shouldCheck);
+                }
+            });
+            updateEntrepriseItemStyle(ent.id);
+            _syncEntrepriseHeaderCheckbox(ent.id);
         });
     }
 
     updateSelectedCount();
+}
+
+/**
+ * Aligne la case « Tout sélectionner » d'une entreprise avec l'état réel des emails.
+ * @param {number} entrepriseId
+ */
+function _syncEntrepriseHeaderCheckbox(entrepriseId) {
+    var entreprise = displayedEntreprisesData.find(function(e) { return e.id === entrepriseId; });
+    if (!entreprise) return;
+    var emails = entreprise.emails || [];
+    var headerCb = document.getElementById('entreprise-' + entrepriseId);
+    if (!headerCb) return;
+    headerCb.checked = emails.length > 0 && emails.every(function(email, idx) {
+        var cb = document.getElementById('email-' + entrepriseId + '-' + idx);
+        return cb && cb.checked;
+    });
 }
 
 // Ouvrir le modal de nouvelle campagne (toujours à l'étape 1)
@@ -2818,9 +2873,33 @@ document.addEventListener('click', function(event) {
     }
 });
 
+// Interrompre une campagne en cours / programmée
+async function cancelCampagne(campagneId) {
+    if (!confirm('Stopper cet envoi ? Les emails déjà partis restent partis, les suivants ne partent plus.')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/campagnes/${campagneId}/cancel`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data && data.error ? data.error : 'Arrêt impossible');
+        }
+        showNotification('Envoi interrompu', 'success');
+        loadCampagnes();
+    } catch (error) {
+        showNotification('Erreur Stop: ' + (error && error.message ? error.message : 'Erreur inconnue'), 'error');
+    }
+}
+
 // Supprimer une campagne
 async function deleteCampagne(campagneId) {
-    if (!confirm('Êtes-vous sûr de vouloir supprimer cette campagne ?')) {
+    if (!confirm('Êtes-vous sûr de vouloir supprimer cette campagne ? Si un envoi est en cours, il sera d\'abord stoppé.')) {
         return;
     }
     
@@ -3143,6 +3222,7 @@ function getCampaignStatusLabel(statut) {
     if (s === 'scheduled') return 'Programmée';
     if (s === 'failed') return 'Échec';
     if (s === 'draft') return 'Brouillon';
+    if (s === 'cancelled' || s === 'canceled' || s === 'stopped') return 'Interrompue';
     return statut || 'Inconnu';
 }
 

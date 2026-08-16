@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Maquettes emails audit | DanielCraft</title>
+  <style>
+    :root {
+      --primary: #4da9d6;
+      --primary-dark: #0f3550;
+      --primary-light: #7bcde3;
+      --metal-1: #9fd4ea;
+      --metal-2: #5faed8;
+      --metal-3: #2f78a6;
+      --metal-4: #184c70;
+      --secondary: #dff8f8;
+      --accent: #c9f4f2;
+      --amber: #d97706;
+      --amber-soft: #fef3c7;
+      --green: #2f9e6a;
+      --green-soft: #eef8f1;
+      --gray-50: #f9fafb;
+      --gray-200: #e5e7eb;
+      --gray-500: #6b7280;
+      --gray-700: #374151;
+      --gray-800: #1f2937;
+      --white: #ffffff;
+      --metal-gradient: linear-gradient(140deg, #9fd4ea 0%, #5faed8 28%, #2f78a6 62%, #184c70 100%);
+      --font: Inter, "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      background:
+        radial-gradient(ellipse 80% 50% at 10% -10%, rgba(159, 212, 234, 0.55), transparent 55%),
+        radial-gradient(ellipse 60% 40% at 90% 0%, rgba(201, 244, 242, 0.7), transparent 50%),
+        var(--secondary);
+      color: var(--gray-800);
+      min-height: 100vh;
+      padding: 28px 20px 64px;
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; }
+    .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+    .brand-mark {
+      width: 40px; height: 40px; border-radius: 11px;
+      background: var(--metal-gradient); color: #fff;
+      font-weight: 800; font-size: 13px; display: grid; place-items: center;
+    }
+    h1 { margin: 0 0 8px; font-size: 1.7rem; color: var(--primary-dark); letter-spacing: -0.02em; }
+    .lead { margin: 0 0 14px; color: var(--gray-500); max-width: 68ch; line-height: 1.55; }
+    .doc-link {
+      display: inline-block; margin: 0 0 20px; color: var(--metal-4);
+      font-weight: 700; font-size: 0.9rem; text-decoration: none;
+    }
+    .doc-link:hover { color: var(--primary); }
+    .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+    .tab {
+      border: 1px solid var(--metal-1); background: var(--white); color: var(--metal-4);
+      padding: 10px 16px; border-radius: 999px; cursor: pointer; font-size: 0.9rem; font-weight: 600;
+    }
+    .tab:hover { border-color: var(--primary); }
+    .tab.is-active { background: var(--metal-gradient); border-color: transparent; color: #fff; }
+    .layout { display: grid; grid-template-columns: 280px 1fr; gap: 18px; align-items: start; }
+    @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+    .side {
+      background: var(--white); border: 1px solid var(--metal-1);
+      border-radius: 16px; box-shadow: 0 10px 28px rgba(24,76,112,0.12); padding: 16px;
+    }
+    .side h2 {
+      margin: 0 0 12px; font-size: 0.85rem; text-transform: uppercase;
+      letter-spacing: 0.08em; color: var(--primary-dark);
+    }
+    .meta { font-size: 0.85rem; color: var(--gray-500); line-height: 1.5; margin: 0 0 14px; }
+    .meta strong { color: var(--gray-800); }
+    .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+    .chip {
+      font-size: 0.75rem; font-weight: 700; padding: 5px 9px; border-radius: 999px;
+      background: var(--accent); color: var(--primary-dark); border: 1px solid var(--metal-1);
+    }
+    .palette {
+      display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin: 0 0 14px;
+    }
+    .swatch { height: 22px; border-radius: 6px; border: 1px solid rgba(15,53,80,0.12); }
+    .cta-doc {
+      display: block; margin-top: 8px; font-size: 0.82rem; color: var(--primary);
+      font-weight: 700; text-decoration: none; word-break: break-all;
+    }
+    .preview-shell {
+      background: var(--accent); border: 1px solid var(--metal-1);
+      border-radius: 18px; padding: 18px; box-shadow: 0 10px 28px rgba(24,76,112,0.12); min-height: 720px;
+    }
+    .preview-toolbar {
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 10px; margin-bottom: 12px; flex-wrap: wrap;
+    }
+    .preview-toolbar span { font-size: 0.85rem; color: var(--primary-dark); font-weight: 700; }
+    .seg {
+      display: inline-flex; background: var(--white); border: 1px solid var(--metal-1);
+      border-radius: 999px; overflow: hidden;
+    }
+    .seg button {
+      border: 0; background: transparent; padding: 8px 14px; cursor: pointer;
+      font-weight: 600; color: var(--gray-500); font-size: 0.85rem;
+    }
+    .seg button.is-active { background: var(--primary-dark); color: #fff; }
+    .frame-wrap {
+      margin: 0 auto; background: var(--metal-1); border-radius: 12px; padding: 12px;
+      transition: max-width 0.2s ease; max-width: 680px;
+    }
+    .frame-wrap.is-mobile { max-width: 390px; }
+    iframe {
+      width: 100%; height: 780px; border: 0; border-radius: 8px; background: #fff; display: block;
+    }
+    .hint { margin-top: 18px; font-size: 0.85rem; color: var(--gray-500); line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">
+      <div class="brand-mark">DC</div>
+      <div>
+        <strong style="color:var(--primary-dark)">DanielCraft</strong>
+        <div style="font-size:0.85rem;color:var(--gray-500)">Maquettes emails - audit &amp; protection</div>
+      </div>
+    </div>
+    <h1>10 maquettes - max clicks</h1>
+    <p class="lead">
+      Palette metal-blue DanielCraft + ton Grand Est (clanche, rincée, regarde voir…).
+      Français correct (accents, accords) + sujets accrocheurs, CTA fort vers /analyse.
+    </p>
+    <a class="doc-link" href="../../../docs/guides/DANIELCRAFT_EMAIL_VOICE.md">Doc voix &amp; palette →</a>
+
+    <div class="tabs" id="tabs" role="tablist"></div>
+
+    <div class="layout">
+      <aside class="side">
+        <h2>Palette</h2>
+        <div class="palette" aria-hidden="true">
+          <div class="swatch" style="background:#4da9d6" title="primary"></div>
+          <div class="swatch" style="background:#0f3550" title="primary-dark"></div>
+          <div class="swatch" style="background:linear-gradient(140deg,#9fd4ea,#184c70)" title="metal"></div>
+          <div class="swatch" style="background:#dff8f8" title="secondary"></div>
+          <div class="swatch" style="background:#d97706" title="amber"></div>
+        </div>
+        <h2>Fiche</h2>
+        <p class="meta" id="meta">Chargement…</p>
+        <div class="chip-row" id="chips"></div>
+        <p class="meta"><strong>CTA</strong></p>
+        <a class="cta-doc" id="ctaLink" href="#" target="_blank" rel="noopener">—</a>
+        <p class="hint">
+          Une fois valide, on porte la maquette dans template_studio puis en BDD.
+        </p>
+      </aside>
+
+      <section class="preview-shell">
+        <div class="preview-toolbar">
+          <span id="previewTitle">Preview</span>
+          <div class="seg" role="group" aria-label="Largeur preview">
+            <button type="button" class="is-active" data-width="desktop">Desktop</button>
+            <button type="button" data-width="mobile">Mobile</button>
+          </div>
+        </div>
+        <div class="frame-wrap" id="frameWrap">
+          <iframe id="frame" title="Preview email" src="01-audit-rapport.html"></iframe>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const variants = [
+      {
+        file: '01-audit-rapport.html',
+        label: '01 · Rapport',
+        subject: 'Claire, ton rapport est prêt - regarde voir',
+        angle: 'Curiosité + rapport prêt + CTA 30 sec',
+        chips: ['regarde voir', 'nareux', 'entre midi'],
+      },
+      {
+        file: '02-pentest-priorites.html',
+        label: '02 · Clanche',
+        subject: 'Ta clanche web est un peu ouverte (atelier-nord.fr)',
+        angle: 'Métaphore porte + 3 priorités sécu',
+        chips: ['clanche', 'clanchée', 'dis voir'],
+      },
+      {
+        file: '03-scores-360.html',
+        label: '03 · Nareuse',
+        subject: '3 notes sur ton site - une est un peu nareuse',
+        angle: 'Curiosity gap sur la note basse',
+        chips: ['nareuse', 'spoiler', 'démêle'],
+      },
+      {
+        file: '04-relance-analyse.html',
+        label: '04 · Relance',
+        subject: 'Hop, je remets le lien - au cas où ça a filé',
+        angle: 'Relance courte, zéro pression',
+        chips: ['doux', 'filé', 'accents OK'],
+      },
+      {
+        file: '05-tech-franchement.html',
+        label: '05 · Franchement',
+        subject: 'On en parle franchement ? (entre midi si tu veux)',
+        angle: 'Ton Loïc / Metz',
+        chips: ['entre midi', 'dis voir', 'Loïc'],
+      },
+      {
+        file: '06-secu-clanche.html',
+        label: '06 · Sécu',
+        subject: 'Sécu : ton site laisse la clanche ouverte',
+        angle: 'Sécurité cash, CTA fermer la clanche',
+        chips: ['clanche', 'cash', '30 sec'],
+      },
+      {
+        file: '07-anciennete-rincee.html',
+        label: '07 · Ancienneté',
+        subject: 'Ton site a pris une rincée du temps',
+        angle: 'Vieillissement site + refresh sans panique',
+        chips: ['rincée', 'nareux', 'téléphone'],
+      },
+      {
+        file: '08-voisin-google.html',
+        label: '08 · Voisin',
+        subject: 'Le commerce d\'à côté est plus facile à trouver',
+        angle: 'Comparaison sociale / visibilité',
+        chips: ['à côté', 'Google', 'dis voir'],
+      },
+      {
+        file: '09-bassote-demandes.html',
+        label: '09 · Ça coince',
+        subject: 'Les gens arrivent - puis ça coince',
+        angle: 'Conversion / contacts qui coincent',
+        chips: ['ça coince', 'entre midi', 'regarde voir'],
+      },
+      {
+        file: '10-curiosite-30s.html',
+        label: '10 · 30 sec',
+        subject: '30 secondes - regarde voir ce que j\'ai vu',
+        angle: 'Ultra court, curiosité max',
+        chips: ['regarde voir', 'prêt', 'entre midi'],
+      },
+    ];
+
+    const analysisUrl =
+      'https://danielcraft.fr/analyse?website=https%3A%2F%2Fatelier-nord.fr%2F&full=1&email=claire%40atelier-nord.fr&name=Claire+Dupont';
+
+    const tabsEl = document.getElementById('tabs');
+    const frame = document.getElementById('frame');
+    const meta = document.getElementById('meta');
+    const chips = document.getElementById('chips');
+    const ctaLink = document.getElementById('ctaLink');
+    const previewTitle = document.getElementById('previewTitle');
+    const frameWrap = document.getElementById('frameWrap');
+
+    function render(index) {
+      const v = variants[index];
+      [...tabsEl.children].forEach((btn, i) => btn.classList.toggle('is-active', i === index));
+      frame.src = v.file;
+      previewTitle.textContent = v.label;
+      meta.innerHTML =
+        '<strong>Objet</strong><br>' + v.subject +
+        '<br><br><strong>Angle</strong><br>' + v.angle +
+        '<br><br><a href="' + v.file + '" target="_blank" rel="noopener">Ouvrir le HTML seul →</a>';
+      chips.innerHTML = v.chips.map((c) => '<span class="chip">' + c + '</span>').join('');
+      ctaLink.href = analysisUrl;
+      ctaLink.textContent = analysisUrl;
+    }
+
+    variants.forEach((v, i) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'tab' + (i === 0 ? ' is-active' : '');
+      btn.textContent = v.label;
+      btn.addEventListener('click', () => render(i));
+      tabsEl.appendChild(btn);
+    });
+
+    document.querySelectorAll('.seg button').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.seg button').forEach((b) => b.classList.remove('is-active'));
+        btn.classList.add('is-active');
+        frameWrap.classList.toggle('is-mobile', btn.dataset.width === 'mobile');
+      });
+    });
+
+    ctaLink.href = analysisUrl;
+    render(0);
+  </script>
+</body>
+</html>

@@ -861,7 +861,7 @@ def api_create_campagne():
             delay=delay,
             mail_account_id=mail_account_id,
         )
-        campagne_manager.update_campagne(campagne_id, statut='scheduled')
+        campagne_manager.update_campagne(campagne_id, statut='scheduled', celery_task_id=task.id)
         return jsonify({'success': True, 'campagne_id': campagne_id, 'task_id': task.id})
 
 
@@ -893,6 +893,9 @@ def api_delete_campagne(campagne_id):
     """
     API: Supprime une campagne.
 
+    Si un envoi est en cours, tente d'abord d'interrompre la tâche Celery
+    (les emails déjà partis restent partis).
+
     Args:
         campagne_id (int): ID de la campagne
 
@@ -900,6 +903,24 @@ def api_delete_campagne(campagne_id):
         JSON: Résultat de la suppression
     """
     from services.database import Database
+    from services.database.campagnes import CampagneManager
+
+    campagne_manager = CampagneManager()
+    campagne = campagne_manager.get_campagne(campagne_id)
+    if not campagne:
+        return jsonify({'error': 'Campagne introuvable'}), 404
+
+    statut = str(campagne.get('statut') or '').strip().lower()
+    if statut in {'running', 'scheduled', 'draft'}:
+        # Signale l'arrêt à la boucle d'envoi avant de supprimer la ligne
+        campagne_manager.update_campagne(campagne_id, statut='cancelled')
+        task_id = (campagne.get('celery_task_id') or '').strip()
+        if task_id:
+            try:
+                from celery_app import celery as celery_app
+                celery_app.control.revoke(task_id, terminate=False)
+            except Exception:
+                pass
 
     database = Database()
     conn = database.get_connection()
@@ -913,6 +934,54 @@ def api_delete_campagne(campagne_id):
     if deleted:
         return jsonify({'success': True})
     return jsonify({'error': 'Campagne introuvable'}), 404
+
+
+@other_bp.route('/api/campagnes/<int:campagne_id>/cancel', methods=['POST'])
+@login_required
+def api_cancel_campagne(campagne_id):
+    """
+    API: Interrompt une campagne en cours ou programmée.
+
+    Les emails déjà envoyés restent envoyés. Les suivants ne partent plus.
+
+    Args:
+        campagne_id (int): ID de la campagne
+
+    Returns:
+        JSON: {'success': bool, 'statut': str}
+    """
+    from services.database.campagnes import CampagneManager
+
+    campagne_manager = CampagneManager()
+    campagne = campagne_manager.get_campagne(campagne_id)
+    if not campagne:
+        return jsonify({'error': 'Campagne introuvable'}), 404
+
+    statut = str(campagne.get('statut') or '').strip().lower()
+    if statut in {'completed', 'completed_with_errors', 'cancelled', 'canceled', 'failed'}:
+        return jsonify({
+            'success': True,
+            'statut': statut,
+            'message': 'Campagne déjà terminée ou annulée',
+        })
+
+    campagne_manager.update_campagne(campagne_id, statut='cancelled')
+    task_id = (campagne.get('celery_task_id') or '').strip()
+    revoked = False
+    if task_id:
+        try:
+            from celery_app import celery as celery_app
+            celery_app.control.revoke(task_id, terminate=False)
+            revoked = True
+        except Exception as e:
+            return jsonify({
+                'success': True,
+                'statut': 'cancelled',
+                'revoked': False,
+                'warning': str(e),
+            })
+
+    return jsonify({'success': True, 'statut': 'cancelled', 'revoked': revoked})
 
 
 @other_bp.route('/api/campagnes/<int:campagne_id>/relaunch', methods=['POST'])
@@ -1018,7 +1087,7 @@ def api_relaunch_campagne(campagne_id):
         delay=2,
         mail_account_id=_mid,
     )
-    campagne_manager.update_campagne(new_campagne_id, statut='scheduled')
+    campagne_manager.update_campagne(new_campagne_id, statut='scheduled', celery_task_id=task.id)
 
     return jsonify({'success': True, 'campagne_id': new_campagne_id, 'task_id': task.id})
 

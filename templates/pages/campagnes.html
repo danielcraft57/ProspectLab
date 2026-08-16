@@ -280,9 +280,11 @@
                                 <div id="ciblage-results-count" class="results-count" style="display: none;"></div>
                             </div>
                             <div class="recipients-quick-actions" aria-label="Actions de sélection" role="group">
-                                <button type="button" class="recipients-action-btn" onclick="recipientsQuickSelect('all')">Tout</button>
-                                <button type="button" class="recipients-action-btn" onclick="recipientsQuickSelect('none')">Aucun</button>
-                                <button type="button" class="recipients-action-btn" onclick="recipientsQuickSelect('invert')">Inverser</button>
+                                <button type="button" class="recipients-action-btn" onclick="recipientsQuickSelect('all')" title="Sélectionner tous les emails visibles">Tout</button>
+                                <button type="button" class="recipients-action-btn" onclick="recipientsQuickSelect('none')" title="Tout désélectionner">Aucun</button>
+                                <button type="button" class="recipients-action-btn" onclick="recipientsQuickSelect('invert')" title="Inverser la sélection">Inverser</button>
+                                <button type="button" class="recipients-action-btn recipients-action-btn--accent" onclick="recipientsQuickSelect('principal')" title="Uniquement les emails marqués Principal">Principaux</button>
+                                <button type="button" class="recipients-action-btn" onclick="recipientsQuickSelect('person')" title="Uniquement les emails rattachés à une personne (is_person)">Personnes</button>
                             </div>
                         </div>
                         <div class="form-group">

@@ -1,0 +1,468 @@
+/* Graphiques SVG / CSS pour maquettes ProspectLab (offline, sans CDN) */
+
+.md-chart-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.md-chart-title h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.md-chart-title .hint {
+  font-size: 0.75rem;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+/* --- Barres verticales --- */
+.md-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 160px;
+  padding: 8px 4px 0;
+}
+.md-bars .bar {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  justify-content: flex-end;
+}
+.md-bars .bar i {
+  display: block;
+  width: 100%;
+  max-width: 36px;
+  border-radius: 8px 8px 4px 4px;
+  background: linear-gradient(180deg, #5eead4, #3dd68c 55%, #1a9b5c);
+  box-shadow: 0 0 12px rgba(61, 214, 140, 0.25);
+  transition: height 0.4s ease;
+}
+.md-bars .bar.alt i {
+  background: linear-gradient(180deg, #93c5fd, #7eb8ff 55%, #3b82c4);
+  box-shadow: 0 0 12px rgba(126, 184, 255, 0.2);
+}
+.md-bars .bar.warn i {
+  background: linear-gradient(180deg, #ffd180, #ffb74d);
+}
+.md-bars .bar .lbl {
+  font-size: 0.65rem;
+  color: var(--md-sys-color-on-surface-variant);
+  text-align: center;
+}
+
+/* --- Barres horizontales --- */
+.md-hbar {
+  display: grid;
+  gap: 10px;
+}
+.md-hbar .row {
+  display: grid;
+  grid-template-columns: 110px 1fr 42px;
+  gap: 10px;
+  align-items: center;
+  font-size: 0.82rem;
+}
+.md-hbar .track {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.md-hbar .track > i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #2bb673, #3dd68c);
+}
+.md-hbar .track.blue > i {
+  background: linear-gradient(90deg, #3b82c4, #7eb8ff);
+}
+.md-hbar .track.amber > i {
+  background: linear-gradient(90deg, #c9892a, #ffb74d);
+}
+.md-hbar .track.red > i {
+  background: linear-gradient(90deg, #c44, #ff8a80);
+}
+.md-hbar .val {
+  text-align: right;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Sparkline SVG --- */
+.md-spark {
+  width: 100%;
+  height: 56px;
+  display: block;
+}
+.md-spark path.fill {
+  fill: rgba(61, 214, 140, 0.18);
+}
+.md-spark path.line {
+  fill: none;
+  stroke: #3dd68c;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.md-spark.blue path.fill { fill: rgba(126, 184, 255, 0.15); }
+.md-spark.blue path.line { stroke: #7eb8ff; }
+.md-spark.amber path.fill { fill: rgba(255, 183, 77, 0.15); }
+.md-spark.amber path.line { stroke: #ffb74d; }
+
+/* --- Donut --- */
+.md-donut-wrap {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.md-donut {
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  position: relative;
+  flex-shrink: 0;
+}
+.md-donut::after {
+  content: attr(data-center);
+  position: absolute;
+  inset: 28px;
+  border-radius: 50%;
+  background: var(--md-sys-color-surface-container);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 1.15rem;
+  text-align: center;
+  line-height: 1.15;
+  color: var(--md-sys-color-on-surface);
+}
+.md-legend {
+  display: grid;
+  gap: 8px;
+  font-size: 0.82rem;
+}
+.md-legend .item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.md-legend .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+/* --- Area / line chart (SVG block) --- */
+.md-line-chart {
+  width: 100%;
+  height: 180px;
+  display: block;
+}
+.md-line-chart .grid line {
+  stroke: rgba(255, 255, 255, 0.06);
+  stroke-width: 1;
+}
+.md-line-chart .area {
+  fill: rgba(61, 214, 140, 0.12);
+}
+.md-line-chart .line {
+  fill: none;
+  stroke: #3dd68c;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.md-line-chart .line2 {
+  fill: none;
+  stroke: #7eb8ff;
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+}
+.md-line-chart .dot {
+  fill: #3dd68c;
+  stroke: #0f1419;
+  stroke-width: 2;
+}
+.md-line-chart .axis-lbl {
+  fill: var(--md-sys-color-on-surface-variant);
+  font-size: 10px;
+  font-family: var(--md-font);
+}
+
+/* --- Heatmap --- */
+.md-heat {
+  display: grid;
+  grid-template-columns: 36px repeat(7, 1fr);
+  gap: 4px;
+  font-size: 0.65rem;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.md-heat .cell {
+  aspect-ratio: 1;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.md-heat .c1 { background: rgba(61, 214, 140, 0.18); }
+.md-heat .c2 { background: rgba(61, 214, 140, 0.35); }
+.md-heat .c3 { background: rgba(61, 214, 140, 0.55); }
+.md-heat .c4 { background: rgba(61, 214, 140, 0.8); }
+.md-heat .lbl {
+  display: grid;
+  place-items: center;
+  aspect-ratio: auto;
+  background: transparent;
+}
+
+/* --- Gauge / radial progress --- */
+.md-gauge {
+  width: 120px;
+  height: 70px;
+  position: relative;
+  overflow: hidden;
+}
+.md-gauge .arc {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 180deg,
+    #3dd68c 0deg,
+    #3dd68c var(--pct, 120deg),
+    rgba(255, 255, 255, 0.08) var(--pct, 120deg),
+    rgba(255, 255, 255, 0.08) 180deg
+  );
+  mask: radial-gradient(farthest-side, transparent 62%, #000 63%);
+  -webkit-mask: radial-gradient(farthest-side, transparent 62%, #000 63%);
+}
+.md-gauge .val {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-weight: 700;
+  font-size: 1.25rem;
+}
+
+/* --- Radar-ish (CSS polygon fake via SVG) --- */
+.md-radar {
+  width: 180px;
+  height: 180px;
+  margin: 0 auto;
+  display: block;
+}
+
+/* --- Funnel --- */
+.md-funnel {
+  display: grid;
+  gap: 6px;
+}
+.md-funnel .step {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, rgba(61, 214, 140, 0.35), rgba(61, 214, 140, 0.08));
+  font-size: 0.85rem;
+}
+.md-funnel .step:nth-child(2) { margin-inline: 8%; width: 84%; justify-self: center; }
+.md-funnel .step:nth-child(3) { margin-inline: 16%; width: 68%; justify-self: center; }
+.md-funnel .step:nth-child(4) { margin-inline: 24%; width: 52%; justify-self: center; }
+.md-funnel .step strong { font-variant-numeric: tabular-nums; }
+
+/* --- Mini KPI spark card --- */
+.md-kpi-spark {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.md-kpi-spark .delta {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.md-kpi-spark .delta.up { color: #3dd68c; }
+.md-kpi-spark .delta.down { color: #ff8a80; }
+
+/* --- Stacked comparison --- */
+.md-stack-bar {
+  display: flex;
+  height: 14px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+}
+.md-stack-bar > i {
+  display: block;
+  height: 100%;
+}
+
+/* --- Bullet chart --- */
+.md-bullet {
+  display: grid;
+  gap: 14px;
+}
+.md-bullet .row {
+  display: grid;
+  gap: 4px;
+  font-size: 0.8rem;
+}
+.md-bullet .track {
+  position: relative;
+  height: 16px;
+  border-radius: 4px;
+  background: rgba(255,255,255,.08);
+  overflow: hidden;
+}
+.md-bullet .range {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: rgba(61,214,140,.15);
+}
+.md-bullet .fill {
+  position: absolute;
+  inset: 3px auto 3px 0;
+  border-radius: 2px;
+  background: #3dd68c;
+}
+.md-bullet .marker {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 3px;
+  background: #fff;
+}
+
+/* --- Slope / bump mini --- */
+.md-slope {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 8px;
+  height: 120px;
+  padding: 8px 0;
+}
+.md-slope .side {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: var(--md-sys-color-on-surface-variant);
+  width: 72px;
+}
+.md-slope svg { flex: 1; height: 100%; }
+
+/* --- Candlestick fake --- */
+.md-candles {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 120px;
+  padding-top: 8px;
+}
+.md-candles .c {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+  position: relative;
+}
+.md-candles .wick {
+  width: 2px;
+  background: rgba(255,255,255,.35);
+  position: absolute;
+}
+.md-candles .body {
+  width: 70%;
+  max-width: 14px;
+  border-radius: 2px;
+  background: #3dd68c;
+  z-index: 1;
+}
+.md-candles .body.down { background: #ff8a80; }
+
+/* --- Treemap --- */
+.md-treemap {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  grid-template-rows: 1.2fr 0.8fr;
+  gap: 6px;
+  height: 180px;
+}
+.md-treemap > div {
+  border-radius: 10px;
+  padding: 10px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.md-treemap .a { grid-row: 1 / 3; background: rgba(61,214,140,.35); }
+.md-treemap .b { background: rgba(126,184,255,.35); }
+.md-treemap .c { background: rgba(255,183,77,.3); }
+.md-treemap .d { background: rgba(61,214,140,.2); }
+.md-treemap .e { background: rgba(255,138,128,.25); }
+.md-treemap span { font-weight: 500; opacity: 0.8; font-size: 0.7rem; }
+
+/* --- Lollipop --- */
+.md-lollipop {
+  display: grid;
+  gap: 12px;
+}
+.md-lollipop .row {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+}
+.md-lollipop .line {
+  position: relative;
+  height: 2px;
+  background: rgba(255,255,255,.12);
+}
+.md-lollipop .line i {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  background: #7eb8ff;
+}
+.md-lollipop .line::after {
+  content: "";
+  position: absolute;
+  right: calc(100% - var(--p, 50%));
+  top: 50%;
+  transform: translate(50%, -50%);
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: #3dd68c;
+  box-shadow: 0 0 0 3px rgba(61,214,140,.25);
+}
+
+/* --- Dual axis legend strip --- */
+.md-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 10px;
+  font-size: 0.78rem;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.md-chart-legend i {
+  display: inline-block;
+  width: 12px; height: 3px;
+  vertical-align: middle;
+  margin-right: 6px;
+  border-radius: 2px;
+}
+

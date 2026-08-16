@@ -778,6 +778,7 @@ class DatabaseSchema(DatabaseBase):
         ''')
         self.safe_execute_sql(cursor, 'ALTER TABLE campagnes_email ADD COLUMN scheduled_at TEXT')
         self.safe_execute_sql(cursor, 'ALTER TABLE campagnes_email ADD COLUMN campaign_params_json TEXT')
+        self.safe_execute_sql(cursor, 'ALTER TABLE campagnes_email ADD COLUMN celery_task_id TEXT')
 
         # Table des modèles d'emails (templates) - stockage en BDD (remplace progressivement templates_data.json)
         self.execute_sql(cursor, '''
