@@ -3820,11 +3820,13 @@ class EntrepriseManager(DatabaseBase):
         total_emails_opened = 0
         total_emails_clicked = 0
         try:
-            # Emails qui ont au moins un open
-            sql_open = '''
+            # Emails qui ont au moins un open humain (hors prefetch)
+            from utils.tracking_suspect import sql_real_open_clause
+            real_open_sql = sql_real_open_clause(self.is_postgresql())
+            sql_open = f'''
                 SELECT COUNT(DISTINCT email_id) as count
                 FROM email_tracking_events
-                WHERE event_type = 'open'
+                WHERE {real_open_sql}
             '''
             params_open: list[object] = []
             if since:
@@ -4055,7 +4057,9 @@ class EntrepriseManager(DatabaseBase):
 
         # Prospects "chauds": entreprises avec click récents (et quelques stats open/click), hors gagnés/perdus.
         try:
-            sql_hot = """
+            from utils.tracking_suspect import sql_real_open_clause
+            real_open_sql = sql_real_open_clause(self.is_postgresql(), alias='et')
+            sql_hot = f"""
                 SELECT
                     ent.id as entreprise_id,
                     ent.nom as nom,
@@ -4065,12 +4069,12 @@ class EntrepriseManager(DatabaseBase):
                     ent.etape_prospection as etape_prospection,
                     MAX(CASE WHEN et.event_type = 'click' THEN et.date_event ELSE NULL END) as last_click_at,
                     SUM(CASE WHEN et.event_type = 'click' THEN 1 ELSE 0 END) as clicks,
-                    SUM(CASE WHEN et.event_type = 'open' THEN 1 ELSE 0 END) as opens
+                    SUM(CASE WHEN {real_open_sql} THEN 1 ELSE 0 END) as opens
                 FROM email_tracking_events et
                 JOIN emails_envoyes ee ON ee.id = et.email_id
                 JOIN entreprises ent ON ent.id = ee.entreprise_id
                 WHERE ee.entreprise_id IS NOT NULL
-                  AND et.event_type IN ('open', 'click')
+                  AND (et.event_type = 'click' OR {real_open_sql})
                   AND COALESCE(ent.statut, '') NOT IN ('Gagné', 'Perdu', 'Désabonné', 'Plainte spam', 'Ne pas contacter')
             """
             params_hot: list[object] = []
@@ -4605,6 +4609,27 @@ class EntrepriseManager(DatabaseBase):
         if filters.get('secteur_contains'):
             base_sql += ' AND e.secteur LIKE ?'
             params.append('%' + str(filters['secteur_contains']) + '%')
+        if filters.get('secteur_any'):
+            values = filters['secteur_any']
+            if isinstance(values, str):
+                values = [v.strip() for v in values.split(',') if v.strip()]
+            conditions = []
+            for v in values or []:
+                conditions.append('LOWER(COALESCE(e.secteur, \'\')) LIKE ?')
+                params.append('%' + str(v).lower() + '%')
+            if conditions:
+                base_sql += ' AND (' + ' OR '.join(conditions) + ')'
+        if filters.get('exclude_secteur_any'):
+            values = filters['exclude_secteur_any']
+            if isinstance(values, str):
+                values = [v.strip() for v in values.split(',') if v.strip()]
+            for v in values or []:
+                base_sql += ' AND LOWER(COALESCE(e.secteur, \'\')) NOT LIKE ?'
+                params.append('%' + str(v).lower() + '%')
+            # Aussi ecarter noms typiquement institutionnels
+            for marker in ('lycée', 'lycee', 'collège', 'college', 'université', 'universite', 'mairie', 'préfecture', 'prefecture'):
+                base_sql += ' AND LOWER(COALESCE(e.nom, \'\')) NOT LIKE ?'
+                params.append('%' + marker + '%')
         if filters.get('opportunite') and isinstance(filters['opportunite'], list):
             placeholders = ','.join(['?' for _ in filters['opportunite']])
             base_sql += f' AND e.opportunite IN ({placeholders})'
@@ -4684,19 +4709,29 @@ class EntrepriseManager(DatabaseBase):
             params.append(filters['etape_prospection'])
         return base_sql
 
-    def _group_campagne_email_rows(self, rows, *, exclude_placeholders=False, principal_only=False):
+    def _group_campagne_email_rows(
+        self,
+        rows,
+        *,
+        exclude_placeholders=False,
+        principal_only=False,
+        exclude_risky=False,
+        max_emails_per_entreprise=None,
+    ):
         """
         Groupe les lignes SQL campagne en entreprises + liste d'emails.
 
         Inclut `email_principal` (source=principal, is_principal=True) et filtre
-        les adresses fictives / templates si demandé.
+        les adresses fictives / templates / risques campagne si demandé.
 
         @param rows: Lignes SQL (scraper + éventuel principal)
         @param exclude_placeholders: Écarter emails fictifs (exemple.fr, IONOS, etc.)
         @param principal_only: Ne garder que l'email principal
+        @param exclude_risky: Écarter gouv / SaaS / support (voir ``is_campaign_risky_email``)
+        @param max_emails_per_entreprise: Plafond d'emails par entreprise (None = illimité)
         @returns: Liste d'entreprises {id, nom, secteur, responsable, emails}
         """
-        from utils.email_quality import is_placeholder_email
+        from utils.email_quality import is_campaign_risky_email, is_placeholder_email
         from utils.name_formatter import format_name
 
         entreprises_dict = {}
@@ -4719,7 +4754,10 @@ class EntrepriseManager(DatabaseBase):
 
             source = r.get('source') or 'scraper'
             is_principal = bool(r.get('is_principal')) or source == 'principal'
-            if exclude_placeholders and is_placeholder_email(email_addr, source if not is_principal else None):
+            source_for_quality = source if not is_principal else None
+            if exclude_placeholders and is_placeholder_email(email_addr, source_for_quality):
+                continue
+            if exclude_risky and is_campaign_risky_email(email_addr, source_for_quality):
                 continue
             if principal_only and not is_principal:
                 continue
@@ -4748,6 +4786,26 @@ class EntrepriseManager(DatabaseBase):
                 'domain': domain,
             })
 
+        # Plafond : prioriser principal puis personnes
+        try:
+            max_n = int(max_emails_per_entreprise) if max_emails_per_entreprise is not None else None
+        except (TypeError, ValueError):
+            max_n = None
+        if max_n is not None and max_n > 0:
+            for ent in entreprises_dict.values():
+                emails = ent.get('emails') or []
+                if len(emails) <= max_n:
+                    continue
+                ranked = sorted(
+                    emails,
+                    key=lambda em: (
+                        0 if em.get('is_principal') else 1,
+                        0 if em.get('is_person') else 1,
+                        (em.get('email') or '').lower(),
+                    ),
+                )
+                ent['emails'] = ranked[:max_n]
+
         # Entreprises sans aucun email après filtres : on les retire
         return [e for e in entreprises_dict.values() if e.get('emails')]
 
@@ -4759,7 +4817,8 @@ class EntrepriseManager(DatabaseBase):
         Pagination optionnelle par entreprise (limit/offset) pour le lazy-load UI.
 
         @param filters: Dictionnaire optionnel de filtres (secteur, search, principal_only,
-            exclude_placeholders, sort_commercial, commercial_limit, etc.)
+            exclude_placeholders, exclude_risky, max_emails_per_entreprise,
+            sort_commercial, commercial_limit, etc.)
         @param limit: Nombre max d'entreprises à retourner (None = toutes)
         @param offset: Décalage (utilisé seulement si limit est fourni)
         @returns: list[dict] si limit is None ; sinon dict {items, total, limit, offset}
@@ -4767,6 +4826,14 @@ class EntrepriseManager(DatabaseBase):
         filters = filters or {}
         exclude_placeholders = bool(filters.get('exclude_placeholders'))
         principal_only = bool(filters.get('principal_only'))
+        # Défaut ON pour les campagnes : exclure gouv / SaaS / support
+        if 'exclude_risky' in filters:
+            exclude_risky = bool(filters.get('exclude_risky'))
+        else:
+            exclude_risky = True
+        max_emails_per_entreprise = filters.get('max_emails_per_entreprise')
+        if max_emails_per_entreprise is None and not principal_only:
+            max_emails_per_entreprise = 2
         use_pagination = limit is not None
         try:
             offset = max(0, int(offset or 0))
@@ -4896,6 +4963,8 @@ class EntrepriseManager(DatabaseBase):
                 email_rows,
                 exclude_placeholders=exclude_placeholders,
                 principal_only=principal_only,
+                exclude_risky=exclude_risky,
+                max_emails_per_entreprise=max_emails_per_entreprise,
             )
             order_index = {eid: idx for idx, eid in enumerate(page_ids)}
             items.sort(key=lambda e: order_index.get(e['id'], 10**9))
@@ -4914,6 +4983,8 @@ class EntrepriseManager(DatabaseBase):
             email_rows,
             exclude_placeholders=exclude_placeholders,
             principal_only=principal_only,
+            exclude_risky=exclude_risky,
+            max_emails_per_entreprise=max_emails_per_entreprise,
         )
 
         # Réordonner selon l'ordre des id_rows (nom)

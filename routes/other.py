@@ -693,6 +693,8 @@ def api_list_campagnes():
                     continue
 
             # Open / click uniques par campagne (1 requête pour tout le lot)
+            from utils.tracking_suspect import sql_countable_event_clause
+            countable_sql = sql_countable_event_clause(campagne_manager.is_postgresql(), alias='et')
             campagne_manager.execute_sql(
                 cursor,
                 f'''
@@ -703,7 +705,7 @@ def api_list_campagnes():
                 FROM email_tracking_events et
                 JOIN emails_envoyes e ON e.id = et.email_id
                 WHERE e.campagne_id IN ({placeholders})
-                  AND et.event_type IN ('open', 'click')
+                  AND {countable_sql}
                 GROUP BY e.campagne_id, et.event_type
                 ''',
                 tuple(ids),
@@ -785,6 +787,9 @@ def api_create_campagne():
 
     data = request.get_json() or {}
 
+    from utils.campaign_recipients import filter_campagne_recipients
+    from utils.email_subject import clean_email_subject
+
     nom = data.get('nom')
     template_id = data.get('template_id')
     recipients = data.get('recipients', [])
@@ -795,6 +800,13 @@ def api_create_campagne():
     scheduled_at_iso = data.get('scheduled_at_iso')
     mail_account_id = data.get('mail_account_id')
 
+    # Filet serveur : exclure gouv/SaaS/support + plafond 2 emails / entreprise
+    recipients, filter_stats = filter_campagne_recipients(
+        recipients,
+        exclude_risky=True,
+        max_emails_per_entreprise=2,
+    )
+
     if not nom:
         now = datetime.now()
         date_str = now.strftime('%d.%m')
@@ -802,8 +814,18 @@ def api_create_campagne():
         template_name = template_id or 'Campagne email'
         nom = f'{template_name[:40]} - {date_str} {time_str}'
 
+    # Nettoyer le nom affiche (placeholders / parentheses vides)
+    nom = clean_email_subject(
+        str(nom or '')
+        .replace('{entreprise}', '')
+        .replace('{nom}', '')
+    ) or nom
+
     if not recipients:
-        return jsonify({'error': 'Aucun destinataire fourni'}), 400
+        return jsonify({
+            'error': 'Aucun destinataire valide apres filtres (gouv / SaaS / support / plafond)',
+            'filter_stats': filter_stats,
+        }), 400
     if not sujet:
         return jsonify({'error': 'Le sujet est requis'}), 400
 
@@ -841,7 +863,13 @@ def api_create_campagne():
             campaign_params_json=params_json,
             mail_account_id=mail_account_id,
         )
-        return jsonify({'success': True, 'campagne_id': campagne_id, 'task_id': None, 'scheduled_at': scheduled_at_str})
+        return jsonify({
+            'success': True,
+            'campagne_id': campagne_id,
+            'task_id': None,
+            'scheduled_at': scheduled_at_str,
+            'filter_stats': filter_stats,
+        })
     else:
         # Envoi immédiat
         campagne_id = campagne_manager.create_campagne(
@@ -862,7 +890,12 @@ def api_create_campagne():
             mail_account_id=mail_account_id,
         )
         campagne_manager.update_campagne(campagne_id, statut='scheduled', celery_task_id=task.id)
-        return jsonify({'success': True, 'campagne_id': campagne_id, 'task_id': task.id})
+        return jsonify({
+            'success': True,
+            'campagne_id': campagne_id,
+            'task_id': task.id,
+            'filter_stats': filter_stats,
+        })
 
 
 @other_bp.route('/api/campagnes/<int:campagne_id>', methods=['GET'])
@@ -1059,6 +1092,20 @@ def api_relaunch_campagne(campagne_id):
     if not recipients:
         return jsonify({'error': 'Aucun destinataire trouvé pour cette campagne (historique et paramètres vides)'}), 400
 
+    from utils.campaign_recipients import filter_campagne_recipients
+    from utils.email_subject import clean_email_subject
+
+    recipients, filter_stats = filter_campagne_recipients(
+        recipients,
+        exclude_risky=True,
+        max_emails_per_entreprise=2,
+    )
+    if not recipients:
+        return jsonify({
+            'error': 'Aucun destinataire valide apres filtres pour la relance',
+            'filter_stats': filter_stats,
+        }), 400
+
     template_id = campagne.get('template_id') or params.get('template_id')
     sujet = campagne.get('sujet') or params.get('subject')
     custom_message = params.get('custom_message')
@@ -1067,7 +1114,10 @@ def api_relaunch_campagne(campagne_id):
         return jsonify({'error': 'Impossible de relancer: campagne sans template ni message source'}), 400
 
     source_name = campagne.get('nom') or f'Campagne #{campagne_id}'
-    new_name = f"{source_name} Relance"
+    new_name = clean_email_subject(
+        str(source_name).replace('{entreprise}', '').replace('{nom}', '')
+    ) or source_name
+    new_name = f"{new_name} Relance"
     _mid = campagne.get('mail_account_id')
     new_campagne_id = campagne_manager.create_campagne(
         nom=new_name[:190],
@@ -1334,6 +1384,8 @@ def api_get_entreprises_with_emails():
       - search
       - principal_only=1
       - exclude_placeholders=1 (emails fictifs / templates IONOS)
+      - exclude_risky=0|1 (gouv / SaaS / support ; défaut 1)
+      - max_emails_per_entreprise (défaut 2 si pas principal_only)
 
     Returns:
         JSON: Liste des entreprises avec emails, ou {items, total, page, page_size}
@@ -1348,6 +1400,15 @@ def api_get_entreprises_with_emails():
         filters['principal_only'] = True
     if request.args.get('exclude_placeholders') in ('1', 'true', 'True'):
         filters['exclude_placeholders'] = True
+    if request.args.get('exclude_risky') in ('0', 'false', 'False'):
+        filters['exclude_risky'] = False
+    elif request.args.get('exclude_risky') in ('1', 'true', 'True'):
+        filters['exclude_risky'] = True
+    if request.args.get('max_emails_per_entreprise') not in (None, ''):
+        try:
+            filters['max_emails_per_entreprise'] = int(request.args.get('max_emails_per_entreprise'))
+        except ValueError:
+            pass
 
     page = request.args.get('page', type=int)
     page_size = request.args.get('page_size', type=int)
@@ -1426,6 +1487,14 @@ def api_ciblage_entreprises():
         filters['secteur'] = request.args.get('secteur')
     if request.args.get('secteur_contains'):
         filters['secteur_contains'] = request.args.get('secteur_contains')
+    if request.args.get('secteur_any'):
+        filters['secteur_any'] = [
+            s.strip() for s in request.args.get('secteur_any').split(',') if s.strip()
+        ]
+    if request.args.get('exclude_secteur_any'):
+        filters['exclude_secteur_any'] = [
+            s.strip() for s in request.args.get('exclude_secteur_any').split(',') if s.strip()
+        ]
     if request.args.get('opportunite'):
         filters['opportunite'] = [s.strip() for s in request.args.get('opportunite').split(',') if s.strip()]
     if request.args.get('statut'):
@@ -1488,6 +1557,15 @@ def api_ciblage_entreprises():
         filters['principal_only'] = True
     if request.args.get('exclude_placeholders') in ('1', 'true', 'True'):
         filters['exclude_placeholders'] = True
+    if request.args.get('exclude_risky') in ('0', 'false', 'False'):
+        filters['exclude_risky'] = False
+    elif request.args.get('exclude_risky') in ('1', 'true', 'True'):
+        filters['exclude_risky'] = True
+    if request.args.get('max_emails_per_entreprise') not in (None, ''):
+        try:
+            filters['max_emails_per_entreprise'] = int(request.args.get('max_emails_per_entreprise'))
+        except ValueError:
+            pass
 
     page = request.args.get('page', type=int)
     page_size = request.args.get('page_size', type=int)
