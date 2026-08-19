@@ -136,12 +136,14 @@ class OpportunityCalculator:
             if sent_count <= 0:
                 return 0.0, []
 
-            # Uniques ouvrants / cliqueurs
+            # Uniques ouvrants / cliqueurs (hors prefetch / scanners)
+            from utils.tracking_suspect import sql_real_open_clause
+            real_open_sql = sql_real_open_clause(self.database.is_postgresql(), alias='et')
             self.database.execute_sql(
                 cursor,
-                '''
+                f'''
                 SELECT
-                    COUNT(DISTINCT CASE WHEN et.event_type = 'open' THEN et.email_id END) AS open_unique,
+                    COUNT(DISTINCT CASE WHEN {real_open_sql} THEN et.email_id END) AS open_unique,
                     COUNT(DISTINCT CASE WHEN et.event_type = 'click' THEN et.email_id END) AS click_unique
                 FROM emails_envoyes e
                 LEFT JOIN email_tracking_events et ON et.email_id = e.id

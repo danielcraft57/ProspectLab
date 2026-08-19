@@ -653,6 +653,147 @@ class CampagneManager(DatabaseBase):
         ok = self.mark_email_bounced(email_id_int, reason=reason)
         return email_id_int if ok else None
 
+    def insert_inbox_event_if_new(
+        self,
+        *,
+        source: str,
+        external_id: str,
+        category: str,
+        email: str | None = None,
+        campagne_id: int | None = None,
+        email_envoye_id: int | None = None,
+        subject: str | None = None,
+        preview: str | None = None,
+        raw_meta=None,
+        confidence: float | None = None,
+        date_event=None,
+    ) -> bool:
+        """
+        Insert idempotent dans ``inbox_events`` (ignore si ``source+external_id`` existe).
+
+        @param source: ``imap`` ou ``brevo``
+        @param external_id: Identifiant externe (Message-ID / Brevo messageId+event)
+        @param category: Categorie classification
+        @param email: Adresse liee
+        @param campagne_id: Campagne optionnelle
+        @param email_envoye_id: Email envoye optionnel
+        @param subject: Sujet
+        @param preview: Apercu
+        @param raw_meta: Dict ou JSON string
+        @param confidence: Score optionnel
+        @param date_event: Datetime / ISO string
+        @returns: True si une ligne a ete inseree, False si deja presente ou erreur
+        """
+        src = (source or '').strip()
+        ext = (external_id or '').strip()
+        cat = (category or '').strip()
+        if not src or not ext or not cat:
+            return False
+
+        if isinstance(raw_meta, dict):
+            raw_meta = json.dumps(raw_meta, ensure_ascii=False, default=str)
+
+        try:
+            self.ensure_inbox_events_table()
+        except Exception:
+            pass
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        params = (
+            src,
+            ext,
+            (email or '').strip() or None,
+            campagne_id,
+            email_envoye_id,
+            cat,
+            subject,
+            preview,
+            raw_meta,
+            confidence,
+            date_event,
+        )
+        try:
+            if self.is_postgresql():
+                self.execute_sql(
+                    cursor,
+                    '''
+                    INSERT INTO inbox_events
+                    (source, external_id, email, campagne_id, email_envoye_id, category,
+                     subject, preview, raw_meta, confidence, date_event)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (source, external_id) DO NOTHING
+                    ''',
+                    params,
+                )
+            else:
+                self.execute_sql(
+                    cursor,
+                    '''
+                    INSERT OR IGNORE INTO inbox_events
+                    (source, external_id, email, campagne_id, email_envoye_id, category,
+                     subject, preview, raw_meta, confidence, date_event)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''',
+                    params,
+                )
+            conn.commit()
+            inserted = int(getattr(cursor, 'rowcount', 0) or 0) > 0
+            return inserted
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            return False
+        finally:
+            conn.close()
+
+    def list_inbox_events_since(self, since_iso: str | None = None, limit: int = 100):
+        """
+        Liste les evenements inbox depuis une date (pour rapports).
+
+        @param since_iso: Date ISO inclusive (None = 7 derniers jours via processed_at)
+        @param limit: Nombre max de lignes
+        @returns: Liste de dicts
+        """
+        try:
+            self.ensure_inbox_events_table()
+        except Exception:
+            return []
+
+        lim = max(1, min(int(limit or 100), 500))
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            if since_iso:
+                self.execute_sql(
+                    cursor,
+                    '''
+                    SELECT * FROM inbox_events
+                    WHERE COALESCE(date_event, processed_at) >= ?
+                    ORDER BY COALESCE(date_event, processed_at) DESC
+                    LIMIT ?
+                    ''',
+                    (since_iso, lim),
+                )
+            else:
+                self.execute_sql(
+                    cursor,
+                    '''
+                    SELECT * FROM inbox_events
+                    ORDER BY COALESCE(date_event, processed_at) DESC
+                    LIMIT ?
+                    ''',
+                    (lim,),
+                )
+            rows = cursor.fetchall() or []
+            return [dict(r) for r in rows]
+        except Exception:
+            return []
+        finally:
+            conn.close()
+
     def get_email_envoye(self, email_id):
         """
         Récupère le détail d'un email envoyé.
@@ -743,7 +884,97 @@ class CampagneManager(DatabaseBase):
         conn.close()
         return [dict(row) for row in rows]
 
-    def save_tracking_event(self, tracking_token, event_type, event_data=None, ip_address=None, user_agent=None):
+    def _pixel_hit_context(self, cursor, email_id, ip_address):
+        """
+        Charge le contexte anti-prefetch pour un hit pixel.
+
+        @param cursor: Curseur SQL deja ouvert
+        @param email_id: ID de l'email envoye
+        @param ip_address: IP cliente (ignoree si privee)
+        @returns: Dict prior_open_count, prior_prefetch_count, seconds_since_first_hit, distinct_emails_same_ip
+        """
+        from utils.tracking_suspect import (
+            get_burst_window_seconds,
+            is_private_or_local_ip,
+            seconds_since,
+        )
+
+        context = {
+            'prior_open_count': 0,
+            'prior_prefetch_count': 0,
+            'seconds_since_first_hit': None,
+            'distinct_emails_same_ip': 0,
+        }
+        if not email_id:
+            return context
+
+        self.execute_sql(
+            cursor,
+            '''
+            SELECT event_type, COUNT(*) AS cnt, MIN(date_event) AS first_event
+            FROM email_tracking_events
+            WHERE email_id = ?
+              AND event_type IN ('open', 'prefetch')
+            GROUP BY event_type
+            ''',
+            (email_id,),
+        )
+        first_hit = None
+        for row in cursor.fetchall() or []:
+            if isinstance(row, dict):
+                event_type = row.get('event_type')
+                count = int(row.get('cnt') or 0)
+                first_event = row.get('first_event')
+            else:
+                event_type = row[0]
+                count = int(row[1] or 0)
+                first_event = row[2] if len(row) > 2 else None
+            if event_type == 'open':
+                context['prior_open_count'] = count
+            elif event_type == 'prefetch':
+                context['prior_prefetch_count'] = count
+            if first_event and (first_hit is None or str(first_event) < str(first_hit)):
+                first_hit = first_event
+        if first_hit is not None:
+            context['seconds_since_first_hit'] = seconds_since(first_hit)
+
+        ip = (ip_address or '').strip()
+        if ip and not is_private_or_local_ip(ip):
+            from datetime import datetime, timedelta, timezone
+
+            window = get_burst_window_seconds()
+            since = (datetime.now(timezone.utc) - timedelta(seconds=int(window))).strftime(
+                '%Y-%m-%d %H:%M:%S'
+            )
+            self.execute_sql(
+                cursor,
+                '''
+                SELECT COUNT(DISTINCT email_id) AS cnt
+                FROM email_tracking_events
+                WHERE ip_address = ?
+                  AND email_id <> ?
+                  AND date_event >= ?
+                ''',
+                (ip, email_id, since),
+            )
+            row = cursor.fetchone()
+            if row:
+                if isinstance(row, dict):
+                    context['distinct_emails_same_ip'] = int(row.get('cnt') or 0)
+                else:
+                    context['distinct_emails_same_ip'] = int(row[0] or 0)
+        return context
+
+    def save_tracking_event(
+        self,
+        tracking_token,
+        event_type,
+        event_data=None,
+        ip_address=None,
+        user_agent=None,
+        http_method=None,
+        request_headers=None,
+    ):
         """
         Enregistre un événement de tracking.
 
@@ -753,6 +984,8 @@ class CampagneManager(DatabaseBase):
             event_data (str|dict|None): Données supplémentaires
             ip_address (str|None): IP du client
             user_agent (str|None): User agent du client
+            http_method (str|None): Methode HTTP (HEAD = prefetch)
+            request_headers (dict|None): En-tetes HTTP (Purpose, etc.)
 
         Returns:
             int|None: ID de l'événement enregistré
@@ -769,7 +1002,7 @@ class CampagneManager(DatabaseBase):
             conn.close()
             return None
 
-        self.execute_sql(cursor,'SELECT id, entreprise_id FROM emails_envoyes WHERE tracking_token = ?', (tracking_token,))
+        self.execute_sql(cursor,'SELECT id, entreprise_id, date_envoi FROM emails_envoyes WHERE tracking_token = ?', (tracking_token,))
         row = cursor.fetchone()
         if not row:
             import logging
@@ -780,13 +1013,16 @@ class CampagneManager(DatabaseBase):
         # Compatibilité SQLite (tuple) / PostgreSQL (dict-like)
         email_id = None
         entreprise_id = None
+        date_envoi = None
         try:
             if isinstance(row, dict):
                 email_id = row.get('id')
                 entreprise_id = row.get('entreprise_id')
+                date_envoi = row.get('date_envoi')
             else:
                 email_id = row[0]
                 entreprise_id = row[1]
+                date_envoi = row[2] if len(row) > 2 else None
         except Exception:
             email_id = None
 
@@ -796,8 +1032,59 @@ class CampagneManager(DatabaseBase):
             conn.close()
             return None
 
-        if isinstance(event_data, dict):
-            event_data = json.dumps(event_data)
+        # Enrichir event_data avec heuristique proxy/bot/prefetch (sans bloquer l'insert)
+        _tracking_meta = {}
+        try:
+            from utils.tracking_suspect import build_tracking_event_meta, seconds_since
+
+            base_meta = {}
+            if isinstance(event_data, dict):
+                base_meta = dict(event_data)
+            elif isinstance(event_data, str) and event_data.strip():
+                try:
+                    parsed = json.loads(event_data)
+                    if isinstance(parsed, dict):
+                        base_meta = parsed
+                    else:
+                        base_meta = {'raw': event_data}
+                except Exception:
+                    base_meta = {'raw': event_data}
+            delay_sec = seconds_since(date_envoi) if event_type == 'open' else None
+            pixel_ctx = {'prior_open_count': 0, 'prior_prefetch_count': 0, 'seconds_since_first_hit': None, 'distinct_emails_same_ip': 0}
+            if event_type == 'open':
+                pixel_ctx = self._pixel_hit_context(cursor, email_id, ip_address)
+            meta = build_tracking_event_meta(
+                ip_address,
+                user_agent,
+                extra=base_meta,
+                http_method=http_method,
+                headers=request_headers if isinstance(request_headers, dict) else None,
+                seconds_after_send=delay_sec,
+                prior_open_count=pixel_ctx.get('prior_open_count') or 0,
+                prior_prefetch_count=pixel_ctx.get('prior_prefetch_count') or 0,
+                seconds_since_first_hit=pixel_ctx.get('seconds_since_first_hit'),
+                distinct_emails_same_ip=pixel_ctx.get('distinct_emails_same_ip') or 0,
+                confirm=(event_type == 'open'),
+            )
+            decided_type = meta.pop('event_type', None)
+            event_data = json.dumps(meta) if meta else None
+            _tracking_meta = meta or {}
+            if event_type == 'open' and (
+                decided_type == 'prefetch'
+                or _tracking_meta.get('prefetch')
+                or _tracking_meta.get('suspect')
+            ):
+                event_type = 'prefetch'
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning(
+                'Classification tracking echouee, hit compte en prefetch',
+                exc_info=True,
+            )
+            _tracking_meta = {'prefetch': True, 'suspect': True, 'reason': 'classify_error'}
+            if event_type == 'open':
+                event_type = 'prefetch'
+            event_data = json.dumps(_tracking_meta)
 
         params = (email_id, tracking_token, event_type, event_data, ip_address, user_agent)
         if self.is_postgresql():
@@ -830,8 +1117,14 @@ class CampagneManager(DatabaseBase):
         conn.close()
 
         # Mettre à jour automatiquement le statut de l'entreprise
+        # (ignorer opens/clicks suspects : proxy mail, bots cloud)
         try:
-            if entreprise_id:
+            is_suspect = bool(
+                _tracking_meta.get('prefetch')
+                or _tracking_meta.get('suspect')
+                or _tracking_meta.get('bot')
+            )
+            if entreprise_id and not is_suspect:
                 if event_type == 'open':
                     # Un "open" = intérêt détecté, mais sans intention forte.
                     # On passe en "À qualifier" (tiède), sans dégrader un statut déjà plus chaud.
@@ -942,12 +1235,14 @@ class CampagneManager(DatabaseBase):
             return 0
 
         placeholders = ','.join(['?'] * len(email_ids))
+        from utils.tracking_suspect import sql_countable_event_clause
+        countable_sql = sql_countable_event_clause(self.is_postgresql())
 
-        # Par email_id : compter les opens et clicks
+        # Par email_id : compter les opens et clicks humains
         self.execute_sql(cursor, f'''
             SELECT email_id, event_type, COUNT(*) as cnt
             FROM email_tracking_events
-            WHERE email_id IN ({placeholders}) AND event_type IN ('open', 'click')
+            WHERE email_id IN ({placeholders}) AND {countable_sql}
             GROUP BY email_id, event_type
         ''', email_ids)
         events = cursor.fetchall()
@@ -1022,11 +1317,14 @@ class CampagneManager(DatabaseBase):
                 'events': []
             }
 
+        from utils.tracking_suspect import sql_countable_event_clause
+        countable_sql = sql_countable_event_clause(self.is_postgresql())
         self.execute_sql(cursor,
             '''
             SELECT event_type, COUNT(*) as count, MIN(date_event) as first_event, MAX(date_event) as last_event
             FROM email_tracking_events
             WHERE email_id = ?
+              AND (event_type = 'read_time' OR ''' + countable_sql + ''')
             GROUP BY event_type
             ''',
             (email_id,)
@@ -1055,6 +1353,7 @@ class CampagneManager(DatabaseBase):
             '''
             SELECT * FROM email_tracking_events
             WHERE email_id = ?
+              AND event_type != 'prefetch'
             ORDER BY date_event ASC
             ''',
             (email_id,)
@@ -1176,6 +1475,8 @@ class CampagneManager(DatabaseBase):
             }
 
         placeholders = ','.join(['?'] * len(email_ids))
+        from utils.tracking_suspect import sql_countable_event_clause
+        countable_sql = sql_countable_event_clause(self.is_postgresql())
 
         self.execute_sql(cursor,
             f'''
@@ -1187,6 +1488,7 @@ class CampagneManager(DatabaseBase):
                 MAX(date_event) as last_event
             FROM email_tracking_events
             WHERE email_id IN ({placeholders})
+            AND {countable_sql}
             GROUP BY email_id, event_type
             ''',
             email_ids
@@ -1211,6 +1513,7 @@ class CampagneManager(DatabaseBase):
                 COUNT(*) as total_events
             FROM email_tracking_events
             WHERE email_id IN ({placeholders})
+            AND {countable_sql}
             GROUP BY event_type
             ''',
             email_ids
@@ -1405,6 +1708,9 @@ class CampagneManager(DatabaseBase):
         if quick_only:
             where.append('(e.campagne_id IS NULL)')
 
+        from utils.tracking_suspect import sql_real_open_clause
+        real_open_sql = sql_real_open_clause(self.is_postgresql(), alias='t')
+
         if filter_type == 'failed':
             where.append("e.statut = 'failed'")
         elif filter_type == 'sent':
@@ -1412,7 +1718,7 @@ class CampagneManager(DatabaseBase):
         elif filter_type == 'opened':
             where.append(
                 "EXISTS (SELECT 1 FROM email_tracking_events t "
-                "WHERE t.email_id = e.id AND t.event_type = 'open')"
+                f"WHERE t.email_id = e.id AND {real_open_sql})"
             )
         elif filter_type == 'clicked':
             where.append(
@@ -1437,7 +1743,7 @@ class CampagneManager(DatabaseBase):
                 e.erreur,
                 (
                     SELECT COUNT(*) FROM email_tracking_events t
-                    WHERE t.email_id = e.id AND t.event_type = 'open'
+                    WHERE t.email_id = e.id AND {real_open_sql}
                 ) AS opens,
                 (
                     SELECT COUNT(*) FROM email_tracking_events t
@@ -1445,11 +1751,11 @@ class CampagneManager(DatabaseBase):
                 ) AS clicks,
                 (
                     SELECT MIN(t.date_event) FROM email_tracking_events t
-                    WHERE t.email_id = e.id AND t.event_type = 'open'
+                    WHERE t.email_id = e.id AND {real_open_sql}
                 ) AS first_open,
                 (
                     SELECT MAX(t.date_event) FROM email_tracking_events t
-                    WHERE t.email_id = e.id AND t.event_type = 'open'
+                    WHERE t.email_id = e.id AND {real_open_sql}
                 ) AS last_open,
                 (
                     SELECT MAX(t.date_event) FROM email_tracking_events t
@@ -1509,12 +1815,15 @@ class CampagneManager(DatabaseBase):
         total_sent = int(counts.get('total_sent') or 0)
         total_failed = int(counts.get('total_failed') or 0)
 
+        from utils.tracking_suspect import sql_real_open_clause
+        real_open_sql = sql_real_open_clause(self.is_postgresql(), alias='t')
+
         self.execute_sql(
             cursor,
-            '''
+            f'''
             SELECT COUNT(DISTINCT e.id) AS c
             FROM emails_envoyes e
-            JOIN email_tracking_events t ON t.email_id = e.id AND t.event_type = 'open'
+            JOIN email_tracking_events t ON t.email_id = e.id AND {real_open_sql}
             WHERE e.campagne_id IS NULL AND e.date_envoi >= ? AND e.statut = 'sent'
             ''',
             (since,),
@@ -1547,4 +1856,188 @@ class CampagneManager(DatabaseBase):
             'total_clicked': total_clicked,
             'open_rate': open_rate,
             'click_rate': click_rate,
+        }
+
+    def reclassify_prefetch_opens(self, limit=None, dry_run=True):
+        """
+        Reclasse les faux opens historiques (Apple MPP, scanners, trop tot).
+
+        Args:
+            limit (int|None): Nombre max d'events a examiner (None = tous)
+            dry_run (bool): Si True, n'ecrit pas en base
+
+        Returns:
+            dict: scanned, updated, reasons
+        """
+        from utils.tracking_suspect import (
+            build_tracking_event_meta,
+            classify_open_hit,
+            get_burst_email_threshold,
+            get_burst_window_seconds,
+            is_private_or_local_ip,
+            parse_tracking_datetime,
+            seconds_since,
+        )
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            self.execute_sql(cursor, "SELECT 1 FROM email_tracking_events LIMIT 1")
+        except Exception:
+            conn.close()
+            return {'scanned': 0, 'updated': 0, 'reasons': {}}
+
+        sql_limit = ''
+        params = []
+        if limit is not None:
+            sql_limit = 'LIMIT ?'
+            params.append(int(limit))
+
+        self.execute_sql(
+            cursor,
+            f'''
+            SELECT
+                t.id,
+                t.email_id,
+                t.event_data,
+                t.ip_address,
+                t.user_agent,
+                t.date_event,
+                e.date_envoi
+            FROM email_tracking_events t
+            LEFT JOIN emails_envoyes e ON e.id = t.email_id
+            WHERE t.event_type = 'open'
+            ORDER BY t.id ASC
+            {sql_limit}
+            ''',
+            tuple(params),
+        )
+        rows = cursor.fetchall() or []
+        scanned = 0
+        updated = 0
+        reasons = {}
+        updates = []
+        remaining = []
+
+        for row in rows:
+            scanned += 1
+            if isinstance(row, dict):
+                event_id = row.get('id')
+                email_id = row.get('email_id')
+                event_data = row.get('event_data')
+                ip_address = row.get('ip_address')
+                user_agent = row.get('user_agent')
+                date_event = row.get('date_event')
+                date_envoi = row.get('date_envoi')
+            else:
+                event_id = row[0]
+                email_id = row[1]
+                event_data = row[2]
+                ip_address = row[3]
+                user_agent = row[4]
+                date_event = row[5]
+                date_envoi = row[6] if len(row) > 6 else None
+
+            extra = {}
+            if isinstance(event_data, dict):
+                extra = dict(event_data)
+            elif isinstance(event_data, str) and event_data.strip():
+                try:
+                    parsed = json.loads(event_data)
+                    if isinstance(parsed, dict):
+                        extra = parsed
+                except Exception:
+                    extra = {'raw': event_data}
+
+            delay_sec = seconds_since(date_envoi, date_event)
+            classified = classify_open_hit(
+                ip_address=ip_address,
+                user_agent=user_agent,
+                seconds_after_send=delay_sec,
+            )
+            if classified.get('prefetch') or classified.get('suspect'):
+                reason = classified.get('reason') or 'prefetch'
+                reasons[reason] = reasons.get(reason, 0) + 1
+                extra.update(build_tracking_event_meta(
+                    ip_address,
+                    user_agent,
+                    extra=extra,
+                    seconds_after_send=delay_sec,
+                ))
+                extra['prefetch'] = True
+                extra['suspect'] = True
+                extra['reason'] = reason
+                updates.append((json.dumps(extra), event_id))
+                continue
+
+            remaining.append({
+                'event_id': event_id,
+                'email_id': email_id,
+                'ip_address': ip_address,
+                'date_event': date_event,
+                'extra': extra,
+            })
+
+        burst_threshold = get_burst_email_threshold()
+        burst_window = get_burst_window_seconds()
+        already = {item[1] for item in updates}
+        by_ip = {}
+        for item in remaining:
+            ip = (item.get('ip_address') or '').strip()
+            if not ip or is_private_or_local_ip(ip):
+                continue
+            by_ip.setdefault(ip, []).append(item)
+        for ip, items in by_ip.items():
+            dated = []
+            for item in items:
+                dt = parse_tracking_datetime(item.get('date_event'))
+                if dt is None:
+                    continue
+                dated.append((dt, item))
+            dated.sort(key=lambda pair: pair[0])
+            for idx, (dt, item) in enumerate(dated):
+                if item['event_id'] in already:
+                    continue
+                emails = {item.get('email_id')}
+                left = idx
+                while left > 0 and (dt - dated[left - 1][0]).total_seconds() <= burst_window:
+                    left -= 1
+                    emails.add(dated[left][1].get('email_id'))
+                right = idx
+                while right + 1 < len(dated) and (dated[right + 1][0] - dt).total_seconds() <= burst_window:
+                    right += 1
+                    emails.add(dated[right][1].get('email_id'))
+                if len(emails) < burst_threshold:
+                    continue
+                extra = dict(item.get('extra') or {})
+                extra['prefetch'] = True
+                extra['suspect'] = True
+                extra['bot'] = True
+                extra['reason'] = 'ip_burst'
+                reasons['ip_burst'] = reasons.get('ip_burst', 0) + 1
+                updates.append((json.dumps(extra), item['event_id']))
+                already.add(item['event_id'])
+
+        if not dry_run:
+            for event_data_json, event_id in updates:
+                self.execute_sql(
+                    cursor,
+                    '''
+                    UPDATE email_tracking_events
+                    SET event_type = 'prefetch', event_data = ?
+                    WHERE id = ? AND event_type = 'open'
+                    ''',
+                    (event_data_json, event_id),
+                )
+            conn.commit()
+            updated = len(updates)
+        else:
+            updated = len(updates)
+
+        conn.close()
+        return {
+            'scanned': scanned,
+            'updated': updated,
+            'dry_run': bool(dry_run),
+            'reasons': reasons,
         }

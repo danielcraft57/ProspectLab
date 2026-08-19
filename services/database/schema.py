@@ -420,6 +420,52 @@ class DatabaseSchema(DatabaseBase):
         finally:
             conn.close()
 
+    def ensure_inbox_events_table(self):
+        """
+        Journal append-only des evenements inbox (Brevo + IMAP classification).
+
+        Pas de CRUD large : insert idempotent + lecture pour rapports uniquement.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS inbox_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source TEXT NOT NULL,
+                    external_id TEXT NOT NULL,
+                    email TEXT,
+                    campagne_id INTEGER,
+                    email_envoye_id INTEGER,
+                    category TEXT NOT NULL,
+                    subject TEXT,
+                    preview TEXT,
+                    raw_meta TEXT,
+                    confidence REAL,
+                    date_event TIMESTAMP,
+                    processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(source, external_id)
+                )
+                ''',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_inbox_events_category ON inbox_events(category)',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_inbox_events_date ON inbox_events(date_event)',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_inbox_events_email ON inbox_events(email)',
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def ensure_pentest_forms_normalized_tables(self):
         """
         Migration idempotente : tables normalisées des tests formulaires pentest.
@@ -928,6 +974,10 @@ class DatabaseSchema(DatabaseBase):
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_tracking_email_id ON email_tracking_events(email_id)')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_tracking_token ON email_tracking_events(tracking_token)')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_tracking_event_type ON email_tracking_events(event_type)')
+        self.safe_execute_sql(
+            cursor,
+            'CREATE INDEX IF NOT EXISTS idx_tracking_ip_date ON email_tracking_events(ip_address, date_event)',
+        )
         
         # Table des segments de ciblage (critères sauvegardés pour les campagnes)
         self.execute_sql(cursor, '''

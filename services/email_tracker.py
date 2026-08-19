@@ -36,19 +36,30 @@ class EmailTracker:
 
     def inject_tracking_pixel(self, html_content: str, tracking_token: str) -> str:
         """
-        Injecte un pixel de tracking invisible dans le HTML
+        Injecte un pixel de tracking invisible dans le HTML.
 
-        Args:
-            html_content: Contenu HTML de l'email
-            tracking_token: Token de tracking unique
+        Combine une balise img (Gmail) et un background CSS (clients qui
+        rendent les styles). Les hits trop tot ou automatiques sont filtres
+        cote serveur, pas ici.
 
-        Returns:
-            str: HTML modifié avec le pixel de tracking
+        @param html_content: Contenu HTML de l'email
+        @param tracking_token: Token de tracking unique
+        @returns: HTML avec le pixel de tracking
         """
         tracking_url = f'{self.base_url}/track/pixel/{tracking_token}'
+        img_url = f'{tracking_url}?ch=img'
+        css_url = f'{tracking_url}?ch=css'
 
-        # Pixel de tracking (1x1 transparent)
-        tracking_pixel = f'<img src="{tracking_url}" width="1" height="1" style="display:none;" alt="" />'
+        # Img pour Gmail (le proxy ne charge souvent pas les backgrounds CSS).
+        # CSS en plus: certains scanners ne fetchent que les <img src>.
+        tracking_pixel = (
+            f'<div class="pl-o" style="line-height:1px;font-size:1px;max-height:1px;'
+            f'overflow:hidden;width:1px;height:1px;">'
+            f'<img src="{img_url}" width="1" height="1" alt="" loading="lazy" '
+            f'style="display:none;border:0;outline:none;width:1px;height:1px;" />'
+            f'</div>'
+            f'<style>@media screen{{.pl-o{{background-image:url(\'{css_url}\')!important;}}}}</style>'
+        )
 
         # Si le HTML contient un </body>, insérer avant
         if '</body>' in html_content.lower():

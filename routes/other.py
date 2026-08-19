@@ -4,7 +4,7 @@ Blueprint pour les routes supplémentaires non encore migrées
 Contient les routes pour les emails, templates, scraping et téléchargements.
 """
 
-from flask import Blueprint, render_template, request, jsonify, send_file, redirect, url_for, flash, session
+from flask import Blueprint, render_template, request, jsonify, send_file, redirect, url_for, flash, session, make_response
 import time
 import os
 from services.email_sender import EmailSender
@@ -1609,27 +1609,44 @@ def api_ciblage_segment_delete(segment_id):
     return jsonify({'error': 'Segment introuvable'}), 404
 
 
-@other_bp.route('/track/pixel/<tracking_token>')
+@other_bp.route('/track/pixel/<tracking_token>', methods=['GET', 'HEAD'])
 def track_pixel(tracking_token):
     """
     Route de tracking pour le pixel invisible (ouverture d'email).
+
+    Les hits de prechargement (Apple MPP, scanners, HEAD, trop tot apres envoi)
+    sont enregistres en event_type ``prefetch`` et ne comptent pas comme ouverture.
 
     Args:
         tracking_token (str): Token de tracking unique
 
     Returns:
-        Response: Image 1x1 transparente
+        Response: Image 1x1 transparente, non cachee
     """
     from services.database.campagnes import CampagneManager
-    from flask import request, send_file
+    from flask import send_file
+    from utils.tracking_suspect import get_request_client_ip
     import io
     import logging
 
     logger = logging.getLogger(__name__)
     
     campagne_manager = CampagneManager()
-    ip_address = request.remote_addr
+    ip_address = get_request_client_ip(request)
     user_agent = request.headers.get('User-Agent', '')
+    request_headers = {
+        'Purpose': request.headers.get('Purpose'),
+        'X-Purpose': request.headers.get('X-Purpose'),
+        'X-Moz': request.headers.get('X-Moz'),
+        'Sec-Purpose': request.headers.get('Sec-Purpose'),
+        'Sec-Fetch-Purpose': request.headers.get('Sec-Fetch-Purpose'),
+        'Sec-Fetch-Dest': request.headers.get('Sec-Fetch-Dest'),
+        'Sec-Fetch-Mode': request.headers.get('Sec-Fetch-Mode'),
+        'Accept': request.headers.get('Accept'),
+        'Accept-Language': request.headers.get('Accept-Language'),
+        'X-Moz-Prefetch': request.headers.get('X-Moz-Prefetch'),
+    }
+    pixel_channel = (request.args.get('ch') or '').strip().lower()[:16]
     
     # Logger pour déboguer
     logger.info(f'Tracking pixel appelé: token={tracking_token[:10]}..., IP={ip_address}, UA={user_agent[:50]}')
@@ -1638,9 +1655,11 @@ def track_pixel(tracking_token):
         event_id = campagne_manager.save_tracking_event(
             tracking_token=tracking_token,
             event_type='open',
-            event_data=None,
+            event_data={'channel': pixel_channel} if pixel_channel else None,
             ip_address=ip_address,
-            user_agent=user_agent
+            user_agent=user_agent,
+            http_method=request.method,
+            request_headers=request_headers,
         )
         
         if event_id:
@@ -1650,11 +1669,16 @@ def track_pixel(tracking_token):
     except Exception as e:
         logger.error(f'Erreur lors de l\'enregistrement du tracking: {e}', exc_info=True)
 
-    # Retourner une image 1x1 transparente
+    # Retourner une image 1x1 transparente (jamais en cache: un prefetch ne doit pas "geler" le pixel)
     img = io.BytesIO()
     img.write(b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xdb\x00\x00\x00\x00IEND\xaeB`\x82')
     img.seek(0)
-    return send_file(img, mimetype='image/png')
+    resp = make_response(send_file(img, mimetype='image/png'))
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private, max-age=0'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    return resp
 
 
 @other_bp.route('/track/click/<tracking_token>')
@@ -1674,7 +1698,8 @@ def track_click(tracking_token):
 
     campagne_manager = CampagneManager()
     url = request.args.get('url', '')
-    ip_address = request.remote_addr
+    from utils.tracking_suspect import get_request_client_ip
+    ip_address = get_request_client_ip(request)
     user_agent = request.headers.get('User-Agent', '')
 
     if url:

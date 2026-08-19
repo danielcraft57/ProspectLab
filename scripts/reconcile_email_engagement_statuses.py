@@ -185,14 +185,16 @@ def main() -> int:
         )
         click_ids = fetch_id_set(cursor.fetchall())
 
-        # Entreprises avec au moins un open
+        # Entreprises avec au moins un open humain
+        from utils.tracking_suspect import sql_real_open_clause
+        real_open_sql = sql_real_open_clause(db.is_postgresql(), alias="et")
         db.execute_sql(
             cursor,
-            """
+            f"""
             SELECT DISTINCT e.entreprise_id
             FROM email_tracking_events et
             JOIN emails_envoyes e ON e.id = et.email_id
-            WHERE et.event_type = 'open'
+            WHERE {real_open_sql}
               AND e.entreprise_id IS NOT NULL
               AND et.date_event >= ?
             """,
