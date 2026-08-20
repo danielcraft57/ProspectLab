@@ -3601,6 +3601,23 @@ class EntrepriseManager(DatabaseBase):
             dict: Dictionnaire avec les statistiques
         """
         conn = self.get_connection()
+        try:
+            return self._get_statistics_with_conn(conn, days=days, offset_days=offset_days)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    def _get_statistics_with_conn(self, conn, days: int | None = None, offset_days: int = 0):
+        """
+        Calcule les statistiques sur une connexion déjà ouverte.
+
+        @param conn: Connexion SQL (SQLite ou PostgreSQL).
+        @param days: Fenêtre en jours (None = pas de filtre temps).
+        @param offset_days: Décalage de la fenêtre.
+        @returns: Dictionnaire de statistiques.
+        """
         # row_factory est déjà configuré dans get_connection() (SQLite) ou via RealDictCursor (PostgreSQL)
         cursor = conn.cursor()
         
@@ -4238,7 +4255,6 @@ class EntrepriseManager(DatabaseBase):
         except Exception:
             stats['evolution_trimestrielle'] = []
 
-        conn.close()
         return stats
 
     def get_mobile_dashboard_overview(self, trend_days: int = 7) -> dict:
@@ -4254,6 +4270,24 @@ class EntrepriseManager(DatabaseBase):
         from datetime import datetime, timedelta
 
         conn = self.get_connection()
+        try:
+            return self._get_mobile_dashboard_overview_with_conn(conn, trend_days=trend_days)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    def _get_mobile_dashboard_overview_with_conn(self, conn, trend_days: int = 7) -> dict:
+        """
+        Calcule le dashboard mobile sur une connexion déjà ouverte.
+
+        @param conn: Connexion SQL.
+        @param trend_days: Nombre de jours pour la série.
+        @returns: Dictionnaire KPI + tendance.
+        """
+        from datetime import datetime, timedelta
+
         cursor = conn.cursor()
         n = max(1, min(int(trend_days or 7), 90))
         out: dict = {
@@ -4347,7 +4381,6 @@ class EntrepriseManager(DatabaseBase):
             trend.append({'date': key, 'count': int(rows_map.get(key, 0))})
         out['trend_entreprises'] = trend
 
-        conn.close()
         return out
     
     def get_ciblage_suggestions(self):

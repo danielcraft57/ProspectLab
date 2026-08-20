@@ -236,6 +236,8 @@ DATABASE_PATH = os.environ.get('DATABASE_PATH', None)  # None = chemin par défa
 # Pool PostgreSQL (activé en prod via APP_ENV=production ou DATABASE_POOL_ENABLED=true)
 DATABASE_POOL_MIN = max(1, int(os.environ.get('DATABASE_POOL_MIN', '2') or '2'))
 DATABASE_POOL_MAX = max(DATABASE_POOL_MIN, int(os.environ.get('DATABASE_POOL_MAX', '20') or '20'))
+# Attente d'une connexion libre si le pool est saturé (Gunicorn/eventlet).
+DATABASE_POOL_WAIT_SEC = max(1.0, float(os.environ.get('DATABASE_POOL_WAIT_SEC', '20') or '20'))
 DATABASE_CONNECT_TIMEOUT_SEC = max(3, int(os.environ.get('DATABASE_CONNECT_TIMEOUT_SEC', '10') or '10'))
 DATABASE_STATEMENT_TIMEOUT_MS = int(os.environ.get('DATABASE_STATEMENT_TIMEOUT_MS', '0') or '0')
 
