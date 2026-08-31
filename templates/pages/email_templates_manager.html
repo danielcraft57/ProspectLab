@@ -12,6 +12,7 @@
         <div class="etm-title">
             <h1>Modèles d'emails</h1>
             <p>Crée, modifie et organise tes templates. Tout est enregistré en base.</p>
+            <p class="etm-header-link"><a href="/design/mockups/emails/index.html" target="_blank" rel="noopener">Galerie maquettes unifiée</a></p>
         </div>
         <div class="etm-header-actions">
             <button class="btn btn-secondary" id="etm-import-btn" type="button">
@@ -63,25 +64,18 @@
         <aside class="etm-sidebar">
             <div class="etm-search">
                 <i class="fa-solid fa-magnifying-glass"></i>
-                <input id="etm-search-input" type="text" placeholder="Rechercher (nom, sujet, id)..." autocomplete="off">
+                <input id="etm-search-input" type="text" placeholder="Rechercher (nom, sujet)..." autocomplete="off">
                 <button class="etm-clear" id="etm-clear-search" type="button" title="Effacer">
                     <i class="fa-solid fa-xmark"></i>
                 </button>
             </div>
 
             <div class="etm-filters">
-                <div class="etm-filter-row">
-                    <label for="etm-category">Catégorie</label>
-                    <select id="etm-category">
-                        <option value="">Toutes</option>
-                        <option value="cold_email">Cold Email</option>
-                        <option value="html_email">Email HTML</option>
-                        <option value="linkedin">LinkedIn</option>
-                        <option value="malt">Malt</option>
-                        <option value="other">Autre</option>
-                    </select>
-                </div>
-                <div class="etm-filter-row">
+                <div class="etm-cat-chips" id="etm-cat-chips" role="tablist" aria-label="Filtrer par catégorie"></div>
+                <select id="etm-category" hidden aria-hidden="true">
+                    <option value="">Toutes</option>
+                </select>
+                <div class="etm-filter-row etm-filter-row--sort">
                     <label for="etm-sort">Tri</label>
                     <select id="etm-sort">
                         <option value="updated_desc">Modifié récemment</option>
@@ -117,17 +111,17 @@
             <div class="etm-form">
                 <div class="etm-grid">
                     <div class="form-group">
-                        <label for="etm-id">ID</label>
-                        <input id="etm-id" type="text" placeholder="Laisse vide pour auto" autocomplete="off">
-                        <small class="etm-hint">L'ID sert dans les campagnes. Si vide, il est généré automatiquement.</small>
-                    </div>
-                    <div class="form-group">
                         <label for="etm-name">Nom</label>
-                        <input id="etm-name" type="text" placeholder="Ex: HTML - Refonte globale" autocomplete="off" required>
+                        <input id="etm-name" type="text" placeholder="Ex: Audit - voisin Google" autocomplete="off" required>
+                        <small class="etm-hint">Libellé interne pour retrouver le modèle dans la liste.</small>
                     </div>
                     <div class="form-group">
                         <label for="etm-category-edit">Catégorie</label>
                         <select id="etm-category-edit">
+                            <option value="audit">Audit</option>
+                            <option value="offres">Offres</option>
+                            <option value="echantillons">Échantillons</option>
+                            <option value="bouquins">Bouquins</option>
                             <option value="cold_email">Cold Email</option>
                             <option value="html_email">Email HTML</option>
                             <option value="linkedin">LinkedIn</option>
@@ -135,9 +129,10 @@
                             <option value="other">Autre</option>
                         </select>
                     </div>
-                    <div class="form-group">
+                    <div class="form-group etm-grid-subject">
                         <label for="etm-subject">Sujet</label>
                         <input id="etm-subject" type="text" placeholder="Ex: Refonte globale - {entreprise}" autocomplete="off">
+                        <small class="etm-hint">Objet de l'email envoyé (peut contenir {entreprise}, {nom}…).</small>
                     </div>
                 </div>
 

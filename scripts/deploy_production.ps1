@@ -151,7 +151,7 @@ if ($UseRemoteGitClone) {
                 $pagesPath = Join-Path $destPath "pages"
                 if (Test-Path $pagesPath) {
                     $pageCount = (Get-ChildItem -Path $pagesPath -Filter "*.html" -Recurse -ErrorAction SilentlyContinue).Count
-                    Write-Host "     └─ templates/pages/ : $pageCount fichiers HTML" -ForegroundColor Gray
+                    Write-Host "     - templates/pages/ : $pageCount fichiers HTML" -ForegroundColor Gray
                 }
             }
             if ($item -eq 'static') {
@@ -159,7 +159,7 @@ if ($UseRemoteGitClone) {
                 $cssPath = Join-Path $destPath "css"
                 $jsCount = if (Test-Path $jsPath) { (Get-ChildItem -Path $jsPath -Filter "*.js" -Recurse -ErrorAction SilentlyContinue).Count } else { 0 }
                 $cssCount = if (Test-Path $cssPath) { (Get-ChildItem -Path $cssPath -Filter "*.css" -Recurse -ErrorAction SilentlyContinue).Count } else { 0 }
-                Write-Host "     └─ static/ : $jsCount fichiers JS, $cssCount fichiers CSS" -ForegroundColor Gray
+                Write-Host "     - static/ : $jsCount fichiers JS, $cssCount fichiers CSS" -ForegroundColor Gray
             }
         }
     }
@@ -316,7 +316,7 @@ if (-not $SkipNfsClient) {
     }
     if ($nfsSkipClientMount) {
         Write-Host "[5b/9] Montage NFS client ignoré (NFS_SKIP_CLIENT_MOUNT dans .env.prod)." -ForegroundColor DarkYellow
-        Write-Host "   Utilise des chemins directs vers l'export (ex. /srv/nfs/prospectlab/uploads) sur ce nœud." -ForegroundColor Gray
+        Write-Host "   Utilise des chemins directs vers l export (ex. /srv/nfs/prospectlab/uploads) sur ce noeud." -ForegroundColor Gray
         Write-Host ""
     }
     $nfsServerDeploy = Get-DotEnvValue -FilePath $envProdForNfs -Key 'NFS_SERVER'

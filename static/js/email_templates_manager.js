@@ -16,7 +16,7 @@
     const badgeEl = $('#etm-status-badge');
     const toastEl = $('#etm-toast');
 
-    const idInput = $('#etm-id');
+    const idInput = null;
     const nameInput = $('#etm-name');
     const categoryInput = $('#etm-category-edit');
     const subjectInput = $('#etm-subject');
@@ -28,6 +28,63 @@
     const previewText = $('#etm-preview-text');
 
     const chips = Array.from(document.querySelectorAll('.etm-chip'));
+    const catChipsEl = $('#etm-cat-chips');
+
+    /** Categories ProspectLab (pub / audit) + classiques */
+    const CORE_CATEGORIES = [
+        'audit',
+        'offres',
+        'echantillons',
+        'bouquins',
+        'cold_email',
+        'html_email',
+        'linkedin',
+        'malt',
+        'other',
+    ];
+
+    const CATEGORY_LABELS = {
+        audit: 'Audit',
+        offres: 'Offres',
+        echantillons: 'Échantillons',
+        bouquins: 'Bouquins',
+        cold_email: 'Cold Email',
+        html_email: 'Email HTML',
+        linkedin: 'LinkedIn',
+        malt: 'Malt',
+        other: 'Autre',
+    };
+
+    /** Couleurs Material par categorie (badges liste + chips) */
+    const CATEGORY_STYLES = {
+        audit: { bg: 'rgba(37, 99, 235, 0.12)', border: 'rgba(37, 99, 235, 0.35)', text: '#1d4ed8' },
+        offres: { bg: 'rgba(22, 163, 74, 0.12)', border: 'rgba(22, 163, 74, 0.35)', text: '#15803d' },
+        echantillons: { bg: 'rgba(147, 51, 234, 0.12)', border: 'rgba(147, 51, 234, 0.35)', text: '#7e22ce' },
+        bouquins: { bg: 'rgba(234, 88, 12, 0.12)', border: 'rgba(234, 88, 12, 0.35)', text: '#c2410c' },
+        html_email: { bg: 'rgba(100, 116, 139, 0.12)', border: 'rgba(100, 116, 139, 0.3)', text: '#475569' },
+        cold_email: { bg: 'rgba(100, 116, 139, 0.12)', border: 'rgba(100, 116, 139, 0.3)', text: '#475569' },
+        other: { bg: 'rgba(100, 116, 139, 0.1)', border: 'rgba(100, 116, 139, 0.25)', text: '#64748b' },
+    };
+
+    /**
+     * Normalise la categorie affichee (html_dc_* legacy -> audit).
+     * @param {object} tpl
+     * @returns {string}
+     */
+    function displayCategory(tpl) {
+        const raw = (tpl?.category || '').trim();
+        if (raw && raw !== 'html_email') return raw;
+        const id = String(tpl?.id || '');
+        if (id.startsWith('html_dc_offres')) return 'offres';
+        if (id.startsWith('html_dc_echantillons')) return 'echantillons';
+        if (id.startsWith('html_dc_bouquins')) return 'bouquins';
+        if (id.startsWith('html_dc_')) return 'audit';
+        return raw || 'other';
+    }
+
+    function categoryStyle(cat) {
+        return CATEGORY_STYLES[cat] || CATEGORY_STYLES.other;
+    }
 
     // Import JSON avancé
     const importPanel = $('#etm-import-panel');
@@ -110,37 +167,64 @@
     }
 
     function getDistinctCategories() {
-        const set = new Set();
+        const set = new Set(CORE_CATEGORIES);
         templates.forEach(t => {
             const c = (t.category || '').trim();
             if (c) set.add(c);
         });
-        // Valeurs par défaut utiles si jamais absentes
-        if (set.size === 0) {
-            set.add('cold_email');
-            set.add('html_email');
-        }
-        return Array.from(set).sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+        return Array.from(set).sort((a, b) => {
+            const ia = CORE_CATEGORIES.indexOf(a);
+            const ib = CORE_CATEGORIES.indexOf(b);
+            if (ia !== -1 || ib !== -1) {
+                if (ia === -1) return 1;
+                if (ib === -1) return -1;
+                return ia - ib;
+            }
+            return a.localeCompare(b, 'fr', { sensitivity: 'base' });
+        });
     }
 
     function formatCategoryLabel(value) {
         const v = (value || '').trim();
         if (!v) return '';
-        // Slugs connus -> labels plus propres
-        if (v === 'cold_email') return 'Cold Email';
-        if (v === 'html_email') return 'Email HTML';
-        if (v === 'linkedin') return 'LinkedIn';
-        if (v === 'malt') return 'Malt';
-        if (v === 'other') return 'Autre';
-        // Fallback: remplace _ par espace et capitalise
+        if (CATEGORY_LABELS[v]) return CATEGORY_LABELS[v];
         const cleaned = v.replace(/_/g, ' ');
         return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+    }
+
+    /**
+     * Rend les chips Material de filtre categorie.
+     */
+    function renderCategoryChips() {
+        if (!catChipsEl) return;
+        const cats = getDistinctCategories();
+        const current = categoryFilter ? categoryFilter.value : '';
+        const counts = {};
+        templates.forEach(t => {
+            const c = displayCategory(t);
+            counts[c] = (counts[c] || 0) + 1;
+        });
+
+        const parts = [];
+        parts.push(
+            `<button type="button" class="etm-cat-chip etm-cat-chip--all${current === '' ? ' is-active' : ''}" data-cat="" role="tab" aria-selected="${current === '' ? 'true' : 'false'}">Toutes <span class="etm-cat-count">${templates.length}</span></button>`
+        );
+        cats.forEach(c => {
+            const n = counts[c] || 0;
+            if (n === 0 && !CORE_CATEGORIES.slice(0, 4).includes(c)) return;
+            const active = current === c;
+            const st = categoryStyle(c);
+            parts.push(
+                `<button type="button" class="etm-cat-chip${active ? ' is-active' : ''}" data-cat="${escapeHtml(c)}" role="tab" aria-selected="${active ? 'true' : 'false'}" style="--chip-bg:${st.bg};--chip-border:${st.border};--chip-text:${st.text}">${escapeHtml(formatCategoryLabel(c))} <span class="etm-cat-count">${n}</span></button>`
+            );
+        });
+        catChipsEl.innerHTML = parts.join('');
     }
 
     function refreshCategorySelectors() {
         const cats = getDistinctCategories();
 
-        // Filtre de gauche (avec "Toutes")
+        // Filtre (select cache, sync avec chips)
         if (categoryFilter) {
             const current = categoryFilter.value;
             categoryFilter.innerHTML = '';
@@ -159,6 +243,8 @@
 
             if (current && cats.includes(current)) {
                 categoryFilter.value = current;
+            } else if (current && !cats.includes(current)) {
+                categoryFilter.value = '';
             }
         }
 
@@ -183,11 +269,13 @@
 
             categoryInput.value = current;
         }
+
+        renderCategoryChips();
     }
 
     async function loadTemplates() {
         setBadge('Chargement...', 'warn');
-        const res = await fetch('/api/templates', { headers: { 'Accept': 'application/json' } });
+        const res = await fetch('/api/templates?for_editor=1', { headers: { 'Accept': 'application/json' } });
         const data = await res.json();
         templates = (Array.isArray(data) ? data : []).map(normalize);
         refreshCategorySelectors();
@@ -217,11 +305,11 @@
 
         let items = templates.slice();
         if (cat) {
-            items = items.filter(t => (t.category || '') === cat);
+            items = items.filter(t => displayCategory(t) === cat);
         }
         if (q) {
             items = items.filter(t => {
-                const hay = `${t.id || ''} ${t.name || ''} ${t.subject || ''}`.toLowerCase();
+                const hay = `${t.name || ''} ${t.subject || ''}`.toLowerCase();
                 return hay.includes(q);
             });
         }
@@ -250,17 +338,20 @@
         }
 
         items.forEach(t => {
+            const cat = displayCategory(t);
+            const st = categoryStyle(cat);
             const el = document.createElement('div');
             el.className = 'etm-item' + (t.id === activeId ? ' etm-item--active' : '');
             el.dataset.templateId = t.id;
+            const subj = (t.subject || '').trim();
+            const title = (t.name || '').trim() || 'Sans nom';
             el.innerHTML = `
                 <div class="etm-item-title">
-                    <strong>${escapeHtml(t.name || t.id)}</strong>
-                    <span class="etm-pill">${escapeHtml(t.category || 'other')}${t.is_html ? ' · HTML' : ''}</span>
+                    <strong>${escapeHtml(title)}</strong>
+                    <span class="etm-pill etm-pill--cat" style="background:${st.bg};border-color:${st.border};color:${st.text}">${escapeHtml(formatCategoryLabel(cat))}${t.is_html ? ' · HTML' : ''}</span>
                 </div>
+                ${subj ? `<div class="etm-item-subject">${escapeHtml(subj)}</div>` : ''}
                 <div class="etm-item-meta">
-                    <span>${escapeHtml(t.id)}</span>
-                    <span>•</span>
                     <span>${escapeHtml(formatUpdated(t) || '')}</span>
                 </div>
             `;
@@ -280,7 +371,7 @@
 
     function currentEditorData() {
         return {
-            id: (idInput.value || '').trim(),
+            id: '',
             name: (nameInput.value || '').trim(),
             category: (categoryInput.value || 'cold_email').trim(),
             subject: (subjectInput.value || '').trim(),
@@ -291,12 +382,15 @@
 
     function setEditorData(tpl) {
         const t = tpl ? normalize(tpl) : null;
-        idInput.value = t?.id || '';
+        if (idInput) {
+            idInput.value = t?.id || '';
+        }
         nameInput.value = t?.name || '';
-        categoryInput.value = t?.category || 'cold_email';
+        const cat = t ? (displayCategory(t) || t.category || 'cold_email') : 'cold_email';
+        categoryInput.value = cat;
         subjectInput.value = t?.subject || '';
         contentInput.value = t?.content || '';
-        isHtmlInput.checked = !!t?.is_html || categoryInput.value === 'html_email';
+        isHtmlInput.checked = !!t?.is_html || cat === 'html_email';
         dirty = false;
         refreshEditorButtons();
         refreshPreview();
@@ -347,6 +441,21 @@
         nameInput.focus();
     }
 
+    function applySavedTemplate(saved) {
+        if (!saved || !saved.id) return;
+        const idx = templates.findIndex(t => t.id === saved.id);
+        const normalized = normalize(saved);
+        if (idx >= 0) {
+            templates[idx] = normalized;
+        } else {
+            templates.push(normalized);
+        }
+        activeId = saved.id;
+        setEditorData(normalized);
+        refreshCategorySelectors();
+        renderList();
+    }
+
     async function saveTemplate() {
         const data = currentEditorData();
         if (!data.name || !data.content) {
@@ -369,32 +478,48 @@
                         name: data.name,
                         category: data.category,
                         subject: data.subject,
-                        content: data.content
+                        content: data.content,
+                        is_html: data.is_html
                     })
                 });
                 const payload = await res.json();
                 if (!res.ok) throw new Error(payload?.error || 'Erreur sauvegarde');
                 templateId = payload.template?.id || activeId;
+                if (payload.template) {
+                    applySavedTemplate(payload.template);
+                } else {
+                    await loadTemplates();
+                    selectTemplate(templateId);
+                }
             } else {
                 // Création: si l'utilisateur renseigne un ID, on le passe à l'API
                 const res = await fetch('/api/templates', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                            id: data.id || undefined,
+                        id: data.id || undefined,
                         name: data.name,
                         category: data.category,
                         subject: data.subject,
-                        content: data.content
+                        content: data.content,
+                        is_html: data.is_html
                     })
                 });
                 const payload = await res.json();
                 if (!res.ok) throw new Error(payload?.error || 'Erreur création');
                 templateId = payload.template?.id || templateId;
+                if (payload.template) {
+                    applySavedTemplate(payload.template);
+                } else {
+                    await loadTemplates();
+                    selectTemplate(templateId);
+                }
             }
 
-            await loadTemplates();
-            selectTemplate(templateId);
+            if (!templates.find(t => t.id === templateId)) {
+                await loadTemplates();
+                selectTemplate(templateId);
+            }
             toast('Enregistré.');
             setBadge('Enregistré', 'ok');
             window.setTimeout(() => setBadge('Prêt', 'ok'), 800);
@@ -685,7 +810,8 @@
         });
     }
 
-    [idInput, nameInput, categoryInput, subjectInput, contentInput, isHtmlInput].forEach(el => {
+    [nameInput, categoryInput, subjectInput, contentInput, isHtmlInput].forEach(el => {
+        if (!el) return;
         el.addEventListener('input', () => {
             markDirty();
             if (el === categoryInput) {
@@ -712,8 +838,21 @@
     });
 
     searchInput.addEventListener('input', renderList);
-    categoryFilter.addEventListener('change', renderList);
+    categoryFilter.addEventListener('change', () => {
+        renderCategoryChips();
+        renderList();
+    });
     sortFilter.addEventListener('change', renderList);
+    if (catChipsEl) {
+        catChipsEl.addEventListener('click', (ev) => {
+            const btn = ev.target.closest('.etm-cat-chip');
+            if (!btn || !categoryFilter) return;
+            const cat = btn.getAttribute('data-cat') || '';
+            categoryFilter.value = cat;
+            renderCategoryChips();
+            renderList();
+        });
+    }
     clearSearchBtn.addEventListener('click', () => {
         searchInput.value = '';
         renderList();

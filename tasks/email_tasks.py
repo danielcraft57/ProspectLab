@@ -36,6 +36,26 @@ logger = setup_logger(__name__, 'email_tasks.log', level=logging.DEBUG)
 STATS_CACHE_PATH = Path(__file__).resolve().parents[1] / 'logs' / 'campagne_stats_cache.json'
 
 
+def _format_campagne_subject(subject_template, *, nom='', entreprise='') -> str:
+    """
+    Formate puis nettoie un sujet de campagne (fallback valeurs vides / parentheses).
+
+    @param subject_template: Template Python ``str.format``
+    @param nom: Nom destinataire
+    @param entreprise: Nom entreprise
+    @returns: Sujet pret a envoyer
+    """
+    from utils.email_subject import clean_email_subject, normalize_template_value
+
+    nom_v = normalize_template_value(nom, fallback='')
+    ent_v = normalize_template_value(entreprise, fallback='')
+    try:
+        raw = (subject_template or 'Prospection').format(nom=nom_v, entreprise=ent_v)
+    except Exception:
+        raw = subject_template or 'Prospection'
+    return clean_email_subject(raw) or 'Prospection'
+
+
 def _resolve_email_sender(mail_account_id, campagne_row):
     """
     Choisit le transport SMTP : compte BDD (mail_accounts) ou variables d'environnement (.env).
@@ -54,6 +74,50 @@ def _resolve_email_sender(mail_account_id, campagne_row):
         except Exception as e:
             logger.warning(f'Compte mail {mid} indisponible, fallback .env: {e}')
     return EmailSender()
+
+
+@celery.task(name='tasks.email_tasks.sync_brevo_events_task')
+def sync_brevo_events_task(limit=50):
+    """
+    Synchronise les evenements Brevo (bounces, blocked, proxy, bots) vers inbox_events.
+
+    @param limit: Nombre max d'events SMTP a tirer
+    @returns: Resume de sync
+    """
+    from services.inbox_sync import sync_brevo_events
+
+    try:
+        summary = sync_brevo_events(limit=int(limit or 50))
+        logger.info('[BrevoSync] %s', summary)
+        return {'success': True, **summary}
+    except Exception as e:
+        logger.error('[BrevoSync] Erreur: %s', e, exc_info=True)
+        return {'success': False, 'error': str(e)}
+
+
+@celery.task(name='tasks.email_tasks.classify_inbox_replies_task')
+def classify_inbox_replies_task(days=3, profiles=None, limit=80):
+    """
+    Classe les reponses IMAP (node12) hors NDR dans inbox_events.
+
+    @param days: Fenetre SINCE en jours
+    @param profiles: Profils IMAP CSV (defaut BOUNCE_SCAN_PROFILES)
+    @param limit: Max messages par profil
+    @returns: Resume de classification
+    """
+    from services.inbox_sync import classify_imap_replies
+
+    try:
+        summary = classify_imap_replies(
+            profiles=profiles or BOUNCE_SCAN_PROFILES,
+            days=int(days or 3),
+            limit=int(limit or 80),
+        )
+        logger.info('[InboxClassify] %s', summary)
+        return {'success': True, **summary}
+    except Exception as e:
+        logger.error('[InboxClassify] Erreur: %s', e, exc_info=True)
+        return {'success': False, 'error': str(e)}
 
 
 @celery.task
@@ -221,7 +285,11 @@ def send_bulk_emails_task(self, recipients, subject_template, body_template, del
             )
             result = sender.send_email(
                 to=recipient.get('email'),
-                subject=subject_template.format(nom=recipient.get('nom', ''), entreprise=recipient.get('entreprise', '')),
+                subject=_format_campagne_subject(
+                    subject_template,
+                    nom=recipient.get('nom', ''),
+                    entreprise=recipient.get('entreprise', ''),
+                ),
                 body=body_template.format(nom=recipient.get('nom', ''), entreprise=recipient.get('entreprise', ''))
             )
             results.append({**recipient, **result})
@@ -256,6 +324,20 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
 
     logger.info(f'[Campagne {campagne_id}] Démarrage de la campagne avec {len(recipients) if recipients else 0} destinataires')
 
+    from utils.campaign_recipients import filter_campagne_recipients
+    recipients, send_filter_stats = filter_campagne_recipients(
+        recipients,
+        exclude_risky=True,
+        max_emails_per_entreprise=0,
+        exclude_unreachable=True,
+    )
+    if send_filter_stats.get('dropped_unreachable'):
+        logger.info(
+            f'[Campagne {campagne_id}] Exclus avant envoi (désabonné/bounce): '
+            f'{send_filter_stats.get("dropped_unreachable")}'
+        )
+    total = len(recipients) if recipients else 0
+
     db = Database()
     campagne_manager = CampagneManager()
     template_manager = TemplateManager()
@@ -285,7 +367,6 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
     except Exception:
         pass
 
-    total = len(recipients) if recipients else 0
     results = []
     total_sent = 0
     total_failed = 0
@@ -313,6 +394,16 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
             )
         except Exception as e:
             logger.warning(f'[Campagne {campagne_id}] Impossible de planifier le bounce scan: {e}')
+
+    # Sync Brevo + classification IMAP apres envoi
+    try:
+        sync_brevo_events_task.apply_async(countdown=600)
+        classify_inbox_replies_task.apply_async(
+            kwargs={'days': 3, 'profiles': BOUNCE_SCAN_PROFILES},
+            countdown=900,
+        )
+    except Exception as e:
+        logger.warning(f'[Campagne {campagne_id}] Impossible de planifier sync inbox: {e}')
 
     template = None
     if template_id:
@@ -376,9 +467,10 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
                 )
                 # Formater le sujet avec les variables
                 subject_template = subject or template.get('subject', 'Prospection')
-                email_subject = subject_template.format(
-                    nom=recipient_nom or 'Monsieur/Madame',
-                    entreprise=recipient.get('entreprise', 'votre entreprise')
+                email_subject = _format_campagne_subject(
+                    subject_template,
+                    nom=recipient_nom or '',
+                    entreprise=recipient.get('entreprise'),
                 )
                 if is_html:
                     html_message = content
@@ -392,7 +484,11 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
                     entreprise=recipient.get('entreprise', 'votre entreprise'),
                     email=recipient.get('email', '')
                 )
-                email_subject = subject or 'Prospection'
+                email_subject = _format_campagne_subject(
+                    subject or 'Prospection',
+                    nom=recipient_nom or '',
+                    entreprise=recipient.get('entreprise'),
+                )
                 html_message = tracker.convert_text_to_html(message)
                 text_message = message
             else:
@@ -547,6 +643,43 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
 
 
 @celery.task
+def generate_recurring_weekly_plans():
+    """
+    Tâche périodique (Celery Beat) : génère les campagnes de la semaine suivante
+    pour les plans hebdomadaires récurrents actifs.
+    """
+    from services.database.weekly_plans import WeeklyPlanManager
+    from utils.weekly_plan_service import generate_weekly_plan_campaigns, compute_next_week_monday
+
+    plan_mgr = WeeklyPlanManager()
+    plans = plan_mgr.list_active_recurring_plans()
+    if not plans:
+        return {'processed': 0, 'created': 0}
+
+    week_monday = compute_next_week_monday()
+    total_created = 0
+    results = []
+
+    for plan in plans:
+        try:
+            out = generate_weekly_plan_campaigns(plan, week_monday=week_monday)
+            created_count = len(out.get('created') or [])
+            total_created += created_count
+            results.append({
+                'plan_id': plan.get('id'),
+                'skipped': out.get('skipped'),
+                'reason': out.get('reason'),
+                'created': created_count,
+            })
+        except Exception as e:
+            logger.error(f'[Beat] Plan hebdo {plan.get("id")}: {e}', exc_info=True)
+            results.append({'plan_id': plan.get('id'), 'error': str(e)})
+
+    logger.info(f'[Beat] Plans hebdo récurrents: {len(plans)} traités, {total_created} campagne(s) créée(s)')
+    return {'processed': len(plans), 'created': total_created, 'results': results}
+
+
+@celery.task
 def start_scheduled_campagnes():
     """
     Tâche périodique (Celery Beat) : lance les campagnes dont l'heure d'envoi programmée est atteinte (UTC).
@@ -608,7 +741,79 @@ def _to_utc_iso(dt):
     return dt_utc.strftime('%Y-%m-%dT%H:%M:%S.000Z')
 
 
-def _build_campaigns_report_html(title, campagnes_stats):
+def _build_inbox_events_report_section():
+    """
+    Resume des inbox_events des dernieres 24h pour les rapports matin/soir.
+
+    @returns: Tuple (html_block, text_block)
+    """
+    from collections import Counter
+    from services.database.campagnes import CampagneManager
+
+    since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    try:
+        cm = CampagneManager()
+        events = cm.list_inbox_events_since(since_iso=since, limit=200)
+    except Exception as e:
+        logger.warning('[Rapport inbox] lecture impossible: %s', e)
+        return '', ''
+
+    if not events:
+        text = "Inbox (24h) : aucun evenement classe."
+        html = (
+            '<div style="margin-top:16px;padding:12px 14px;border:1px solid #e5e7eb;'
+            'border-radius:12px;background:#f9fafb;font-size:13px;color:#6b7280;">'
+            'Inbox (24h) : aucun evenement classe.</div>'
+        )
+        return html, text
+
+    counts = Counter((e.get('category') or 'unknown') for e in events)
+    humans = [e for e in events if e.get('category') == 'human_reply'][:5]
+    lines = ['Inbox (24h) :']
+    for cat, n in counts.most_common():
+        lines.append(f'  - {cat}: {n}')
+    if humans:
+        lines.append('Reponses humaines recentes :')
+        for h in humans:
+            lines.append(
+                f"  - {(h.get('email') or '?')} | {(h.get('subject') or '')[:60]}"
+            )
+    text = '\n'.join(lines)
+
+    rows = ''.join(
+        f'<tr><td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">{cat}</td>'
+        f'<td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">{n}</td></tr>'
+        for cat, n in counts.most_common()
+    )
+    human_rows = ''.join(
+        f'<li style="margin:4px 0;">{(h.get("email") or "?")} — '
+        f'{(h.get("subject") or "")[:70]}</li>'
+        for h in humans
+    ) or '<li style="color:#6b7280;">Aucune</li>'
+    html = f'''
+      <div style="margin-top:16px;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden;">
+        <div style="padding:10px 12px;background:#f9fafb;border-bottom:1px solid #e5e7eb;font-size:13px;font-weight:600;">
+          Inbox classifiee (24h)
+        </div>
+        <table width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;border-collapse:collapse;">
+          <thead>
+            <tr style="background:#f3f4f6;">
+              <th align="left" style="padding:6px 8px;">Categorie</th>
+              <th align="left" style="padding:6px 8px;">Count</th>
+            </tr>
+          </thead>
+          <tbody>{rows}</tbody>
+        </table>
+        <div style="padding:10px 12px;font-size:13px;">
+          <div style="font-weight:600;margin-bottom:6px;">Human replies</div>
+          <ul style="margin:0;padding-left:18px;">{human_rows}</ul>
+        </div>
+      </div>
+    '''
+    return html, text
+
+
+def _build_campaigns_report_html(title, campagnes_stats, inbox_html=''):
     """
     Version claire / moderne du rapport campagnes (fond clair, cartes).
     """
@@ -693,6 +898,8 @@ def _build_campaigns_report_html(title, campagnes_stats):
               </table>
             </div>
 
+            {inbox_html}
+
             <div style="margin-top:14px; font-size:12px; color:#6b7280;">
               Astuce : surveille les fortes variations de taux d'ouverture/clic pour identifier les séquences qui performent le mieux.
             </div>
@@ -703,22 +910,25 @@ def _build_campaigns_report_html(title, campagnes_stats):
     """
 
 
-def _build_campaigns_report_text(title, campagnes_stats):
+def _build_campaigns_report_text(title, campagnes_stats, inbox_text=''):
     """Version texte brut du rapport de campagnes."""
     if not campagnes_stats:
-        return f"{title}\n\nAucune campagne correspondante sur la période analysée."
-
-    lines = [title, "", "Récapitulatif des campagnes :"]
-    for cs in campagnes_stats:
-        line = (
-            f"- #{cs.get('id')} - {cs.get('nom') or ''} "
-            f"(statut={cs.get('statut') or ''}, "
-            f"emails={cs.get('total_emails')}, "
-            f"open={cs.get('open_rate'):.1f}%, "
-            f"click={cs.get('click_rate'):.1f}%)"
-        )
-        lines.append(line)
-    return "\n".join(lines)
+        base = f"{title}\n\nAucune campagne correspondante sur la période analysée."
+    else:
+        lines = [title, "", "Récapitulatif des campagnes :"]
+        for cs in campagnes_stats:
+            line = (
+                f"- #{cs.get('id')} - {cs.get('nom') or ''} "
+                f"(statut={cs.get('statut') or ''}, "
+                f"emails={cs.get('total_emails')}, "
+                f"open={cs.get('open_rate'):.1f}%, "
+                f"click={cs.get('click_rate'):.1f}%)"
+            )
+            lines.append(line)
+        base = "\n".join(lines)
+    if inbox_text:
+        return f"{base}\n\n{inbox_text}"
+    return base
 
 
 @celery.task
@@ -782,12 +992,25 @@ def send_campagnes_report_task(report_type='evening'):
             f"[Rapport campagnes] Aucun envoi : aucune campagne avec emails envoyés sur la période "
             f"({report_type}, {len(campagnes)} campagne(s) trouvée(s) sans lignes emails_envoyes)."
         )
-        return {'success': True, 'count': 0, 'skipped': True, 'reason': 'no_sent_emails_in_window'}
+        # On envoie quand meme un resume inbox s'il y a des evenements
+        inbox_html, inbox_text = _build_inbox_events_report_section()
+        if not inbox_text or 'aucun evenement' in inbox_text.lower():
+            return {'success': True, 'count': 0, 'skipped': True, 'reason': 'no_sent_emails_in_window'}
+        sender = EmailSender()
+        subject = f"[ProspectLab] {title} (inbox)"
+        result = sender.send_email(
+            to=MAIL_DEFAULT_RECIPIENT,
+            subject=subject,
+            body=_build_campaigns_report_text(title, [], inbox_text),
+            html_body=_build_campaigns_report_html(title, [], inbox_html),
+        )
+        return {'success': result.get('success', False), 'count': 0, 'inbox_only': True}
 
+    inbox_html, inbox_text = _build_inbox_events_report_section()
     sender = EmailSender()
     subject = f"[ProspectLab] {title}"
-    text_body = _build_campaigns_report_text(title, campagnes_stats)
-    html_body = _build_campaigns_report_html(title, campagnes_stats)
+    text_body = _build_campaigns_report_text(title, campagnes_stats, inbox_text)
+    html_body = _build_campaigns_report_html(title, campagnes_stats, inbox_html)
 
     logger.info(f"[Rapport campagnes] Envoi du rapport '{title}' pour {len(campagnes_stats)} campagne(s)")
     result = sender.send_email(

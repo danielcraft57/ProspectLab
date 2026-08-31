@@ -146,6 +146,10 @@ celery.conf.update(
             'task': 'tasks.email_tasks.start_scheduled_campagnes',
             'schedule': 60.0,  # Toutes les minutes : lance les campagnes dont l'heure programmée est atteinte (UTC)
         },
+        'generate-recurring-weekly-plans': {
+            'task': 'tasks.email_tasks.generate_recurring_weekly_plans',
+            'schedule': crontab(hour=6, minute=0, day_of_week=0),  # Dimanche 6h Paris : semaine suivante
+        },
         # Rapports de campagnes (matin / soir) vers contact@danielcraft.fr
         'campagnes-report-evening': {
             'task': 'tasks.email_tasks.send_campagnes_report_task',
@@ -170,6 +174,16 @@ celery.conf.update(
         'bounce-scan-evening': {
             'task': 'tasks.email_tasks.run_bounce_scan_task',
             'schedule': crontab(hour=20, minute=10),
+        },
+        # Sync Brevo (bounces / proxy / bots) vers inbox_events
+        'brevo-sync': {
+            'task': 'tasks.email_tasks.sync_brevo_events_task',
+            'schedule': 900.0,  # Toutes les 15 minutes
+        },
+        # Classification IMAP reponses (node12)
+        'inbox-classify': {
+            'task': 'tasks.email_tasks.classify_inbox_replies_task',
+            'schedule': 1800.0,  # Toutes les 30 minutes
         },
     },
 )

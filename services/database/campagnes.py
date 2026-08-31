@@ -16,7 +16,7 @@ class CampagneManager(DatabaseBase):
         """Initialise le module campagnes"""
         super().__init__(*args, **kwargs)
     
-    def create_campagne(self, nom, template_id=None, sujet=None, total_destinataires=0, statut='draft', scheduled_at=None, campaign_params_json=None, mail_account_id=None):
+    def create_campagne(self, nom, template_id=None, sujet=None, total_destinataires=0, statut='draft', scheduled_at=None, campaign_params_json=None, mail_account_id=None, plan_hebdo_id=None):
         """
         Crée une nouvelle campagne email.
 
@@ -28,6 +28,7 @@ class CampagneManager(DatabaseBase):
             statut (str): Statut ('draft', 'scheduled', 'running', 'completed', 'failed')
             scheduled_at (str|None): Date/heure d'envoi programmé (ISO UTC)
             campaign_params_json (str|None): Paramètres d'envoi sérialisés (recipients, template_id, etc.)
+            plan_hebdo_id (int|None): ID du plan hebdomadaire parent
 
         Returns:
             int: ID de la campagne créée
@@ -38,21 +39,21 @@ class CampagneManager(DatabaseBase):
         if self.is_postgresql():
             self.execute_sql(cursor,
                 '''
-                INSERT INTO campagnes_email (nom, template_id, sujet, total_destinataires, total_envoyes, total_reussis, statut, scheduled_at, campaign_params_json, mail_account_id)
-                VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?, ?)
+                INSERT INTO campagnes_email (nom, template_id, sujet, total_destinataires, total_envoyes, total_reussis, statut, scheduled_at, campaign_params_json, mail_account_id, plan_hebdo_id)
+                VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?)
                 RETURNING id
                 ''',
-                (nom, template_id, sujet, total_destinataires, statut, scheduled_at, campaign_params_json, mail_account_id)
+                (nom, template_id, sujet, total_destinataires, statut, scheduled_at, campaign_params_json, mail_account_id, plan_hebdo_id)
             )
             row = cursor.fetchone()
             campagne_id = row.get('id') if isinstance(row, dict) else (row[0] if row else None)
         else:
             self.execute_sql(cursor,
                 '''
-                INSERT INTO campagnes_email (nom, template_id, sujet, total_destinataires, total_envoyes, total_reussis, statut, scheduled_at, campaign_params_json, mail_account_id)
-                VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?, ?)
+                INSERT INTO campagnes_email (nom, template_id, sujet, total_destinataires, total_envoyes, total_reussis, statut, scheduled_at, campaign_params_json, mail_account_id, plan_hebdo_id)
+                VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?)
                 ''',
-                (nom, template_id, sujet, total_destinataires, statut, scheduled_at, campaign_params_json, mail_account_id)
+                (nom, template_id, sujet, total_destinataires, statut, scheduled_at, campaign_params_json, mail_account_id, plan_hebdo_id)
             )
             campagne_id = cursor.lastrowid
 

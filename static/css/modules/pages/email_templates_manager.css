@@ -331,10 +331,101 @@ body[data-theme='dark'] .etm-search input {
 }
 
 .etm-filters {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+    display: flex;
+    flex-direction: column;
     gap: 10px;
     margin: 12px 0;
+}
+
+.etm-filter-row--sort {
+    max-width: 220px;
+}
+
+.etm-cat-count {
+    opacity: 0.65;
+    font-weight: 500;
+    margin-left: 2px;
+}
+
+.etm-cat-chips {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 2px;
+}
+
+.etm-cat-chip {
+    border: 1px solid var(--chip-border, rgba(226, 232, 240, 0.95));
+    background: var(--chip-bg, rgba(248, 250, 252, 0.95));
+    color: var(--chip-text, #334155);
+    border-radius: 999px;
+    padding: 7px 14px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, transform 0.12s ease;
+    line-height: 1.2;
+}
+
+.etm-cat-chip:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+}
+
+.etm-cat-chip.is-active {
+    box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.08);
+    font-weight: 800;
+}
+
+.etm-cat-chip--all.is-active {
+    background: rgba(229, 57, 53, 0.12);
+    border-color: rgba(229, 57, 53, 0.45);
+    color: #b71c1c;
+}
+
+.etm-item-subject {
+    margin: 4px 0 6px;
+    font-size: 0.82rem;
+    color: #64748b;
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.etm-pill--cat {
+    border: 1px solid transparent;
+    font-size: 0.68rem;
+    letter-spacing: 0.02em;
+}
+
+.etm-header-link {
+    margin: 6px 0 0;
+    font-size: 0.88rem;
+}
+
+.etm-header-link a {
+    color: #2563eb;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.etm-header-link a:hover {
+    text-decoration: underline;
+}
+
+body[data-theme='dark'] .etm-cat-chip {
+    background: rgba(2, 6, 23, 0.55);
+    border-color: rgba(51, 65, 85, 0.9);
+    color: #e2e8f0;
+}
+
+body[data-theme='dark'] .etm-cat-chip.is-active {
+    background: rgba(229, 57, 53, 0.22);
+    border-color: rgba(229, 57, 53, 0.55);
+    color: #fecaca;
 }
 
 .etm-filter-row label {
@@ -507,7 +598,7 @@ body[data-theme='dark'] .etm-badge {
 
 .etm-grid {
     display: grid;
-    grid-template-columns: 1fr 1.2fr 0.9fr 1.2fr;
+    grid-template-columns: 1.2fr 0.9fr 1.4fr;
     gap: 12px;
 }
 

@@ -6,9 +6,15 @@
 <div class="campagnes-container">
     <div class="page-header">
         <h1>Campagnes Email</h1>
-        <button class="btn-new-campagne" onclick="openNewCampagneModal()">
-            + Nouvelle campagne
-        </button>
+        <div class="page-header-actions">
+            <button type="button" class="btn-weekly-plan" onclick="openWeeklyPlanModal()">
+                <i class="fa-solid fa-calendar-week" aria-hidden="true"></i>
+                Planifier la semaine
+            </button>
+            <button class="btn-new-campagne" onclick="openNewCampagneModal()">
+                + Nouvelle campagne
+            </button>
+        </div>
     </div>
 
     <section id="brevo-status-panel" class="brevo-status-panel" aria-live="polite">
@@ -49,6 +55,27 @@
         </div>
         <div id="campagnes-results-count" class="campagnes-results-count"></div>
     </div>
+
+    <section id="weekly-plans-calendar" class="weekly-plans-calendar" aria-label="Calendrier des plans hebdomadaires">
+        <div class="weekly-plans-calendar-header">
+            <h2>Calendrier des plans</h2>
+            <button type="button" id="weekly-plans-calendar-refresh" class="btn-calendar-refresh" title="Actualiser">
+                <i class="fa-solid fa-rotate" aria-hidden="true"></i>
+            </button>
+        </div>
+        <div id="weekly-plans-calendar-body" class="weekly-plans-calendar-body">
+            <div class="weekly-plans-calendar-loading">Chargement du calendrier…</div>
+        </div>
+    </section>
+
+    <section id="weekly-plans-active" class="weekly-plans-active" aria-label="Plans hebdomadaires actifs">
+        <div class="weekly-plans-active-header">
+            <h2>Plans actifs</h2>
+        </div>
+        <div id="weekly-plans-active-body" class="weekly-plans-active-body">
+            <div class="weekly-plans-active-loading">Chargement des plans…</div>
+        </div>
+    </section>
 
     <div id="campagnes-grid" class="campagnes-grid">
         <div class="loading">Chargement des campagnes...</div>
@@ -213,10 +240,13 @@
                         <p class="form-hint">Choisissez les entreprises à contacter. À l&apos;étape 2 vous affinerez les emails.</p>
                         <div class="email-filters-quick">
                             <div class="form-group ciblage-checkbox">
-                                <label><input type="checkbox" id="filter-email-principal-only"> Uniquement emails principaux</label>
+                                <label><input type="checkbox" id="filter-email-principal-only" checked> Uniquement emails principaux</label>
                             </div>
                             <div class="form-group ciblage-checkbox">
                                 <label><input type="checkbox" id="filter-email-exclude-placeholders" checked> Exclure emails fictifs (templates IONOS, exemple.fr…)</label>
+                            </div>
+                            <div class="form-group ciblage-checkbox">
+                                <label><input type="checkbox" id="filter-email-exclude-risky" checked> Exclure emails à risque (.gouv, education, SaaS, support…)</label>
                             </div>
                         </div>
                         <div class="form-group entreprise-search-row">
@@ -385,6 +415,68 @@
                 <button type="button" id="btn-campagne-next" class="btn-submit" onclick="campagneStepNext()">Suivant</button>
                 <button type="button" id="btn-campagne-submit" class="btn-submit" style="display: none;" onclick="submitCampagne()">Lancer la campagne</button>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal plan hebdomadaire : plusieurs campagnes / semaine pour un groupe -->
+<div id="weekly-plan-modal" class="modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="weekly-plan-modal-title">
+    <div class="modal-content modal-weekly-plan" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h2 id="weekly-plan-modal-title">Planifier la semaine</h2>
+            <button type="button" class="close-modal" aria-label="Fermer">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p class="weekly-plan-intro">Choisis un groupe et jusqu'à 4 modèles à envoyer sur la semaine. Chaque créneau crée une campagne programmée distincte.</p>
+            <form id="weekly-plan-form">
+                <div class="form-section">
+                    <div class="form-section-title">Groupe ciblé</div>
+                    <div class="form-group">
+                        <label for="weekly-plan-groupe">Groupe *</label>
+                        <select id="weekly-plan-groupe" name="groupe_id" required>
+                            <option value="">Choisir un groupe...</option>
+                        </select>
+                        <p id="weekly-plan-recipients-preview" class="weekly-plan-preview" aria-live="polite"></p>
+                    </div>
+                    <div class="form-group">
+                        <label for="weekly-plan-nom">Nom du plan (optionnel)</label>
+                        <input type="text" id="weekly-plan-nom" name="nom" placeholder="Ex: Plan semaine Formateurs">
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <div class="form-section-title">Créneaux de la semaine</div>
+                    <p id="weekly-plan-week-hint" class="form-hint weekly-plan-week-hint"></p>
+                    <p class="form-hint">Active les créneaux souhaités, choisis un modèle et ajuste la date/heure (uniquement dans la semaine affichée).</p>
+                    <div id="weekly-plan-slots" class="weekly-plan-slots"></div>
+                </div>
+
+                <div class="form-section">
+                    <div class="form-section-title">Paramètres communs</div>
+                    <div class="form-group">
+                        <label for="weekly-plan-delay">Délai entre envois (secondes)</label>
+                        <input type="number" id="weekly-plan-delay" name="delay" value="2" min="1" max="10">
+                    </div>
+                    <div class="form-group">
+                        <label for="weekly-plan-rotation">Répartition des destinataires</label>
+                        <select id="weekly-plan-rotation" name="rotation_mode">
+                            <option value="all">Tous les modèles → tous les destinataires</option>
+                            <option value="split">Rotation A/B/C/D (répartir entre les créneaux)</option>
+                        </select>
+                    </div>
+                    <div class="form-group ciblage-checkbox">
+                        <label>
+                            <input type="checkbox" id="weekly-plan-recurrence" name="recurrence_enabled" checked>
+                            Reprogrammer automatiquement chaque semaine (dimanche 6h)
+                        </label>
+                    </div>
+                    <p class="form-hint">Les désabonnés et entreprises en bounce sont exclus automatiquement (entreprise entière).</p>
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn-cancel" onclick="closeWeeklyPlanModal()">Annuler</button>
+            <button type="button" id="btn-weekly-plan-submit" class="btn-submit" onclick="submitWeeklyPlan()">Programmer la semaine</button>
         </div>
     </div>
 </div>

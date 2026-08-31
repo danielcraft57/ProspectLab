@@ -713,6 +713,16 @@ def _update_entreprise_status(entreprise_id: int, statut: str, note=None):
             except Exception:
                 pass
 
+        # Tags de traçabilité pour exclusions campagne
+        try:
+            if statut == 'Désabonné':
+                database.add_entreprise_tag(entreprise_id, 'desabonne')
+            elif statut == 'Bounce':
+                database.add_entreprise_tag(entreprise_id, 'bounce')
+                database.add_entreprise_tag(entreprise_id, 'email_invalide')
+        except Exception:
+            pass
+
         entreprise_updated = database.get_entreprise(entreprise_id)
         from utils.helpers import clean_json_dict
         entreprise_updated = clean_json_dict(entreprise_updated)

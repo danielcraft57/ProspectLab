@@ -491,7 +491,11 @@ def api_templates():
         JSON: Liste des templates
     """
     if request.method == 'GET':
-        templates = template_manager.list_templates(mail_account_id=session.get('mail_account_id'))
+        for_editor = request.args.get('for_editor') in ('1', 'true', 'yes')
+        templates = template_manager.list_templates(
+            mail_account_id=None,
+            for_editor=for_editor,
+        )
         return jsonify(templates)
 
     # POST: créer un template (REST)
@@ -511,7 +515,7 @@ def api_templates():
         content=content,
         category=category,
         template_id=explicit_id or None,
-        mail_account_id=session.get('mail_account_id'),
+        mail_account_id=None,
     )
     return jsonify({'success': True, 'template': tpl}), 201
 
@@ -529,9 +533,12 @@ def api_template_detail(template_id):
         JSON: Détails du template ou erreur 404
     """
     if request.method == 'GET':
+        for_editor = request.args.get('for_editor') in ('1', 'true', 'yes')
         template = template_manager.get_template(
             template_id,
-            mail_account_id=session.get('mail_account_id'),
+            for_preview=not for_editor,
+            for_editor=for_editor,
+            mail_account_id=None,
         )
         if template:
             return jsonify(template)
@@ -545,13 +552,18 @@ def api_template_detail(template_id):
 
     # PUT: update
     data = request.get_json() or {}
+    name = (data.get('name') or '').strip() if data.get('name') is not None else None
+    subject = (data.get('subject') or '').strip() if data.get('subject') is not None else None
+    category = (data.get('category') or '').strip() if data.get('category') is not None else None
+    content = data.get('content') if 'content' in data else None
+    is_html = data.get('is_html') if 'is_html' in data else None
     tpl = template_manager.update_template(
         template_id=template_id,
-        name=data.get('name'),
-        subject=data.get('subject'),
-        content=data.get('content'),
-        category=data.get('category'),
-        mail_account_id=session.get('mail_account_id'),
+        name=name,
+        subject=subject,
+        content=content,
+        category=category or None,
+        is_html=is_html,
     )
     if tpl:
         return jsonify({'success': True, 'template': tpl})
@@ -768,6 +780,10 @@ def api_list_campagnes():
             c['open_rate'] = 0.0
             c['click_rate'] = 0.0
 
+    from utils.campagne_metadata import enrich_campagne_from_params
+    for c in campagnes or []:
+        enrich_campagne_from_params(c)
+
     return jsonify(campagnes)
 
 
@@ -789,6 +805,10 @@ def api_create_campagne():
 
     from utils.campaign_recipients import filter_campagne_recipients
     from utils.email_subject import clean_email_subject
+    from utils.campagne_metadata import (
+        build_campaign_params,
+        extract_groupe_ids_from_payload,
+    )
 
     nom = data.get('nom')
     template_id = data.get('template_id')
@@ -800,11 +820,15 @@ def api_create_campagne():
     scheduled_at_iso = data.get('scheduled_at_iso')
     mail_account_id = data.get('mail_account_id')
 
-    # Filet serveur : exclure gouv/SaaS/support + plafond 2 emails / entreprise
+    groupe_ids = extract_groupe_ids_from_payload(data)
+    ciblage = data.get('ciblage') if isinstance(data.get('ciblage'), dict) else None
+
+    # Filet serveur : exclure gouv/SaaS/support + désabonnés/bounces + plafond 2 emails / entreprise
     recipients, filter_stats = filter_campagne_recipients(
         recipients,
         exclude_risky=True,
         max_emails_per_entreprise=2,
+        exclude_unreachable=True,
     )
 
     if not nom:
@@ -823,7 +847,7 @@ def api_create_campagne():
 
     if not recipients:
         return jsonify({
-            'error': 'Aucun destinataire valide apres filtres (gouv / SaaS / support / plafond)',
+            'error': 'Aucun destinataire valide apres filtres (gouv / SaaS / support / desabonne / bounce / plafond)',
             'filter_stats': filter_stats,
         }), 400
     if not sujet:
@@ -843,14 +867,16 @@ def api_create_campagne():
         except (ValueError, TypeError):
             return jsonify({'error': 'Date/heure programmée invalide'}), 400
 
-        campaign_params = {
-            'recipients': recipients,
-            'template_id': template_id,
-            'subject': sujet,
-            'custom_message': custom_message,
-            'delay': delay,
-            'mail_account_id': mail_account_id,
-        }
+        campaign_params = build_campaign_params(
+            recipients=recipients,
+            template_id=template_id,
+            subject=sujet,
+            custom_message=custom_message,
+            delay=delay,
+            mail_account_id=mail_account_id,
+            groupe_ids=groupe_ids,
+            ciblage=ciblage,
+        )
         params_json = json.dumps(campaign_params)
 
         campagne_id = campagne_manager.create_campagne(
@@ -871,13 +897,26 @@ def api_create_campagne():
             'filter_stats': filter_stats,
         })
     else:
-        # Envoi immédiat
+        # Envoi immédiat — persister aussi le ciblage pour traçabilité
+        campaign_params = build_campaign_params(
+            recipients=recipients,
+            template_id=template_id,
+            subject=sujet,
+            custom_message=custom_message,
+            delay=delay,
+            mail_account_id=mail_account_id,
+            groupe_ids=groupe_ids,
+            ciblage=ciblage,
+        )
+        params_json = json.dumps(campaign_params)
+
         campagne_id = campagne_manager.create_campagne(
             nom=nom,
             template_id=template_id,
             sujet=sujet,
             total_destinataires=len(recipients),
             statut='draft',
+            campaign_params_json=params_json,
             mail_account_id=mail_account_id,
         )
         task = send_campagne_task.delay(
@@ -896,6 +935,255 @@ def api_create_campagne():
             'task_id': task.id,
             'filter_stats': filter_stats,
         })
+
+
+@other_bp.route('/api/campagnes/plan-hebdomadaire', methods=['POST'])
+@login_required
+def api_create_weekly_plan():
+    """
+    API: Crée un plan hebdomadaire — plusieurs campagnes programmées pour un groupe.
+
+    Body JSON:
+        groupe_id (int): Groupe ciblé
+        nom (str, optionnel): Nom du plan
+        slots (list): [{template_id, scheduled_at_iso, sujet?}] — 1 à 4 créneaux
+        delay (int, optionnel): Délai entre envois
+        mail_account_id (int, optionnel)
+        recipients (list, optionnel): Destinataires ; sinon chargés depuis le groupe
+    """
+    from datetime import datetime, timezone
+    from services.database.campagnes import CampagneManager
+    from services.database.weekly_plans import WeeklyPlanManager
+    from services.database.groupes import GroupeEntrepriseManager
+    from services.template_manager import TemplateManager
+    from utils.campaign_recipients import filter_campagne_recipients
+    from utils.email_subject import clean_email_subject
+    from utils.weekly_plan_recipients import build_recipients_from_groupe
+    from utils.campaign_exclusions import split_recipients_for_rotation
+    from utils.weekly_plan_service import build_slot_pattern_from_slots
+    from utils.campagne_metadata import build_campaign_params
+    import json
+
+    data = request.get_json() or {}
+    groupe_id = data.get('groupe_id')
+    slots = data.get('slots') or []
+    delay = int(data.get('delay') or 2)
+    mail_account_id = data.get('mail_account_id')
+    recipients = data.get('recipients')
+    recurrence_enabled = bool(data.get('recurrence_enabled'))
+    rotation_mode = (data.get('rotation_mode') or 'all').strip().lower()
+    if rotation_mode not in ('all', 'split'):
+        rotation_mode = 'all'
+
+    if not groupe_id:
+        return jsonify({'error': 'groupe_id requis'}), 400
+    try:
+        groupe_id = int(groupe_id)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'groupe_id invalide'}), 400
+
+    if not slots or not isinstance(slots, list):
+        return jsonify({'error': 'Au moins un créneau (slot) est requis'}), 400
+    if len(slots) > 4:
+        return jsonify({'error': 'Maximum 4 créneaux par semaine'}), 400
+
+    groupe_mgr = GroupeEntrepriseManager()
+    all_groupes = groupe_mgr.get_groupes_entreprises() or []
+    groupe = next((g for g in all_groupes if g.get('id') == groupe_id), None)
+    if not groupe:
+        return jsonify({'error': 'Groupe introuvable'}), 404
+
+    if not recipients:
+        recipients = build_recipients_from_groupe(groupe_id)
+
+    recipients, filter_stats = filter_campagne_recipients(
+        recipients,
+        exclude_risky=True,
+        max_emails_per_entreprise=2,
+        exclude_unreachable=True,
+    )
+    if not recipients:
+        return jsonify({
+            'error': 'Aucun destinataire valide pour ce groupe (desabonnes / bounces exclus)',
+            'filter_stats': filter_stats,
+        }), 400
+
+    tm = TemplateManager()
+    templates_by_id = {t.get('id'): t for t in (tm.list_templates() or []) if t.get('id')}
+
+    now_utc = datetime.now(timezone.utc)
+    validated_slots = []
+    for i, slot in enumerate(slots):
+        if not isinstance(slot, dict):
+            continue
+        if slot.get('enabled') is False:
+            continue
+        template_id = (slot.get('template_id') or '').strip()
+        scheduled_at_iso = slot.get('scheduled_at_iso')
+        if not template_id:
+            return jsonify({'error': f'Créneau {i + 1} : modèle requis'}), 400
+        if not scheduled_at_iso:
+            return jsonify({'error': f'Créneau {i + 1} : date/heure requise'}), 400
+        try:
+            parsed = datetime.fromisoformat(str(scheduled_at_iso).replace('Z', '+00:00'))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            if parsed <= now_utc:
+                return jsonify({'error': f'Créneau {i + 1} : la date doit être dans le futur'}), 400
+            scheduled_at_str = parsed.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+        except (ValueError, TypeError):
+            return jsonify({'error': f'Créneau {i + 1} : date/heure invalide'}), 400
+
+        tpl = templates_by_id.get(template_id) or {}
+        sujet = slot.get('sujet') or tpl.get('subject') or 'Prospection'
+        sujet = clean_email_subject(str(sujet)) or 'Prospection'
+        validated_slots.append({
+            'template_id': template_id,
+            'scheduled_at': scheduled_at_str,
+            'sujet': sujet,
+            'template_name': tpl.get('name') or template_id,
+        })
+
+    if not validated_slots:
+        return jsonify({'error': 'Aucun créneau actif avec modèle et date valides'}), 400
+
+    nom_plan = data.get('nom') or f"Plan semaine — {groupe.get('nom', 'Groupe')}"
+    plan_mgr = WeeklyPlanManager()
+    campagne_mgr = CampagneManager()
+
+    slots_for_db = [
+        {'template_id': s['template_id'], 'scheduled_at': s['scheduled_at'], 'sujet': s['sujet']}
+        for s in validated_slots
+    ]
+    slot_pattern = build_slot_pattern_from_slots(slots_for_db)
+    plan_id = plan_mgr.create_plan(
+        nom=nom_plan,
+        groupe_id=groupe_id,
+        slots_json=json.dumps(slots_for_db),
+        delay=delay,
+        mail_account_id=mail_account_id,
+        recurrence_enabled=recurrence_enabled,
+        rotation_mode=rotation_mode,
+        slot_pattern_json=json.dumps(slot_pattern),
+    )
+
+    recipient_chunks = [recipients]
+    if rotation_mode == 'split' and len(validated_slots) > 1:
+        recipient_chunks = split_recipients_for_rotation(recipients, len(validated_slots))
+
+    created = []
+    for idx, slot in enumerate(validated_slots):
+        slot_recipients = recipient_chunks[idx] if idx < len(recipient_chunks) else recipients
+        if not slot_recipients:
+            continue
+        tpl_name = slot['template_name']
+        date_label = slot['scheduled_at'][:10]
+        campagne_nom = clean_email_subject(f"{tpl_name} — {groupe.get('nom', '')} — {date_label}") or nom_plan
+        campaign_params = build_campaign_params(
+            recipients=slot_recipients,
+            template_id=slot['template_id'],
+            subject=slot['sujet'],
+            delay=delay,
+            mail_account_id=mail_account_id,
+            groupe_ids=[groupe_id],
+            ciblage={'mode': 'groupes', 'groupe_ids': [groupe_id]},
+            plan_hebdo_id=plan_id,
+            slot_index=idx,
+            rotation_mode=rotation_mode,
+        )
+        campagne_id = campagne_mgr.create_campagne(
+            nom=campagne_nom,
+            template_id=slot['template_id'],
+            sujet=slot['sujet'],
+            total_destinataires=len(slot_recipients),
+            statut='scheduled',
+            scheduled_at=slot['scheduled_at'],
+            campaign_params_json=json.dumps(campaign_params),
+            mail_account_id=mail_account_id,
+            plan_hebdo_id=plan_id,
+        )
+        created.append({
+            'campagne_id': campagne_id,
+            'nom': campagne_nom,
+            'template_id': slot['template_id'],
+            'scheduled_at': slot['scheduled_at'],
+            'destinataires': len(slot_recipients),
+        })
+
+    return jsonify({
+        'success': True,
+        'plan_id': plan_id,
+        'nom': nom_plan,
+        'groupe_id': groupe_id,
+        'recurrence_enabled': recurrence_enabled,
+        'rotation_mode': rotation_mode,
+        'campagnes': created,
+        'total_destinataires': len(recipients),
+        'filter_stats': filter_stats,
+    })
+
+
+@other_bp.route('/api/campagnes/plans-hebdo/calendar', methods=['GET'])
+@login_required
+def api_weekly_plans_calendar():
+    """API: Événements calendrier des plans hebdomadaires actifs."""
+    from services.database.weekly_plans import WeeklyPlanManager
+
+    date_from = request.args.get('from')
+    date_to = request.args.get('to')
+    plan_mgr = WeeklyPlanManager()
+    events = plan_mgr.get_calendar_events(date_from=date_from, date_to=date_to)
+    return jsonify(events)
+
+
+@other_bp.route('/api/campagnes/plans-hebdo/<int:plan_id>/cancel', methods=['POST'])
+@login_required
+def api_cancel_weekly_plan(plan_id):
+    """API: Annule un plan et ses campagnes programmées."""
+    from services.database.weekly_plans import WeeklyPlanManager
+    from services.database.campagnes import CampagneManager
+
+    plan_mgr = WeeklyPlanManager()
+    plan = plan_mgr.get_plan(plan_id)
+    if not plan:
+        return jsonify({'error': 'Plan introuvable'}), 404
+
+    campagne_mgr = CampagneManager()
+    cancelled = 0
+    for camp in plan_mgr.get_campagnes_for_plan(plan_id):
+        if camp.get('statut') in ('scheduled', 'draft'):
+            campagne_mgr.update_campagne(camp['id'], statut='cancelled')
+            cancelled += 1
+
+    plan_mgr.update_plan_statut(plan_id, 'cancelled')
+    return jsonify({'success': True, 'plan_id': plan_id, 'campagnes_annulees': cancelled})
+
+
+@other_bp.route('/api/campagnes/plans-hebdo', methods=['GET'])
+@login_required
+def api_list_weekly_plans():
+    """API: Liste les plans hebdomadaires."""
+    from services.database.weekly_plans import WeeklyPlanManager
+
+    groupe_id = request.args.get('groupe_id', type=int)
+    statut = request.args.get('statut')
+    plan_mgr = WeeklyPlanManager()
+    plans = plan_mgr.list_plans(groupe_id=groupe_id, statut=statut)
+    return jsonify(plans)
+
+
+@other_bp.route('/api/campagnes/plans-hebdo/<int:plan_id>', methods=['GET'])
+@login_required
+def api_get_weekly_plan(plan_id):
+    """API: Détail d'un plan hebdomadaire avec ses campagnes."""
+    from services.database.weekly_plans import WeeklyPlanManager
+
+    plan_mgr = WeeklyPlanManager()
+    plan = plan_mgr.get_plan(plan_id)
+    if not plan:
+        return jsonify({'error': 'Plan introuvable'}), 404
+    plan['campagnes'] = plan_mgr.get_campagnes_for_plan(plan_id)
+    return jsonify(plan)
 
 
 @other_bp.route('/api/campagnes/<int:campagne_id>', methods=['GET'])
@@ -1099,10 +1387,11 @@ def api_relaunch_campagne(campagne_id):
         recipients,
         exclude_risky=True,
         max_emails_per_entreprise=2,
+        exclude_unreachable=True,
     )
     if not recipients:
         return jsonify({
-            'error': 'Aucun destinataire valide apres filtres pour la relance',
+            'error': 'Aucun destinataire valide apres filtres pour la relance (desabonnes / bounces exclus)',
             'filter_stats': filter_stats,
         }), 400
 

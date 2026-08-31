@@ -825,6 +825,29 @@ class DatabaseSchema(DatabaseBase):
         self.safe_execute_sql(cursor, 'ALTER TABLE campagnes_email ADD COLUMN scheduled_at TEXT')
         self.safe_execute_sql(cursor, 'ALTER TABLE campagnes_email ADD COLUMN campaign_params_json TEXT')
         self.safe_execute_sql(cursor, 'ALTER TABLE campagnes_email ADD COLUMN celery_task_id TEXT')
+        self.safe_execute_sql(cursor, 'ALTER TABLE campagnes_email ADD COLUMN plan_hebdo_id INTEGER')
+
+        # Plans de campagnes hebdomadaires (plusieurs envois / semaine par groupe)
+        self.execute_sql(cursor, '''
+            CREATE TABLE IF NOT EXISTS plans_campagne_hebdo (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nom TEXT NOT NULL,
+                groupe_id INTEGER NOT NULL,
+                statut TEXT NOT NULL DEFAULT 'active',
+                slots_json TEXT NOT NULL,
+                delay INTEGER DEFAULT 2,
+                mail_account_id INTEGER,
+                date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (groupe_id) REFERENCES groupes_entreprises(id) ON DELETE CASCADE
+            )
+        ''')
+        self.execute_sql(cursor, 'CREATE INDEX IF NOT EXISTS idx_plans_campagne_hebdo_groupe ON plans_campagne_hebdo(groupe_id)')
+        self.execute_sql(cursor, 'CREATE INDEX IF NOT EXISTS idx_campagnes_email_plan_hebdo ON campagnes_email(plan_hebdo_id)')
+        self.safe_execute_sql(cursor, 'ALTER TABLE plans_campagne_hebdo ADD COLUMN recurrence_enabled INTEGER DEFAULT 0')
+        self.safe_execute_sql(cursor, "ALTER TABLE plans_campagne_hebdo ADD COLUMN rotation_mode TEXT DEFAULT 'all'")
+        self.safe_execute_sql(cursor, 'ALTER TABLE plans_campagne_hebdo ADD COLUMN slot_pattern_json TEXT')
+        self.safe_execute_sql(cursor, 'ALTER TABLE plans_campagne_hebdo ADD COLUMN last_recurrence_at TEXT')
+        self.safe_execute_sql(cursor, 'ALTER TABLE plans_campagne_hebdo ADD COLUMN next_recurrence_at TEXT')
 
         # Table des modèles d'emails (templates) - stockage en BDD (remplace progressivement templates_data.json)
         self.execute_sql(cursor, '''

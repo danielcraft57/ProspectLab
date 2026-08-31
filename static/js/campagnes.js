@@ -64,6 +64,9 @@ document.addEventListener('DOMContentLoaded', function() {
     initWebSocket();
     initGenerateContactEmailButton();
     loadBrevoStatus();
+    initWeeklyPlanModal();
+    loadWeeklyPlansCalendar();
+    loadActiveWeeklyPlans();
 });
 
 /**
@@ -477,12 +480,23 @@ function displayCampagnes(campagnes) {
         const effectiveStatus = getEffectiveCampaignStatus(campagne);
         const failedCount = Math.max(0, Number(campagne.total_envoyes || 0) - Number(campagne.total_reussis || 0));
         const bouncedCount = Number(campagne.total_bounced || 0);
+        var badgesHtml = '';
+        if (campagne.plan_hebdo_id) {
+            badgesHtml += '<span class="campagne-badge campagne-badge-plan" title="Plan hebdomadaire #' + campagne.plan_hebdo_id + '">Plan #' + campagne.plan_hebdo_id + '</span>';
+        }
+        if (campagne.groupe_ids && campagne.groupe_ids.length) {
+            badgesHtml += '<span class="campagne-badge campagne-badge-groupe" title="Groupes ciblés">Groupe' + (campagne.groupe_ids.length > 1 ? 's' : '') + ' #' + campagne.groupe_ids.join(', #') + '</span>';
+        }
+        if (campagne.rotation_mode === 'split') {
+            badgesHtml += '<span class="campagne-badge campagne-badge-rotation" title="Rotation A/B/C/D">Rotation</span>';
+        }
         return `
         <div class="campagne-card" data-campagne-id="${campagne.id}" data-task-id="${escapeHtml(campagne.celery_task_id || '')}">
             <div class="campagne-header">
                 <h3 class="campagne-title">${escapeHtml(campagne.nom)}</h3>
                 <span class="campagne-statut statut-${effectiveStatus}">${getCampaignStatusLabel(effectiveStatus)}</span>
             </div>
+            ${badgesHtml ? '<div class="campagne-badges">' + badgesHtml + '</div>' : ''}
             <div class="campagne-meta">
                 <div class="campagne-meta-main">
                     <span class="campagne-meta-dot"></span>
@@ -1052,6 +1066,34 @@ function collectCiblageCriteresFromForm() {
     return filters;
 }
 
+/**
+ * Snapshot du ciblage pour traçabilité (persisté dans campaign_params_json).
+ * @returns {{mode: string, groupe_ids?: number[], criteres?: object, segment_id?: number, objectif?: string}}
+ */
+function getCiblageSnapshotForCampagne() {
+    var modeEl = document.querySelector('input[name="ciblage_mode"]:checked');
+    var mode = modeEl ? modeEl.value : 'toutes';
+    var snapshot = { mode: mode };
+    if (mode === 'groupes') {
+        var gids = getSelectedGroupIds();
+        if (gids.length) snapshot.groupe_ids = gids;
+    } else if (mode === 'criteres') {
+        snapshot.criteres = collectCiblageCriteresFromForm();
+        var gidsCrit = getSelectedGroupIds();
+        if (gidsCrit.length) snapshot.groupe_ids = gidsCrit;
+    } else if (mode === 'segment') {
+        var segEl = document.getElementById('ciblage-segment');
+        if (segEl && segEl.value) {
+            var sid = parseInt(segEl.value, 10);
+            if (!isNaN(sid)) snapshot.segment_id = sid;
+        }
+    } else if (mode === 'objectif') {
+        var objEl = document.getElementById('ciblage-objectif');
+        if (objEl && objEl.value) snapshot.objectif = objEl.value;
+    }
+    return snapshot;
+}
+
 function initCiblageSaveSegment() {
     var btn = document.getElementById('ciblage-save-segment-btn');
     if (!btn) return;
@@ -1145,14 +1187,19 @@ function initEmailFiltersListeners() {
         'filter-email-exclude-domains',
         'filter-email-exclude-contains',
         'filter-email-principal-only',
-        'filter-email-exclude-placeholders'
+        'filter-email-exclude-placeholders',
+        'filter-email-exclude-risky'
     ];
     ids.forEach(function(id) {
         var el = document.getElementById(id);
         if (!el) return;
         el.addEventListener('change', function() {
-            // principal / fictifs : recharger côté API pour que l'étape 1 reste cohérente
-            if (id === 'filter-email-principal-only' || id === 'filter-email-exclude-placeholders') {
+            // principal / fictifs / risque : recharger côté API pour que l'étape 1 reste cohérente
+            if (
+                id === 'filter-email-principal-only'
+                || id === 'filter-email-exclude-placeholders'
+                || id === 'filter-email-exclude-risky'
+            ) {
                 reloadEntreprisesFromCurrentMode();
                 return;
             }
@@ -1203,14 +1250,46 @@ function isPlaceholderEmailClient(email, source) {
 }
 
 /**
+ * Emails a risque campagne (gouv / education / SaaS / support) - miroir email_quality.py.
+ * @param {string} email
+ * @param {string} [source]
+ * @returns {boolean}
+ */
+function isCampaignRiskyEmailClient(email, source) {
+    if (isPlaceholderEmailClient(email, source)) return true;
+    var domain = ((email || '').split('@')[1] || '').toLowerCase().trim();
+    var local = ((email || '').split('@')[0] || '').toLowerCase().trim();
+    if (!domain) return true;
+    var exact = {
+        'epagine.fr': 1, 'amazon.com': 1, 'amazonaws.com': 1, 'amazon.fr': 1,
+        'smsbox.fr': 1, 'github.com': 1, 'noreply.github.com': 1, 'users.noreply.github.com': 1,
+        'prestafacture.com': 1, 'education.lu': 1, 'cgie.lu': 1, 'al.lu': 1
+    };
+    if (exact[domain]) return true;
+    if (domain.indexOf('.gouv.fr') !== -1 || domain.endsWith('.gouv.fr')) return true;
+    if (domain.indexOf('.education.lu') !== -1 || domain.endsWith('.education.lu')) return true;
+    if (domain.endsWith('.gouv.lu')) return true;
+    var roles = {
+        support:1, helpdesk:1, noreply:1, 'no-reply':1, donotreply:1, 'do-not-reply':1,
+        hotline:1, ticket:1, tickets:1, postmaster:1, 'mailer-daemon':1, abuse:1,
+        webmaster:1, hostmaster:1, bounce:1, bounces:1, newsletter:1, notifications:1,
+        notification:1, robot:1, bot:1, api:1, 'api-services-support':1
+    };
+    if (roles[local]) return true;
+    if (/^(noreply|no-reply|donotreply|mailer-daemon|api-|api\.|ticket\.|helpdesk\.)/.test(local)) return true;
+    return false;
+}
+
+/**
  * Lit les options de filtrage email (étape 2 + params API).
- * @returns {{principalOnly: boolean, excludePlaceholders: boolean, personOnly: boolean, withName: boolean, excludeDomains: string[], excludeContains: string}}
+ * @returns {{principalOnly: boolean, excludePlaceholders: boolean, excludeRisky: boolean, personOnly: boolean, withName: boolean, excludeDomains: string[], excludeContains: string}}
  */
 function getEmailFilterFlags() {
     var excludeDomainsRaw = (document.getElementById('filter-email-exclude-domains') && document.getElementById('filter-email-exclude-domains').value) || '';
     return {
         principalOnly: !!(document.getElementById('filter-email-principal-only') && document.getElementById('filter-email-principal-only').checked),
         excludePlaceholders: !!(document.getElementById('filter-email-exclude-placeholders') && document.getElementById('filter-email-exclude-placeholders').checked),
+        excludeRisky: !!(document.getElementById('filter-email-exclude-risky') && document.getElementById('filter-email-exclude-risky').checked),
         personOnly: !!(document.getElementById('filter-email-person-only') && document.getElementById('filter-email-person-only').checked),
         withName: !!(document.getElementById('filter-email-with-name') && document.getElementById('filter-email-with-name').checked),
         excludeDomains: excludeDomainsRaw.split(',').map(function(s) { return s.trim().toLowerCase(); }).filter(Boolean),
@@ -1295,6 +1374,7 @@ function applyEmailFilters(sourceData) {
         var emails = (ent.emails || []).filter(function(em) {
             if (flags.principalOnly && !em.is_principal) return false;
             if (flags.excludePlaceholders && isPlaceholderEmailClient(em.email, em.source)) return false;
+            if (flags.excludeRisky && isCampaignRiskyEmailClient(em.email, em.source)) return false;
             if (flags.personOnly && !em.is_person) return false;
             if (flags.withName && (!em.nom || em.nom === 'N/A' || !em.nom.trim())) return false;
             var domain = (em.domain || (em.email && em.email.split('@')[1]) || '').toLowerCase();
@@ -1302,6 +1382,15 @@ function applyEmailFilters(sourceData) {
             if (flags.excludeContains && (em.email || '').toLowerCase().indexOf(flags.excludeContains) !== -1) return false;
             return true;
         });
+        // Plafond client aligné serveur (2) si pas principal_only
+        if (!flags.principalOnly && emails.length > 2) {
+            emails = emails.slice().sort(function(a, b) {
+                var ra = (a.is_principal ? 0 : 1) + (a.is_person ? 0 : 1);
+                var rb = (b.is_principal ? 0 : 1) + (b.is_person ? 0 : 1);
+                if (ra !== rb) return ra - rb;
+                return String(a.email || '').localeCompare(String(b.email || ''));
+            }).slice(0, 2);
+        }
         return {
             id: ent.id,
             nom: ent.nom,
@@ -1364,6 +1453,7 @@ function goToStepFromHeader(step) {
         campagneModalStep = 2;
         displayEntreprisesStep2();
         showCampagneStep(2);
+        setTimeout(function() { recipientsQuickSelect('principal'); }, 0);
         return;
     }
     if (step === 3 && threeSteps) {
@@ -1386,6 +1476,8 @@ function campagneStepNext() {
             selectedRecipients = [];
             campagneModalStep = 2;
             displayEntreprisesStep2();
+            // Précocher les emails principaux visibles (aligné P0 rapport)
+            setTimeout(function() { recipientsQuickSelect('principal'); }, 0);
         } else {
             campagneModalStep = 2;
         }
@@ -1742,6 +1834,8 @@ function appendCampagneEntreprisesPagingParams(params, page) {
     var flags = getEmailFilterFlags();
     if (flags.principalOnly) params.set('principal_only', '1');
     if (flags.excludePlaceholders) params.set('exclude_placeholders', '1');
+    if (flags.excludeRisky) params.set('exclude_risky', '1');
+    else params.set('exclude_risky', '0');
     if (step1SearchTerm) params.set('search', step1SearchTerm);
 }
 
@@ -2363,6 +2457,21 @@ function closeModal() {
 // Soumettre la campagne
 // Générer un nom de campagne automatique
 /**
+ * Nettoie un libelle de campagne (placeholders, parentheses vides).
+ * @param {string} text
+ * @returns {string}
+ */
+function cleanCampagneLabel(text) {
+    var t = String(text || '');
+    t = t.replace(/\{[^}]+\}/g, '');
+    t = t.replace(/\(\s*\)/g, '');
+    t = t.replace(/[ \t]{2,}/g, ' ').trim();
+    t = t.replace(/[\s]*[-–—|:]\s*$/g, '').trim();
+    t = t.replace(/^[ \t]*[-–—|:]\s*/g, '').trim();
+    return t;
+}
+
+/**
  * Génère un nom de campagne lisible à partir du template
  * et du contexte (secteur principal / exemple d'entreprise).
  * 
@@ -2394,7 +2503,7 @@ function generateCampagneName(templateName, recipientCount, sectorLabel, entrepr
             }
         }
         if (!templateLabel) {
-            templateLabel = templateName.trim();
+            templateLabel = cleanCampagneLabel(templateName);
         }
     } else {
         templateLabel = 'Campagne email';
@@ -2403,20 +2512,25 @@ function generateCampagneName(templateName, recipientCount, sectorLabel, entrepr
     // Secteur ou nom d'entreprise (court) - sert de "deuxième nom" / contexte
     let contextPart = '';
     if (sectorLabel) {
-        const s = sectorLabel.trim();
+        const s = cleanCampagneLabel(sectorLabel);
         contextPart = s.length > 16 ? s.split(' ')[0] : s;
     } else if (entrepriseLabel) {
-        const n = entrepriseLabel.trim();
+        const n = cleanCampagneLabel(entrepriseLabel);
         contextPart = n.length > 18 ? n.split(' ')[0] : n;
     }
-    
+
+    // Eviter un suffixe generique "Services" / "Technologie"
+    if (contextPart && /^(services|technologie|autre|divers)$/i.test(contextPart)) {
+        contextPart = '';
+    }
+
     // Construire le nom final, sans icônes ni compteur
     const parts = [
         templateLabel,
         contextPart
     ].filter(function(p) { return p && p !== ''; });
-    
-    return parts.join(' ');
+
+    return cleanCampagneLabel(parts.join(' ')) || 'Campagne email';
 }
 
 async function submitCampagne() {
@@ -2452,13 +2566,14 @@ async function submitCampagne() {
         scheduledAtIso = planned.toISOString();
     }
 
-    // Générer automatiquement le nom de la campagne (en tenant compte du secteur / nom)
+    // Générer automatiquement le nom de la campagne (sujet nettoye prioritaire)
     const template = templatesData.find(t => t.id === templateId);
     const templateName = template ? template.name : null;
     // Contexte: secteur principal + exemple d'entreprise
     const context = getCampagneContext();
+    const baseLabel = cleanCampagneLabel(sujet) || templateName;
     const nom = generateCampagneName(
-        templateName,
+        baseLabel,
         selectedRecipients.length,
         context.sectorLabel,
         context.entrepriseLabel
@@ -2512,6 +2627,9 @@ async function submitCampagne() {
     submitBtn.textContent = 'Création en cours...';
     
     try {
+        var ciblageSnapshot = getCiblageSnapshotForCampagne();
+        var groupeIds = ciblageSnapshot.groupe_ids || [];
+
         const response = await fetch('/api/campagnes', {
             method: 'POST',
             headers: {
@@ -2526,6 +2644,8 @@ async function submitCampagne() {
                 delay,
                 send_mode: sendMode,
                 scheduled_at_iso: scheduledAtIso,
+                groupe_ids: groupeIds,
+                ciblage: ciblageSnapshot,
                 mail_account_id: (window.__MAIL_ACCOUNT_ID__ !== null && window.__MAIL_ACCOUNT_ID__ !== undefined)
                     ? window.__MAIL_ACCOUNT_ID__
                     : null,
@@ -2534,7 +2654,15 @@ async function submitCampagne() {
 
         const data = await response.json();
 
-            if (data.success) {
+        if (data.success) {
+            var fs = data.filter_stats || {};
+            var dropped = (fs.dropped_risky || 0) + (fs.dropped_cap || 0) + (fs.dropped_dup || 0) + (fs.dropped_unreachable || 0);
+            if (dropped > 0) {
+                alert(
+                    'Campagne creee. Filet serveur : ' + dropped + ' destinataire(s) ecarte(s) '
+                    + '(risque/desabonne/bounce/plafond). Envoi sur ' + (fs.output || '?') + ' adresse(s).'
+                );
+            }
             closeModal();
             loadCampagnes();
             loadBrevoStatus(true);
@@ -3013,11 +3141,19 @@ function closeSentEmailPreview() {
     if (previewModal) previewModal.classList.remove('show');
 }
 
-// Fermer la modale en cliquant en dehors
+// Fermer les modales en cliquant en dehors (backdrop)
 document.addEventListener('click', function(event) {
-    const modal = document.getElementById('results-modal');
-    if (event.target === modal) {
+    var resultsModal = document.getElementById('results-modal');
+    if (event.target === resultsModal) {
         closeResultsModal();
+    }
+    var weeklyModal = document.getElementById('weekly-plan-modal');
+    if (event.target === weeklyModal) {
+        closeWeeklyPlanModal();
+    }
+    var campagneModal = document.getElementById('campagne-modal');
+    if (event.target === campagneModal) {
+        closeModal();
     }
 });
 
@@ -3476,5 +3612,605 @@ function formatContactName(nomDestinataire) {
     
     // Sinon, retourner tel quel
     return escapeHtml(nomDestinataire);
+}
+
+// --- Plan hebdomadaire (plusieurs campagnes / semaine par groupe) ---
+
+const WEEKLY_PLAN_SLOT_DEFAULTS = [
+    { label: 'Mardi matin', weekday: 2, hour: 9, minute: 0, enabled: true },
+    { label: 'Mercredi après-midi', weekday: 3, hour: 14, minute: 0, enabled: true },
+    { label: 'Jeudi matin', weekday: 4, hour: 9, minute: 0, enabled: true },
+    { label: 'Vendredi après-midi', weekday: 5, hour: 14, minute: 0, enabled: false },
+];
+
+const WEEKLY_PLAN_DAY_NAMES = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+
+let weeklyPlanRecipientsPreview = null;
+let weeklyPlanWeekMonday = null;
+
+function getWeeklyPlanWeekBounds(weekMonday) {
+    var monday = weekMonday || getNextWeekMonday();
+    var sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    return {
+        monday: monday,
+        min: formatDateInputValue(monday),
+        max: formatDateInputValue(sunday),
+    };
+}
+
+function getWeeklyPlanDayNameFromDate(dateVal) {
+    if (!dateVal) return '';
+    var d = new Date(dateVal + 'T12:00:00');
+    if (isNaN(d.getTime())) return '';
+    return WEEKLY_PLAN_DAY_NAMES[d.getDay()] || '';
+}
+
+function getWeeklyPlanPeriodLabel(timeVal) {
+    if (!timeVal) return '';
+    var parts = String(timeVal).split(':');
+    var h = parseInt(parts[0], 10);
+    if (isNaN(h)) return '';
+    if (h < 12) return 'matin';
+    if (h < 18) return 'après-midi';
+    return 'soir';
+}
+
+function clampWeeklyPlanDateToWeek(dateVal, bounds) {
+    if (!dateVal || !bounds) return dateVal;
+    if (dateVal < bounds.min) return bounds.min;
+    if (dateVal > bounds.max) return bounds.max;
+    return dateVal;
+}
+
+function updateWeeklyPlanSlotLabel(slotEl) {
+    if (!slotEl) return;
+    var labelEl = slotEl.querySelector('.weekly-plan-slot-label');
+    var dateInput = slotEl.querySelector('.weekly-plan-date');
+    var timeInput = slotEl.querySelector('.weekly-plan-time');
+    if (!labelEl || !dateInput || !timeInput) return;
+    var dayName = getWeeklyPlanDayNameFromDate(dateInput.value);
+    var period = getWeeklyPlanPeriodLabel(timeInput.value);
+    if (dayName && period) {
+        labelEl.textContent = dayName + ' ' + period;
+    }
+}
+
+function updateWeeklyPlanWeekHint(bounds) {
+    var hint = document.getElementById('weekly-plan-week-hint');
+    if (!hint || !bounds) return;
+    hint.textContent = 'Semaine du ' + bounds.min.split('-').reverse().join('/') + ' au ' + bounds.max.split('-').reverse().join('/');
+}
+
+function onWeeklyPlanDateChange(ev) {
+    var input = ev.target;
+    var slotEl = input.closest('.weekly-plan-slot');
+    if (!slotEl || !weeklyPlanWeekMonday) return;
+    var bounds = getWeeklyPlanWeekBounds(weeklyPlanWeekMonday);
+    var clamped = clampWeeklyPlanDateToWeek(input.value, bounds);
+    if (clamped !== input.value) {
+        input.value = clamped;
+    }
+    updateWeeklyPlanSlotLabel(slotEl);
+}
+
+function onWeeklyPlanTimeChange(ev) {
+    var slotEl = ev.target.closest('.weekly-plan-slot');
+    updateWeeklyPlanSlotLabel(slotEl);
+}
+
+function initWeeklyPlanModalDismiss() {
+    var modal = document.getElementById('weekly-plan-modal');
+    if (!modal || modal.dataset.dismissBound === '1') return;
+    modal.dataset.dismissBound = '1';
+
+    modal.addEventListener('click', function(ev) {
+        if (ev.target === modal) {
+            closeWeeklyPlanModal();
+        }
+    });
+
+    var closeBtn = modal.querySelector('.close-modal');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', function(ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            closeWeeklyPlanModal();
+        });
+    }
+
+    document.addEventListener('keydown', function(ev) {
+        if (ev.key === 'Escape' && modal.style.display === 'block') {
+            closeWeeklyPlanModal();
+        }
+    });
+}
+
+function initWeeklyPlanModal() {
+    var groupeSelect = document.getElementById('weekly-plan-groupe');
+    if (groupeSelect) {
+        groupeSelect.addEventListener('change', onWeeklyPlanGroupeChange);
+    }
+    var refreshBtn = document.getElementById('weekly-plans-calendar-refresh');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', function() { loadWeeklyPlansCalendar(); });
+    }
+    initWeeklyPlanModalDismiss();
+}
+
+function getCalendarWeekRange() {
+    var monday = getNextWeekMonday();
+    var sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    sunday.setHours(23, 59, 59, 999);
+    return {
+        from: monday.toISOString(),
+        to: sunday.toISOString(),
+    };
+}
+
+async function loadWeeklyPlansCalendar() {
+    var body = document.getElementById('weekly-plans-calendar-body');
+    if (!body) return;
+    body.innerHTML = '<div class="weekly-plans-calendar-loading">Chargement du calendrier…</div>';
+    try {
+        var range = getCalendarWeekRange();
+        var res = await fetch('/api/campagnes/plans-hebdo/calendar?from=' + encodeURIComponent(range.from) + '&to=' + encodeURIComponent(range.to));
+        var events = await res.json();
+        if (!res.ok || !Array.isArray(events)) {
+            body.innerHTML = '<div class="weekly-plans-calendar-empty">Impossible de charger le calendrier.</div>';
+            return;
+        }
+        if (!events.length) {
+            body.innerHTML = '<div class="weekly-plans-calendar-empty">Aucun envoi planifié cette semaine via un plan hebdomadaire.</div>';
+            return;
+        }
+        var days = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+        var byDay = {};
+        events.forEach(function(ev) {
+            if (!ev.scheduled_at) return;
+            var d = new Date(ev.scheduled_at);
+            var key = formatDateInputValue(d);
+            if (!byDay[key]) byDay[key] = [];
+            byDay[key].push(ev);
+        });
+        var monday = getNextWeekMonday();
+        var html = '<div class="weekly-calendar-grid">';
+        for (var i = 0; i < 7; i++) {
+            var dayDate = new Date(monday);
+            dayDate.setDate(monday.getDate() + i);
+            var key = formatDateInputValue(dayDate);
+            var dayEvents = byDay[key] || [];
+            html += '<div class="weekly-calendar-day">' +
+                '<div class="weekly-calendar-day-title">' + days[i] + ' ' + dayDate.getDate() + '/' + (dayDate.getMonth() + 1) + '</div>' +
+                '<div class="weekly-calendar-day-events">';
+            if (!dayEvents.length) {
+                html += '<span class="weekly-calendar-empty-slot">—</span>';
+            } else {
+                dayEvents.forEach(function(ev) {
+                    var time = new Date(ev.scheduled_at);
+                    var timeStr = String(time.getHours()).padStart(2, '0') + ':' + String(time.getMinutes()).padStart(2, '0');
+                    html += '<div class="weekly-calendar-event" title="' + escapeHtml(ev.plan_nom || '') + '">' +
+                        '<span class="weekly-calendar-event-time">' + timeStr + '</span> ' +
+                        '<span class="weekly-calendar-event-name">' + escapeHtml(ev.campagne_nom || ev.template_id || 'Campagne') + '</span>' +
+                        '<span class="weekly-calendar-event-meta">' + escapeHtml(ev.groupe_nom || '') + '</span>' +
+                        '</div>';
+                });
+            }
+            html += '</div></div>';
+        }
+        html += '</div>';
+        body.innerHTML = html;
+    } catch (e) {
+        body.innerHTML = '<div class="weekly-plans-calendar-empty">Erreur calendrier.</div>';
+    }
+}
+
+async function loadActiveWeeklyPlans() {
+    var body = document.getElementById('weekly-plans-active-body');
+    if (!body) return;
+    body.innerHTML = '<div class="weekly-plans-active-loading">Chargement des plans…</div>';
+    try {
+        var res = await fetch('/api/campagnes/plans-hebdo?statut=active');
+        var plans = await res.json();
+        if (!res.ok || !Array.isArray(plans)) {
+            body.innerHTML = '<div class="weekly-plans-active-empty">Impossible de charger les plans.</div>';
+            return;
+        }
+        if (!plans.length) {
+            body.innerHTML = '<div class="weekly-plans-active-empty">Aucun plan hebdomadaire actif. Utilise « Planifier la semaine » pour en créer un.</div>';
+            return;
+        }
+        body.innerHTML = '<div class="weekly-plans-active-list">' + plans.map(function(plan) {
+            var slotsCount = (plan.slots && plan.slots.length) || (plan.slot_pattern && plan.slot_pattern.length) || 0;
+            var recurrenceBadge = plan.recurrence_enabled
+                ? '<span class="plan-badge plan-badge-recurrence">Récurrence</span>'
+                : '';
+            var rotationBadge = plan.rotation_mode === 'split'
+                ? '<span class="plan-badge plan-badge-rotation">Rotation A/B</span>'
+                : '<span class="plan-badge plan-badge-all">Tous destinataires</span>';
+            return '<div class="weekly-plan-active-card" data-plan-id="' + plan.id + '">' +
+                '<div class="weekly-plan-active-top">' +
+                '<strong class="weekly-plan-active-name">' + escapeHtml(plan.nom || ('Plan #' + plan.id)) + '</strong>' +
+                '<div class="weekly-plan-active-badges">' + recurrenceBadge + rotationBadge + '</div>' +
+                '</div>' +
+                '<div class="weekly-plan-active-meta">' +
+                escapeHtml(plan.groupe_nom || 'Groupe #' + plan.groupe_id) +
+                ' · ' + slotsCount + ' créneau(x) · ' + (plan.campagnes_count || 0) + ' campagne(s)' +
+                '</div>' +
+                '<div class="weekly-plan-active-actions">' +
+                '<button type="button" class="btn-plan-cancel" onclick="cancelWeeklyPlan(' + plan.id + ')">Annuler le plan</button>' +
+                '</div>' +
+                '</div>';
+        }).join('') + '</div>';
+    } catch (e) {
+        body.innerHTML = '<div class="weekly-plans-active-empty">Erreur chargement plans.</div>';
+    }
+}
+
+async function cancelWeeklyPlan(planId) {
+    if (!planId) return;
+    if (!confirm('Annuler ce plan et toutes ses campagnes programmées ?')) return;
+    try {
+        var res = await fetch('/api/campagnes/plans-hebdo/' + planId + '/cancel', { method: 'POST' });
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Erreur');
+        loadActiveWeeklyPlans();
+        loadWeeklyPlansCalendar();
+        loadCampagnes();
+    } catch (e) {
+        alert('Erreur : ' + (e && e.message ? e.message : e));
+    }
+}
+
+function getNextWeekMonday(fromDate) {
+    var d = new Date(fromDate || new Date());
+    d.setHours(0, 0, 0, 0);
+    var day = d.getDay();
+    var diff = day === 0 ? -6 : 1 - day;
+    var monday = new Date(d);
+    monday.setDate(d.getDate() + diff);
+    var friday = new Date(monday);
+    friday.setDate(monday.getDate() + 4);
+    if (friday.getTime() < d.getTime()) {
+        monday.setDate(monday.getDate() + 7);
+    }
+    return monday;
+}
+
+function getDateForWeekday(weekMonday, weekday) {
+    var d = new Date(weekMonday);
+    d.setDate(d.getDate() + (weekday - 1));
+    return d;
+}
+
+function formatDateInputValue(date) {
+    var yyyy = date.getFullYear();
+    var mm = String(date.getMonth() + 1).padStart(2, '0');
+    var dd = String(date.getDate()).padStart(2, '0');
+    return yyyy + '-' + mm + '-' + dd;
+}
+
+function formatTimeInputValue(hour, minute) {
+    return String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0');
+}
+
+function renderWeeklyPlanSlots() {
+    var container = document.getElementById('weekly-plan-slots');
+    if (!container) return;
+
+    weeklyPlanWeekMonday = getNextWeekMonday();
+    var bounds = getWeeklyPlanWeekBounds(weeklyPlanWeekMonday);
+    updateWeeklyPlanWeekHint(bounds);
+
+    var templateOptions = '<option value="">Choisir un modèle...</option>';
+    (templatesData || []).forEach(function(tpl) {
+        templateOptions += '<option value="' + escapeHtml(tpl.id) + '">' + escapeHtml(tpl.name || tpl.id) + '</option>';
+    });
+
+    container.innerHTML = WEEKLY_PLAN_SLOT_DEFAULTS.map(function(slot, idx) {
+        var slotDate = getDateForWeekday(weeklyPlanWeekMonday, slot.weekday);
+        var dateVal = formatDateInputValue(slotDate);
+        var timeVal = formatTimeInputValue(slot.hour, slot.minute);
+        var dayName = getWeeklyPlanDayNameFromDate(dateVal);
+        var period = getWeeklyPlanPeriodLabel(timeVal);
+        var slotLabel = (dayName && period) ? (dayName + ' ' + period) : slot.label;
+        var checked = slot.enabled ? ' checked' : '';
+        return '<div class="weekly-plan-slot' + (slot.enabled ? ' is-enabled' : '') + '" data-slot-index="' + idx + '">' +
+            '<div class="weekly-plan-slot-header">' +
+            '<label class="weekly-plan-slot-toggle">' +
+            '<input type="checkbox" class="weekly-plan-slot-enabled"' + checked + ' data-slot="' + idx + '">' +
+            '<span class="weekly-plan-slot-label">' + escapeHtml(slotLabel) + '</span>' +
+            '</label>' +
+            '</div>' +
+            '<div class="weekly-plan-slot-fields">' +
+            '<div class="form-group">' +
+            '<label>Modèle</label>' +
+            '<select class="weekly-plan-template" data-slot="' + idx + '" ' + (slot.enabled ? '' : 'disabled') + '>' + templateOptions + '</select>' +
+            '</div>' +
+            '<div class="weekly-plan-slot-datetime">' +
+            '<div class="form-group">' +
+            '<label>Date</label>' +
+            '<input type="date" class="weekly-plan-date" data-slot="' + idx + '" value="' + dateVal + '" min="' + bounds.min + '" max="' + bounds.max + '" ' + (slot.enabled ? '' : 'disabled') + '>' +
+            '</div>' +
+            '<div class="form-group">' +
+            '<label>Heure</label>' +
+            '<input type="time" class="weekly-plan-time" data-slot="' + idx + '" value="' + timeVal + '" min="07:00" max="19:00" step="300" ' + (slot.enabled ? '' : 'disabled') + '>' +
+            '</div>' +
+            '</div>' +
+            '</div>' +
+            '</div>';
+    }).join('');
+
+    container.querySelectorAll('.weekly-plan-slot-enabled').forEach(function(cb) {
+        cb.addEventListener('change', function() {
+            var slotEl = cb.closest('.weekly-plan-slot');
+            var enabled = cb.checked;
+            if (slotEl) slotEl.classList.toggle('is-enabled', enabled);
+            slotEl.querySelectorAll('.weekly-plan-template, .weekly-plan-date, .weekly-plan-time').forEach(function(el) {
+                el.disabled = !enabled;
+            });
+        });
+    });
+
+    container.querySelectorAll('.weekly-plan-date').forEach(function(input) {
+        input.addEventListener('change', onWeeklyPlanDateChange);
+        input.addEventListener('input', onWeeklyPlanDateChange);
+    });
+
+    container.querySelectorAll('.weekly-plan-time').forEach(function(input) {
+        input.addEventListener('change', onWeeklyPlanTimeChange);
+        input.addEventListener('input', onWeeklyPlanTimeChange);
+    });
+
+    container.querySelectorAll('.weekly-plan-template').forEach(function(sel) {
+        sel.addEventListener('change', function() {
+            var tpl = (templatesData || []).find(function(t) { return t.id === sel.value; });
+            if (!tpl) return;
+            var slotEl = sel.closest('.weekly-plan-slot');
+            if (slotEl && !slotEl.querySelector('.weekly-plan-slot-enabled').checked) {
+                slotEl.querySelector('.weekly-plan-slot-enabled').checked = true;
+                slotEl.classList.add('is-enabled');
+                slotEl.querySelectorAll('.weekly-plan-template, .weekly-plan-date, .weekly-plan-time').forEach(function(el) {
+                    el.disabled = false;
+                });
+            }
+        });
+    });
+}
+
+async function populateWeeklyPlanGroupes() {
+    var select = document.getElementById('weekly-plan-groupe');
+    if (!select) return;
+    select.innerHTML = '<option value="">Choisir un groupe...</option>';
+    var groupes = groupesCiblage && groupesCiblage.length ? groupesCiblage : [];
+    if (!groupes.length) {
+        try {
+            var response = await fetch('/api/groupes-entreprises');
+            groupes = await response.json();
+        } catch (e) {
+            groupes = [];
+        }
+    }
+    groupes.forEach(function(g) {
+        var opt = document.createElement('option');
+        opt.value = g.id;
+        var count = g.entreprises_count || 0;
+        opt.textContent = (g.nom || 'Groupe') + (count ? ' (' + count + ' entreprises)' : '');
+        select.appendChild(opt);
+    });
+}
+
+async function onWeeklyPlanGroupeChange() {
+    var select = document.getElementById('weekly-plan-groupe');
+    var preview = document.getElementById('weekly-plan-recipients-preview');
+    if (!select || !preview) return;
+    var groupeId = parseInt(select.value, 10);
+    if (!groupeId) {
+        preview.textContent = '';
+        weeklyPlanRecipientsPreview = null;
+        return;
+    }
+    preview.textContent = 'Chargement des destinataires...';
+    try {
+        var params = new URLSearchParams({
+            groupe_ids: String(groupeId),
+            principal_only: '1',
+            exclude_risky: '1',
+            exclude_placeholders: '1',
+            page_size: '200',
+            page: '1',
+        });
+        var totalEnt = 0;
+        var totalEmails = 0;
+        var page = 1;
+        while (true) {
+            params.set('page', String(page));
+            var res = await fetch('/api/ciblage/entreprises?' + params.toString());
+            var data = await res.json();
+            var items = data.items || data || [];
+            if (!Array.isArray(items)) break;
+            totalEnt += items.length;
+            items.forEach(function(ent) {
+                totalEmails += (ent.emails && ent.emails.length) || 0;
+            });
+            var total = data.total || totalEnt;
+            if (page * (data.page_size || 200) >= total || items.length === 0) break;
+            page += 1;
+        }
+        weeklyPlanRecipientsPreview = { groupeId: groupeId, entreprises: totalEnt, emails: totalEmails };
+        preview.textContent = totalEnt + ' entreprise(s), ~' + totalEmails + ' email(s) principal(aux) — les filtres serveur s\'appliquent à la création.';
+    } catch (e) {
+        preview.textContent = 'Impossible de prévisualiser les destinataires.';
+        weeklyPlanRecipientsPreview = null;
+    }
+}
+
+function openWeeklyPlanModal() {
+    var modal = document.getElementById('weekly-plan-modal');
+    if (!modal) return;
+
+    var form = document.getElementById('weekly-plan-form');
+    if (form) form.reset();
+
+    var preview = document.getElementById('weekly-plan-recipients-preview');
+    if (preview) preview.textContent = '';
+    weeklyPlanRecipientsPreview = null;
+
+    var delayInput = document.getElementById('weekly-plan-delay');
+    if (delayInput) delayInput.value = '2';
+
+    var recurrenceCb = document.getElementById('weekly-plan-recurrence');
+    if (recurrenceCb) recurrenceCb.checked = true;
+
+    function showModal() {
+        renderWeeklyPlanSlots();
+        populateWeeklyPlanGroupes();
+        modal.style.display = 'block';
+    }
+
+    if (!templatesData || !templatesData.length) {
+        loadTemplates().then(showModal);
+    } else {
+        showModal();
+    }
+}
+
+function closeWeeklyPlanModal() {
+    var modal = document.getElementById('weekly-plan-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+async function submitWeeklyPlan() {
+    var groupeSelect = document.getElementById('weekly-plan-groupe');
+    var groupeId = groupeSelect ? parseInt(groupeSelect.value, 10) : 0;
+    if (!groupeId) {
+        alert('Choisis un groupe.');
+        return;
+    }
+
+    var slots = [];
+    var container = document.getElementById('weekly-plan-slots');
+    if (!container) return;
+
+    container.querySelectorAll('.weekly-plan-slot').forEach(function(slotEl) {
+        var enabledCb = slotEl.querySelector('.weekly-plan-slot-enabled');
+        var enabled = enabledCb && enabledCb.checked;
+        var templateSel = slotEl.querySelector('.weekly-plan-template');
+        var dateInput = slotEl.querySelector('.weekly-plan-date');
+        var timeInput = slotEl.querySelector('.weekly-plan-time');
+        if (!enabled) {
+            slots.push({ enabled: false });
+            return;
+        }
+        var templateId = templateSel ? templateSel.value : '';
+        var dateVal = dateInput ? dateInput.value : '';
+        var timeVal = timeInput ? timeInput.value : '';
+        if (!templateId) {
+            slots.push({ enabled: true, error: 'missing_template' });
+            return;
+        }
+        if (!dateVal || !timeVal) {
+            slots.push({ enabled: true, error: 'missing_datetime' });
+            return;
+        }
+        var bounds = weeklyPlanWeekMonday ? getWeeklyPlanWeekBounds(weeklyPlanWeekMonday) : null;
+        if (bounds) {
+            dateVal = clampWeeklyPlanDateToWeek(dateVal, bounds);
+            if (dateInput) dateInput.value = dateVal;
+            if (dateVal < bounds.min || dateVal > bounds.max) {
+                slots.push({ enabled: true, error: 'out_of_week' });
+                return;
+            }
+        }
+        updateWeeklyPlanSlotLabel(slotEl);
+        var planned = new Date(dateVal + 'T' + timeVal);
+        if (planned.getTime() <= Date.now()) {
+            slots.push({ enabled: true, error: 'past' });
+            return;
+        }
+        var tpl = (templatesData || []).find(function(t) { return t.id === templateId; });
+        slots.push({
+            enabled: true,
+            template_id: templateId,
+            scheduled_at_iso: planned.toISOString(),
+            sujet: tpl ? (tpl.subject || '') : '',
+        });
+    });
+
+    var activeSlots = slots.filter(function(s) { return s.enabled; });
+    if (activeSlots.length === 0) {
+        alert('Active au moins un créneau avec un modèle.');
+        return;
+    }
+    if (activeSlots.some(function(s) { return s.error === 'missing_template'; })) {
+        alert('Chaque créneau actif doit avoir un modèle sélectionné.');
+        return;
+    }
+    if (activeSlots.some(function(s) { return s.error === 'missing_datetime'; })) {
+        alert('Chaque créneau actif doit avoir une date et une heure.');
+        return;
+    }
+    if (activeSlots.some(function(s) { return s.error === 'past'; })) {
+        alert('Toutes les dates doivent être dans le futur.');
+        return;
+    }
+    if (activeSlots.some(function(s) { return s.error === 'out_of_week'; })) {
+        alert('Chaque date doit rester dans la semaine affichée (lundi à dimanche).');
+        return;
+    }
+
+    var nomInput = document.getElementById('weekly-plan-nom');
+    var delayInput = document.getElementById('weekly-plan-delay');
+    var rotationSelect = document.getElementById('weekly-plan-rotation');
+    var recurrenceCb = document.getElementById('weekly-plan-recurrence');
+    var submitBtn = document.getElementById('btn-weekly-plan-submit');
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Programmation...';
+    }
+
+    try {
+        var response = await fetch('/api/campagnes/plan-hebdomadaire', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                groupe_id: groupeId,
+                nom: nomInput ? (nomInput.value || '').trim() : '',
+                slots: activeSlots,
+                delay: delayInput ? (parseInt(delayInput.value, 10) || 2) : 2,
+                rotation_mode: rotationSelect ? rotationSelect.value : 'all',
+                recurrence_enabled: recurrenceCb ? recurrenceCb.checked : false,
+                mail_account_id: (window.__MAIL_ACCOUNT_ID__ !== null && window.__MAIL_ACCOUNT_ID__ !== undefined)
+                    ? window.__MAIL_ACCOUNT_ID__
+                    : null,
+            }),
+        });
+        var data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || 'Erreur lors de la création du plan');
+        }
+        closeWeeklyPlanModal();
+        var count = (data.campagnes && data.campagnes.length) || 0;
+        var unreachable = (data.filter_stats && data.filter_stats.dropped_unreachable) || 0;
+        var msg = 'Plan créé : ' + count + ' campagne(s) programmée(s) pour ' + (data.total_destinataires || 0) + ' destinataire(s).';
+        if (unreachable > 0) {
+            msg += ' (' + unreachable + ' exclus : désabonnés / bounces)';
+        }
+        if (data.recurrence_enabled) {
+            msg += ' Récurrence hebdomadaire activée.';
+        }
+        alert(msg);
+        loadCampagnes();
+        loadWeeklyPlansCalendar();
+        loadActiveWeeklyPlans();
+    } catch (e) {
+        alert('Erreur : ' + (e && e.message ? e.message : e));
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Programmer la semaine';
+        }
+    }
 }
 

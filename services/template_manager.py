@@ -43,49 +43,94 @@ def _append_email_query_before_fragment(url: str, encoded_email: str) -> str:
 
 def _vitrine_fields_from_secteur(secteur: str) -> Dict[str, str]:
     """
-    Associe le libellé secteur (champ entreprise) à une démo catalogue DanielCraft.
-    Les URLs pointent vers danielcraft.fr/vitrines/… (captures longues : prévoir affichage fenêtré côté HTML).
+    Associe le libelle secteur a une demo catalogue DanielCraft.
+
+    Priorite : echantillons (/echantillons/...) puis fallback vitrines.
+    Enrichit aussi secteur_label / secteur_accroche via utils.secteurs.
+
+    @param secteur: Champ entreprises.secteur (FR ou type Google EN)
+    @returns: Placeholders vitrine + echantillon + secteur_*
     """
-    s = (secteur or "").lower()
-    rules: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
-        ("technologie", ("tech", "saas", "logiciel", "cloud", "api", "esn", "informatique", "dévelop", "develop", "software", "éditeur", "editeur")),
-        ("services", ("facility", "conciergerie", "nettoyage", "propreté", "proprete", "gestionnaire", "immeuble", "services aux")),
-        ("restauration", ("restaur", "hcr", "brasserie", "café", "cafe", "bar ", "traiteur", "cuisine")),
-        ("commerce", ("commerce", "retail", "magasin", "superm", "drive", "épicerie", "epicerie", "grande distribution", "boulanger", "boulange")),
-        ("education", ("form", "organisme", "cfa", "pédagog", "pedagog", "école", "ecole", "training", "apprentissage")),
-        ("etablissement", ("hôtel", "hotel", "hébergement", "hebergement", "chambre d'hôte", "gîte", "gite", "resort")),
-        ("beaute", ("spa", "institut", "beauté", "beaute", "soin", "esthétique", "esthetique", "massage", "onglerie")),
-        ("automobile", ("garage", "auto ", "véhicule", "vehicule", "carrosserie", "mécanique", "mecanique", "concession")),
-        ("chocolatier", ("chocolat", "confiseur", "patissier", "pâtissier", "torréfact", "torrefact")),
-        ("odontologie", ("dent", "orthodont", "cabinet dent", "odont", "stomatolog")),
-        ("banque", ("banque", "assurance", "courtier", "mutuelle", "épargne", "epargne")),
-        ("industrie", ("industr", "usin", "manufact", "fonderie", "acier", "production", "machin")),
-        ("comptable", ("compta", "expertise comptable", "expert-comptable", "commissaire aux comptes", "cabinet compt")),
-        ("association", ("associat", "ong", "fondation", "solidarité", "solidarite", "bénévolat", "benevolat")),
-    )
+    try:
+        from utils.secteurs import enrich_secteur_template_vars, echantillon_slug_for_secteur
+    except Exception:
+        enrich_secteur_template_vars = None  # type: ignore
+        echantillon_slug_for_secteur = None  # type: ignore
+
+    out: Dict[str, str] = {}
+    if enrich_secteur_template_vars:
+        enriched = enrich_secteur_template_vars(secteur)
+        # Cast soft pour rester Dict[str, str] cote templates
+        for k, v in enriched.items():
+            if isinstance(v, bool):
+                out[k] = "1" if v else ""
+            else:
+                out[k] = "" if v is None else str(v)
+    else:
+        out["secteur"] = (secteur or "").strip()
+        out["secteur_label"] = out["secteur"]
+
     slug = ""
-    for candidate, needles in rules:
-        if any(n in s for n in needles):
-            slug = candidate
-            break
-    root = "https://danielcraft.fr/vitrines"
-    catalog = f"{root}/"
+    if echantillon_slug_for_secteur:
+        slug = echantillon_slug_for_secteur(secteur) or ""
     if not slug:
-        return {
-            "vitrine_slug": "",
+        s = (secteur or "").lower()
+        rules: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+            ("technologie", ("tech", "saas", "logiciel", "cloud", "api", "esn", "informatique", "develop", "software")),
+            ("services", ("facility", "conciergerie", "nettoyage", "proprete", "services aux")),
+            ("restauration", ("restaur", "hcr", "brasserie", "cafe", "bar ", "traiteur", "food")),
+            ("commerce", ("commerce", "retail", "magasin", "superm", "drive", "epicerie", "store", "bakery")),
+            ("education", ("form", "organisme", "cfa", "pedagog", "ecole", "training", "school")),
+            ("etablissement", ("hotel", "hebergement", "lodging", "gite", "resort")),
+            ("beaute", ("spa", "institut", "beaute", "soin", "esthetique", "hair")),
+            ("automobile", ("garage", "auto ", "vehicule", "carrosserie", "mecanique", "car ")),
+            ("odontologie", ("dent", "orthodont", "odont")),
+            ("industrie", ("industr", "usin", "manufact")),
+            ("comptable", ("compta", "accounting", "expert-comptable")),
+            ("association", ("associat", "ong", "fondation", "church")),
+            ("juridique", ("lawyer", "avocat", "jurid")),
+            ("immobilier", ("immo", "real estate")),
+            ("architecture", ("architect", "btp", "contractor")),
+            ("artisan", ("plomb", "electric", "artisan")),
+        )
+        for candidate, needles in rules:
+            if any(n in s for n in needles):
+                slug = candidate
+                break
+
+    root_ech = "https://danielcraft.fr/echantillons"
+    root_vit = "https://danielcraft.fr/vitrines"
+    catalog = f"{root_ech}/"
+    if not slug:
+        out.update(
+            {
+                "vitrine_slug": "",
+                "vitrine_catalog_url": catalog,
+                "vitrine_demo_url": catalog,
+                "vitrine_fiche_url": catalog,
+                "vitrine_screenshot_url": "",
+            }
+        )
+        return out
+
+    out.update(
+        {
+            "vitrine_slug": slug,
             "vitrine_catalog_url": catalog,
-            "vitrine_demo_url": catalog,
-            "vitrine_fiche_url": catalog,
-            "vitrine_screenshot_url": "",
+            "vitrine_demo_url": f"{root_ech}/{slug}/demo/index.html",
+            "vitrine_fiche_url": f"{root_ech}/{slug}/",
+            "vitrine_screenshot_url": f"{root_ech}/{slug}/screenshots/tablet_1024x2500.webp",
+            # Alias historiques / emails audit
+            "echantillon_slug": out.get("echantillon_slug") or slug,
+            "echantillon_url": out.get("echantillon_url") or f"{root_ech}/{slug}/",
+            "echantillon_demo_url": out.get("echantillon_demo_url") or f"{root_ech}/{slug}/demo/index.html",
+            "echantillon_screenshot_url": out.get("echantillon_screenshot_url")
+            or f"{root_ech}/{slug}/screenshots/tablet_1024x2500.webp",
+            # Ancien chemin vitrines (si encore utilise)
+            "vitrine_legacy_url": f"{root_vit}/{slug}/",
         }
-    shot = f"{root}/{slug}/screenshots/desktop_1920x2400.webp"
-    return {
-        "vitrine_slug": slug,
-        "vitrine_catalog_url": catalog,
-        "vitrine_demo_url": f"{root}/{slug}/demo/index.html",
-        "vitrine_fiche_url": f"{root}/{slug}/",
-        "vitrine_screenshot_url": shot,
-    }
+    )
+    return out
 
 
 class TemplateManager:
@@ -261,7 +306,7 @@ class TemplateManager:
         with open(self.templates_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     
-    def list_templates(self, category=None, mail_account_id: Optional[int] = None) -> List[Dict]:
+    def list_templates(self, category=None, mail_account_id: Optional[int] = None, for_editor: bool = False) -> List[Dict]:
         """
         Liste tous les templates.
         Recharge le fichier à chaque appel pour afficher les modèles ajoutés ou modifiés.
@@ -322,7 +367,7 @@ class TemplateManager:
                     if snippet.startswith('<!doctype html') or snippet.startswith('<html') or '<body' in snippet:
                         template['is_html'] = True
 
-                if template.get('is_html'):
+                if template.get('is_html') and not for_editor:
                     # Pour l'UI (gestionnaire de modèles), on renvoie du HTML "résolu"
                     # (fragments inclus) afin d'éviter d'afficher des directives {#include:...}.
                     if isinstance(content, str):
@@ -332,6 +377,8 @@ class TemplateManager:
                         content = self._make_ui_preview_links_clickable(content, brand_host=brand_host)
                         template['content'] = content
                     template['preview'] = 'Modèle HTML avec variables dynamiques. {{nom}} = nom du contact ou responsable entreprise si inconnu ; {{entreprise}}, {{email}}, {{responsable}}, blocs conditionnels.'
+                elif template.get('is_html') and for_editor:
+                    template['preview'] = 'Modèle HTML (édition brute, includes non développés).'
                 else:
                     text = content if isinstance(content, str) else str(content)
                     template['preview'] = text[:100] + '...' if len(text) > 100 else text
@@ -342,6 +389,7 @@ class TemplateManager:
         self,
         template_id: str,
         for_preview: bool = True,
+        for_editor: bool = False,
         mail_account_id: Optional[int] = None,
         brand_slug: Optional[str] = None,
     ) -> Optional[Dict]:
@@ -363,7 +411,7 @@ class TemplateManager:
                 if tpl:
                     d = dict(tpl)
                     d['is_html'] = bool(d.get('is_html'))
-                    if d.get('is_html') and isinstance(d.get('content'), str):
+                    if d.get('is_html') and isinstance(d.get('content'), str) and not for_editor:
                         d['content'] = self._apply_includes(
                             d['content'],
                             mail_account_id=mail_account_id,
@@ -381,7 +429,7 @@ class TemplateManager:
         for template in self.templates:
             if template.get('id') == template_id:
                 d = template.copy()
-                if d.get('is_html') and isinstance(d.get('content'), str):
+                if d.get('is_html') and isinstance(d.get('content'), str) and not for_editor:
                     d['content'] = self._apply_includes(
                         d['content'],
                         mail_account_id=mail_account_id,
@@ -605,7 +653,9 @@ class TemplateManager:
         return template
     
     def update_template(self, template_id: str, name: str = None, subject: str = None,
-                        content: str = None, category: str = None, mail_account_id: Optional[int] = None) -> Optional[Dict]:
+                        content: str = None, category: str = None,
+                        is_html: Optional[bool] = None,
+                        mail_account_id: Optional[int] = None) -> Optional[Dict]:
         """
         Met à jour un template existant.
 
@@ -614,7 +664,8 @@ class TemplateManager:
             name: Nouveau nom (optionnel)
             subject: Nouveau sujet (optionnel)
             content: Nouveau contenu (optionnel)
-            category: Nouvelle catégorie (optionnel) ; si 'html_email', is_html est mis à True.
+            category: Nouvelle catégorie (optionnel) ; si 'html_email', is_html est mis à True sauf override explicite.
+            is_html: Forcer le flag HTML (optionnel).
 
         Returns:
             Template mis à jour ou None
@@ -631,18 +682,22 @@ class TemplateManager:
                     new_category = category if category is not None else existing.get('category', 'cold_email')
                     new_subject = subject if subject is not None else existing.get('subject', '')
                     new_content = content if content is not None else existing.get('content', '')
-                    mid_to_set = (
-                        mail_account_id
-                        if mail_account_id is not None
-                        else existing.get('mail_account_id')
-                    )
+                    if is_html is not None:
+                        new_is_html = bool(is_html)
+                    elif category is not None:
+                        new_is_html = (new_category == 'html_email') or bool(existing.get('is_html'))
+                    else:
+                        new_is_html = bool(existing.get('is_html')) or (new_category == 'html_email')
+                    mid_to_set = existing.get('mail_account_id')
+                    if mail_account_id is not None:
+                        mid_to_set = mail_account_id
                     saved = db.upsert_email_template(
                         template_id=template_id,
                         name=new_name,
                         category=new_category,
                         subject=new_subject,
                         content=new_content,
-                        is_html=(new_category == 'html_email'),
+                        is_html=new_is_html,
                         is_active=bool(existing.get('is_active', 1)),
                         mail_account_id=mid_to_set,
                     )
@@ -660,7 +715,10 @@ class TemplateManager:
                     template['content'] = content
                 if category is not None:
                     template['category'] = category
-                    template['is_html'] = category == 'html_email'
+                    if is_html is None:
+                        template['is_html'] = category == 'html_email' or bool(template.get('is_html'))
+                if is_html is not None:
+                    template['is_html'] = bool(is_html)
                 template['updated_at'] = datetime.now().isoformat()
                 self._save_templates()
                 return template.copy()

@@ -4629,8 +4629,11 @@ class EntrepriseManager(DatabaseBase):
         @param filters: Dict de filtres (peut être None)
         @returns: SQL enrichi
         """
-        if not filters:
-            return base_sql
+        filters = filters or {}
+
+        if filters.get('exclude_unreachable', True):
+            from utils.campaign_exclusions import append_unreachable_entreprise_sql
+            base_sql = append_unreachable_entreprise_sql(base_sql, params)
 
         if filters.get('groupe_ids') and isinstance(filters['groupe_ids'], list) and len(filters['groupe_ids']) > 0:
             placeholders = ','.join(['?' for _ in filters['groupe_ids']])
