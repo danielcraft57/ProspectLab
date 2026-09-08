@@ -26,3 +26,7 @@ jobs:
       - name: Compile check
         run: |
           python -m compileall app.py celery_app.py config.py routes services tasks utils
+
+      - name: Unit tests campagnes email
+        run: |
+          python -m unittest scripts.tests.test_email_quality scripts.tests.test_email_subject_clean scripts.tests.test_inbox_classification scripts.tests.test_brevo_event_mapping scripts.tests.test_tracking_suspect scripts.tests.test_campaign_recipients scripts.tests.test_crosslinked_domains -v

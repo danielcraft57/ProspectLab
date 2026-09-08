@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import html as _html
 import re
 import sys
 from pathlib import Path
@@ -9,6 +8,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+from utils.email_subject import humanize_template_name, infer_subject_from_html
 
 from template_studio.html_sources_provider import brand_provider
 from template_studio.html_templates_generator import HtmlTemplatesGenerator
@@ -63,35 +64,25 @@ def _build_generator(repo_root: Path, brand: str | None = None) -> HtmlTemplates
     fragments_dirs = [d for d in [brand_fragments_dir, common_fragments_dir] if d is not None]
 
     def _infer_title(html_text: str) -> str:
-        # On tente de récupérer le <title> pour proposer un subject réutilisable.
-        # Si rien n'est trouvé, on renvoie vide.
-        m = re.search(r"<title[^>]*>(.*?)</title>", html_text, flags=re.IGNORECASE | re.DOTALL)
-        raw_title = (m.group(1) if m else "").strip()
-        # Normaliser les espaces sans toucher aux {placeholders}
-        title = re.sub(r"\s+", " ", raw_title).strip()
-        return title
+        """Déduit le sujet depuis le HTML (commentaire SUBJECT ou balise title)."""
+        return infer_subject_from_html(html_text)
 
     def _humanize_name_from_title_or_id(title: str, tpl_id: str) -> str:
-        """
-        Produit un nom lisible pour l'UI (différent de l'ID technique).
-        - base: <title>
-        - sans placeholders {entreprise}, {nom}, etc.
-        - sans décorations type "— {entreprise}"
-        """
-        t = _html.unescape(title or "").strip()
-        # Retirer les placeholders
-        t = re.sub(r"\{[a-zA-Z0-9_\-]+\}", "", t).strip()
-        # Nettoyer les séparateurs et espaces
-        t = re.sub(r"\s*[-—–]\s*", " — ", t)
-        t = re.sub(r"\s+", " ", t).strip(" —-–")
-        if t:
-            return t
+        """Produit un nom lisible pour l'UI (sans Objet:, placeholders ni ())."""
+        return humanize_template_name(title, tpl_id)
 
-        # Fallback: à partir de l'ID
-        base = (tpl_id or "").strip()
-        base = re.sub(r"^html_", "", base)
-        base = base.replace("_", " ").strip()
-        return base[:1].upper() + base[1:] if base else tpl_id
+    def _category_for_id(tpl_id: str) -> str:
+        """Categorie UI : audit, offres, echantillons, bouquins."""
+        tid = (tpl_id or "").strip()
+        if "_offres_" in tid or tid.startswith("html_dc_offres"):
+            return "offres"
+        if "_echantillons_" in tid or tid.startswith("html_dc_echantillons"):
+            return "echantillons"
+        if "_bouquins_" in tid or tid.startswith("html_dc_bouquins"):
+            return "bouquins"
+        if tid.startswith("html_dc_"):
+            return "audit"
+        return "html_email"
 
     def _infer_specs_from_html_sources() -> list[dict]:
         specs: list[dict] = []
@@ -119,6 +110,7 @@ def _build_generator(repo_root: Path, brand: str | None = None) -> HtmlTemplates
                         "id": tpl_id,
                         "name": name,
                         "subject": subject or "",
+                        "category": _category_for_id(tpl_id),
                     }
                 )
         return specs

@@ -16,7 +16,7 @@ from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
 import json
-from config import MAIL_DEFAULT_RECIPIENT
+from config import CAMPAIGN_REPORT_RECIPIENT
 from config import (
     BOUNCE_SCAN_ENABLED,
     BOUNCE_SCAN_PROFILES,
@@ -813,15 +813,17 @@ def _build_inbox_events_report_section():
     return html, text
 
 
-def _build_campaigns_report_html(title, campagnes_stats, inbox_html=''):
+def _build_campaigns_report_html(title, campagnes_stats, inbox_html='', global_impression=''):
     """
     Version claire / moderne du rapport campagnes (fond clair, cartes).
     """
+    from utils.campaign_report import impression_campaign
+
     # Section tableau (même si vide on garde un bloc propre)
     if not campagnes_stats:
         rows_html = """
           <tr>
-            <td colspan="6" style="padding:10px 12px; text-align:center; color:#6b7280;">
+            <td colspan="7" style="padding:10px 12px; text-align:center; color:#6b7280;">
               Aucune campagne correspondante sur la période analysée.
             </td>
           </tr>
@@ -829,6 +831,7 @@ def _build_campaigns_report_html(title, campagnes_stats, inbox_html=''):
     else:
         rows_html = ""
         for cs in campagnes_stats:
+            lecture = impression_campaign(cs)
             rows_html += f"""
               <tr>
                 <td style="padding:8px 10px; border-bottom:1px solid #e5e7eb;">{cs.get('id')}</td>
@@ -837,12 +840,21 @@ def _build_campaigns_report_html(title, campagnes_stats, inbox_html=''):
                 <td style="padding:8px 10px; border-bottom:1px solid #e5e7eb;">{cs.get('total_emails')}</td>
                 <td style="padding:8px 10px; border-bottom:1px solid #e5e7eb;">{cs.get('open_rate'):.1f}%</td>
                 <td style="padding:8px 10px; border-bottom:1px solid #e5e7eb;">{cs.get('click_rate'):.1f}%</td>
+                <td style="padding:8px 10px; border-bottom:1px solid #e5e7eb; font-size:12px; color:#4b5563; font-style:italic;">{lecture}</td>
               </tr>
             """
 
     total_emails = sum(cs.get('total_emails', 0) for cs in campagnes_stats) if campagnes_stats else 0
     avg_open = sum(cs.get('open_rate', 0.0) for cs in campagnes_stats) / max(len(campagnes_stats), 1) if campagnes_stats else 0.0
     avg_click = sum(cs.get('click_rate', 0.0) for cs in campagnes_stats) / max(len(campagnes_stats), 1) if campagnes_stats else 0.0
+    impression_block = ''
+    if global_impression:
+        impression_block = f'''
+            <div style="margin-bottom:16px; padding:12px 14px; border-radius:12px; background:#fffbeb; border:1px solid #fde68a; font-size:14px; color:#78350f; line-height:1.5;">
+              <strong style="display:block; margin-bottom:4px; color:#92400e;">Impression globale</strong>
+              {global_impression}
+            </div>
+        '''
 
     return f"""
     <html>
@@ -850,12 +862,13 @@ def _build_campaigns_report_html(title, campagnes_stats, inbox_html=''):
         <div style="max-width:840px; margin:0 auto; background:#ffffff; border-radius:16px; box-shadow:0 18px 40px rgba(15,23,42,0.12); overflow:hidden; border:1px solid #e5e7eb;">
           <!-- Bandeau -->
           <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6); padding:18px 22px; color:#ffffff;">
-            <div style="font-size:13px; opacity:0.9; margin-bottom:4px;">Rapport campagnes ProspectLab</div>
+            <div style="font-size:13px; opacity:0.9; margin-bottom:4px;">Bilan campagnes ProspectLab</div>
             <div style="font-size:20px; font-weight:600;">{title}</div>
           </div>
 
           <!-- Contenu principal -->
           <div style="padding:18px 22px 22px;">
+            {impression_block}
             <!-- Cartes synthèse -->
             <div style="display:flex; flex-wrap:wrap; gap:12px; margin-bottom:18px;">
               <div style="flex:1 1 150px; background:#f9fafb; border-radius:12px; padding:12px 14px; border:1px solid #e5e7eb;">
@@ -890,6 +903,7 @@ def _build_campaigns_report_html(title, campagnes_stats, inbox_html=''):
                     <th align="left" style="padding:8px 10px; border-bottom:1px solid #e5e7eb;">Emails</th>
                     <th align="left" style="padding:8px 10px; border-bottom:1px solid #e5e7eb;">Ouverture</th>
                     <th align="left" style="padding:8px 10px; border-bottom:1px solid #e5e7eb;">Clic</th>
+                    <th align="left" style="padding:8px 10px; border-bottom:1px solid #e5e7eb;">Lecture</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -910,12 +924,17 @@ def _build_campaigns_report_html(title, campagnes_stats, inbox_html=''):
     """
 
 
-def _build_campaigns_report_text(title, campagnes_stats, inbox_text=''):
+def _build_campaigns_report_text(title, campagnes_stats, inbox_text='', global_impression=''):
     """Version texte brut du rapport de campagnes."""
+    from utils.campaign_report import impression_campaign
+
     if not campagnes_stats:
         base = f"{title}\n\nAucune campagne correspondante sur la période analysée."
     else:
-        lines = [title, "", "Récapitulatif des campagnes :"]
+        lines = [title, '']
+        if global_impression:
+            lines.extend(['Impression globale :', global_impression, ''])
+        lines.append('Récapitulatif des campagnes :')
         for cs in campagnes_stats:
             line = (
                 f"- #{cs.get('id')} - {cs.get('nom') or ''} "
@@ -925,6 +944,7 @@ def _build_campaigns_report_text(title, campagnes_stats, inbox_text=''):
                 f"click={cs.get('click_rate'):.1f}%)"
             )
             lines.append(line)
+            lines.append(f"  Lecture : {impression_campaign(cs)}")
         base = "\n".join(lines)
     if inbox_text:
         return f"{base}\n\n{inbox_text}"
@@ -941,9 +961,10 @@ def send_campagnes_report_task(report_type='evening'):
     - Si report_type == 'morning' :
         Rapporte les campagnes lancées la veille après-midi/soir (12h-23h59).
 
-    Le rapport est envoyé à MAIL_DEFAULT_RECIPIENT.
+    Le rapport est envoyé à CAMPAIGN_REPORT_RECIPIENT.
     """
     from services.database.campagnes import CampagneManager
+    from utils.campaign_report import compose_periodic_report_header
 
     now_paris = _get_paris_now()
     today = now_paris.date()
@@ -951,12 +972,12 @@ def send_campagnes_report_task(report_type='evening'):
     if report_type == 'evening':
         start_local = datetime.combine(today, time(6, 0), tzinfo=now_paris.tzinfo)
         end_local = datetime.combine(today, time(12, 0), tzinfo=now_paris.tzinfo)
-        title = f"Rapport campagnes - Matin du {today.strftime('%d/%m/%Y')}"
+        period_date = today
     else:  # 'morning'
         yesterday = today - timedelta(days=1)
         start_local = datetime.combine(yesterday, time(12, 0), tzinfo=now_paris.tzinfo)
         end_local = datetime.combine(yesterday, time(23, 59, 59), tzinfo=now_paris.tzinfo)
-        title = f"Rapport campagnes - Après-midi/soir du {yesterday.strftime('%d/%m/%Y')}"
+        period_date = yesterday
 
     start_utc_iso = _to_utc_iso(start_local)
     end_utc_iso = _to_utc_iso(end_local)
@@ -997,24 +1018,25 @@ def send_campagnes_report_task(report_type='evening'):
         if not inbox_text or 'aucun evenement' in inbox_text.lower():
             return {'success': True, 'count': 0, 'skipped': True, 'reason': 'no_sent_emails_in_window'}
         sender = EmailSender()
-        subject = f"[ProspectLab] {title} (inbox)"
+        title, subject, global_impression = compose_periodic_report_header(report_type, period_date, [])
+        subject = f"{subject} (inbox)"
         result = sender.send_email(
-            to=MAIL_DEFAULT_RECIPIENT,
+            to=CAMPAIGN_REPORT_RECIPIENT,
             subject=subject,
-            body=_build_campaigns_report_text(title, [], inbox_text),
-            html_body=_build_campaigns_report_html(title, [], inbox_html),
+            body=_build_campaigns_report_text(title, [], inbox_text, global_impression),
+            html_body=_build_campaigns_report_html(title, [], inbox_html, global_impression),
         )
         return {'success': result.get('success', False), 'count': 0, 'inbox_only': True}
 
     inbox_html, inbox_text = _build_inbox_events_report_section()
+    title, subject, global_impression = compose_periodic_report_header(report_type, period_date, campagnes_stats)
     sender = EmailSender()
-    subject = f"[ProspectLab] {title}"
-    text_body = _build_campaigns_report_text(title, campagnes_stats, inbox_text)
-    html_body = _build_campaigns_report_html(title, campagnes_stats, inbox_html)
+    text_body = _build_campaigns_report_text(title, campagnes_stats, inbox_text, global_impression)
+    html_body = _build_campaigns_report_html(title, campagnes_stats, inbox_html, global_impression)
 
     logger.info(f"[Rapport campagnes] Envoi du rapport '{title}' pour {len(campagnes_stats)} campagne(s)")
     result = sender.send_email(
-        to=MAIL_DEFAULT_RECIPIENT,
+        to=CAMPAIGN_REPORT_RECIPIENT,
         subject=subject,
         body=text_body,
         html_body=html_body,
@@ -1307,18 +1329,32 @@ def check_campaigns_significant_changes_task(
         logger.info("[Campagnes stabilization] Aucun rapport à envoyer.")
         return {'success': True, 'changes': 0}
 
-    title = f"Campagnes - rapport de stabilisation ({len(to_send)} campagne(s))"
+    from utils.campaign_report import compose_stabilization_header, impression_campaign
+
+    title, subject = compose_stabilization_header(len(to_send))
     lines = [title, ""]
     for ch in to_send:
+        cs = {
+            'open_rate': ch.get('current_open', 0),
+            'click_rate': ch.get('current_click', 0),
+            'total_emails': ch.get('total_emails', 0),
+        }
         lines.append(
             f"- #{ch['id']} - {ch.get('nom') or ''} "
             f"(emails={ch['total_emails']}, open={ch['current_open']:.1f}% click={ch['current_click']:.1f}%)"
         )
+        lines.append(f"  Lecture : {impression_campaign(cs)}")
     text_body = "\n".join(lines)
 
     # HTML simple (évite de ré-injecter des données personnelles détaillées)
     rows_html = ""
     for ch in to_send:
+        cs = {
+            'open_rate': ch.get('current_open', 0),
+            'click_rate': ch.get('current_click', 0),
+            'total_emails': ch.get('total_emails', 0),
+        }
+        lecture = impression_campaign(cs)
         rows_html += f"""
           <tr>
             <td style="padding:8px 10px; border-bottom:1px solid #e5e7eb;">{ch['id']}</td>
@@ -1326,6 +1362,7 @@ def check_campaigns_significant_changes_task(
             <td style="padding:8px 10px; border-bottom:1px solid #e5e7eb; text-align:center;">{ch['total_emails']}</td>
             <td style="padding:8px 10px; border-bottom:1px solid #e5e7eb; text-align:center; color:#16a34a; font-weight:600;">{ch['current_open']:.1f}%</td>
             <td style="padding:8px 10px; border-bottom:1px solid #e5e7eb; text-align:center; color:#2563eb; font-weight:600;">{ch['current_click']:.1f}%</td>
+            <td style="padding:8px 10px; border-bottom:1px solid #e5e7eb; font-size:12px; color:#4b5563; font-style:italic;">{lecture}</td>
           </tr>
         """
 
@@ -1335,7 +1372,7 @@ def check_campaigns_significant_changes_task(
         <div style="max-width:840px; margin:0 auto; background:#ffffff; border-radius:16px; box-shadow:0 18px 40px rgba(15,23,42,0.10); overflow:hidden; border:1px solid #e5e7eb;">
           <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6); padding:18px 22px; color:#fff;">
             <div style="font-size:13px; opacity:0.92; margin-bottom:4px;">ProspectLab</div>
-            <div style="font-size:18px; font-weight:600;">Rapport de stabilisation</div>
+            <div style="font-size:18px; font-weight:600;">{title}</div>
           </div>
           <div style="padding:16px 22px 22px;">
             <table cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse; font-size:13px;">
@@ -1346,6 +1383,7 @@ def check_campaigns_significant_changes_task(
                   <th style="padding:10px 10px; border-bottom:1px solid #e5e7eb; text-align:center; color:#374151;">Emails</th>
                   <th style="padding:10px 10px; border-bottom:1px solid #e5e7eb; text-align:center; color:#374151;">Open</th>
                   <th style="padding:10px 10px; border-bottom:1px solid #e5e7eb; text-align:center; color:#374151;">Click</th>
+                  <th style="padding:10px 10px; border-bottom:1px solid #e5e7eb; text-align:left; color:#374151;">Lecture</th>
                 </tr>
               </thead>
               <tbody>
@@ -1359,10 +1397,9 @@ def check_campaigns_significant_changes_task(
     """
 
     sender = EmailSender()
-    subject = "[ProspectLab] " + title
     logger.info(f"[Campagnes stabilization] Envoi d'un rapport pour {len(to_send)} campagne(s)")
     result = sender.send_email(
-        to=MAIL_DEFAULT_RECIPIENT,
+        to=CAMPAIGN_REPORT_RECIPIENT,
         subject=subject,
         body=text_body,
         html_body=html_body,
@@ -1415,7 +1452,8 @@ def check_campaigns_significant_changes_task(
         return {'success': True, 'changes': 0}
 
     # Construire le rapport des changements
-    title = "Campagnes - changements significatifs détectés"
+    title = "Vibrations détectées — campagnes en mouvement"
+    subject = f"[ProspectLab] Mouvement sur {len(changed)} campagne(s) — performances en évolution"
     lines = [title, "", "Campagnes impactées :"]
     for ch in changed:
         lines.append(
@@ -1470,10 +1508,9 @@ def check_campaigns_significant_changes_task(
     """
 
     sender = EmailSender()
-    subject = "[ProspectLab] " + title
     logger.info(f"[Campagnes changes] Envoi du rapport de changements pour {len(changed)} campagne(s)")
     result = sender.send_email(
-        to=MAIL_DEFAULT_RECIPIENT,
+        to=CAMPAIGN_REPORT_RECIPIENT,
         subject=subject,
         body=text_body,
         html_body=html_body,

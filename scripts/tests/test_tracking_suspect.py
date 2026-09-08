@@ -24,6 +24,8 @@ from utils.tracking_suspect import (
     is_cloud_scanner_ip,
     is_prefetch_request,
     is_proxy_or_bot_user_agent,
+    sql_countable_event_clause,
+    sql_real_open_clause,
 )
 
 
@@ -143,6 +145,18 @@ class TestTrackingSuspect(unittest.TestCase):
         )
         self.assertEqual(decided.get('event_type'), 'open')
         self.assertEqual(decided.get('reason'), 'human_headers')
+
+    def test_sql_clauses_escape_percent_for_postgresql(self):
+        """Le LIKE Apple MPP ne doit pas casser psycopg2 (%% en prod)."""
+        pg_clause = sql_real_open_clause(True, 'et')
+        self.assertIn("NOT LIKE '17.%%'", pg_clause)
+
+        sqlite_clause = sql_real_open_clause(False, 'et')
+        self.assertIn("NOT LIKE '17.%'", sqlite_clause)
+        self.assertNotIn("NOT LIKE '17.%%'", sqlite_clause)
+
+        countable_pg = sql_countable_event_clause(True, 'et')
+        self.assertIn("NOT LIKE '17.%%'", countable_pg)
 
 
 if __name__ == '__main__':

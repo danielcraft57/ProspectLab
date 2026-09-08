@@ -11,13 +11,21 @@
     <div class="etm-header">
         <div class="etm-title">
             <h1>Modèles d'emails</h1>
-            <p>Crée, modifie et organise tes templates. Tout est enregistré en base.</p>
-            <p class="etm-header-link"><a href="/design/mockups/emails/index.html" target="_blank" rel="noopener">Galerie maquettes unifiée</a></p>
+            <p class="etm-lead">Catégories cliquables, paramètres par défaut, rendu live des variables ({nom}, {secteur_label}, échantillons…).</p>
         </div>
         <div class="etm-header-actions">
+            <div class="etm-badge" id="etm-status-badge">Prêt</div>
             <button class="btn btn-secondary" id="etm-import-btn" type="button">
                 <i class="fa-solid fa-file-import"></i>
-                Importer (JSON)
+                Importer
+            </button>
+            <button class="btn btn-secondary" id="etm-delete-btn" type="button" disabled>
+                <i class="fa-regular fa-trash-can"></i>
+                Supprimer
+            </button>
+            <button class="btn btn-primary" id="etm-save-btn" type="button" disabled>
+                <i class="fa-regular fa-floppy-disk"></i>
+                Enregistrer
             </button>
             <button class="btn btn-primary" id="etm-new-btn" type="button">
                 <i class="fa-solid fa-plus"></i>
@@ -31,149 +39,174 @@
             <h2>Import de modèles (JSON)</h2>
             <p class="etm-import-help">
                 Charge un fichier ou colle un JSON contenant un tableau de templates, ou un objet <code>{"templates": [...]}</code>.
-                La syntaxe est vérifiée, ainsi que les champs manquants et les doublons d'ID.
             </p>
             <div class="etm-import-grid">
                 <div class="form-group">
                     <label for="etm-import-file">Fichier JSON</label>
                     <input id="etm-import-file" type="file" accept=".json,application/json">
-                    <small class="etm-hint">Optionnel : le contenu sera aussi recopié dans la zone ci-dessous.</small>
                 </div>
             </div>
             <div class="form-group">
                 <label for="etm-import-text">Zone JSON</label>
-                <textarea id="etm-import-text" rows="8" placeholder='{"templates": [...]} ou [...]' spellcheck="false"></textarea>
+                <textarea id="etm-import-text" rows="6" placeholder='{"templates": [...]} ou [...]' spellcheck="false"></textarea>
             </div>
             <div id="etm-import-result" class="etm-import-result" aria-live="polite"></div>
             <div class="etm-import-actions-bottom">
                 <div class="etm-import-buttons">
-                    <button class="btn btn-secondary btn-small" id="etm-import-parse-btn" type="button">
-                        <i class="fa-solid fa-magnifying-glass"></i>
-                        Analyser le JSON
-                    </button>
-                    <button class="btn btn-primary btn-small" id="etm-import-apply-btn" type="button" disabled>
-                        <i class="fa-solid fa-file-import"></i>
-                        Importer les modèles
-                    </button>
+                    <button class="btn btn-secondary btn-small" id="etm-import-parse-btn" type="button">Analyser</button>
+                    <button class="btn btn-primary btn-small" id="etm-import-apply-btn" type="button" disabled>Importer</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <div class="etm-layout">
-        <aside class="etm-sidebar">
-            <div class="etm-search">
-                <i class="fa-solid fa-magnifying-glass"></i>
-                <input id="etm-search-input" type="text" placeholder="Rechercher (nom, sujet)..." autocomplete="off">
-                <button class="etm-clear" id="etm-clear-search" type="button" title="Effacer">
-                    <i class="fa-solid fa-xmark"></i>
-                </button>
+    <div class="etm-cat-chips etm-cat-chips--top" id="etm-cat-chips" role="tablist" aria-label="Filtrer par catégorie"></div>
+    <select id="etm-category" hidden aria-hidden="true"><option value="">Toutes</option></select>
+
+    <div class="etm-workspace">
+        <aside class="etm-panel" id="etm-side-panel">
+            <div class="etm-md-tabs" id="etm-side-tabs" data-active="models" role="tablist" aria-label="Panneau latéral">
+                <button type="button" class="etm-md-tab is-active" role="tab" id="etm-tab-models" data-tab="models" aria-selected="true">Modèles</button>
+                <button type="button" class="etm-md-tab" role="tab" id="etm-tab-params" data-tab="params" aria-selected="false">Paramètres</button>
+                <span class="etm-md-tab-ink" aria-hidden="true"></span>
             </div>
 
-            <div class="etm-filters">
-                <div class="etm-cat-chips" id="etm-cat-chips" role="tablist" aria-label="Filtrer par catégorie"></div>
-                <select id="etm-category" hidden aria-hidden="true">
-                    <option value="">Toutes</option>
-                </select>
-                <div class="etm-filter-row etm-filter-row--sort">
-                    <label for="etm-sort">Tri</label>
-                    <select id="etm-sort">
-                        <option value="updated_desc">Modifié récemment</option>
-                        <option value="name_asc">Nom (A-Z)</option>
-                    </select>
-                </div>
-            </div>
-
-            <div class="etm-list" id="etm-list" aria-label="Liste des modèles"></div>
-        </aside>
-
-        <section class="etm-editor">
-            <div class="etm-editor-top">
-                <div class="etm-editor-top-left">
-                    <div class="etm-badge" id="etm-status-badge">Prêt</div>
-                </div>
-                <div class="etm-editor-top-right">
-                    <button class="btn btn-secondary btn-small" id="etm-preview-toggle" type="button">
-                        <i class="fa-regular fa-eye"></i>
-                        Aperçu
-                    </button>
-                    <button class="btn btn-danger btn-small" id="etm-delete-btn" type="button" disabled>
-                        <i class="fa-regular fa-trash-can"></i>
-                        Supprimer
-                    </button>
-                    <button class="btn btn-primary btn-small" id="etm-save-btn" type="button" disabled>
-                        <i class="fa-regular fa-floppy-disk"></i>
-                        Enregistrer
-                    </button>
-                </div>
-            </div>
-
-            <div class="etm-form">
-                <div class="etm-grid">
-                    <div class="form-group">
-                        <label for="etm-name">Nom</label>
-                        <input id="etm-name" type="text" placeholder="Ex: Audit - voisin Google" autocomplete="off" required>
-                        <small class="etm-hint">Libellé interne pour retrouver le modèle dans la liste.</small>
+            <div class="etm-md-panels">
+                <div class="etm-md-panel is-active" id="etm-panel-models" role="tabpanel">
+                    <div class="etm-search">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <input id="etm-search-input" type="text" placeholder="Rechercher…" autocomplete="off">
+                        <button class="etm-clear" id="etm-clear-search" type="button" title="Effacer"><i class="fa-solid fa-xmark"></i></button>
                     </div>
-                    <div class="form-group">
-                        <label for="etm-category-edit">Catégorie</label>
-                        <select id="etm-category-edit">
-                            <option value="audit">Audit</option>
-                            <option value="offres">Offres</option>
-                            <option value="echantillons">Échantillons</option>
-                            <option value="bouquins">Bouquins</option>
-                            <option value="cold_email">Cold Email</option>
-                            <option value="html_email">Email HTML</option>
-                            <option value="linkedin">LinkedIn</option>
-                            <option value="malt">Malt</option>
-                            <option value="other">Autre</option>
+                    <div class="etm-filter-row etm-filter-row--sort">
+                        <label for="etm-sort">Tri</label>
+                        <select id="etm-sort">
+                            <option value="updated_desc">Modifié récemment</option>
+                            <option value="name_asc">Nom (A-Z)</option>
                         </select>
                     </div>
-                    <div class="form-group etm-grid-subject">
-                        <label for="etm-subject">Sujet</label>
-                        <input id="etm-subject" type="text" placeholder="Ex: Refonte globale - {entreprise}" autocomplete="off">
-                        <small class="etm-hint">Objet de l'email envoyé (peut contenir {entreprise}, {nom}…).</small>
-                    </div>
+                    <div class="etm-list" id="etm-list" aria-label="Liste des modèles"></div>
                 </div>
 
-                <div class="etm-body">
-                    <div class="etm-body-head">
-                        <div class="etm-body-title">
-                            <h2>Contenu</h2>
-                            <div class="etm-chips">
-                                <span class="etm-chip" data-insert="{nom}">{nom}</span>
-                                <span class="etm-chip" data-insert="{entreprise}">{entreprise}</span>
-                                <span class="etm-chip" data-insert="{email}">{email}</span>
-                                {% raw %}
-                                <span class="etm-chip" data-insert="{#if_tech_data}\n\n{#endif}">{#if_tech_data}</span>
-                                <span class="etm-chip" data-insert="{#if_performance}\n\n{#endif}">{#if_performance}</span>
-                                <span class="etm-chip" data-insert="{#if_security}\n\n{#endif}">{#if_security}</span>
-                                <span class="etm-chip" data-insert="{#if_scraping_data}\n\n{#endif}">{#if_scraping_data}</span>
-                                {% endraw %}
-                            </div>
+                <div class="etm-md-panel" id="etm-panel-params" role="tabpanel">
+                    <div class="etm-params-scroll">
+                        <div class="etm-live-dot"><i></i> Aperçu en temps réel</div>
+
+                        <label class="etm-field"><span>Prénom / nom</span>
+                            <input id="etm-p-nom" type="text" value="Claire" autocomplete="off">
+                        </label>
+                        <label class="etm-field"><span>Entreprise</span>
+                            <input id="etm-p-entreprise" type="text" value="Atelier Nord-Est" autocomplete="off">
+                        </label>
+                        <label class="etm-field"><span>Email</span>
+                            <input id="etm-p-email" type="email" value="claire@atelier-nord.fr" autocomplete="off">
+                        </label>
+                        <label class="etm-field"><span>Site</span>
+                            <input id="etm-p-website" type="text" value="atelier-nord.fr" autocomplete="off">
+                        </label>
+                        <label class="etm-field"><span>Secteur</span>
+                            <select id="etm-p-secteur">
+                                <option value="Commerce" selected>Commerce</option>
+                                <option value="Restauration">Restauration</option>
+                                <option value="Beauté">Beauté</option>
+                                <option value="Automobile">Automobile</option>
+                                <option value="Santé">Santé</option>
+                                <option value="Immobilier">Immobilier</option>
+                                <option value="BTP">BTP</option>
+                                <option value="Technologie">Technologie</option>
+                                <option value="Services">Services</option>
+                                <option value="Éducation">Éducation</option>
+                                <option value="Hôtellerie">Hôtellerie</option>
+                                <option value="Juridique">Juridique</option>
+                                <option value="Finance">Finance</option>
+                                <option value="Industrie">Industrie</option>
+                                <option value="Artisanat">Artisanat</option>
+                                <option value="Transport">Transport</option>
+                                <option value="Communication">Communication</option>
+                            </select>
+                        </label>
+
+                        <div class="etm-param-actions">
+                            <button type="button" class="btn btn-secondary btn-small" id="etm-params-reset">Reset</button>
+                            <button type="button" class="btn btn-primary btn-small" id="etm-params-refresh">Rafraîchir</button>
                         </div>
-                        <div class="etm-body-actions">
-                            <label class="etm-switch">
-                                <input id="etm-is-html" type="checkbox">
-                                <span class="etm-slider"></span>
-                                <span class="etm-switch-label">HTML</span>
+
+                        <div class="etm-meta-box">
+                            <label class="etm-field etm-field--compact"><span>Nom du modèle</span>
+                                <input id="etm-name" type="text" placeholder="Ex: PDF 0,50" autocomplete="off" required>
                             </label>
+                            <label class="etm-field etm-field--compact"><span>Catégorie</span>
+                                <select id="etm-category-edit">
+                                    <option value="audit">Audit</option>
+                                    <option value="offres">Offres</option>
+                                    <option value="echantillons">Échantillons</option>
+                                    <option value="bouquins">Bouquins</option>
+                                    <option value="cold_email">Cold Email</option>
+                                    <option value="html_email">Email HTML</option>
+                                    <option value="linkedin">LinkedIn</option>
+                                    <option value="malt">Malt</option>
+                                    <option value="other">Autre</option>
+                                </select>
+                            </label>
+                            <label class="etm-field etm-field--compact"><span>Sujet (modèle)</span>
+                                <input id="etm-subject" type="text" placeholder="Ex: On te trouve sur Google ? …" autocomplete="off">
+                            </label>
+
+                            <p class="etm-meta-subject"><strong>Objet rendu</strong><br><span id="etm-subject-live">—</span></p>
+                            <div class="etm-meta-chips" id="etm-meta-chips"></div>
+                            <div class="etm-meta-vars" id="etm-vars-live"></div>
                         </div>
                     </div>
-                    <textarea id="etm-content" rows="18" placeholder="Bonjour {nom}, ..." spellcheck="false"></textarea>
                 </div>
 
-                <div class="etm-preview" id="etm-preview" hidden>
-                    <div class="etm-preview-head">
-                        <h2>Aperçu</h2>
-                        <p>Le rendu exact dépend des données entreprise, mais ça te permet de valider le HTML vite fait.</p>
+            </div>
+        </aside>
+
+        <section class="etm-preview-shell">
+            <div class="etm-preview-toolbar">
+                <div class="etm-preview-title" id="etm-preview-title">Sélectionne un modèle</div>
+                <div class="etm-preview-toolbar-actions">
+                    <div class="etm-seg etm-seg--mode" role="group" aria-label="Mode édition">
+                        <button type="button" class="is-active" data-preview-mode="render" id="etm-mode-render">Aperçu</button>
+                        <button type="button" data-preview-mode="source" id="etm-mode-source">Code source</button>
                     </div>
-                    <div class="etm-preview-body">
-                        <iframe id="etm-preview-iframe" title="Aperçu du template" sandbox=""></iframe>
-                        <pre id="etm-preview-text" class="etm-preview-text" hidden></pre>
+                    <div class="etm-seg etm-seg--width" role="group" aria-label="Largeur aperçu">
+                        <button type="button" class="is-active" data-width="desktop" id="etm-width-desktop">Desktop</button>
+                        <button type="button" data-width="mobile" id="etm-width-mobile">Mobile</button>
                     </div>
+                    <label class="etm-switch etm-switch--compact" title="Modèle HTML">
+                        <input id="etm-is-html" type="checkbox" checked>
+                        <span class="etm-slider"></span>
+                        <span class="etm-switch-label">HTML</span>
+                    </label>
                 </div>
             </div>
+            <div class="etm-frame-wrap" id="etm-frame-wrap">
+                <div class="etm-preview-render" id="etm-preview-render">
+                    <iframe id="etm-preview-iframe" title="Aperçu du template" sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox"></iframe>
+                    <pre id="etm-preview-text" class="etm-preview-text" hidden></pre>
+                    <button type="button" class="etm-preview-edit-hint" id="etm-preview-edit-hint" hidden>
+                        <i class="fa-solid fa-pen" aria-hidden="true"></i>
+                        Éditer le contenu
+                    </button>
+                </div>
+                <div class="etm-source-editor" id="etm-source-editor" hidden>
+                    <div class="etm-body-head">
+                        <div class="etm-chips">
+                            <span class="etm-chip" data-insert="{nom}">{nom}</span>
+                            <span class="etm-chip" data-insert="{entreprise}">{entreprise}</span>
+                            <span class="etm-chip" data-insert="{email}">{email}</span>
+                            {% raw %}
+                            <span class="etm-chip" data-insert="{#if_tech_data}\n\n{#endif}">{#if_tech_data}</span>
+                            <span class="etm-chip" data-insert="{#if_performance}\n\n{#endif}">{#if_performance}</span>
+                            <span class="etm-chip" data-insert="{#if_security}\n\n{#endif}">{#if_security}</span>
+                            {% endraw %}
+                        </div>
+                    </div>
+                    <textarea id="etm-content" rows="22" placeholder="<!DOCTYPE html>…" spellcheck="false"></textarea>
+                </div>
+            </div>
+            <p class="etm-preview-status" id="etm-preview-status">Chargement…</p>
         </section>
     </div>
 
@@ -184,4 +217,3 @@
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/email_templates_manager.js') }}"></script>
 {% endblock %}
-

@@ -43,11 +43,15 @@
             </div>
             <div class="filter-group">
                 <label for="campagnes-date-from" class="filter-label">Du</label>
-                <input type="date" id="campagnes-date-from">
+                <div class="md-field-control md-field-control--compact md-field-control--datetime">
+                    <input type="date" lang="fr-FR" id="campagnes-date-from" class="md-input md-input--datetime">
+                </div>
             </div>
             <div class="filter-group">
                 <label for="campagnes-date-to" class="filter-label">Au</label>
-                <input type="date" id="campagnes-date-to">
+                <div class="md-field-control md-field-control--compact md-field-control--datetime">
+                    <input type="date" lang="fr-FR" id="campagnes-date-to" class="md-input md-input--datetime">
+                </div>
             </div>
             <div class="filter-group filter-group-reset">
                 <button type="button" id="campagnes-filters-reset" class="btn-filters-reset">Réinitialiser</button>
@@ -331,11 +335,14 @@
                 <div id="campagne-step-3" class="campagne-step" role="tabpanel" aria-labelledby="step-indicator-3" style="display: none;">
                     <div class="form-section">
                         <div class="form-section-title">Contenu du message</div>
-                        <div class="form-group">
+                        <div class="form-group md-field md-field--select md-template-select-field">
                             <label for="campagne-template">Modèle de message</label>
-                            <select id="campagne-template" name="template_id">
-                                <option value="">Aucun (message personnalisé)</option>
-                            </select>
+                            <div class="md-field-control md-field-control--select">
+                                <select id="campagne-template" class="md-select md-select--grouped" name="template_id">
+                                    <option value="">Aucun (message personnalisé)</option>
+                                </select>
+                            </div>
+                            <p class="md-select-hint md-template-caption" id="campagne-template-hint" hidden></p>
                             <div id="template-suggestions" class="template-suggestions" aria-live="polite"></div>
                         </div>
                         <div class="form-group">
@@ -376,13 +383,19 @@
                         </div>
                         <div id="schedule-block" class="schedule-block" style="display: none;" aria-hidden="true">
                             <div id="schedule-fields" class="schedule-fields-row">
-                                <div class="form-group">
+                                <div class="form-group md-datetime-field">
                                     <label for="campagne-schedule-date">Date d'envoi</label>
-                                    <input type="date" id="campagne-schedule-date" name="schedule_date">
+                                    <div class="md-field-control md-field-control--datetime">
+                                        <input type="date" lang="fr-FR" id="campagne-schedule-date" name="schedule_date" class="md-input md-input--datetime">
+                                    </div>
+                                    <span class="md-datetime-caption" id="campagne-schedule-date-caption"></span>
                                 </div>
-                                <div class="form-group">
+                                <div class="form-group md-datetime-field">
                                     <label for="campagne-schedule-time">Heure d'envoi</label>
-                                    <input type="time" id="campagne-schedule-time" name="schedule_time">
+                                    <div class="md-field-control md-field-control--datetime">
+                                        <input type="time" lang="fr-FR" id="campagne-schedule-time" name="schedule_time" class="md-input md-input--datetime">
+                                    </div>
+                                    <span class="md-datetime-caption" id="campagne-schedule-time-caption"></span>
                                 </div>
                             </div>
                             <div class="schedule-suggestions">
@@ -419,64 +432,208 @@
     </div>
 </div>
 
-<!-- Modal plan hebdomadaire : plusieurs campagnes / semaine pour un groupe -->
+<!-- Modal plan hebdomadaire : wizard 3 étapes (destinataires → semaine → récap) -->
 <div id="weekly-plan-modal" class="modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="weekly-plan-modal-title">
-    <div class="modal-content modal-weekly-plan" onclick="event.stopPropagation()">
+    <div class="modal-content modal-campagne-steps modal-weekly-plan" onclick="event.stopPropagation()">
         <div class="modal-header">
             <h2 id="weekly-plan-modal-title">Planifier la semaine</h2>
             <button type="button" class="close-modal" aria-label="Fermer">&times;</button>
         </div>
-        <div class="modal-body">
-            <p class="weekly-plan-intro">Choisis un groupe et jusqu'à 4 modèles à envoyer sur la semaine. Chaque créneau crée une campagne programmée distincte.</p>
+        <div class="modal-steps-indicator weekly-plan-steps-indicator" role="tablist" aria-label="Étapes du plan hebdomadaire">
+            <div class="step-item" data-step="1" onclick="weeklyPlanGoToStepFromHeader(1)">
+                <span id="weekly-plan-step-indicator-1" class="step-dot step-active" aria-current="step">1</span>
+                <div class="step-label">
+                    <span class="step-icon"><i class="fa-solid fa-envelope-open-text"></i></span>
+                    <span>Destinataires</span>
+                </div>
+            </div>
+            <span class="step-line" aria-hidden="true"></span>
+            <div class="step-item" data-step="2" onclick="weeklyPlanGoToStepFromHeader(2)">
+                <span id="weekly-plan-step-indicator-2" class="step-dot">2</span>
+                <div class="step-label">
+                    <span class="step-icon"><i class="fa-solid fa-calendar-week"></i></span>
+                    <span>Semaine</span>
+                </div>
+            </div>
+            <span class="step-line" aria-hidden="true"></span>
+            <div class="step-item" data-step="3" onclick="weeklyPlanGoToStepFromHeader(3)">
+                <span id="weekly-plan-step-indicator-3" class="step-dot">3</span>
+                <div class="step-label">
+                    <span class="step-icon"><i class="fa-solid fa-clipboard-check"></i></span>
+                    <span>Récap</span>
+                </div>
+            </div>
+        </div>
+        <div class="modal-body modal-body-weekly-plan">
             <form id="weekly-plan-form">
-                <div class="form-section">
-                    <div class="form-section-title">Groupe ciblé</div>
-                    <div class="form-group">
-                        <label for="weekly-plan-groupe">Groupe *</label>
-                        <select id="weekly-plan-groupe" name="groupe_id" required>
-                            <option value="">Choisir un groupe...</option>
-                        </select>
-                        <p id="weekly-plan-recipients-preview" class="weekly-plan-preview" aria-live="polite"></p>
+                <!-- Étape 1 : groupe + entreprises + emails -->
+                <div id="weekly-plan-step-1" class="weekly-plan-step" role="tabpanel" aria-labelledby="weekly-plan-step-indicator-1">
+                    <p class="weekly-plan-intro">Choisis un groupe, affine les filtres puis sélectionne les emails à inclure dans le plan.</p>
+
+                    <div class="weekly-plan-section-card">
+                        <div class="form-section-title weekly-plan-section-title">
+                            <i class="fa-solid fa-layer-group" aria-hidden="true"></i>
+                            Groupe ciblé
+                        </div>
+                        <div class="form-group md-field md-field--select">
+                            <label for="weekly-plan-groupe">Groupe *</label>
+                            <div class="md-field-control md-field-control--select">
+                                <select id="weekly-plan-groupe" class="md-select" name="groupe_id" required>
+                                    <option value="">Choisir un groupe...</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="weekly-plan-recipients-preview" class="weekly-plan-preview-banner" aria-live="polite" hidden></div>
                     </div>
-                    <div class="form-group">
-                        <label for="weekly-plan-nom">Nom du plan (optionnel)</label>
-                        <input type="text" id="weekly-plan-nom" name="nom" placeholder="Ex: Plan semaine Formateurs">
+
+                    <div class="weekly-plan-section-card">
+                        <div class="form-section-title-row step1-header-row">
+                            <div class="step1-header-left">
+                                <div class="form-section-title weekly-plan-section-title">
+                                    <i class="fa-solid fa-building" aria-hidden="true"></i>
+                                    Entreprises du groupe
+                                </div>
+                                <div id="weekly-plan-step1-results-count" class="results-count weekly-plan-results-chip" style="display: none;"></div>
+                            </div>
+                        </div>
+                        <div class="md-filter-chips" role="group" aria-label="Filtres email rapides">
+                            <label class="md-filter-chip">
+                                <input type="checkbox" id="weekly-plan-filter-principal-only" checked>
+                                <span>Principaux</span>
+                            </label>
+                            <label class="md-filter-chip">
+                                <input type="checkbox" id="weekly-plan-filter-exclude-placeholders" checked>
+                                <span>Sans fictifs</span>
+                            </label>
+                            <label class="md-filter-chip">
+                                <input type="checkbox" id="weekly-plan-filter-exclude-risky" checked>
+                                <span>Sans risque</span>
+                            </label>
+                        </div>
+                        <div class="step1-quick-actions-row">
+                            <div class="step1-quick-actions md-action-chips" aria-label="Actions de sélection entreprises" role="group">
+                                <button type="button" class="recipients-action-btn" onclick="weeklyPlanEntreprisesQuickSelect('all')">Tout</button>
+                                <button type="button" class="recipients-action-btn" onclick="weeklyPlanEntreprisesQuickSelect('none')">Aucun</button>
+                                <button type="button" class="recipients-action-btn" onclick="weeklyPlanEntreprisesQuickSelect('invert')">Inverser</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <div id="weekly-plan-entreprises-selector" class="recipients-selector weekly-plan-recipients-panel">
+                                <div class="empty-state weekly-plan-empty-state"><p>Choisis un groupe pour charger les entreprises.</p></div>
+                            </div>
+                            <div id="weekly-plan-entreprises-load-more-wrap" class="entreprises-load-more-wrap" style="display: none;">
+                                <button type="button" id="weekly-plan-entreprises-load-more-btn" class="recipients-action-btn md-btn-outlined">Charger plus</button>
+                                <span id="weekly-plan-entreprises-load-more-hint" class="entreprises-load-more-hint"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="weekly-plan-section-card">
+                        <div class="form-section-title-row recipients-header-row">
+                            <div class="recipients-header-left">
+                                <div class="form-section-title weekly-plan-section-title">
+                                    <i class="fa-solid fa-at" aria-hidden="true"></i>
+                                    Sélection des emails
+                                </div>
+                                <div id="weekly-plan-ciblage-results-count" class="results-count weekly-plan-results-chip" style="display: none;"></div>
+                            </div>
+                            <div class="recipients-quick-actions md-action-chips" aria-label="Actions de sélection emails" role="group">
+                                <button type="button" class="recipients-action-btn" onclick="weeklyPlanRecipientsQuickSelect('all')">Tout</button>
+                                <button type="button" class="recipients-action-btn" onclick="weeklyPlanRecipientsQuickSelect('none')">Aucun</button>
+                                <button type="button" class="recipients-action-btn" onclick="weeklyPlanRecipientsQuickSelect('invert')">Inverser</button>
+                                <button type="button" class="recipients-action-btn recipients-action-btn--accent" onclick="weeklyPlanRecipientsQuickSelect('principal')">Principaux</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <div id="weekly-plan-recipients-selector" class="recipients-selector weekly-plan-recipients-panel">
+                                <div class="empty-state weekly-plan-empty-state"><p>Sélectionne des entreprises pour afficher leurs emails.</p></div>
+                            </div>
+                            <div id="weekly-plan-selected-count" class="weekly-plan-selection-banner" style="display: none;" aria-live="polite">
+                                <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
+                                <span class="weekly-plan-selection-banner-text">0 destinataire(s) sélectionné(s)</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
-                <div class="form-section">
-                    <div class="form-section-title">Créneaux de la semaine</div>
-                    <p id="weekly-plan-week-hint" class="form-hint weekly-plan-week-hint"></p>
-                    <p class="form-hint">Active les créneaux souhaités, choisis un modèle et ajuste la date/heure (uniquement dans la semaine affichée).</p>
-                    <div id="weekly-plan-slots" class="weekly-plan-slots"></div>
-                </div>
+                <!-- Étape 2 : créneaux + paramètres -->
+                <div id="weekly-plan-step-2" class="weekly-plan-step" role="tabpanel" aria-labelledby="weekly-plan-step-indicator-2" style="display: none;">
+                    <div class="weekly-plan-section-card">
+                        <div class="form-group md-field">
+                            <label for="weekly-plan-nom">Nom du plan (titre indicatif)</label>
+                            <div class="md-field-control">
+                                <input type="text" id="weekly-plan-nom" class="md-input" name="nom" placeholder="Ex: Plan semaine — Formateurs — 26/08–01/09" autocomplete="off">
+                            </div>
+                            <p class="md-select-hint weekly-plan-nom-hint">Ce titre sera repris dans le nom de chaque campagne programmée.</p>
+                        </div>
+                    </div>
 
-                <div class="form-section">
-                    <div class="form-section-title">Paramètres communs</div>
-                    <div class="form-group">
-                        <label for="weekly-plan-delay">Délai entre envois (secondes)</label>
-                        <input type="number" id="weekly-plan-delay" name="delay" value="2" min="1" max="10">
+                    <div class="weekly-plan-section-card">
+                        <div class="form-section-title weekly-plan-section-title">
+                            <i class="fa-solid fa-calendar-days" aria-hidden="true"></i>
+                            Créneaux de la semaine
+                        </div>
+                        <p id="weekly-plan-week-hint" class="form-hint weekly-plan-week-hint"></p>
+                        <p class="md-select-hint">Active les créneaux souhaités, choisis un modèle et ajuste la date/heure (Europe/Paris).</p>
+                        <div id="weekly-plan-slots" class="weekly-plan-slots"></div>
                     </div>
-                    <div class="form-group">
-                        <label for="weekly-plan-rotation">Répartition des destinataires</label>
-                        <select id="weekly-plan-rotation" name="rotation_mode">
-                            <option value="all">Tous les modèles → tous les destinataires</option>
-                            <option value="split">Rotation A/B/C/D (répartir entre les créneaux)</option>
-                        </select>
-                    </div>
-                    <div class="form-group ciblage-checkbox">
-                        <label>
-                            <input type="checkbox" id="weekly-plan-recurrence" name="recurrence_enabled" checked>
-                            Reprogrammer automatiquement chaque semaine (dimanche 6h)
+
+                    <div class="weekly-plan-section-card">
+                        <div class="form-section-title weekly-plan-section-title">
+                            <i class="fa-solid fa-sliders" aria-hidden="true"></i>
+                            Paramètres communs
+                        </div>
+                        <div class="weekly-plan-params-grid">
+                            <div class="form-group md-field">
+                                <label for="weekly-plan-delay">Délai entre envois (s)</label>
+                                <div class="md-field-control md-field-control--compact">
+                                    <input type="number" id="weekly-plan-delay" class="md-input md-input--number" name="delay" value="2" min="1" max="10">
+                                </div>
+                            </div>
+                            <div class="form-group md-field md-field--select">
+                                <label for="weekly-plan-rotation">Répartition</label>
+                                <div class="md-field-control md-field-control--select md-field-control--compact">
+                                    <select id="weekly-plan-rotation" class="md-select" name="rotation_mode">
+                                        <option value="all">Tous → tous</option>
+                                        <option value="split">Rotation A/B/C/D</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <label class="md-switch-row" for="weekly-plan-recurrence">
+                            <span class="md-switch">
+                                <input type="checkbox" id="weekly-plan-recurrence" name="recurrence_enabled" checked>
+                                <span class="md-switch-track" aria-hidden="true"></span>
+                            </span>
+                            <span class="md-switch-label">Reprogrammer chaque semaine (dimanche 6h)</span>
                         </label>
+                        <p class="md-select-hint">Les désabonnés et entreprises en bounce sont exclus automatiquement.</p>
                     </div>
-                    <p class="form-hint">Les désabonnés et entreprises en bounce sont exclus automatiquement (entreprise entière).</p>
+                </div>
+
+                <!-- Étape 3 : récapitulatif -->
+                <div id="weekly-plan-step-3" class="weekly-plan-step" role="tabpanel" aria-labelledby="weekly-plan-step-indicator-3" style="display: none;">
+                    <div class="weekly-plan-section-card weekly-plan-recap-card">
+                        <div class="form-section-title weekly-plan-section-title">
+                            <i class="fa-solid fa-clipboard-check" aria-hidden="true"></i>
+                            Récapitulatif
+                        </div>
+                        <p class="md-select-hint">Vérifie les destinataires, les créneaux et les options avant de valider.</p>
+                        <div id="weekly-plan-recap" class="weekly-plan-recap" aria-live="polite"></div>
+                    </div>
                 </div>
             </form>
         </div>
-        <div class="modal-footer">
-            <button type="button" class="btn-cancel" onclick="closeWeeklyPlanModal()">Annuler</button>
-            <button type="button" id="btn-weekly-plan-submit" class="btn-submit" onclick="submitWeeklyPlan()">Programmer la semaine</button>
+        <div class="modal-footer modal-footer-steps">
+            <button type="button" id="btn-weekly-plan-prev" class="btn-cancel" style="display: none;" onclick="weeklyPlanStepPrev()">Précédent</button>
+            <div class="modal-footer-right">
+                <button type="button" class="btn-cancel" onclick="closeWeeklyPlanModal()">Annuler</button>
+                <button type="button" id="btn-weekly-plan-next" class="btn-submit" onclick="weeklyPlanStepNext()">Suivant</button>
+                <button type="button" id="btn-weekly-plan-submit" class="btn-submit btn-submit--accent" style="display: none;" onclick="submitWeeklyPlan()">
+                    <i class="fa-solid fa-calendar-check" aria-hidden="true"></i>
+                    Programmer la semaine
+                </button>
+            </div>
         </div>
     </div>
 </div>

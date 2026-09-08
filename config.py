@@ -122,8 +122,11 @@ MAIL_USERNAME = os.environ.get('MAIL_USERNAME', '')
 MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD', '')
 MAIL_DEFAULT_SENDER = os.environ.get('MAIL_DEFAULT_SENDER', 'Loic Daniel <loic@example.com>')
 
-# Destinataire par défaut pour les rapports internes (campagnes, diagnostics, etc.)
+# Destinataire par défaut pour les rapports internes (diagnostics, alertes diverses)
 MAIL_DEFAULT_RECIPIENT = os.environ.get('MAIL_DEFAULT_RECIPIENT', 'contact@danielcraft.fr')
+
+# Destinataire des rapports de campagnes (matin/soir, stabilisation, fiche détaillée)
+CAMPAIGN_REPORT_RECIPIENT = os.environ.get('CAMPAIGN_REPORT_RECIPIENT', 'loic5488@gmail.com')
 
 # Brevo (Sendinblue) : clé API pour quota / compte (l'envoi SMTP utilise MAIL_* ci-dessus)
 BREVO_API_KEY = os.environ.get('BREVO_API_KEY', '')

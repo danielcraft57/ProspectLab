@@ -7,7 +7,23 @@ import time
 from flask import render_template
 
 
-_DEFAULT_ASSET_VERSION = str(int(time.time()))
+def _static_asset_version():
+    """Version cache-buster basée sur la date de modif des assets critiques."""
+    try:
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        candidates = [
+            os.path.join(root, 'static', 'js', 'campagnes.js'),
+            os.path.join(root, 'static', 'css', 'modules', 'pages', 'campagnes.css'),
+        ]
+        mtimes = [os.path.getmtime(p) for p in candidates if os.path.isfile(p)]
+        if mtimes:
+            return str(int(max(mtimes)))
+    except OSError:
+        pass
+    return str(int(time.time()))
+
+
+_DEFAULT_ASSET_VERSION = _static_asset_version()
 
 
 def render_page(template_name, **kwargs):

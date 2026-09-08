@@ -27,55 +27,128 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 5000);
     });
 
-    // Gestion du thème clair/sombre
-    function applyTheme(theme) {
+    // Gestion du thème : auto (système) / sombre / clair
+    const THEME_STORAGE_KEY = 'theme';
+    const VALID_THEME_PREFS = new Set(['auto', 'dark', 'light']);
+
+    /**
+     * Lit la préférence utilisateur (auto par défaut).
+     * @returns {'auto'|'dark'|'light'}
+     */
+    function loadThemePreference() {
+        try {
+            const stored = localStorage.getItem(THEME_STORAGE_KEY);
+            if (stored && VALID_THEME_PREFS.has(stored)) return stored;
+        } catch (e) {
+            // Ignorer les erreurs de stockage
+        }
+        return 'auto';
+    }
+
+    /**
+     * Résout auto → thème effectif selon le système.
+     * @param {'auto'|'dark'|'light'} pref
+     * @returns {'dark'|'light'}
+     */
+    function resolveTheme(pref) {
+        if (pref === 'dark') return 'dark';
+        if (pref === 'light') return 'light';
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            return 'dark';
+        }
+        return 'light';
+    }
+
+    /**
+     * Applique la préférence sur le document.
+     * @param {'auto'|'dark'|'light'} pref
+     */
+    function applyThemePreference(pref) {
         const body = document.body;
+        const html = document.documentElement;
         if (!body) return;
-        if (theme === 'dark') {
+
+        const safePref = VALID_THEME_PREFS.has(pref) ? pref : 'auto';
+        const resolved = resolveTheme(safePref);
+
+        body.dataset.themePref = safePref;
+        if (resolved === 'dark') {
             body.setAttribute('data-theme', 'dark');
         } else {
             body.removeAttribute('data-theme');
         }
-    }
 
-    // Choix initial: localStorage > préférence système > clair
-    let currentTheme = localStorage.getItem('theme');
-    if (!currentTheme) {
-        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-            currentTheme = 'dark';
-        } else {
-            currentTheme = 'light';
+        if (html) {
+            html.style.colorScheme = resolved;
         }
     }
-    applyTheme(currentTheme);
+
+    /**
+     * Passe au mode suivant : auto → sombre → clair → auto.
+     * @param {'auto'|'dark'|'light'} current
+     * @returns {'auto'|'dark'|'light'}
+     */
+    function cycleThemePreference(current) {
+        if (current === 'auto') return 'dark';
+        if (current === 'dark') return 'light';
+        return 'auto';
+    }
+
+    let themePreference = loadThemePreference();
+    applyThemePreference(themePreference);
 
     const toggleBtn = document.querySelector('.theme-toggle-btn');
     if (toggleBtn) {
         const icon = toggleBtn.querySelector('i');
 
-        function updateIcon(theme) {
+        /**
+         * Met à jour l'icône et les libellés du bouton thème.
+         * @param {'auto'|'dark'|'light'} pref
+         */
+        function updateThemeToggleUi(pref) {
             if (!icon) return;
-            if (theme === 'dark') {
-                icon.classList.remove('fa-moon');
-                icon.classList.add('fa-sun');
-            } else {
-                icon.classList.remove('fa-sun');
+            icon.classList.remove('fa-moon', 'fa-sun', 'fa-circle-half-stroke');
+            if (pref === 'dark') {
                 icon.classList.add('fa-moon');
+                toggleBtn.setAttribute('aria-label', 'Thème : sombre');
+                toggleBtn.title = 'Thème sombre (cliquer pour clair)';
+            } else if (pref === 'light') {
+                icon.classList.add('fa-sun');
+                toggleBtn.setAttribute('aria-label', 'Thème : clair');
+                toggleBtn.title = 'Thème clair (cliquer pour auto)';
+            } else {
+                icon.classList.add('fa-circle-half-stroke');
+                toggleBtn.setAttribute('aria-label', 'Thème : automatique');
+                toggleBtn.title = 'Thème auto · suit le système (cliquer pour sombre)';
             }
         }
 
-        updateIcon(currentTheme);
+        updateThemeToggleUi(themePreference);
 
         toggleBtn.addEventListener('click', function() {
-            currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
-            applyTheme(currentTheme);
-            updateIcon(currentTheme);
+            themePreference = cycleThemePreference(themePreference);
+            applyThemePreference(themePreference);
+            updateThemeToggleUi(themePreference);
             try {
-                localStorage.setItem('theme', currentTheme);
+                localStorage.setItem(THEME_STORAGE_KEY, themePreference);
             } catch (e) {
                 // Ignorer les erreurs de stockage
             }
         });
+
+        if (window.matchMedia) {
+            const mq = window.matchMedia('(prefers-color-scheme: dark)');
+            const onSystemThemeChange = function() {
+                if (themePreference === 'auto') {
+                    applyThemePreference('auto');
+                }
+            };
+            if (typeof mq.addEventListener === 'function') {
+                mq.addEventListener('change', onSystemThemeChange);
+            } else if (typeof mq.addListener === 'function') {
+                mq.addListener(onSystemThemeChange);
+            }
+        }
     }
 
     // Menu burger (tablette & mobile)

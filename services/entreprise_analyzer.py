@@ -16,6 +16,7 @@ import threading
 import sys
 import logging
 from pathlib import Path
+from utils.secteurs import normalize_secteur
 
 # Configurer le logger
 logger = logging.getLogger(__name__)
@@ -546,20 +547,59 @@ class EntrepriseAnalyzer:
         
         search_text = category_lower + ' ' + text_lower
         
-        # Score par secteur
+        # Si la catégorie fournie est déjà claire, on la normalise et on la préfère.
+        try:
+            cat_norm = normalize_secteur(category) if category else ''
+            if cat_norm:
+                return cat_norm
+        except Exception:
+            # si normalize échoue, on continue avec l'heuristique
+            pass
+
+        # Score par secteur (avec tie-break amélioré basé sur longueur et matches exacts)
         sector_scores = {}
+        match_details = {}  # secteur -> (score, exact_matches, max_keyword_len)
         for sector, keywords in sectors.items():
             score = 0
+            exact_matches = 0
+            max_kw_len = 0
             for keyword in keywords:
                 if keyword in search_text:
                     score += 1
+                    max_kw_len = max(max_kw_len, len(keyword))
+                    # bonus si match mot entier (word boundary)
+                    try:
+                        import re as _re
+                        if _re.search(r'\\b' + _re.escape(keyword) + r'\\b', search_text):
+                            exact_matches += 1
+                    except Exception:
+                        # fallback simple check
+                        if (' ' + keyword + ' ') in (' ' + search_text + ' '):
+                            exact_matches += 1
             if score > 0:
+                # Pondération supplémentaire pour secteurs sensibles (finance) si mots-clés financiers trouvés
+                if sector == 'Finance':
+                    # mots financiers forts -> bonus
+                    fin_keys = ['banque', 'assurance', 'compta', 'comptable', 'patrimoine', 'fiscal', 'courtier', 'bank', 'insurance', 'account', 'chartered']
+                    for fk in fin_keys:
+                        if fk in search_text:
+                            score += 1
+                            if fk in search_text.split():
+                                exact_matches += 1
                 sector_scores[sector] = score
-        
-        # Retourner le secteur avec le score le plus élevé
+                match_details[sector] = (score, exact_matches, max_kw_len)
+
+        # Choisir le secteur selon : score > exact_matches > max_keyword_len
         if sector_scores:
-            best_sector = max(sector_scores.items(), key=lambda x: x[1])[0]
-            return best_sector
+            # find max by tuple (score, exact_matches, max_kw_len)
+            best = None
+            best_key = None
+            for s, detail in match_details.items():
+                if best is None or detail > best:
+                    best = detail
+                    best_key = s
+            if best_key:
+                return best_key
         
         # Si on a trouvé dans les meta tags
         if sector_from_meta:

@@ -795,7 +795,9 @@ def sql_real_open_clause(is_postgresql: bool, alias: str = '') -> str:
     """
     prefix = f'{alias}.' if alias else ''
     type_sql = f"{prefix}event_type = 'open'"
-    apple_sql = f"({prefix}ip_address IS NULL OR {prefix}ip_address NOT LIKE '17.%')"
+    # psycopg2 interprete % comme placeholder : echapper le wildcard LIKE en prod PostgreSQL.
+    apple_like = "'17.%%'" if is_postgresql else "'17.%'"
+    apple_sql = f"({prefix}ip_address IS NULL OR {prefix}ip_address NOT LIKE {apple_like})"
     suspect_sql = _sql_not_flagged_clause(is_postgresql, alias, 'suspect')
     prefetch_sql = _sql_not_flagged_clause(is_postgresql, alias, 'prefetch')
     return f"{type_sql} AND {apple_sql} AND {suspect_sql} AND {prefetch_sql}"

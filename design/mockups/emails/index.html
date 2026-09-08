@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Maquettes emails | DanielCraft</title>
+  <style>
+    :root {
+      --primary: #4da9d6;
+      --primary-dark: #0f3550;
+      --metal-1: #9fd4ea;
+      --metal-4: #184c70;
+      --secondary: #dff8f8;
+      --accent: #c9f4f2;
+      --gray-50: #f9fafb;
+      --gray-200: #e5e7eb;
+      --gray-500: #6b7280;
+      --gray-700: #374151;
+      --gray-800: #1f2937;
+      --white: #ffffff;
+      --metal-gradient: linear-gradient(140deg, #9fd4ea 0%, #5faed8 28%, #2f78a6 62%, #184c70 100%);
+      --font: "Segoe UI", Inter, Tahoma, Geneva, Verdana, sans-serif;
+      --shadow: 0 10px 28px rgba(24, 76, 112, 0.12);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      color: var(--gray-800);
+      min-height: 100vh;
+      background:
+        radial-gradient(ellipse 80% 50% at 10% -10%, rgba(159, 212, 234, 0.55), transparent 55%),
+        radial-gradient(ellipse 60% 40% at 90% 0%, rgba(201, 244, 242, 0.7), transparent 50%),
+        var(--secondary);
+      padding: 24px 16px 56px;
+    }
+    .wrap { max-width: 1320px; margin: 0 auto; }
+    .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .brand-mark {
+      width: 40px; height: 40px; border-radius: 11px;
+      background: var(--metal-gradient); color: #fff;
+      font-weight: 800; font-size: 13px; display: grid; place-items: center;
+    }
+    h1 { margin: 0 0 6px; font-size: 1.65rem; color: var(--primary-dark); letter-spacing: -0.02em; }
+    .lead { margin: 0 0 16px; color: var(--gray-500); max-width: 72ch; line-height: 1.5; font-size: 0.95rem; }
+
+    .cats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+    .cat {
+      border: 1px solid var(--metal-1); background: var(--white); color: var(--metal-4);
+      padding: 10px 14px; border-radius: 999px; cursor: pointer; font-size: 0.88rem; font-weight: 700;
+      transition: transform 0.12s ease, box-shadow 0.12s ease;
+    }
+    .cat:hover { border-color: var(--primary); transform: translateY(-1px); }
+    .cat.is-active { background: var(--metal-gradient); border-color: transparent; color: #fff; box-shadow: var(--shadow); }
+    .cat .count {
+      display: inline-block; margin-left: 6px; opacity: 0.75; font-weight: 600; font-size: 0.78rem;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(280px, 340px) 1fr;
+      gap: 14px;
+      align-items: start;
+    }
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+
+    .panel {
+      background: var(--white);
+      border: 1px solid var(--metal-1);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      padding: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      min-height: 720px;
+    }
+
+    /* Tabs Material */
+    .md-tabs {
+      display: flex;
+      position: relative;
+      border-bottom: 1px solid var(--gray-200);
+      background: #f8fcfd;
+      padding: 0;
+    }
+    .md-tab {
+      flex: 1;
+      position: relative;
+      border: 0;
+      background: transparent;
+      padding: 14px 12px 13px;
+      font: inherit;
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--gray-500);
+      cursor: pointer;
+      transition: color 0.15s ease, background-color 0.15s ease;
+    }
+    .md-tab:hover { color: var(--primary-dark); background: rgba(77, 169, 214, 0.06); }
+    .md-tab.is-active { color: var(--primary); }
+    .md-tab:focus-visible {
+      outline: 2px solid rgba(77, 169, 214, 0.55);
+      outline-offset: -2px;
+    }
+    .md-tab-ink {
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      height: 3px;
+      width: 50%;
+      border-radius: 3px 3px 0 0;
+      background: var(--primary);
+      transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+      pointer-events: none;
+    }
+    .md-tabs[data-active="params"] .md-tab-ink {
+      transform: translateX(100%);
+    }
+
+    .md-panels { flex: 1; padding: 14px; min-height: 0; display: flex; flex-direction: column; }
+    .md-panel { display: none; flex: 1; min-height: 0; flex-direction: column; }
+    .md-panel.is-active { display: flex; }
+
+    .tpl-list { display: flex; flex-direction: column; gap: 6px; max-height: 640px; overflow: auto; flex: 1; }
+    .params-scroll { overflow: auto; max-height: 640px; padding-right: 2px; }
+    .tpl {
+      text-align: left;
+      border: 1px solid transparent;
+      background: var(--gray-50);
+      border-radius: 12px;
+      padding: 10px 12px;
+      cursor: pointer;
+      color: var(--gray-800);
+    }
+    .tpl:hover { border-color: var(--metal-1); background: #fff; }
+    .tpl.is-active {
+      border-color: var(--primary);
+      background: linear-gradient(180deg, #eef9fd, #fff);
+      box-shadow: inset 0 0 0 1px rgba(77, 169, 214, 0.25);
+    }
+    .tpl strong { display: block; font-size: 0.9rem; margin-bottom: 2px; }
+    .tpl span { display: block; font-size: 0.78rem; color: var(--gray-500); line-height: 1.35; }
+    .tpl .badge {
+      display: inline-block; margin-top: 6px; font-size: 0.7rem; font-weight: 700;
+      padding: 3px 8px; border-radius: 999px; background: var(--accent); color: var(--primary-dark);
+    }
+
+    label.field {
+      display: block; margin: 0 0 10px; font-size: 0.78rem; font-weight: 700; color: var(--gray-700);
+    }
+    label.field span { display: block; margin-bottom: 4px; }
+    input, select {
+      width: 100%;
+      border: 1px solid var(--gray-200);
+      border-radius: 10px;
+      padding: 9px 11px;
+      font: inherit;
+      font-size: 0.9rem;
+      color: var(--gray-800);
+      background: #fff;
+    }
+    input:focus, select:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(77, 169, 214, 0.2);
+    }
+    .param-actions { display: flex; gap: 8px; margin-top: 4px; }
+    .param-actions button {
+      flex: 1;
+      border: 1px solid var(--metal-1);
+      background: var(--white);
+      border-radius: 10px;
+      padding: 9px 10px;
+      font-weight: 700;
+      font-size: 0.82rem;
+      cursor: pointer;
+      color: var(--metal-4);
+    }
+    .param-actions button.primary {
+      background: var(--metal-gradient);
+      border-color: transparent;
+      color: #fff;
+    }
+    .live-dot {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 0.75rem; color: var(--gray-500); margin: 0 0 10px;
+    }
+    .live-dot i {
+      width: 8px; height: 8px; border-radius: 50%; background: #2f9e6a;
+      box-shadow: 0 0 0 3px rgba(47, 158, 106, 0.2);
+    }
+    .meta-box {
+      margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--gray-200);
+      font-size: 0.8rem; color: var(--gray-500); line-height: 1.45;
+    }
+    .meta-box strong { color: var(--gray-800); }
+    .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .chip {
+      font-size: 0.72rem; font-weight: 700; padding: 4px 8px; border-radius: 999px;
+      background: var(--accent); color: var(--primary-dark); border: 1px solid var(--metal-1);
+    }
+
+    .preview-shell {
+      background: var(--accent);
+      border: 1px solid var(--metal-1);
+      border-radius: 18px;
+      padding: 14px;
+      box-shadow: var(--shadow);
+      min-height: 720px;
+    }
+    .preview-toolbar {
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 10px; margin-bottom: 10px; flex-wrap: wrap;
+    }
+    .preview-toolbar .title { font-size: 0.88rem; color: var(--primary-dark); font-weight: 800; }
+    .seg {
+      display: inline-flex; background: var(--white); border: 1px solid var(--metal-1);
+      border-radius: 999px; overflow: hidden;
+    }
+    .seg button {
+      border: 0; background: transparent; padding: 8px 14px; cursor: pointer;
+      font-weight: 700; color: var(--gray-500); font-size: 0.82rem;
+    }
+    .seg button.is-active { background: var(--primary-dark); color: #fff; }
+    .frame-wrap {
+      margin: 0 auto; background: var(--metal-1); border-radius: 12px; padding: 10px;
+      transition: max-width 0.2s ease; max-width: 680px;
+    }
+    .frame-wrap.is-mobile { max-width: 390px; }
+    iframe {
+      width: 100%; height: 780px; border: 0; border-radius: 8px; background: #fff; display: block;
+    }
+    .status {
+      margin-top: 10px; font-size: 0.8rem; color: var(--gray-500);
+    }
+    .status.error { color: #b45309; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">
+      <div class="brand-mark">DC</div>
+      <div>
+        <strong style="color:var(--primary-dark)">DanielCraft</strong>
+        <div style="font-size:0.85rem;color:var(--gray-500)">Galerie emails unifiee - audit + pub</div>
+      </div>
+    </div>
+    <h1>Maquettes emails</h1>
+    <p class="lead">
+      Categories cliquables, parametres par defaut, rendu live des variables
+      (<code>{nom}</code>, <code>{secteur_label}</code>, echantillons…).
+    </p>
+
+    <div class="cats" id="cats" role="tablist" aria-label="Categories"></div>
+
+    <div class="layout">
+      <aside class="panel" id="sidePanel">
+        <div class="md-tabs" id="sideTabs" data-active="models" role="tablist" aria-label="Panneau lateral">
+          <button type="button" class="md-tab is-active" role="tab" id="tabModels" aria-controls="panelModels" aria-selected="true" data-tab="models">Modeles</button>
+          <button type="button" class="md-tab" role="tab" id="tabParams" aria-controls="panelParams" aria-selected="false" data-tab="params">Parametres</button>
+          <span class="md-tab-ink" aria-hidden="true"></span>
+        </div>
+        <div class="md-panels">
+          <div class="md-panel is-active" id="panelModels" role="tabpanel" aria-labelledby="tabModels">
+            <div class="tpl-list" id="tplList"></div>
+          </div>
+          <div class="md-panel" id="panelParams" role="tabpanel" aria-labelledby="tabParams">
+            <div class="params-scroll">
+              <div class="live-dot"><i></i> Apercu en temps reel</div>
+              <label class="field"><span>Prenom / nom</span>
+                <input id="pNom" type="text" value="Claire" autocomplete="off" />
+              </label>
+              <label class="field"><span>Entreprise</span>
+                <input id="pEntreprise" type="text" value="Atelier Nord-Est" autocomplete="off" />
+              </label>
+              <label class="field"><span>Email</span>
+                <input id="pEmail" type="email" value="claire@atelier-nord.fr" autocomplete="off" />
+              </label>
+              <label class="field"><span>Site</span>
+                <input id="pWebsite" type="text" value="atelier-nord.fr" autocomplete="off" />
+              </label>
+              <label class="field"><span>Secteur</span>
+                <select id="pSecteur">
+                  <option value="Restauration">Restauration</option>
+                  <option value="Commerce" selected>Commerce</option>
+                  <option value="Beauté">Beauté</option>
+                  <option value="Automobile">Automobile</option>
+                  <option value="Santé">Santé</option>
+                  <option value="Immobilier">Immobilier</option>
+                  <option value="BTP">BTP</option>
+                  <option value="Technologie">Technologie</option>
+                  <option value="Services">Services</option>
+                  <option value="Éducation">Éducation</option>
+                  <option value="Hôtellerie">Hôtellerie</option>
+                  <option value="Juridique">Juridique</option>
+                  <option value="Finance">Finance</option>
+                  <option value="Industrie">Industrie</option>
+                  <option value="Communication">Communication</option>
+                  <option value="Transport">Transport</option>
+                  <option value="Artisanat">Artisanat</option>
+                  <option value="car_repair">car_repair (EN)</option>
+                  <option value="food">food (EN)</option>
+                  <option value="dentist">dentist (EN)</option>
+                </select>
+              </label>
+              <div class="param-actions">
+                <button type="button" id="btnReset">Reset</button>
+                <button type="button" class="primary" id="btnApply">Rafraichir</button>
+              </div>
+              <div class="meta-box" id="metaBox">
+                <strong>Objet rendu</strong><br /><span id="subjectLive">—</span>
+                <div class="chip-row" id="chips"></div>
+                <div style="margin-top:8px" id="varsLive"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <section class="preview-shell">
+        <div class="preview-toolbar">
+          <div class="title" id="previewTitle">Preview</div>
+          <div class="seg" role="group" aria-label="Largeur preview">
+            <button type="button" class="is-active" data-width="desktop">Desktop</button>
+            <button type="button" data-width="mobile">Mobile</button>
+          </div>
+        </div>
+        <div class="frame-wrap" id="frameWrap">
+          <iframe id="frame" title="Preview email" sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox"></iframe>
+        </div>
+        <p class="status" id="status">Chargement…</p>
+      </section>
+    </div>
+  </div>
+
+  <script src="templates-bundle.js"></script>
+  <script>
+    const CATEGORIES = [
+      { id: 'all', label: 'Tous' },
+      { id: 'audit', label: 'Audit' },
+      { id: 'offres', label: 'Offres' },
+      { id: 'echantillons', label: 'Echantillons' },
+      { id: 'bouquins', label: 'Bouquins' },
+    ];
+
+    const VARIANTS = [
+      // Audit
+      { id: 'a01', cat: 'audit', folder: 'emails-audit', file: '01-audit-rapport.html', label: 'Rapport pret', subject: '{nom}, ton rapport est pret - jette un oeil', angle: 'Curiosite + CTA analyse', chips: ['audit', 'rapport'] },
+      { id: 'a02', cat: 'audit', folder: 'emails-audit', file: '02-pentest-priorites.html', label: 'Porte ouverte', subject: 'Ta porte web est un peu ouverte ({entreprise})', angle: 'Secu / priorites', chips: ['porte', 'secu'] },
+      { id: 'a03', cat: 'audit', folder: 'emails-audit', file: '03-scores-360.html', label: 'Notes', subject: '3 notes sur {entreprise} - une est pas terrible', angle: 'Curiosity gap', chips: ['scores'] },
+      { id: 'a04', cat: 'audit', folder: 'emails-audit', file: '04-relance-analyse.html', label: 'Relance', subject: 'Hop, je remets le lien - au cas ou ca a file', angle: 'Relance douce', chips: ['relance'] },
+      { id: 'a05', cat: 'audit', folder: 'emails-audit', file: '05-tech-franchement.html', label: 'Franchement', subject: 'On en parle franchement ? (autour de midi si tu veux)', angle: 'Prise de RDV', chips: ['rdv'] },
+      { id: 'a06', cat: 'audit', folder: 'emails-audit', file: '06-secu-clanche.html', label: 'Secu', subject: 'Secu : ton site laisse la porte ouverte ({entreprise})', angle: 'Securite cash', chips: ['secu'] },
+      { id: 'a07', cat: 'audit', folder: 'emails-audit', file: '07-anciennete-rincee.html', label: 'Anciennete', subject: 'Ton site a pris un coup de vieux ({entreprise})', angle: 'Refresh', chips: ['vieux'] },
+      { id: 'a08', cat: 'audit', folder: 'emails-audit', file: '08-voisin-google.html', label: 'Voisin Google', subject: 'Le commerce d a cote est plus facile a trouver', angle: 'Visibilite', chips: ['google'] },
+      { id: 'a09', cat: 'audit', folder: 'emails-audit', file: '09-bassote-demandes.html', label: 'Ca coince', subject: 'Les gens arrivent - puis ca coince ({entreprise})', angle: 'Conversion', chips: ['coince'] },
+      { id: 'a10', cat: 'audit', folder: 'emails-audit', file: '10-curiosite-30s.html', label: '30 sec', subject: '30 secondes - jette un oeil a ce que j ai vu', angle: 'Ultra court', chips: ['30s'] },
+      // Offres
+      { id: 'o01', cat: 'offres', folder: 'emails-pub', file: '01-offres-reputation.html', label: 'Reputation locale', subject: 'On te trouve sur Google ? Pack reputation locale', angle: 'Maps + avis', chips: ['nos-offres', 'Maps'], cta: 'https://danielcraft.fr/nos-offres' },
+      { id: 'o02', cat: 'offres', folder: 'emails-pub', file: '02-offres-vitrine-390.html', label: 'Vitrine 390', subject: 'Un site clair pour {entreprise} - a partir de 390 EUR HT', angle: 'Entree de gamme', chips: ['390', 'devis'], cta: 'https://danielcraft.fr/nos-offres' },
+      { id: 'o03', cat: 'offres', folder: 'emails-pub', file: '03-offres-whatsapp.html', label: 'WhatsApp', subject: 'Tes clients ecrivent sur WhatsApp - ton site peut suivre', angle: 'Mobile', chips: ['WhatsApp'], cta: 'https://danielcraft.fr/nos-offres' },
+      { id: 'o04', cat: 'offres', folder: 'emails-pub', file: '04-offres-assistant-ia.html', label: 'Assistant IA', subject: 'Un assistant pour repondre aux clients', angle: 'IA magasin', chips: ['IA'], cta: 'https://danielcraft.fr/nos-offres' },
+      // Echantillons (heroes = moitie haute + ratio d'or Lxl)
+      { id: 'e01', cat: 'echantillons', folder: 'emails-pub', file: '05-echantillons-metier.html', label: 'Modele metier', subject: 'Un modele pour {secteur_label} - regarde avant de commander', angle: 'Secteur live', chips: ['secteur', 'phi'], ctaKey: 'echantillon_demo_url' },
+      { id: 'e02', cat: 'echantillons', folder: 'emails-pub', file: '06-echantillons-enseigne.html', label: 'Pose enseigne', subject: 'On pose ton enseigne dessus ? ({secteur_label})', angle: 'Closing echantillon', chips: ['enseigne', 'phi'], ctaKey: 'echantillon_url' },
+      { id: 'e03', cat: 'echantillons', folder: 'emails-pub', file: '09-echantillons-restauration.html', label: 'Restau', subject: 'Un modele resto pour {entreprise} - jette un oeil', angle: 'Restauration', chips: ['resto', 'phi'], ctaKey: 'echantillon_demo_url' },
+      { id: 'e04', cat: 'echantillons', folder: 'emails-pub', file: '10-echantillons-auto.html', label: 'Auto / garage', subject: 'Garage / atelier : un modele deja pret ({secteur_label})', angle: 'Automobile', chips: ['auto', 'phi'], ctaKey: 'echantillon_demo_url' },
+      { id: 'e05', cat: 'echantillons', folder: 'emails-pub', file: '11-echantillons-sante.html', label: 'Sante', subject: 'Cabinet / sante : un modele pour te projeter', angle: 'Sante', chips: ['sante', 'phi'], ctaKey: 'echantillon_demo_url' },
+      { id: 'e06', cat: 'echantillons', folder: 'emails-pub', file: '15-echantillons-30s.html', label: '30 secondes', subject: '30 secondes - un modèle pour {secteur_label}', angle: 'Lundi / rapide', chips: ['generique', 'semaine'], ctaKey: 'echantillon_demo_url' },
+      { id: 'e07', cat: 'echantillons', folder: 'emails-pub', file: '16-echantillons-mobile.html', label: 'Mobile', subject: 'Sur téléphone, ton métier {secteur_label} ça passe ?', angle: 'Mardi / mobile', chips: ['generique', 'semaine'], ctaKey: 'echantillon_demo_url' },
+      { id: 'e08', cat: 'echantillons', folder: 'emails-pub', file: '17-echantillons-demo-live.html', label: 'Démo live', subject: 'La démo {secteur_label} est en ligne - jette un oeil', angle: 'Mercredi / live', chips: ['generique', 'semaine'], ctaKey: 'echantillon_demo_url' },
+      { id: 'e09', cat: 'echantillons', folder: 'emails-pub', file: '18-echantillons-avant-devis.html', label: 'Avant devis', subject: 'Avant le devis pour {entreprise} - regarde ce modèle', angle: 'Jeudi / devis', chips: ['generique', 'semaine'], ctaKey: 'echantillon_url' },
+      { id: 'e10', cat: 'echantillons', folder: 'emails-pub', file: '19-echantillons-catalogue.html', label: 'Catalogue', subject: 'Y\'a un échantillon pour {secteur_label} - et d\'autres à côté', angle: 'Vendredi / catalogue', chips: ['generique', 'semaine'], ctaKey: 'echantillon_url' },
+      { id: 'e11', cat: 'echantillons', folder: 'emails-pub', file: '20-echantillons-projection.html', label: 'Projection', subject: '{nom}, imagine le site de {entreprise} comme ça', angle: 'Samedi / projection', chips: ['generique', 'semaine'], ctaKey: 'echantillon_demo_url' },
+      { id: 'e12', cat: 'echantillons', folder: 'emails-pub', file: '21-echantillons-secteur-semaine.html', label: 'Secteur semaine', subject: 'Cette semaine : modèle {secteur_label} prêt à regarder', angle: 'Dimanche / semaine', chips: ['generique', 'semaine'], ctaKey: 'echantillon_demo_url' },
+      // Bouquins
+      { id: 'b01', cat: 'bouquins', folder: 'emails-pub', file: '07-bouquins-050.html', label: 'PDF 0,50', subject: 'PDF clairs a 0,50 EUR - packs encore moins cher', angle: 'Catalogue', chips: ['0,50'], cta: 'https://danielcraft.fr/bouquins/' },
+      { id: 'b02', cat: 'bouquins', folder: 'emails-pub', file: '08-bouquins-commerce.html', label: 'Pack vente', subject: '4 PDF commerce & vente - moins cher qu a l unite', angle: 'Pack low-ticket', chips: ['vente'], cta: 'https://danielcraft.fr/bouquins/' },
+      { id: 'b03', cat: 'bouquins', folder: 'emails-pub', file: '12-bouquins-ia.html', label: 'Pack IA', subject: 'PDF IA sans bla-bla - a partir de 0,50 EUR', angle: 'IA', chips: ['IA'], cta: 'https://danielcraft.fr/bouquins/' },
+      { id: 'b04', cat: 'bouquins', folder: 'emails-pub', file: '13-bouquins-secu.html', label: 'Pack secu', subject: 'Securite web en PDF - bases jusqu a expert', angle: 'Secu', chips: ['secu'], cta: 'https://danielcraft.fr/bouquins/' },
+      { id: 'b05', cat: 'bouquins', folder: 'emails-pub', file: '14-bouquins-code.html', label: 'Pack code', subject: 'HTML, JS, Python, Git - PDF a 0,50 EUR', angle: 'Code', chips: ['code'], cta: 'https://danielcraft.fr/bouquins/' },
+    ];
+
+    /** Heroes echantillons locaux : crop email φ dans assets/echantillons/{slug}.jpg */
+    const HERO_ECHANTILLON = {
+      restauration: 'echantillons/restauration.jpg',
+      automobile: 'echantillons/automobile.jpg',
+      commerce: 'echantillons/commerce.jpg',
+      beaute: 'echantillons/beaute.jpg',
+      odontologie: 'echantillons/odontologie.jpg',
+      osteo: 'echantillons/osteo.jpg',
+      immobilier: 'echantillons/immobilier.jpg',
+      juridique: 'echantillons/juridique.jpg',
+      architecture: 'echantillons/architecture.jpg',
+      artisan: 'echantillons/artisan.jpg',
+      association: 'echantillons/association.jpg',
+      boulangerie: 'echantillons/boulangerie.jpg',
+      caviste: 'echantillons/caviste.jpg',
+      comptable: 'echantillons/comptable.jpg',
+      education: 'echantillons/education.jpg',
+      etablissement: 'echantillons/etablissement.jpg',
+      fitness: 'echantillons/fitness.jpg',
+      fleuriste: 'echantillons/fleuriste.jpg',
+      industrie: 'echantillons/industrie.jpg',
+      photographie: 'echantillons/photographie.jpg',
+      services: 'echantillons/services.jpg',
+      technologie: 'echantillons/technologie.jpg',
+      'saas-landing': 'echantillons/saas-landing.jpg',
+      'saas-dashboard': 'echantillons/saas-dashboard.jpg',
+    };
+
+    const SECTEUR_ECHANTILLON = {
+      Technologie: 'technologie', Services: 'services', Restauration: 'restauration', Commerce: 'commerce',
+      'Éducation': 'education', Automobile: 'automobile', 'Beauté': 'beaute', Immobilier: 'immobilier',
+      BTP: 'architecture', Communication: 'photographie', 'Santé': 'osteo', Industrie: 'industrie',
+      Finance: 'comptable', 'Hôtellerie': 'etablissement', Juridique: 'juridique', Transport: 'automobile',
+      Artisanat: 'artisan',
+    };
+    const SECTEUR_ACCROCHE = {
+      Technologie: 'un site produit clair, qui rassure avant la demo',
+      Services: 'un site qui explique ton offre sans jargon',
+      Restauration: 'carte, photos et reservation visibles sur telephone',
+      Commerce: 'rayons, horaires et click & collect lisibles',
+      'Éducation': 'parcours, inscriptions et contact simples',
+      Automobile: 'atelier, RDV et devis qui rassurent',
+      'Beauté': 'soins, tarifs et prise de RDV sans friction',
+      Immobilier: 'biens, estimation et contact vendeur / acquereur',
+      BTP: 'chantiers, devis express et preuves terrain',
+      Communication: 'portfolio et demande de devis en un clic',
+      'Santé': 'tarifs, creneaux et rappel telephonique',
+      Industrie: 'machines, qualite et devis B2B',
+      Finance: 'forfaits, bilan flash et contact dirigeant',
+      'Hôtellerie': 'chambres, spa et reservation bien visibles',
+      Juridique: 'expertises, forfaits et prise de contact',
+      Transport: 'zones, delais et demande de devis',
+      Artisanat: 'depannage, zones d intervention et devis rapide',
+    };
+    const EN_TO_FR = {
+      car_repair: 'Automobile', food: 'Restauration', dentist: 'Santé', establishment: 'Services',
+      lodging: 'Hôtellerie', clothing_store: 'Commerce', general_contractor: 'BTP', health: 'Santé',
+    };
+
+    const DEFAULTS = {
+      nom: 'Claire',
+      entreprise: 'Atelier Nord-Est',
+      email: 'claire@atelier-nord.fr',
+      website: 'atelier-nord.fr',
+      secteur: 'Commerce',
+    };
+
+    let activeCat = 'all';
+    let activeId = 'e01';
+    let htmlCache = {};
+    let renderTimer = null;
+
+    const els = {
+      cats: document.getElementById('cats'),
+      tplList: document.getElementById('tplList'),
+      frame: document.getElementById('frame'),
+      frameWrap: document.getElementById('frameWrap'),
+      previewTitle: document.getElementById('previewTitle'),
+      status: document.getElementById('status'),
+      subjectLive: document.getElementById('subjectLive'),
+      chips: document.getElementById('chips'),
+      varsLive: document.getElementById('varsLive'),
+      pNom: document.getElementById('pNom'),
+      pEntreprise: document.getElementById('pEntreprise'),
+      pEmail: document.getElementById('pEmail'),
+      pWebsite: document.getElementById('pWebsite'),
+      pSecteur: document.getElementById('pSecteur'),
+      sideTabs: document.getElementById('sideTabs'),
+      panelModels: document.getElementById('panelModels'),
+      panelParams: document.getElementById('panelParams'),
+      tabModels: document.getElementById('tabModels'),
+      tabParams: document.getElementById('tabParams'),
+    };
+
+    /**
+     * Bascule les onglets Material Modeles / Parametres.
+     * @param {'models'|'params'} tab
+     */
+    function setSideTab(tab) {
+      const isParams = tab === 'params';
+      els.sideTabs.dataset.active = isParams ? 'params' : 'models';
+      els.tabModels.classList.toggle('is-active', !isParams);
+      els.tabParams.classList.toggle('is-active', isParams);
+      els.tabModels.setAttribute('aria-selected', String(!isParams));
+      els.tabParams.setAttribute('aria-selected', String(isParams));
+      els.panelModels.classList.toggle('is-active', !isParams);
+      els.panelParams.classList.toggle('is-active', isParams);
+    }
+
+    function normalizeSecteur(raw) {
+      const s = (raw || '').trim();
+      if (!s) return '';
+      if (SECTEUR_ECHANTILLON[s]) return s;
+      return EN_TO_FR[s] || EN_TO_FR[s.toLowerCase()] || s;
+    }
+
+    function echantillonSlug(raw) {
+      const key = (raw || '').toLowerCase();
+      if (key.includes('dent')) return 'odontologie';
+      if (key.includes('car_repair') || key.includes('garage')) return 'automobile';
+      if (key.includes('food') || key.includes('restaur')) return 'restauration';
+      const label = normalizeSecteur(raw);
+      return SECTEUR_ECHANTILLON[label] || 'commerce';
+    }
+
+    /**
+     * Hero email echantillon : asset local recadre (moitie haute + ratio d'or).
+     * @param {string} slug
+     * @returns {string}
+     */
+    function localEchantillonHero(slug) {
+      const file = HERO_ECHANTILLON[slug] || ('echantillons/' + (slug || 'commerce') + '.jpg');
+      const base = location.href.replace(/[#?].*$/, '').replace(/[^/\\]+$/, '');
+      try {
+        return new URL('../emails-pub/assets/' + file, base).href;
+      } catch (_) {
+        return '../emails-pub/assets/' + file;
+      }
+    }
+
+    function buildParams() {
+      const nom = els.pNom.value.trim() || DEFAULTS.nom;
+      const entreprise = els.pEntreprise.value.trim() || DEFAULTS.entreprise;
+      const email = els.pEmail.value.trim() || DEFAULTS.email;
+      let website = els.pWebsite.value.trim() || DEFAULTS.website;
+      website = website.replace(/^https?:\/\//, '').replace(/\/$/, '');
+      const secteurBrut = els.pSecteur.value || DEFAULTS.secteur;
+      const secteurLabel = normalizeSecteur(secteurBrut);
+      const slug = echantillonSlug(secteurBrut);
+      const root = 'https://danielcraft.fr/echantillons';
+      const websiteUrl = 'https://' + website + '/';
+      const analysisUrl =
+        'https://danielcraft.fr/analyse?website=' + encodeURIComponent(websiteUrl) +
+        '&full=1&email=' + encodeURIComponent(email) +
+        '&name=' + encodeURIComponent(nom);
+
+      return {
+        nom,
+        entreprise,
+        email,
+        website,
+        secteur: secteurLabel,
+        secteur_brut: secteurBrut,
+        secteur_label: secteurLabel,
+        secteur_groupe: secteurLabel,
+        secteur_accroche: SECTEUR_ACCROCHE[secteurLabel] || 'un site clair, adapte a ton metier',
+        echantillon_slug: slug,
+        echantillon_catalog_url: root + '/',
+        echantillon_url: root + '/' + slug + '/',
+        echantillon_demo_url: root + '/' + slug + '/demo/index.html',
+        // Moitie haute + φ (pas le screenshot tablet entier)
+        echantillon_screenshot_url: localEchantillonHero(slug),
+        vitrine_slug: slug,
+        vitrine_demo_url: root + '/' + slug + '/demo/index.html',
+        vitrine_fiche_url: root + '/' + slug + '/',
+        vitrine_screenshot_url: localEchantillonHero(slug),
+        analysis_url: analysisUrl,
+        base_url: 'https://danielcraft.fr',
+        unsubscribe_url: 'https://danielcraft.fr/desabonnement',
+        dc_contact_url: 'https://danielcraft.fr/?email=' + encodeURIComponent(email) + '#contact',
+        has_secteur: secteurLabel ? '1' : '',
+        has_secteur_label: secteurLabel ? '1' : '',
+        has_echantillon: slug ? '1' : '',
+      };
+    }
+
+    function applyTemplate(html, data) {
+      let out = html;
+      // Conditionnels simples {#if_xxx}...{#endif}
+      out = out.replace(/\{#if_([a-z0-9_]+)\}([\s\S]*?)\{#endif\}/gi, (_, key, body) => {
+        const val = data[key];
+        const ok = !(val === undefined || val === null || val === '' || val === false || val === '0');
+        return ok ? body : '';
+      });
+      // Placeholders {var} et {{var}}
+      out = out.replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_, key) => {
+        const v = data[key];
+        return v === undefined || v === null ? '' : String(v);
+      });
+      out = out.replace(/\{([a-z0-9_]+)\}/gi, (match, key) => {
+        if (key.startsWith('#') || key === 'endif') return match;
+        if (!(key in data)) return match;
+        const v = data[key];
+        return v === undefined || v === null ? '' : String(v);
+      });
+      return out;
+    }
+
+    function rewriteAssetPaths(html, folder) {
+      // Base = dossier emails/ (file:// et http://)
+      const base = location.href.replace(/[#?].*$/, '').replace(/[^/\\]+$/, '');
+      let assetsHref = '../' + folder + '/assets/';
+      try {
+        assetsHref = new URL('../' + folder + '/assets/', base).href;
+      } catch (_) {}
+      return html.replace(/(src|href)=(["'])(?:\.\/)?assets\//g, '$1=$2' + assetsHref);
+    }
+
+    function fillSubject(tpl, data) {
+      return applyTemplate(tpl.subject, data);
+    }
+
+    function filteredVariants() {
+      return VARIANTS.filter((v) => activeCat === 'all' || v.cat === activeCat);
+    }
+
+    function renderCats() {
+      els.cats.innerHTML = '';
+      CATEGORIES.forEach((c) => {
+        const n = c.id === 'all' ? VARIANTS.length : VARIANTS.filter((v) => v.cat === c.id).length;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'cat' + (activeCat === c.id ? ' is-active' : '');
+        btn.innerHTML = c.label + '<span class="count">' + n + '</span>';
+        btn.addEventListener('click', () => {
+          activeCat = c.id;
+          const list = filteredVariants();
+          if (!list.some((v) => v.id === activeId) && list[0]) activeId = list[0].id;
+          renderCats();
+          renderList();
+          scheduleRender(true);
+        });
+        els.cats.appendChild(btn);
+      });
+    }
+
+    function renderList() {
+      const list = filteredVariants();
+      els.tplList.innerHTML = '';
+      list.forEach((v) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'tpl' + (v.id === activeId ? ' is-active' : '');
+        btn.innerHTML =
+          '<strong>' + v.label + '</strong>' +
+          '<span>' + v.angle + '</span>' +
+          '<span class="badge">' + v.cat + '</span>';
+        btn.addEventListener('click', () => {
+          activeId = v.id;
+          renderList();
+          scheduleRender(true);
+        });
+        els.tplList.appendChild(btn);
+      });
+    }
+
+    async function loadHtml(tpl) {
+      const key = tpl.folder + '/' + tpl.file;
+      if (htmlCache[key]) return htmlCache[key];
+
+      // Bundle embarque : marche en file:// (CORS bloque sinon)
+      const bundle = window.EMAIL_TEMPLATES_BUNDLE || {};
+      if (bundle[key]) {
+        htmlCache[key] = bundle[key];
+        return bundle[key];
+      }
+
+      // Fallback HTTP
+      const url = '../' + key;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Impossible de charger ' + key + ' (' + res.status + ')');
+      const text = await res.text();
+      htmlCache[key] = text;
+      return text;
+    }
+
+    async function renderPreview(forceReload) {
+      const tpl = VARIANTS.find((v) => v.id === activeId) || VARIANTS[0];
+      const data = buildParams();
+      els.previewTitle.textContent = tpl.label + ' · ' + tpl.cat;
+      els.subjectLive.textContent = fillSubject(tpl, data);
+      els.chips.innerHTML = (tpl.chips || []).map((c) => '<span class="chip">' + c + '</span>').join('');
+      els.varsLive.innerHTML =
+        '<strong>Variables live</strong><br>' +
+        '{secteur_label} = ' + data.secteur_label + '<br>' +
+        '{echantillon_slug} = ' + data.echantillon_slug + '<br>' +
+        '{secteur_accroche} = ' + data.secteur_accroche;
+
+      els.status.textContent = 'Rendu…';
+      els.status.className = 'status';
+      try {
+        if (forceReload) delete htmlCache[tpl.folder + '/' + tpl.file];
+        let html = await loadHtml(tpl);
+        // Emails : on retire les scripts (srcdoc n'en a pas besoin)
+        html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+        const base = location.href.replace(/[#?].*$/, '').replace(/[^/\\]+$/, '');
+        if (!/<base\s/i.test(html)) {
+          html = html.replace(/<head([^>]*)>/i, '<head$1><base href="' + base + '">');
+        }
+        html = rewriteAssetPaths(html, tpl.folder);
+        html = applyTemplate(html, data);
+        els.frame.srcdoc = html;
+        const via = (window.EMAIL_TEMPLATES_BUNDLE && window.EMAIL_TEMPLATES_BUNDLE[tpl.folder + '/' + tpl.file])
+          ? 'bundle'
+          : 'fetch';
+        els.status.textContent = 'OK · ' + tpl.folder + '/' + tpl.file + ' · ' + via;
+      } catch (err) {
+        els.status.textContent = String(err.message || err);
+        els.status.className = 'status error';
+      }
+    }
+
+    function scheduleRender(force) {
+      clearTimeout(renderTimer);
+      renderTimer = setTimeout(() => renderPreview(!!force), force ? 40 : 180);
+    }
+
+    function resetParams() {
+      els.pNom.value = DEFAULTS.nom;
+      els.pEntreprise.value = DEFAULTS.entreprise;
+      els.pEmail.value = DEFAULTS.email;
+      els.pWebsite.value = DEFAULTS.website;
+      els.pSecteur.value = DEFAULTS.secteur;
+      scheduleRender(false);
+    }
+
+    ['pNom', 'pEntreprise', 'pEmail', 'pWebsite', 'pSecteur'].forEach((id) => {
+      els[id].addEventListener('input', () => scheduleRender(false));
+      els[id].addEventListener('change', () => scheduleRender(false));
+    });
+    document.getElementById('btnReset').addEventListener('click', resetParams);
+    document.getElementById('btnApply').addEventListener('click', () => scheduleRender(true));
+
+    [els.tabModels, els.tabParams].forEach((btn) => {
+      btn.addEventListener('click', () => setSideTab(btn.dataset.tab));
+    });
+    els.sideTabs.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
+      ev.preventDefault();
+      const next = els.sideTabs.dataset.active === 'models' ? 'params' : 'models';
+      setSideTab(next);
+      (next === 'params' ? els.tabParams : els.tabModels).focus();
+    });
+
+    document.querySelectorAll('.seg button').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.seg button').forEach((b) => b.classList.remove('is-active'));
+        btn.classList.add('is-active');
+        els.frameWrap.classList.toggle('is-mobile', btn.dataset.width === 'mobile');
+      });
+    });
+
+    // Deep-link ?cat=echantillons&id=e01&tab=params
+    const qs = new URLSearchParams(location.search);
+    if (qs.get('cat') && CATEGORIES.some((c) => c.id === qs.get('cat'))) activeCat = qs.get('cat');
+    if (qs.get('id') && VARIANTS.some((v) => v.id === qs.get('id'))) activeId = qs.get('id');
+    if (qs.get('tab') === 'params') setSideTab('params');
+
+    renderCats();
+    renderList();
+    scheduleRender(true);
+  </script>
+</body>
+</html>

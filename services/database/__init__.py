@@ -169,6 +169,13 @@ class Database(
             )
 
         try:
+            self.ensure_inbox_events_table()
+        except Exception:
+            logging.getLogger(__name__).warning(
+                'Migration inbox_events non appliquée', exc_info=True
+            )
+
+        try:
             self.ensure_web_external_links_table()
         except Exception:
             logging.getLogger(__name__).warning(

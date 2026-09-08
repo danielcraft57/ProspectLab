@@ -14,6 +14,58 @@ from utils.weekly_plan_recipients import build_recipients_from_groupe
 PARIS = ZoneInfo('Europe/Paris')
 
 
+def format_scheduled_date_fr(scheduled_at: str) -> str:
+    """
+    Formate une date ISO en jj/mm/aaaa (fuseau Paris si datetime avec TZ).
+
+    @param scheduled_at: Date/heure ISO
+    @returns: Date courte française
+    """
+    raw = str(scheduled_at or '').strip()
+    if len(raw) >= 10 and raw[4] == '-' and raw[7] == '-':
+        return f"{raw[8:10]}/{raw[5:7]}/{raw[0:4]}"
+    return raw[:10]
+
+
+def build_weekly_plan_campagne_nom(
+    plan_nom: str,
+    template_name: str,
+    scheduled_at: str,
+) -> str:
+    """
+    Construit le nom indicatif d'une campagne issue d'un plan hebdomadaire.
+
+    Format : « {nom du plan} — {modèle} — {jj/mm/aaaa} »
+
+    @param plan_nom: Titre indicatif du plan
+    @param template_name: Nom du modèle email
+    @param scheduled_at: Date/heure programmée (ISO)
+    @returns: Nom de campagne nettoyé
+    """
+    plan = clean_email_subject(str(plan_nom or '').strip())
+    tpl = clean_email_subject(str(template_name or '').strip())
+    date_fr = format_scheduled_date_fr(scheduled_at)
+    parts = [p for p in (plan, tpl, date_fr) if p]
+    label = clean_email_subject(' — '.join(parts))
+    return label or plan or tpl or 'Campagne planifiée'
+
+
+def default_weekly_plan_nom(groupe_nom: str, week_start: str = '', week_end: str = '') -> str:
+    """
+    Propose un nom indicatif par défaut pour un plan hebdomadaire.
+
+    @param groupe_nom: Nom du groupe ciblé
+    @param week_start: Date début semaine (yyyy-mm-dd)
+    @param week_end: Date fin semaine (yyyy-mm-dd)
+    @returns: Nom suggéré
+    """
+    groupe = clean_email_subject(str(groupe_nom or '').strip()) or 'Groupe'
+    if week_start and week_end:
+        week = f"{format_scheduled_date_fr(week_start)}–{format_scheduled_date_fr(week_end)}"
+        return clean_email_subject(f"Plan semaine — {groupe} — {week}") or f"Plan semaine — {groupe}"
+    return clean_email_subject(f"Plan semaine — {groupe}") or f"Plan semaine — {groupe}"
+
+
 def build_slot_pattern_from_slots(slots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Extrait un motif récurrent (jour/heure/modèle) depuis des créneaux absolus.
@@ -194,8 +246,11 @@ def generate_weekly_plan_campaigns(
         tpl = templates_by_id.get(template_id) or {}
         sujet = clean_email_subject(str(slot.get('sujet') or tpl.get('subject') or 'Prospection')) or 'Prospection'
         tpl_name = tpl.get('name') or template_id
-        date_label = slot['scheduled_at'][:10]
-        campagne_nom = clean_email_subject(f"{tpl_name} — {groupe_nom} — {date_label}") or plan.get('nom', 'Plan')
+        campagne_nom = build_weekly_plan_campagne_nom(
+            plan.get('nom') or 'Plan',
+            tpl_name,
+            slot['scheduled_at'],
+        )
 
         campaign_params = {
             'recipients': slot_recipients,

@@ -8,6 +8,41 @@ et définit des critères de filtrage réutilisables pour la prospection.
 # Liste des objectifs : id, nom, description, filtres appliqués
 OBJECTIFS_CIBLAGE = [
     {
+        "id": "artisans",
+        "nom": "Artisans et métiers de proximité",
+        "description": (
+            "BTP, beauté, boulangerie, coiffure, électriciens, garages, artisanat… "
+            "Exclut écoles, admin, finance."
+        ),
+        "filters": {
+            "secteur_any": [
+                "BTP",
+                "Artisanat",
+                "Beauté",
+                "electrician",
+                "bakery",
+                "hair_care",
+                "car_repair",
+                "general_contractor",
+                "plumber",
+                "roofing",
+                "painter",
+                "locksmith",
+                "florist",
+                "moving_company",
+            ],
+            "exclude_secteur_any": [
+                "Éducation",
+                "Education",
+                "school",
+                "Finance",
+                "Juridique",
+                "Technologie",
+                "establishment",
+            ],
+        },
+    },
+    {
         "id": "formations",
         "nom": "Formations et organismes de formation",
         "description": "Organismes de formation, centres de formation, OPCO, acteurs Qualiopi",

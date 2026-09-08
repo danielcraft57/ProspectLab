@@ -413,8 +413,14 @@ Write-Host ""
 
 # Nettoyage du cache et redémarrage des services
 Write-Host "[8/9] Nettoyage Redis/Logs et redémarrage des services..." -ForegroundColor Yellow
-ssh "$User@$Server" "cd $RemotePath && if [ -x scripts/linux/clear-redis.sh ]; then ./scripts/linux/clear-redis.sh; fi && if [ -x scripts/linux/clear-logs.sh ]; then ./scripts/linux/clear-logs.sh; fi" | Out-Null
+ssh "$User@$Server" "cd $RemotePath && if [ -x scripts/linux/clear-redis.sh ]; then ./scripts/linux/clear-redis.sh; fi && if [ -x scripts/linux/clear-logs.sh ]; then ./scripts/linux/clear-logs.sh; fi && if [ -x scripts/linux/clear-celerybeat-schedule.sh ]; then ./scripts/linux/clear-celerybeat-schedule.sh; fi" | Out-Null
 ssh "$User@$Server" "sudo systemctl restart prospectlab prospectlab-celery prospectlab-celerybeat" | Out-Null
+$beatStatus = ssh "$User@$Server" "systemctl is-active prospectlab-celerybeat" 2>$null
+if ($beatStatus -eq 'active') {
+    Write-Host "✅ Celery Beat actif après redémarrage" -ForegroundColor Green
+} else {
+    Write-Host "⚠️  Celery Beat ne répond pas (état: $beatStatus). Sur le serveur: rm -f $RemotePath/celerybeat-schedule.* $RemotePath/celery_beat.pid && sudo systemctl restart prospectlab-celerybeat" -ForegroundColor Yellow
+}
 Write-Host "✅ Cache vidé et services redémarrés" -ForegroundColor Green
 Write-Host ""
 

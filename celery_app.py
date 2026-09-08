@@ -150,7 +150,7 @@ celery.conf.update(
             'task': 'tasks.email_tasks.generate_recurring_weekly_plans',
             'schedule': crontab(hour=6, minute=0, day_of_week=0),  # Dimanche 6h Paris : semaine suivante
         },
-        # Rapports de campagnes (matin / soir) vers contact@danielcraft.fr
+        # Rapports de campagnes (matin / soir) vers CAMPAIGN_REPORT_RECIPIENT
         'campagnes-report-evening': {
             'task': 'tasks.email_tasks.send_campagnes_report_task',
             'schedule': crontab(hour=18, minute=0),  # Tous les jours à 18h (heure de Paris via CELERY_TIMEZONE)

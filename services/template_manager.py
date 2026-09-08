@@ -6,7 +6,7 @@ import json
 import re
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from urllib.parse import quote
 
 
@@ -1240,6 +1240,8 @@ class TemplateManager:
         extended_overrides: Optional[Dict] = None,
         brand_domain: Optional[str] = None,
         mail_account_id: Optional[int] = None,
+        content_override: Optional[str] = None,
+        subject_override: Optional[str] = None,
     ):
         """
         Rend un template avec les variables remplacées
@@ -1252,19 +1254,36 @@ class TemplateManager:
             entreprise_id: ID de l'entreprise pour récupérer les données étendues (optionnel)
             extended_overrides: dict optionnel pour surcharger/completer les données étendues
                                  (utile pour la CLI en mode mock).
+            content_override: Contenu brut à rendre (preview éditeur, sans lire la BDD).
+            subject_override: Sujet brut à utiliser avec content_override.
         
         Returns:
             Tuple (contenu rendu, is_html)
         """
         resolved_brand = self._resolve_brand_slug(mail_account_id=mail_account_id)
-        template = self.get_template(
-            template_id,
-            for_preview=False,
-            mail_account_id=mail_account_id,
-            brand_slug=resolved_brand,
-        )
+        template = None
+        if template_id:
+            template = self.get_template(
+                template_id,
+                for_preview=False,
+                mail_account_id=mail_account_id,
+                brand_slug=resolved_brand,
+            )
+        if not template and content_override is not None:
+            template = {
+                'id': template_id or 'preview',
+                'content': content_override,
+                'subject': subject_override or '',
+                'is_html': True,
+            }
         if not template:
             return '', False
+
+        template = dict(template)
+        if content_override is not None:
+            template['content'] = content_override
+        if subject_override is not None:
+            template['subject'] = subject_override
         
         content = template.get('content', '')
         # Factorisation via fragments communs (header/footer/CTA…).
@@ -1378,6 +1397,20 @@ class TemplateManager:
             'dc_contact_url': dc_contact_url,
             **extended_flat
         }
+        # Hero email echantillon : crop nombre d'or servi par ProspectLab (meilleur que le webp tablet brut)
+        echantillon_slug = (variables.get('echantillon_slug') or '').strip()
+        if echantillon_slug:
+            hero_rel = f"static/email/danielcraft/pub/echantillons/{echantillon_slug}.jpg"
+            hero_path = Path(__file__).resolve().parent.parent / hero_rel
+            if hero_path.is_file():
+                hero_url = f"{base_url}/{hero_rel}"
+                variables['echantillon_screenshot_url'] = hero_url
+                variables['echantillon_email_hero_url'] = hero_url
+                variables['vitrine_screenshot_url'] = hero_url
+            elif not variables.get('echantillon_screenshot_full_url'):
+                variables['echantillon_screenshot_full_url'] = (
+                    f"https://danielcraft.fr/echantillons/{echantillon_slug}/screenshots/tablet_1024x2500.webp"
+                )
         # Aliases booléens pour les conditionnels {#if_security} / {#if_performance} / {#if_risk}
         # qui sont ensuite traités par le moteur générique {#if_<xxx>}.
         variables['security'] = variables.get('security_score') is not None
@@ -1588,6 +1621,120 @@ class TemplateManager:
             pass
 
         return content, is_html
+
+    @staticmethod
+    def _render_subject_line(
+        subject_template: str,
+        nom: str,
+        entreprise: str,
+        extra_vars: Optional[Dict] = None,
+    ) -> str:
+        """
+        Rend un sujet d'email avec les variables de preview.
+
+        @param subject_template: Modèle de sujet ({nom}, {entreprise}, etc.)
+        @param nom: Prénom / nom du destinataire
+        @param entreprise: Nom de l'entreprise
+        @param extra_vars: Variables additionnelles (secteur_label, etc.)
+        @returns: Sujet nettoyé
+        """
+        from utils.email_subject import clean_email_subject, normalize_template_value
+
+        subject_template = (subject_template or '').strip()
+        if not subject_template:
+            return ''
+
+        variables = {
+            'nom': normalize_template_value(nom, 'Monsieur/Madame'),
+            'entreprise': normalize_template_value(entreprise, 'votre entreprise'),
+        }
+        if extra_vars:
+            for key, value in extra_vars.items():
+                if isinstance(value, bool):
+                    variables[key] = '1' if value else ''
+                elif value is None:
+                    variables[key] = ''
+                else:
+                    variables[key] = str(value)
+
+        try:
+            rendered = subject_template.format(**variables)
+        except Exception:
+            class SafeFormatter:
+                def __init__(self, mapping):
+                    self.mapping = mapping
+
+                def format(self, template):
+                    import re as _re
+                    def replace(match):
+                        key = match.group(1)
+                        return str(self.mapping.get(key, ''))
+                    return _re.sub(r'\{([^}]+)\}', replace, template)
+
+            rendered = SafeFormatter(variables).format(subject_template)
+
+        return clean_email_subject(rendered)
+
+    def preview_for_editor(
+        self,
+        *,
+        template_id: Optional[str] = None,
+        content: Optional[str] = None,
+        subject: Optional[str] = None,
+        nom: str = '',
+        entreprise: str = '',
+        email: str = '',
+        website: str = '',
+        secteur: str = '',
+    ) -> Dict[str, Any]:
+        """
+        Rendu live pour la page de gestion des modèles (variables + HTML).
+
+        @returns: dict content, subject, is_html, variables
+        """
+        from utils.secteurs import enrich_secteur_template_vars
+
+        extended = dict(enrich_secteur_template_vars(secteur or '') or {})
+        website_raw = (website or '').strip()
+        if website_raw:
+            extended['website'] = (
+                website_raw if website_raw.startswith('http') else f'https://{website_raw.lstrip("/")}'
+            )
+
+        content_rendered, is_html = self.render_template(
+            template_id or '__preview__',
+            nom=nom,
+            entreprise=entreprise,
+            email=email,
+            extended_overrides=extended,
+            content_override=content,
+            subject_override=subject,
+            mail_account_id=None,
+        )
+
+        if is_html and content_rendered:
+            content_rendered = self._make_ui_preview_links_clickable(
+                content_rendered,
+                brand_host='danielcraft.fr',
+            )
+
+        subject_tpl = (subject or '').strip()
+        if not subject_tpl and template_id:
+            tpl = self.get_template(template_id, for_editor=True, mail_account_id=None)
+            subject_tpl = (tpl or {}).get('subject') or ''
+
+        subject_rendered = self._render_subject_line(subject_tpl, nom, entreprise, extended)
+
+        return {
+            'content': content_rendered,
+            'subject': subject_rendered,
+            'is_html': is_html,
+            'variables': {
+                'secteur_label': extended.get('secteur_label') or secteur or '',
+                'echantillon_slug': extended.get('echantillon_slug') or extended.get('vitrine_slug') or '',
+                'secteur_accroche': extended.get('secteur_accroche') or '',
+            },
+        }
 
     def suggest_templates_for_entreprise(
         self,

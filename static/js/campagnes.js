@@ -320,6 +320,11 @@ function refreshRunningCampagneCardsInPlace() {
             return;
         }
 
+        var metaMain = card.querySelector('.campagne-meta-main span:last-child');
+        if (metaMain && st === 'scheduled') {
+            metaMain.textContent = formatCampagneCardMeta(campagne);
+        }
+
         var dest = Math.max(Number(campagne.total_destinataires) || 1, 1);
         var sent = Number(campagne.total_envoyes) || 0;
         var pct = Math.round((sent / dest) * 100);
@@ -500,7 +505,7 @@ function displayCampagnes(campagnes) {
             <div class="campagne-meta">
                 <div class="campagne-meta-main">
                     <span class="campagne-meta-dot"></span>
-                    <span>${formatRelativeDate(campagne.date_creation)}</span>
+                    <span>${formatCampagneCardMeta(campagne)}</span>
                 </div>
                 <div class="campagne-meta-timeline">
                     <span class="meta-pill ${effectiveStatus === 'scheduled' ? 'is-active' : ''}">Créée</span>
@@ -641,6 +646,137 @@ function updateCampagneCardMetrics(campagneId, stats) {
     if (clickBarEl) clickBarEl.style.width = clampPercent(clickRate) + '%';
 }
 
+// --- Groupes de modèles (catégories) pour les selects ---
+
+var TEMPLATE_CATEGORY_ORDER = [
+    { id: 'audit', label: 'Audit' },
+    { id: 'offres', label: 'Offres' },
+    { id: 'echantillons', label: 'Échantillons' },
+    { id: 'bouquins', label: 'Bouquins' },
+    { id: 'cold_email', label: 'Cold Email' },
+    { id: 'html_email', label: 'Email HTML' },
+    { id: 'linkedin', label: 'LinkedIn' },
+    { id: 'malt', label: 'Malt' },
+    { id: 'other', label: 'Autre' },
+];
+
+/**
+ * Catégorie affichée d'un modèle (legacy html_dc_* -> audit/offres/...).
+ * @param {object} tpl
+ * @returns {string}
+ */
+function displayTemplateCategory(tpl) {
+    var raw = (tpl && tpl.category ? String(tpl.category) : '').trim();
+    if (raw && raw !== 'html_email') return raw;
+    var id = String((tpl && tpl.id) || '');
+    if (id.indexOf('html_dc_offres') === 0) return 'offres';
+    if (id.indexOf('html_dc_echantillons') === 0) return 'echantillons';
+    if (id.indexOf('html_dc_bouquins') === 0) return 'bouquins';
+    if (id.indexOf('html_dc_') === 0) return 'audit';
+    return raw || 'other';
+}
+
+function getTemplateCategoryLabel(catId) {
+    var found = TEMPLATE_CATEGORY_ORDER.find(function(c) { return c.id === catId; });
+    if (found) return found.label;
+    var cleaned = String(catId || '').replace(/_/g, ' ');
+    return cleaned ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1) : 'Autre';
+}
+
+function groupTemplatesByCategory(list) {
+    var groups = new Map();
+    TEMPLATE_CATEGORY_ORDER.forEach(function(c) { groups.set(c.id, []); });
+    (list || []).forEach(function(tpl) {
+        var cat = displayTemplateCategory(tpl);
+        if (!groups.has(cat)) groups.set(cat, []);
+        groups.get(cat).push(tpl);
+    });
+    return groups;
+}
+
+/**
+ * Construit le HTML d'un select groupé par catégorie.
+ * @param {string|null} selectedId
+ * @param {string} placeholder
+ * @returns {string}
+ */
+function buildTemplateOptionsHtml(selectedId, placeholder) {
+    var groups = groupTemplatesByCategory(templatesData);
+    var html = '<option value="">' + escapeHtml(placeholder || 'Aucun (message personnalisé)') + '</option>';
+
+    function appendGroup(catId, label, items) {
+        if (!items || !items.length) return;
+        items.sort(function(a, b) {
+            return String(a.name || '').localeCompare(String(b.name || ''), 'fr', { sensitivity: 'base' });
+        });
+        html += '<optgroup label="' + escapeHtml(label) + '">';
+        items.forEach(function(tpl) {
+            var sel = tpl.id === selectedId ? ' selected' : '';
+            var name = (tpl.name || '').trim() || 'Sans nom';
+            var subj = (tpl.subject || '').trim();
+            html += '<option value="' + escapeHtml(tpl.id) + '"' + sel +
+                (subj ? ' title="' + escapeHtml(subj) + '"' : '') + '>' +
+                escapeHtml(name) + '</option>';
+        });
+        html += '</optgroup>';
+    }
+
+    TEMPLATE_CATEGORY_ORDER.forEach(function(cat) {
+        appendGroup(cat.id, cat.label, groups.get(cat.id));
+    });
+
+    groups.forEach(function(items, catId) {
+        if (TEMPLATE_CATEGORY_ORDER.some(function(c) { return c.id === catId; })) return;
+        appendGroup(catId, getTemplateCategoryLabel(catId), items);
+    });
+
+    return html;
+}
+
+function formatTemplateSelectCaption(templateId) {
+    if (!templateId) return '';
+    var tpl = (templatesData || []).find(function(t) { return t.id === templateId; });
+    if (!tpl) return '';
+    var cat = getTemplateCategoryLabel(displayTemplateCategory(tpl));
+    var name = String(tpl.name || '').trim();
+    var subj = String(tpl.subject || '').replace(/^objet:\s*/i, '').trim();
+    var bits = [];
+    if (cat) bits.push(cat);
+    if (name) bits.push(name);
+    if (subj && subj.toLowerCase() !== name.toLowerCase()) {
+        bits.push('Objet : ' + subj);
+    }
+    return bits.join(' · ');
+}
+
+function refreshTemplateSelectHint(selectEl) {
+    var hint = document.getElementById('campagne-template-hint');
+    if (!hint || !selectEl) return;
+    var caption = formatTemplateSelectCaption(selectEl.value);
+    if (caption) {
+        hint.textContent = caption;
+        hint.hidden = false;
+    } else {
+        hint.hidden = true;
+        hint.textContent = '';
+    }
+}
+
+/**
+ * Met à jour la légende sous un select modèle (plan hebdo).
+ * @param {HTMLSelectElement|null} selectEl
+ */
+function refreshWeeklyPlanTemplateCaption(selectEl) {
+    if (!selectEl) return;
+    var group = selectEl.closest('.md-template-select-field');
+    if (!group) return;
+    var cap = group.querySelector('.md-template-caption');
+    if (!cap) return;
+    var caption = formatTemplateSelectCaption(selectEl.value);
+    cap.textContent = caption || 'Choisir un modèle dans la liste';
+    cap.hidden = false;
+}
+
 // Charger les templates et remplir le select "Modèle de message" (étape 3)
 async function loadTemplates() {
     var select = document.getElementById('campagne-template');
@@ -661,13 +797,10 @@ async function loadTemplates() {
 function renderTemplateSelect() {
     var select = document.getElementById('campagne-template');
     if (!select) return;
-    select.innerHTML = '<option value="">Aucun (message personnalisé)</option>';
-    templatesData.forEach(function(template) {
-        var option = document.createElement('option');
-        option.value = template.id;
-        option.textContent = template.name || template.id;
-        select.appendChild(option);
-    });
+    var current = select.value;
+    select.innerHTML = buildTemplateOptionsHtml(current, 'Aucun (message personnalisé)');
+    if (current) select.value = current;
+    refreshTemplateSelectHint(select);
 }
 
 // Attacher une seule fois le listener "change" du select Modèle de message
@@ -680,6 +813,7 @@ function initTemplateSelectListener() {
 function onCampagneTemplateChange() {
     var select = document.getElementById('campagne-template');
     var value = select ? select.value : '';
+    refreshTemplateSelectHint(select);
     var template = templatesData.find(function(t) { return t.id === value; });
     var messageTextarea = document.getElementById('campagne-message');
     var previewDiv = document.getElementById('template-preview');
@@ -1539,19 +1673,36 @@ function initCiblageModeSwitch() {
     updateBlocks();
 }
 
-/** Met les champs date et heure d'envoi à la date et l'heure actuelles (locale). */
+/** Met à jour les légendes lisibles sous les champs de programmation campagne. */
+function refreshScheduleCaptions() {
+    var dateInput = document.getElementById('campagne-schedule-date');
+    var timeInput = document.getElementById('campagne-schedule-time');
+    var dateCap = document.getElementById('campagne-schedule-date-caption');
+    var timeCap = document.getElementById('campagne-schedule-time-caption');
+    if (dateCap) dateCap.textContent = dateInput && dateInput.value ? formatDateParisShort(dateInput.value) : '';
+    if (timeCap) timeCap.textContent = timeInput && timeInput.value ? formatTimeParisDisplay(timeInput.value) : '';
+}
+
+/** Met les champs date et heure d'envoi sur l'heure courante Europe/Paris. */
 function setScheduleDateTimeToNow() {
     const dateInput = document.getElementById('campagne-schedule-date');
     const timeInput = document.getElementById('campagne-schedule-time');
     if (!dateInput || !timeInput) return;
-    const now = new Date();
-    const yyyy = now.getFullYear();
-    const mm = String(now.getMonth() + 1).padStart(2, '0');
-    const dd = String(now.getDate()).padStart(2, '0');
-    const hh = String(now.getHours()).padStart(2, '0');
-    const min = String(now.getMinutes()).padStart(2, '0');
-    dateInput.value = yyyy + '-' + mm + '-' + dd;
-    timeInput.value = hh + ':' + min;
+    var bits = {};
+    new Intl.DateTimeFormat('fr-CA', {
+        timeZone: CAMPAGNE_TZ,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+    }).formatToParts(new Date()).forEach(function(p) {
+        if (p.type !== 'literal') bits[p.type] = p.value;
+    });
+    dateInput.value = bits.year + '-' + bits.month + '-' + bits.day;
+    timeInput.value = bits.hour + ':' + bits.minute;
+    refreshScheduleCaptions();
 }
 
 /** Jours fériés en France (métropole). Retourne des chaînes "YYYY-MM-DD". */
@@ -1727,6 +1878,7 @@ function initScheduleFields() {
             const dd = String(d.getDate()).padStart(2, '0');
             dateInput.value = yyyy + '-' + mm + '-' + dd;
             timeInput.value = String(slot.hour).padStart(2, '0') + ':' + String(slot.minute).padStart(2, '0');
+            refreshScheduleCaptions();
 
             const scheduledRadio = document.querySelector('input[name="send_mode"][value="scheduled"]');
             if (scheduledRadio) scheduledRadio.checked = true;
@@ -1734,7 +1886,19 @@ function initScheduleFields() {
         });
     });
 
+    var dateInput = document.getElementById('campagne-schedule-date');
+    var timeInput = document.getElementById('campagne-schedule-time');
+    if (dateInput) {
+        dateInput.addEventListener('input', refreshScheduleCaptions);
+        dateInput.addEventListener('change', refreshScheduleCaptions);
+    }
+    if (timeInput) {
+        timeInput.addEventListener('input', refreshScheduleCaptions);
+        timeInput.addEventListener('change', refreshScheduleCaptions);
+    }
+
     updateScheduleVisibility();
+    refreshScheduleCaptions();
 }
 
 // Charger les prospects selon l'objectif sélectionné
@@ -2556,14 +2720,17 @@ async function submitCampagne() {
             alert('Choisis une date et une heure pour programmer l\'envoi.');
             return;
         }
-        // Interpréter date/heure en heure locale, puis convertir en ISO UTC pour le serveur
-        const planned = new Date(scheduleDate + 'T' + scheduleTime);
+        // Interpréter date/heure en Europe/Paris, puis convertir en ISO UTC pour le serveur
+        scheduledAtIso = wallClockParisToUtcIso(scheduleDate, scheduleTime);
+        if (!scheduledAtIso) {
+            alert('Date ou heure invalide.');
+            return;
+        }
         const now = new Date();
-        if (planned.getTime() <= now.getTime()) {
+        if (new Date(scheduledAtIso).getTime() <= now.getTime()) {
             alert('La date/heure d\'envoi doit être dans le futur.');
             return;
         }
-        scheduledAtIso = planned.toISOString();
     }
 
     // Générer automatiquement le nom de la campagne (sujet nettoye prioritaire)
@@ -3457,9 +3624,90 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+/** Fuseau horaire de référence pour la programmation des campagnes. */
+var CAMPAGNE_TZ = 'Europe/Paris';
+
+/**
+ * Affiche une date ISO (yyyy-mm-dd) au format jj/mm/aaaa.
+ * @param {string} isoDate
+ * @returns {string}
+ */
+function formatDateParisShort(isoDate) {
+    if (!isoDate) return '';
+    var parts = String(isoDate).split('-');
+    if (parts.length !== 3) return isoDate;
+    return parts[2] + '/' + parts[1] + '/' + parts[0];
+}
+
+/**
+ * Libellé heure 24h avec mention du fuseau Paris.
+ * @param {string} timeHHMM
+ * @returns {string}
+ */
+function formatTimeParisDisplay(timeHHMM) {
+    if (!timeHHMM) return '';
+    return String(timeHHMM).slice(0, 5).replace(':', 'h') + ' · Europe/Paris';
+}
+
+/**
+ * Convertit une date/heure « mur » Paris en ISO UTC pour l'API.
+ * @param {string} isoDate - yyyy-mm-dd
+ * @param {string} timeHHMM - HH:mm
+ * @returns {string}
+ */
+function wallClockParisToUtcIso(isoDate, timeHHMM) {
+    if (!isoDate || !timeHHMM) return '';
+    var y = parseInt(isoDate.slice(0, 4), 10);
+    var mo = parseInt(isoDate.slice(5, 7), 10);
+    var d = parseInt(isoDate.slice(8, 10), 10);
+    var h = parseInt(timeHHMM.slice(0, 2), 10);
+    var mi = parseInt(timeHHMM.slice(3, 5), 10);
+    var ms = Date.UTC(y, mo - 1, d, h, mi);
+    var fmt = new Intl.DateTimeFormat('en-CA', {
+        timeZone: CAMPAGNE_TZ,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+    });
+    for (var i = 0; i < 6; i++) {
+        var bits = {};
+        fmt.formatToParts(new Date(ms)).forEach(function(p) {
+            if (p.type !== 'literal') bits[p.type] = p.value;
+        });
+        var py = parseInt(bits.year, 10);
+        var pm = parseInt(bits.month, 10);
+        var pd = parseInt(bits.day, 10);
+        var ph = parseInt(bits.hour, 10);
+        var pn = parseInt(bits.minute, 10);
+        var diff = Date.UTC(y, mo - 1, d, h, mi) - Date.UTC(py, pm - 1, pd, ph, pn);
+        if (diff === 0) break;
+        ms += diff;
+    }
+    return new Date(ms).toISOString();
+}
+
+/**
+ * Met à jour la légende lisible sous un champ date/heure.
+ * @param {HTMLElement|null} fieldGroup
+ * @param {string} isoDate
+ * @param {string} timeHHMM
+ */
+function updateDatetimeCaption(fieldGroup, isoDate, timeHHMM) {
+    if (!fieldGroup) return;
+    var cap = fieldGroup.querySelector('.md-datetime-caption');
+    if (!cap) return;
+    var bits = [];
+    if (isoDate) bits.push(formatDateParisShort(isoDate));
+    if (timeHHMM) bits.push(formatTimeParisDisplay(timeHHMM));
+    cap.textContent = bits.join(' · ');
+}
+
 function formatDate(dateString) {
     if (!dateString) return '-';
-    const date = parseDateLoose(dateString);
+    const date = parseCampaignInstant(dateString);
     if (Number.isNaN(date.getTime())) return dateString;
     return date.toLocaleDateString('fr-FR', {
         year: 'numeric',
@@ -3467,21 +3715,97 @@ function formatDate(dateString) {
         day: 'numeric',
         hour: '2-digit',
         minute: '2-digit',
-        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+        timeZone: CAMPAGNE_TZ,
     });
+}
+
+function formatCampagneCardMeta(campagne) {
+    var scheduledRaw = campagne && (campagne.scheduled_at || campagne.scheduledAt);
+    if (scheduledRaw) {
+        var scheduled = parseCampaignInstant(scheduledRaw);
+        if (!Number.isNaN(scheduled.getTime())) {
+            var now = Date.now();
+            var diffMs = scheduled.getTime() - now;
+            var countdown = formatFutureCountdown(diffMs);
+            var clock = scheduled.toLocaleString('fr-FR', {
+                weekday: 'short',
+                day: 'numeric',
+                month: 'short',
+                hour: '2-digit',
+                minute: '2-digit',
+                timeZone: CAMPAGNE_TZ,
+            });
+            if (diffMs > 0) {
+                return 'Programmé · ' + countdown + ' · ' + clock;
+            }
+            return 'Envoi imminent · ' + clock;
+        }
+    }
+    var status = getEffectiveCampaignStatus(campagne);
+    if (status === 'scheduled') {
+        return 'Programmée · date à confirmer';
+    }
+    return 'Créée · ' + formatRelativeDate(campagne.date_creation);
+}
+
+/**
+ * Formate un délai futur en français (jours, heures, minutes).
+ * @param {number} diffMs - Millisecondes jusqu'à la date cible (positif)
+ * @returns {string}
+ */
+function formatFutureCountdown(diffMs) {
+    if (!Number.isFinite(diffMs) || diffMs <= 0) {
+        return 'maintenant';
+    }
+    var minute = 60 * 1000;
+    var hour = 60 * minute;
+    var day = 24 * hour;
+    if (diffMs < minute) {
+        return 'moins d\'1 min';
+    }
+    if (diffMs < hour) {
+        var minsOnly = Math.max(1, Math.ceil(diffMs / minute));
+        return 'dans ' + minsOnly + ' min';
+    }
+    if (diffMs < day) {
+        var hours = Math.floor(diffMs / hour);
+        var mins = Math.floor((diffMs % hour) / minute);
+        if (mins > 0) {
+            return 'dans ' + hours + ' h ' + mins + ' min';
+        }
+        return 'dans ' + Math.max(1, hours) + ' h';
+    }
+    var days = Math.floor(diffMs / day);
+    var remHours = Math.floor((diffMs % day) / hour);
+    if (days < 7) {
+        if (remHours > 0) {
+            return 'dans ' + days + ' j ' + remHours + ' h';
+        }
+        return 'dans ' + days + ' jour' + (days > 1 ? 's' : '');
+    }
+    var weeks = Math.floor(days / 7);
+    var remDays = days % 7;
+    if (remDays > 0) {
+        return 'dans ' + weeks + ' sem ' + remDays + ' j';
+    }
+    return 'dans ' + weeks + ' sem';
 }
 
 function formatRelativeDate(dateString) {
     if (!dateString) return 'Date inconnue';
-    const date = parseDateLoose(dateString);
+    const date = parseCampaignInstant(dateString);
     if (Number.isNaN(date.getTime())) return 'Date inconnue';
 
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
-    if (diffMs < 0) return 'Dans quelques instants';
     const minute = 60 * 1000;
     const hour = 60 * minute;
     const day = 24 * hour;
+
+    if (diffMs < 0) {
+        var futureLabel = formatFutureCountdown(Math.abs(diffMs));
+        return futureLabel.charAt(0).toUpperCase() + futureLabel.slice(1);
+    }
 
     if (diffMs < minute) return 'A l\'instant';
     if (diffMs < hour) {
@@ -3495,6 +3819,31 @@ function formatRelativeDate(dateString) {
     const d = Math.floor(diffMs / day);
     if (d < 7) return 'Il y a ' + d + ' jour' + (d > 1 ? 's' : '');
     return 'Il y a ' + Math.floor(d / 7) + ' sem';
+}
+
+/**
+ * Parse une date campagne : ISO UTC (Z) ou horodatage naïf serveur (Europe/Paris).
+ * @param {string} value
+ * @returns {Date}
+ */
+function parseCampaignInstant(value) {
+    if (!value) return new Date('invalid');
+    if (value instanceof Date) return value;
+    const raw = String(value).trim();
+    if (/Z$/i.test(raw) || /[+-]\d{2}:?\d{2}$/.test(raw)) {
+        return new Date(raw);
+    }
+    // ISO UTC sans suffixe Z (ex. 2026-09-04T12:00:00.000)
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(raw)) {
+        var asUtc = new Date(raw.endsWith('Z') ? raw : (raw + 'Z'));
+        if (!Number.isNaN(asUtc.getTime())) return asUtc;
+    }
+    const m = raw.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/);
+    if (m) {
+        const utcIso = wallClockParisToUtcIso(m[1], m[2]);
+        if (utcIso) return new Date(utcIso);
+    }
+    return parseDateLoose(value);
 }
 
 function parseDateLoose(value) {
@@ -3627,6 +3976,740 @@ const WEEKLY_PLAN_DAY_NAMES = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi'
 
 let weeklyPlanRecipientsPreview = null;
 let weeklyPlanWeekMonday = null;
+let weeklyPlanNomTouched = false;
+let weeklyPlanModalStep = 1;
+let weeklyPlanEntreprisesData = [];
+let weeklyPlanSelectedEntrepriseIds = [];
+let weeklyPlanSelectedRecipients = [];
+let weeklyPlanDisplayedEntreprisesData = [];
+let weeklyPlanEntreprisesPage = 1;
+let weeklyPlanEntreprisesTotal = 0;
+let weeklyPlanEntreprisesHasMore = false;
+let weeklyPlanEntreprisesLoadingMore = false;
+let weeklyPlanCurrentGroupeId = null;
+let weeklyPlanGroupeMemberCount = 0;
+let weeklyPlanLoadToken = 0;
+const WEEKLY_PLAN_ENTREPRISES_PAGE_SIZE = 100;
+
+/**
+ * Lit les filtres email de l'étape destinataires du plan hebdo.
+ * @returns {{principalOnly: boolean, excludePlaceholders: boolean, excludeRisky: boolean}}
+ */
+function getWeeklyPlanEmailFilterFlags() {
+    var principalEl = document.getElementById('weekly-plan-filter-principal-only');
+    var placeholdersEl = document.getElementById('weekly-plan-filter-exclude-placeholders');
+    var riskyEl = document.getElementById('weekly-plan-filter-exclude-risky');
+    return {
+        principalOnly: principalEl ? principalEl.checked : true,
+        excludePlaceholders: placeholdersEl ? placeholdersEl.checked : true,
+        excludeRisky: riskyEl ? riskyEl.checked : true,
+    };
+}
+
+/**
+ * Applique les filtres email côté client sur les entreprises du plan hebdo.
+ * @param {Array} sourceData
+ * @returns {Array}
+ */
+function applyWeeklyPlanEmailFilters(sourceData) {
+    var source = sourceData || weeklyPlanEntreprisesData || [];
+    var flags = getWeeklyPlanEmailFilterFlags();
+    return source.map(function(ent) {
+        var emails = (ent.emails || []).filter(function(em) {
+            if (flags.principalOnly && !em.is_principal) return false;
+            if (flags.excludePlaceholders && isPlaceholderEmailClient(em.email, em.source)) return false;
+            if (flags.excludeRisky && isCampaignRiskyEmailClient(em.email, em.source)) return false;
+            return true;
+        });
+        if (!flags.principalOnly && emails.length > 2) {
+            emails = emails.slice().sort(function(a, b) {
+                var ra = (a.is_principal ? 0 : 1) + (a.is_person ? 0 : 1);
+                var rb = (b.is_principal ? 0 : 1) + (b.is_person ? 0 : 1);
+                if (ra !== rb) return ra - rb;
+                return String(a.email || '').localeCompare(String(b.email || ''));
+            }).slice(0, 2);
+        }
+        return {
+            id: ent.id,
+            nom: ent.nom,
+            secteur: ent.secteur,
+            responsable: ent.responsable,
+            priority_score: ent.priority_score,
+            emails: emails,
+        };
+    }).filter(function(ent) { return ent.emails.length > 0; });
+}
+
+/**
+ * Affiche l'étape N du wizard plan hebdomadaire.
+ * @param {number} stepNum
+ */
+function showWeeklyPlanStep(stepNum) {
+    weeklyPlanModalStep = stepNum;
+    var s1 = document.getElementById('weekly-plan-step-1');
+    var s2 = document.getElementById('weekly-plan-step-2');
+    var s3 = document.getElementById('weekly-plan-step-3');
+    var i1 = document.getElementById('weekly-plan-step-indicator-1');
+    var i2 = document.getElementById('weekly-plan-step-indicator-2');
+    var i3 = document.getElementById('weekly-plan-step-indicator-3');
+    if (s1) s1.style.display = stepNum === 1 ? 'block' : 'none';
+    if (s2) s2.style.display = stepNum === 2 ? 'block' : 'none';
+    if (s3) s3.style.display = stepNum === 3 ? 'block' : 'none';
+
+    [i1, i2, i3].forEach(function(indicator, idx) {
+        if (!indicator) return;
+        var n = idx + 1;
+        indicator.classList.toggle('step-active', stepNum === n);
+        indicator.classList.toggle('step-done', stepNum > n);
+        if (stepNum === n) {
+            indicator.setAttribute('aria-current', 'step');
+        } else {
+            indicator.removeAttribute('aria-current');
+        }
+        var stepItem = indicator.closest('.step-item');
+        if (stepItem) stepItem.classList.toggle('step-done', stepNum > n);
+    });
+
+    var btnPrev = document.getElementById('btn-weekly-plan-prev');
+    var btnNext = document.getElementById('btn-weekly-plan-next');
+    var btnSubmit = document.getElementById('btn-weekly-plan-submit');
+    if (btnPrev) btnPrev.style.display = stepNum === 1 ? 'none' : 'inline-block';
+    if (btnNext) btnNext.style.display = stepNum === 3 ? 'none' : 'inline-block';
+    if (btnSubmit) btnSubmit.style.display = stepNum === 3 ? 'inline-flex' : 'none';
+    if (stepNum === 3) {
+        renderWeeklyPlanRecap();
+    }
+}
+
+/**
+ * Navigation via l'indicateur d'étapes du plan hebdo.
+ * @param {number} step
+ */
+function weeklyPlanGoToStepFromHeader(step) {
+    if (step === 1) {
+        showWeeklyPlanStep(1);
+        return;
+    }
+    if (step === 2) {
+        if (!weeklyPlanCurrentGroupeId) return;
+        if (!weeklyPlanSelectedRecipients.length) return;
+        showWeeklyPlanStep(2);
+        suggestWeeklyPlanNom();
+        return;
+    }
+    if (step === 3) {
+        if (weeklyPlanModalStep < 2) return;
+        if (!validateWeeklyPlanSlotsForStep()) return;
+        showWeeklyPlanStep(3);
+    }
+}
+
+/**
+ * Passe à l'étape suivante du wizard plan hebdo.
+ */
+function weeklyPlanStepNext() {
+    if (weeklyPlanModalStep === 1) {
+        if (!weeklyPlanCurrentGroupeId) {
+            alert('Choisis un groupe.');
+            return;
+        }
+        if (!weeklyPlanSelectedEntrepriseIds.length) {
+            alert('Sélectionne au moins une entreprise.');
+            return;
+        }
+        if (!weeklyPlanSelectedRecipients.length) {
+            alert('Sélectionne au moins un email destinataire.');
+            return;
+        }
+        showWeeklyPlanStep(2);
+        suggestWeeklyPlanNom();
+        return;
+    }
+    if (weeklyPlanModalStep === 2) {
+        if (!validateWeeklyPlanSlotsForStep()) return;
+        showWeeklyPlanStep(3);
+    }
+}
+
+/**
+ * Revient à l'étape précédente du wizard plan hebdo.
+ */
+function weeklyPlanStepPrev() {
+    if (weeklyPlanModalStep === 2) {
+        showWeeklyPlanStep(1);
+    } else if (weeklyPlanModalStep === 3) {
+        showWeeklyPlanStep(2);
+    }
+}
+
+/**
+ * Met à jour le bouton « Charger plus » pour les entreprises du plan hebdo.
+ */
+function updateWeeklyPlanEntreprisesLoadMoreUi() {
+    var wrap = document.getElementById('weekly-plan-entreprises-load-more-wrap');
+    var hint = document.getElementById('weekly-plan-entreprises-load-more-hint');
+    var btn = document.getElementById('weekly-plan-entreprises-load-more-btn');
+    if (!wrap) return;
+    if (!weeklyPlanEntreprisesHasMore) {
+        wrap.style.display = 'none';
+        return;
+    }
+    wrap.style.display = 'flex';
+    if (btn) btn.disabled = !!weeklyPlanEntreprisesLoadingMore;
+    if (hint) {
+        hint.textContent = (weeklyPlanEntreprisesData.length || 0) + ' / ' + (weeklyPlanEntreprisesTotal || 0) + ' chargée(s)';
+    }
+}
+
+/**
+ * Nombre d'entreprises du groupe ayant au moins un email exploitable (réponse API).
+ * @returns {number}
+ */
+function countWeeklyPlanEntreprisesWithEmail() {
+    return (weeklyPlanEntreprisesData || []).filter(function(e) {
+        return e.emails && e.emails.length > 0;
+    }).length;
+}
+
+/**
+ * Charge les entreprises du groupe sélectionné (toutes les pages API).
+ * @param {{reset?: boolean}} options
+ * @returns {Promise<void>}
+ */
+async function loadWeeklyPlanEntreprises(options) {
+    options = options || {};
+    var reset = options.reset !== false;
+    var container = document.getElementById('weekly-plan-entreprises-selector');
+    if (!container || !weeklyPlanCurrentGroupeId) return;
+
+    var myToken = ++weeklyPlanLoadToken;
+    var requestedGroupeId = weeklyPlanCurrentGroupeId;
+
+    if (reset) {
+        weeklyPlanEntreprisesPage = 1;
+        weeklyPlanEntreprisesData = [];
+        weeklyPlanSelectedEntrepriseIds = [];
+        weeklyPlanSelectedRecipients = [];
+        container.innerHTML = '<div class="loading">Chargement des entreprises du groupe...</div>';
+    }
+
+    weeklyPlanEntreprisesLoadingMore = true;
+    updateWeeklyPlanEntreprisesLoadMoreUi();
+
+    var flags = getWeeklyPlanEmailFilterFlags();
+    var allItems = reset ? [] : (weeklyPlanEntreprisesData || []).slice();
+    var total = weeklyPlanEntreprisesTotal || 0;
+    var page = reset ? 1 : (weeklyPlanEntreprisesPage + 1);
+
+    try {
+        while (true) {
+            if (myToken !== weeklyPlanLoadToken || requestedGroupeId !== weeklyPlanCurrentGroupeId) {
+                return;
+            }
+
+            var params = new URLSearchParams({
+                groupe_ids: String(requestedGroupeId),
+                page: String(page),
+                page_size: String(WEEKLY_PLAN_ENTREPRISES_PAGE_SIZE),
+                include_without_email: '1',
+            });
+            if (flags.principalOnly) params.set('principal_only', '1');
+            if (flags.excludePlaceholders) params.set('exclude_placeholders', '1');
+            if (flags.excludeRisky) params.set('exclude_risky', '1');
+            else params.set('exclude_risky', '0');
+
+            var res = await fetch('/api/ciblage/entreprises?' + params.toString());
+            if (!res.ok) {
+                throw new Error('HTTP ' + res.status);
+            }
+            var data = await res.json();
+            if (myToken !== weeklyPlanLoadToken || requestedGroupeId !== weeklyPlanCurrentGroupeId) {
+                return;
+            }
+
+            var pagePayload = normalizeEntreprisesPagePayload(data);
+            total = Number(pagePayload.total) || pagePayload.items.length;
+            if (!pagePayload.items.length) {
+                break;
+            }
+            allItems = allItems.concat(pagePayload.items);
+            if (allItems.length >= total) {
+                break;
+            }
+            page += 1;
+        }
+
+        weeklyPlanEntreprisesData = allItems;
+        weeklyPlanEntreprisesTotal = total;
+        weeklyPlanEntreprisesPage = page;
+        weeklyPlanEntreprisesHasMore = false;
+
+        if (reset) {
+            weeklyPlanSelectedEntrepriseIds = weeklyPlanEntreprisesData
+                .filter(function(e) { return e.emails && e.emails.length; })
+                .map(function(e) { return e.id; });
+        }
+
+        displayWeeklyPlanEntreprises(true);
+        displayWeeklyPlanRecipients();
+        updateWeeklyPlanRecipientsPreview();
+
+        if (reset && weeklyPlanSelectedEntrepriseIds.length) {
+            setTimeout(function() { weeklyPlanRecipientsQuickSelect('principal'); }, 0);
+        }
+    } catch (e) {
+        if (myToken !== weeklyPlanLoadToken) return;
+        if (reset) {
+            container.innerHTML = '<div class="empty-state"><p>Erreur lors du chargement des entreprises</p></div>';
+        }
+        weeklyPlanEntreprisesHasMore = false;
+    } finally {
+        if (myToken === weeklyPlanLoadToken) {
+            weeklyPlanEntreprisesLoadingMore = false;
+            updateWeeklyPlanEntreprisesLoadMoreUi();
+        }
+    }
+}
+
+/**
+ * Affiche la liste des entreprises (étape 1 plan hebdo).
+ * @param {boolean} reset
+ */
+function displayWeeklyPlanEntreprises(reset) {
+    var container = document.getElementById('weekly-plan-entreprises-selector');
+    var countEl = document.getElementById('weekly-plan-step1-results-count');
+    if (!container) return;
+
+    var list = weeklyPlanEntreprisesData || [];
+    var withEmailCount = countWeeklyPlanEntreprisesWithEmail();
+    var groupeTotal = weeklyPlanGroupeMemberCount || weeklyPlanEntreprisesTotal || list.length;
+
+    if (!list.length) {
+        if (reset !== false) {
+            container.innerHTML = '<div class="empty-state"><p>Aucune entreprise dans ce groupe.</p></div>';
+        }
+        if (countEl) countEl.style.display = 'none';
+        updateWeeklyPlanEntreprisesLoadMoreUi();
+        return;
+    }
+
+    if (countEl) {
+        countEl.textContent = withEmailCount + ' avec email exploitable sur ' + groupeTotal + ' dans le groupe';
+        countEl.style.display = 'block';
+    }
+
+    container.innerHTML = list.map(function(ent) {
+        var nb = (ent.emails && ent.emails.length) || 0;
+        var hasEmail = nb > 0;
+        var checked = weeklyPlanSelectedEntrepriseIds.indexOf(ent.id) !== -1;
+        var noEmailClass = hasEmail ? '' : ' is-no-email';
+        var cardClick = hasEmail ? (' onclick="weeklyPlanToggleEntrepriseByCard(event, ' + ent.id + ')"') : '';
+        return '<div class="entreprise-item step1-ent-item step1-card-clickable' + noEmailClass + (checked && hasEmail ? ' selected' : '') + '" data-entreprise-id="' + ent.id + '"' + cardClick + '>' +
+            '<div class="entreprise-header">' +
+            '<div><div class="entreprise-name">' + escapeHtml(ent.nom) + '</div>' +
+            (ent.secteur ? '<div class="entreprise-secteur">' + escapeHtml(ent.secteur) + '</div>' : '') +
+            '<div class="entreprise-email-count">' + (hasEmail ? (nb + ' email(s)') : 'Aucun email exploitable') + '</div>' +
+            '</div>' +
+            '<div class="checkbox-wrapper">' +
+            '<input type="checkbox" id="wp-ent-' + ent.id + '" ' + (checked && hasEmail ? 'checked ' : '') + (hasEmail ? '' : 'disabled ') + 'onchange="weeklyPlanToggleEntreprise(' + ent.id + ', this.checked)">' +
+            '<label for="wp-ent-' + ent.id + '">' + (hasEmail ? 'Sélectionner' : 'Indisponible') + '</label>' +
+            '</div></div></div>';
+    }).join('');
+    updateWeeklyPlanEntreprisesLoadMoreUi();
+}
+
+/**
+ * Affiche les emails des entreprises sélectionnées (plan hebdo).
+ */
+function displayWeeklyPlanRecipients() {
+    var source = (weeklyPlanEntreprisesData || []).filter(function(e) {
+        return weeklyPlanSelectedEntrepriseIds.indexOf(e.id) !== -1 && e.emails && e.emails.length;
+    });
+    weeklyPlanDisplayedEntreprisesData = source;
+    var container = document.getElementById('weekly-plan-recipients-selector');
+    var countEl = document.getElementById('weekly-plan-ciblage-results-count');
+    if (!container) return;
+
+    if (!weeklyPlanDisplayedEntreprisesData.length) {
+        container.innerHTML = '<div class="empty-state"><p>Sélectionne des entreprises pour afficher leurs emails.</p></div>';
+        if (countEl) countEl.style.display = 'none';
+        updateWeeklyPlanSelectedCount();
+        return;
+    }
+
+    var totalEmails = weeklyPlanDisplayedEntreprisesData.reduce(function(sum, e) {
+        return sum + (e.emails && e.emails.length);
+    }, 0);
+    if (countEl) {
+        countEl.textContent = weeklyPlanDisplayedEntreprisesData.length + ' entreprise(s), ' + totalEmails + ' email(s)';
+        countEl.style.display = 'block';
+    }
+
+    container.innerHTML = weeklyPlanDisplayedEntreprisesData.map(function(entreprise) {
+        var emails = entreprise.emails || [];
+        if (!emails.length) return '';
+        return '<div class="entreprise-item step2-card-clickable" data-entreprise-id="' + entreprise.id + '">' +
+            '<div class="entreprise-header">' +
+            '<div><div class="entreprise-name">' + escapeHtml(entreprise.nom) + '</div>' +
+            (entreprise.secteur ? '<div class="entreprise-secteur">' + escapeHtml(entreprise.secteur) + '</div>' : '') +
+            '</div>' +
+            '<div class="checkbox-wrapper">' +
+            '<input type="checkbox" id="wp-entreprise-' + entreprise.id + '" onchange="weeklyPlanToggleEntrepriseEmails(' + entreprise.id + ', this.checked)">' +
+            '<label for="wp-entreprise-' + entreprise.id + '">Tout sélectionner</label>' +
+            '</div></div>' +
+            '<div class="emails-list">' +
+            emails.map(function(email, idx) {
+                var isSelected = weeklyPlanSelectedRecipients.some(function(r) {
+                    return r.email === email.email && r.entreprise_id === entreprise.id;
+                });
+                var principalBadge = email.is_principal ? '<span class="email-badge-principal">Principal</span>' : '';
+                return '<div class="email-item email-row-clickable" onclick="weeklyPlanToggleEmailByRow(event, ' + entreprise.id + ', ' + idx + ')">' +
+                    '<input type="checkbox" id="wp-email-' + entreprise.id + '-' + idx + '" ' + (isSelected ? 'checked ' : '') +
+                    'onchange="weeklyPlanToggleEmail(' + entreprise.id + ', ' + idx + ', this.checked)">' +
+                    '<span class="email-address">' + escapeHtml(email.email) + '</span>' +
+                    principalBadge +
+                    (email.nom && email.nom !== 'N/A' ? '<span> (' + escapeHtml(email.nom) + ')</span>' : '') +
+                    '</div>';
+            }).join('') +
+            '</div></div>';
+    }).filter(Boolean).join('');
+
+    weeklyPlanDisplayedEntreprisesData.forEach(function(ent) {
+        weeklyPlanSyncEntrepriseHeaderCheckbox(ent.id);
+    });
+    updateWeeklyPlanSelectedCount();
+}
+
+function weeklyPlanToggleEntrepriseByCard(event, entrepriseId) {
+    if (event.target.closest('input[type="checkbox"]') || event.target.closest('label')) return;
+    var cb = document.getElementById('wp-ent-' + entrepriseId);
+    if (!cb) return;
+    cb.checked = !cb.checked;
+    weeklyPlanToggleEntreprise(entrepriseId, cb.checked);
+}
+
+function weeklyPlanToggleEntreprise(entrepriseId, checked) {
+    var idx = weeklyPlanSelectedEntrepriseIds.indexOf(entrepriseId);
+    if (checked && idx === -1) weeklyPlanSelectedEntrepriseIds.push(entrepriseId);
+    if (!checked && idx !== -1) weeklyPlanSelectedEntrepriseIds.splice(idx, 1);
+    var item = document.querySelector('#weekly-plan-entreprises-selector .step1-ent-item[data-entreprise-id="' + entrepriseId + '"]');
+    if (item) item.classList.toggle('selected', checked);
+    if (!checked) {
+        weeklyPlanSelectedRecipients = weeklyPlanSelectedRecipients.filter(function(r) {
+            return r.entreprise_id !== entrepriseId;
+        });
+    }
+    displayWeeklyPlanRecipients();
+}
+
+function weeklyPlanToggleEmailByRow(event, entrepriseId, emailIdx) {
+    if (event.target.closest('input[type="checkbox"]')) return;
+    var cb = document.getElementById('wp-email-' + entrepriseId + '-' + emailIdx);
+    if (!cb) return;
+    cb.checked = !cb.checked;
+    weeklyPlanToggleEmail(entrepriseId, emailIdx, cb.checked);
+}
+
+function weeklyPlanToggleEmail(entrepriseId, emailIdx, checked) {
+    var entreprise = weeklyPlanDisplayedEntreprisesData.find(function(e) { return e.id === entrepriseId; });
+    if (!entreprise || !entreprise.emails[emailIdx]) return;
+    var email = entreprise.emails[emailIdx];
+    if (checked) {
+        var nomDest = (email.nom && email.nom !== 'N/A' && String(email.nom).trim())
+            ? email.nom
+            : (entreprise.responsable && String(entreprise.responsable).trim()) ? entreprise.responsable : null;
+        if (!weeklyPlanSelectedRecipients.find(function(r) {
+            return r.email === email.email && r.entreprise_id === entrepriseId;
+        })) {
+            weeklyPlanSelectedRecipients.push({
+                email: email.email,
+                nom: nomDest,
+                entreprise: entreprise.nom,
+                entreprise_id: entrepriseId,
+            });
+        }
+    } else {
+        weeklyPlanSelectedRecipients = weeklyPlanSelectedRecipients.filter(function(r) {
+            return !(r.email === email.email && r.entreprise_id === entrepriseId);
+        });
+    }
+    weeklyPlanSyncEntrepriseHeaderCheckbox(entrepriseId);
+    updateWeeklyPlanSelectedCount();
+}
+
+function weeklyPlanToggleEntrepriseEmails(entrepriseId, checked) {
+    var entreprise = weeklyPlanDisplayedEntreprisesData.find(function(e) { return e.id === entrepriseId; });
+    if (!entreprise) return;
+    (entreprise.emails || []).forEach(function(email, idx) {
+        var cb = document.getElementById('wp-email-' + entrepriseId + '-' + idx);
+        if (cb && cb.checked !== checked) {
+            cb.checked = checked;
+            weeklyPlanToggleEmail(entrepriseId, idx, checked);
+        }
+    });
+}
+
+function weeklyPlanSyncEntrepriseHeaderCheckbox(entrepriseId) {
+    var headerCb = document.getElementById('wp-entreprise-' + entrepriseId);
+    if (!headerCb) return;
+    var entreprise = weeklyPlanDisplayedEntreprisesData.find(function(e) { return e.id === entrepriseId; });
+    if (!entreprise) return;
+    var emails = entreprise.emails || [];
+    var allChecked = emails.every(function(email, idx) {
+        var cb = document.getElementById('wp-email-' + entrepriseId + '-' + idx);
+        return cb && cb.checked;
+    });
+    headerCb.checked = allChecked && emails.length > 0;
+}
+
+function updateWeeklyPlanSelectedCount() {
+    var countDiv = document.getElementById('weekly-plan-selected-count');
+    var count = weeklyPlanSelectedRecipients.length;
+    if (countDiv) {
+        if (count > 0) {
+            countDiv.style.display = 'flex';
+            var textEl = countDiv.querySelector('.weekly-plan-selection-banner-text');
+            if (textEl) {
+                textEl.textContent = count + ' destinataire(s) sélectionné(s)';
+            }
+        } else {
+            countDiv.style.display = 'none';
+        }
+    }
+    updateWeeklyPlanRecipientsPreview();
+}
+
+function getWeeklyPlanGroupeMemberCount(groupeId) {
+    if (!groupeId) return 0;
+    var fromList = (groupesCiblage || []).find(function(g) { return Number(g.id) === Number(groupeId); });
+    if (fromList && fromList.entreprises_count != null) {
+        return Number(fromList.entreprises_count) || 0;
+    }
+    var select = document.getElementById('weekly-plan-groupe');
+    if (select && select.selectedIndex > 0) {
+        var opt = select.options[select.selectedIndex];
+        var m = (opt.textContent || '').match(/\((\d+)\s+entreprises?\)/i);
+        if (m) return parseInt(m[1], 10);
+    }
+    return 0;
+}
+
+function updateWeeklyPlanRecipientsPreview() {
+    var preview = document.getElementById('weekly-plan-recipients-preview');
+    if (!preview) return;
+    if (!weeklyPlanCurrentGroupeId) {
+        preview.hidden = true;
+        preview.textContent = '';
+        return;
+    }
+    var entCount = weeklyPlanSelectedEntrepriseIds.length;
+    var emailCount = weeklyPlanSelectedRecipients.length;
+    var groupeTotal = weeklyPlanGroupeMemberCount || weeklyPlanEntreprisesTotal || 0;
+    var withEmail = countWeeklyPlanEntreprisesWithEmail();
+    var parts = [
+        groupeTotal ? (groupeTotal + ' dans le groupe') : null,
+        withEmail ? (withEmail + ' avec email exploitable') : null,
+        entCount + ' retenue(s)',
+        emailCount + ' email(s) sélectionné(s)',
+    ].filter(Boolean);
+    preview.textContent = parts.join(' · ') + '.';
+    preview.hidden = false;
+    weeklyPlanRecipientsPreview = {
+        groupeId: weeklyPlanCurrentGroupeId,
+        entreprises: entCount,
+        emails: emailCount,
+    };
+}
+
+function weeklyPlanEntreprisesQuickSelect(mode) {
+    var container = document.getElementById('weekly-plan-entreprises-selector');
+    if (!container) return;
+    var items = container.querySelectorAll('.step1-ent-item[data-entreprise-id]');
+    items.forEach(function(item) {
+        var entrepriseId = parseInt(item.getAttribute('data-entreprise-id'), 10);
+        if (!entrepriseId) return;
+        var cb = document.getElementById('wp-ent-' + entrepriseId);
+        if (!cb || cb.disabled) return;
+        var newChecked = mode === 'all' ? true : (mode === 'none' ? false : !cb.checked);
+        cb.checked = newChecked;
+        weeklyPlanToggleEntreprise(entrepriseId, newChecked);
+    });
+}
+
+function weeklyPlanRecipientsQuickSelect(mode) {
+    if (!weeklyPlanDisplayedEntreprisesData.length) return;
+    if (mode === 'all' || mode === 'none') {
+        var checked = mode === 'all';
+        weeklyPlanDisplayedEntreprisesData.forEach(function(ent) {
+            weeklyPlanToggleEntrepriseEmails(ent.id, checked);
+        });
+    } else if (mode === 'invert') {
+        weeklyPlanDisplayedEntreprisesData.forEach(function(ent) {
+            (ent.emails || []).forEach(function(email, idx) {
+                var cb = document.getElementById('wp-email-' + ent.id + '-' + idx);
+                if (!cb) return;
+                cb.checked = !cb.checked;
+                weeklyPlanToggleEmail(ent.id, idx, cb.checked);
+            });
+        });
+    } else if (mode === 'principal') {
+        weeklyPlanDisplayedEntreprisesData.forEach(function(ent) {
+            (ent.emails || []).forEach(function(email, idx) {
+                var cb = document.getElementById('wp-email-' + ent.id + '-' + idx);
+                if (!cb) return;
+                var shouldCheck = !!email.is_principal;
+                if (cb.checked !== shouldCheck) {
+                    cb.checked = shouldCheck;
+                    weeklyPlanToggleEmail(ent.id, idx, shouldCheck);
+                }
+            });
+            weeklyPlanSyncEntrepriseHeaderCheckbox(ent.id);
+        });
+    }
+    updateWeeklyPlanSelectedCount();
+}
+
+/**
+ * Valide les créneaux avant de passer au récap (sans soumettre).
+ * @returns {boolean}
+ */
+function validateWeeklyPlanSlotsForStep() {
+    var container = document.getElementById('weekly-plan-slots');
+    if (!container) return false;
+    var activeCount = 0;
+    var hasError = false;
+    container.querySelectorAll('.weekly-plan-slot').forEach(function(slotEl) {
+        var enabledCb = slotEl.querySelector('.weekly-plan-slot-enabled');
+        if (!enabledCb || !enabledCb.checked) return;
+        activeCount += 1;
+        var templateSel = slotEl.querySelector('.weekly-plan-template');
+        var dateInput = slotEl.querySelector('.weekly-plan-date');
+        var timeInput = slotEl.querySelector('.weekly-plan-time');
+        if (!templateSel || !templateSel.value) hasError = true;
+        if (!dateInput || !dateInput.value || !timeInput || !timeInput.value) hasError = true;
+    });
+    if (activeCount === 0) {
+        alert('Active au moins un créneau avec un modèle.');
+        return false;
+    }
+    if (hasError) {
+        alert('Chaque créneau actif doit avoir un modèle, une date et une heure.');
+        return false;
+    }
+    return true;
+}
+
+/**
+ * Construit le HTML du récapitulatif (étape 3).
+ */
+function renderWeeklyPlanRecap() {
+    var recapEl = document.getElementById('weekly-plan-recap');
+    if (!recapEl) return;
+
+    var groupeSelect = document.getElementById('weekly-plan-groupe');
+    var groupeLabel = groupeSelect && groupeSelect.selectedIndex > 0
+        ? groupeSelect.options[groupeSelect.selectedIndex].textContent
+        : '—';
+    var nomInput = document.getElementById('weekly-plan-nom');
+    var nom = nomInput ? (nomInput.value || '').trim() : '';
+    var delayInput = document.getElementById('weekly-plan-delay');
+    var rotationSelect = document.getElementById('weekly-plan-rotation');
+    var recurrenceCb = document.getElementById('weekly-plan-recurrence');
+
+    var slotsHtml = '';
+    var container = document.getElementById('weekly-plan-slots');
+    if (container) {
+        container.querySelectorAll('.weekly-plan-slot').forEach(function(slotEl) {
+            var enabledCb = slotEl.querySelector('.weekly-plan-slot-enabled');
+            if (!enabledCb || !enabledCb.checked) return;
+            var labelEl = slotEl.querySelector('.weekly-plan-slot-label');
+            var templateSel = slotEl.querySelector('.weekly-plan-template');
+            var dateInput = slotEl.querySelector('.weekly-plan-date');
+            var timeInput = slotEl.querySelector('.weekly-plan-time');
+            var tplName = '';
+            if (templateSel && templateSel.value) {
+                var tpl = (templatesData || []).find(function(t) { return t.id === templateSel.value; });
+                tplName = tpl ? (tpl.name || templateSel.value) : templateSel.value;
+            }
+            var dateFr = dateInput && dateInput.value ? formatScheduledDateFrParis(dateInput.value, timeInput ? timeInput.value : '') : '';
+            slotsHtml += '<li><strong>' + escapeHtml(labelEl ? labelEl.textContent : 'Créneau') + '</strong> — ' +
+                escapeHtml(tplName) + (dateFr ? ' (' + escapeHtml(dateFr) + ')' : '') + '</li>';
+        });
+    }
+    if (!slotsHtml) slotsHtml = '<li>Aucun créneau actif</li>';
+
+    var rotationLabel = rotationSelect && rotationSelect.value === 'split'
+        ? 'Rotation A/B/C/D entre les créneaux'
+        : 'Tous les modèles → tous les destinataires';
+
+    recapEl.innerHTML =
+        '<div class="weekly-plan-recap-block">' +
+        '<div class="weekly-plan-recap-block-header">' +
+        '<i class="fa-solid fa-users" aria-hidden="true"></i>' +
+        '<h3>Destinataires</h3>' +
+        '<span class="weekly-plan-recap-badge">' + weeklyPlanSelectedRecipients.length + ' emails</span>' +
+        '</div>' +
+        '<p><strong>Groupe :</strong> ' + escapeHtml(groupeLabel) + '</p>' +
+        '<p><strong>' + weeklyPlanSelectedRecipients.length + '</strong> email(s) pour ' +
+        '<strong>' + weeklyPlanSelectedEntrepriseIds.length + '</strong> entreprise(s).</p>' +
+        '</div>' +
+        '<div class="weekly-plan-recap-block">' +
+        '<div class="weekly-plan-recap-block-header">' +
+        '<i class="fa-solid fa-calendar-week" aria-hidden="true"></i>' +
+        '<h3>Planification</h3>' +
+        '</div>' +
+        (nom ? '<p><strong>Nom :</strong> ' + escapeHtml(nom) + '</p>' : '') +
+        '<p id="weekly-plan-week-hint-recap" class="weekly-plan-week-hint"></p>' +
+        '<ul class="weekly-plan-recap-slots">' + slotsHtml + '</ul>' +
+        '</div>' +
+        '<div class="weekly-plan-recap-block">' +
+        '<div class="weekly-plan-recap-block-header">' +
+        '<i class="fa-solid fa-sliders" aria-hidden="true"></i>' +
+        '<h3>Options</h3>' +
+        '</div>' +
+        '<p>Délai entre envois : <strong>' + (delayInput ? (parseInt(delayInput.value, 10) || 2) : 2) + ' s</strong></p>' +
+        '<p>Répartition : <strong>' + escapeHtml(rotationLabel) + '</strong></p>' +
+        '<p>Récurrence hebdo : <strong>' + (recurrenceCb && recurrenceCb.checked ? 'Oui' : 'Non') + '</strong></p>' +
+        '</div>';
+
+    var weekHintRecap = document.getElementById('weekly-plan-week-hint-recap');
+    var weekHint = document.getElementById('weekly-plan-week-hint');
+    if (weekHintRecap && weekHint) weekHintRecap.textContent = weekHint.textContent;
+}
+
+/**
+ * Formate une date/heure locale Paris pour affichage récap.
+ * @param {string} dateVal
+ * @param {string} timeVal
+ * @returns {string}
+ */
+function formatScheduledDateFrParis(dateVal, timeVal) {
+    if (!dateVal) return '';
+    var parts = dateVal.split('-');
+    if (parts.length !== 3) return dateVal;
+    var time = timeVal || '00:00';
+    return parts[2] + '/' + parts[1] + '/' + parts[0] + ' ' + time;
+}
+
+function initWeeklyPlanFilterListeners() {
+    ['weekly-plan-filter-principal-only', 'weekly-plan-filter-exclude-placeholders', 'weekly-plan-filter-exclude-risky'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('change', function() {
+            if (weeklyPlanCurrentGroupeId) {
+                loadWeeklyPlanEntreprises({ reset: true });
+            }
+        });
+    });
+    var loadMoreBtn = document.getElementById('weekly-plan-entreprises-load-more-btn');
+    if (loadMoreBtn) {
+        loadMoreBtn.addEventListener('click', function() {
+            if (weeklyPlanEntreprisesHasMore && !weeklyPlanEntreprisesLoadingMore) {
+                loadWeeklyPlanEntreprises({ reset: false });
+            }
+        });
+    }
+}
 
 function getWeeklyPlanWeekBounds(weekMonday) {
     var monday = weekMonday || getNextWeekMonday();
@@ -3679,7 +4762,7 @@ function updateWeeklyPlanSlotLabel(slotEl) {
 function updateWeeklyPlanWeekHint(bounds) {
     var hint = document.getElementById('weekly-plan-week-hint');
     if (!hint || !bounds) return;
-    hint.textContent = 'Semaine du ' + bounds.min.split('-').reverse().join('/') + ' au ' + bounds.max.split('-').reverse().join('/');
+    hint.textContent = 'Semaine du ' + formatDateParisShort(bounds.min) + ' au ' + formatDateParisShort(bounds.max) + ' (Europe/Paris)';
 }
 
 function onWeeklyPlanDateChange(ev) {
@@ -3692,11 +4775,16 @@ function onWeeklyPlanDateChange(ev) {
         input.value = clamped;
     }
     updateWeeklyPlanSlotLabel(slotEl);
+    var dateGroup = input ? input.closest('.md-datetime-field') : null;
+    if (dateGroup) updateDatetimeCaption(dateGroup, input.value, '');
 }
 
 function onWeeklyPlanTimeChange(ev) {
     var slotEl = ev.target.closest('.weekly-plan-slot');
+    var timeInput = ev.target;
     updateWeeklyPlanSlotLabel(slotEl);
+    var timeGroup = timeInput ? timeInput.closest('.md-datetime-field') : null;
+    if (timeGroup) updateDatetimeCaption(timeGroup, '', timeInput.value);
 }
 
 function initWeeklyPlanModalDismiss() {
@@ -3726,11 +4814,60 @@ function initWeeklyPlanModalDismiss() {
     });
 }
 
+function updateWeeklyPlanModalTitle() {
+    var title = document.getElementById('weekly-plan-modal-title');
+    var nomInput = document.getElementById('weekly-plan-nom');
+    if (!title) return;
+    var nom = nomInput ? (nomInput.value || '').trim() : '';
+    title.textContent = nom ? ('Planifier : ' + nom) : 'Planifier la semaine';
+}
+
+/**
+ * Propose un nom indicatif pour le plan (groupe + semaine) si l'utilisateur ne l'a pas saisi.
+ */
+function suggestWeeklyPlanNom() {
+    if (weeklyPlanNomTouched) {
+        updateWeeklyPlanModalTitle();
+        return;
+    }
+    var nomInput = document.getElementById('weekly-plan-nom');
+    var groupeSelect = document.getElementById('weekly-plan-groupe');
+    if (!nomInput) return;
+
+    var groupeNom = '';
+    if (groupeSelect && groupeSelect.value) {
+        var opt = groupeSelect.options[groupeSelect.selectedIndex];
+        groupeNom = (opt.textContent || '').replace(/\s*\(\d+\s+entreprises?\)\s*$/i, '').trim();
+    }
+
+    var weekPart = '';
+    if (weeklyPlanWeekMonday) {
+        var bounds = getWeeklyPlanWeekBounds(weeklyPlanWeekMonday);
+        if (bounds && bounds.min && bounds.max) {
+            weekPart = formatDateParisShort(bounds.min) + '–' + formatDateParisShort(bounds.max);
+        }
+    }
+
+    var bits = ['Plan semaine'];
+    if (groupeNom) bits.push(groupeNom);
+    if (weekPart) bits.push(weekPart);
+    nomInput.value = bits.join(' — ');
+    updateWeeklyPlanModalTitle();
+}
+
 function initWeeklyPlanModal() {
     var groupeSelect = document.getElementById('weekly-plan-groupe');
     if (groupeSelect) {
         groupeSelect.addEventListener('change', onWeeklyPlanGroupeChange);
     }
+    var nomInput = document.getElementById('weekly-plan-nom');
+    if (nomInput) {
+        nomInput.addEventListener('input', function() {
+            weeklyPlanNomTouched = true;
+            updateWeeklyPlanModalTitle();
+        });
+    }
+    initWeeklyPlanFilterListeners();
     var refreshBtn = document.getElementById('weekly-plans-calendar-refresh');
     if (refreshBtn) {
         refreshBtn.addEventListener('click', function() { loadWeeklyPlansCalendar(); });
@@ -3790,10 +4927,10 @@ async function loadWeeklyPlansCalendar() {
                 dayEvents.forEach(function(ev) {
                     var time = new Date(ev.scheduled_at);
                     var timeStr = String(time.getHours()).padStart(2, '0') + ':' + String(time.getMinutes()).padStart(2, '0');
-                    html += '<div class="weekly-calendar-event" title="' + escapeHtml(ev.plan_nom || '') + '">' +
+                    html += '<div class="weekly-calendar-event" title="' + escapeHtml(ev.campagne_nom || ev.plan_nom || '') + '">' +
                         '<span class="weekly-calendar-event-time">' + timeStr + '</span> ' +
-                        '<span class="weekly-calendar-event-name">' + escapeHtml(ev.campagne_nom || ev.template_id || 'Campagne') + '</span>' +
-                        '<span class="weekly-calendar-event-meta">' + escapeHtml(ev.groupe_nom || '') + '</span>' +
+                        '<span class="weekly-calendar-event-name">' + escapeHtml(ev.plan_nom || ev.campagne_nom || ev.template_id || 'Campagne') + '</span>' +
+                        '<span class="weekly-calendar-event-meta">' + escapeHtml(ev.campagne_nom && ev.plan_nom && ev.campagne_nom !== ev.plan_nom ? ev.campagne_nom : (ev.groupe_nom || '')) + '</span>' +
                         '</div>';
                 });
             }
@@ -3903,10 +5040,7 @@ function renderWeeklyPlanSlots() {
     var bounds = getWeeklyPlanWeekBounds(weeklyPlanWeekMonday);
     updateWeeklyPlanWeekHint(bounds);
 
-    var templateOptions = '<option value="">Choisir un modèle...</option>';
-    (templatesData || []).forEach(function(tpl) {
-        templateOptions += '<option value="' + escapeHtml(tpl.id) + '">' + escapeHtml(tpl.name || tpl.id) + '</option>';
-    });
+    var templateOptions = buildTemplateOptionsHtml('', 'Choisir un modèle...');
 
     container.innerHTML = WEEKLY_PLAN_SLOT_DEFAULTS.map(function(slot, idx) {
         var slotDate = getDateForWeekday(weeklyPlanWeekMonday, slot.weekday);
@@ -3924,18 +5058,27 @@ function renderWeeklyPlanSlots() {
             '</label>' +
             '</div>' +
             '<div class="weekly-plan-slot-fields">' +
-            '<div class="form-group">' +
+            '<div class="form-group md-field md-field--select md-template-select-field">' +
             '<label>Modèle</label>' +
-            '<select class="weekly-plan-template" data-slot="' + idx + '" ' + (slot.enabled ? '' : 'disabled') + '>' + templateOptions + '</select>' +
+            '<div class="md-field-control md-field-control--select">' +
+            '<select class="weekly-plan-template md-select md-select--grouped" data-slot="' + idx + '" ' + (slot.enabled ? '' : 'disabled') + '>' + templateOptions + '</select>' +
+            '</div>' +
+            '<span class="md-select-hint md-template-caption">Choisir un modèle dans la liste</span>' +
             '</div>' +
             '<div class="weekly-plan-slot-datetime">' +
-            '<div class="form-group">' +
+            '<div class="form-group md-datetime-field">' +
             '<label>Date</label>' +
-            '<input type="date" class="weekly-plan-date" data-slot="' + idx + '" value="' + dateVal + '" min="' + bounds.min + '" max="' + bounds.max + '" ' + (slot.enabled ? '' : 'disabled') + '>' +
+            '<div class="md-field-control md-field-control--datetime">' +
+            '<input type="date" lang="fr-FR" class="weekly-plan-date md-input md-input--datetime" data-slot="' + idx + '" value="' + dateVal + '" min="' + bounds.min + '" max="' + bounds.max + '" ' + (slot.enabled ? '' : 'disabled') + '>' +
             '</div>' +
-            '<div class="form-group">' +
+            '<span class="md-datetime-caption">' + escapeHtml(formatDateParisShort(dateVal)) + '</span>' +
+            '</div>' +
+            '<div class="form-group md-datetime-field">' +
             '<label>Heure</label>' +
-            '<input type="time" class="weekly-plan-time" data-slot="' + idx + '" value="' + timeVal + '" min="07:00" max="19:00" step="300" ' + (slot.enabled ? '' : 'disabled') + '>' +
+            '<div class="md-field-control md-field-control--datetime">' +
+            '<input type="time" lang="fr-FR" class="weekly-plan-time md-input md-input--datetime" data-slot="' + idx + '" value="' + timeVal + '" min="07:00" max="19:00" step="300" ' + (slot.enabled ? '' : 'disabled') + '>' +
+            '</div>' +
+            '<span class="md-datetime-caption">' + escapeHtml(formatTimeParisDisplay(timeVal)) + '</span>' +
             '</div>' +
             '</div>' +
             '</div>' +
@@ -3965,6 +5108,7 @@ function renderWeeklyPlanSlots() {
 
     container.querySelectorAll('.weekly-plan-template').forEach(function(sel) {
         sel.addEventListener('change', function() {
+            refreshWeeklyPlanTemplateCaption(sel);
             var tpl = (templatesData || []).find(function(t) { return t.id === sel.value; });
             if (!tpl) return;
             var slotEl = sel.closest('.weekly-plan-slot');
@@ -3976,7 +5120,10 @@ function renderWeeklyPlanSlots() {
                 });
             }
         });
+        refreshWeeklyPlanTemplateCaption(sel);
     });
+
+    suggestWeeklyPlanNom();
 }
 
 async function populateWeeklyPlanGroupes() {
@@ -4004,46 +5151,29 @@ async function populateWeeklyPlanGroupes() {
 async function onWeeklyPlanGroupeChange() {
     var select = document.getElementById('weekly-plan-groupe');
     var preview = document.getElementById('weekly-plan-recipients-preview');
-    if (!select || !preview) return;
+    if (!select) return;
     var groupeId = parseInt(select.value, 10);
+    weeklyPlanCurrentGroupeId = groupeId || null;
+    weeklyPlanGroupeMemberCount = groupeId ? getWeeklyPlanGroupeMemberCount(groupeId) : 0;
+    weeklyPlanEntreprisesData = [];
+    weeklyPlanSelectedEntrepriseIds = [];
+    weeklyPlanSelectedRecipients = [];
     if (!groupeId) {
-        preview.textContent = '';
+        if (preview) {
+            preview.hidden = true;
+            preview.textContent = '';
+        }
         weeklyPlanRecipientsPreview = null;
+        var entContainer = document.getElementById('weekly-plan-entreprises-selector');
+        if (entContainer) entContainer.innerHTML = '<div class="empty-state"><p>Choisis un groupe pour charger les entreprises.</p></div>';
+        var recContainer = document.getElementById('weekly-plan-recipients-selector');
+        if (recContainer) recContainer.innerHTML = '<div class="empty-state"><p>Sélectionne des entreprises pour afficher leurs emails.</p></div>';
+        updateWeeklyPlanSelectedCount();
         return;
     }
-    preview.textContent = 'Chargement des destinataires...';
-    try {
-        var params = new URLSearchParams({
-            groupe_ids: String(groupeId),
-            principal_only: '1',
-            exclude_risky: '1',
-            exclude_placeholders: '1',
-            page_size: '200',
-            page: '1',
-        });
-        var totalEnt = 0;
-        var totalEmails = 0;
-        var page = 1;
-        while (true) {
-            params.set('page', String(page));
-            var res = await fetch('/api/ciblage/entreprises?' + params.toString());
-            var data = await res.json();
-            var items = data.items || data || [];
-            if (!Array.isArray(items)) break;
-            totalEnt += items.length;
-            items.forEach(function(ent) {
-                totalEmails += (ent.emails && ent.emails.length) || 0;
-            });
-            var total = data.total || totalEnt;
-            if (page * (data.page_size || 200) >= total || items.length === 0) break;
-            page += 1;
-        }
-        weeklyPlanRecipientsPreview = { groupeId: groupeId, entreprises: totalEnt, emails: totalEmails };
-        preview.textContent = totalEnt + ' entreprise(s), ~' + totalEmails + ' email(s) principal(aux) — les filtres serveur s\'appliquent à la création.';
-    } catch (e) {
-        preview.textContent = 'Impossible de prévisualiser les destinataires.';
-        weeklyPlanRecipientsPreview = null;
-    }
+    if (preview) preview.textContent = 'Chargement des entreprises du groupe...';
+    await loadWeeklyPlanEntreprises({ reset: true });
+    suggestWeeklyPlanNom();
 }
 
 function openWeeklyPlanModal() {
@@ -4051,17 +5181,40 @@ function openWeeklyPlanModal() {
     if (!modal) return;
 
     var form = document.getElementById('weekly-plan-form');
+    weeklyPlanLoadToken += 1;
+    weeklyPlanModalStep = 1;
+    weeklyPlanCurrentGroupeId = null;
+    weeklyPlanGroupeMemberCount = 0;
     if (form) form.reset();
+    weeklyPlanEntreprisesData = [];
+    weeklyPlanSelectedEntrepriseIds = [];
+    weeklyPlanSelectedRecipients = [];
+    weeklyPlanDisplayedEntreprisesData = [];
+    weeklyPlanRecipientsPreview = null;
+    weeklyPlanNomTouched = false;
 
     var preview = document.getElementById('weekly-plan-recipients-preview');
-    if (preview) preview.textContent = '';
-    weeklyPlanRecipientsPreview = null;
+    if (preview) {
+        preview.hidden = true;
+        preview.textContent = '';
+    }
+
+    var nomInput = document.getElementById('weekly-plan-nom');
+    if (nomInput) nomInput.value = '';
+    updateWeeklyPlanModalTitle();
 
     var delayInput = document.getElementById('weekly-plan-delay');
     if (delayInput) delayInput.value = '2';
 
     var recurrenceCb = document.getElementById('weekly-plan-recurrence');
     if (recurrenceCb) recurrenceCb.checked = true;
+
+    var entContainer = document.getElementById('weekly-plan-entreprises-selector');
+    if (entContainer) entContainer.innerHTML = '<div class="empty-state"><p>Choisis un groupe pour charger les entreprises.</p></div>';
+    var recContainer = document.getElementById('weekly-plan-recipients-selector');
+    if (recContainer) recContainer.innerHTML = '<div class="empty-state"><p>Sélectionne des entreprises pour afficher leurs emails.</p></div>';
+    updateWeeklyPlanSelectedCount();
+    showWeeklyPlanStep(1);
 
     function showModal() {
         renderWeeklyPlanSlots();
@@ -4086,6 +5239,11 @@ async function submitWeeklyPlan() {
     var groupeId = groupeSelect ? parseInt(groupeSelect.value, 10) : 0;
     if (!groupeId) {
         alert('Choisis un groupe.');
+        return;
+    }
+    if (!weeklyPlanSelectedRecipients.length) {
+        alert('Sélectionne au moins un destinataire.');
+        showWeeklyPlanStep(1);
         return;
     }
 
@@ -4124,8 +5282,8 @@ async function submitWeeklyPlan() {
             }
         }
         updateWeeklyPlanSlotLabel(slotEl);
-        var planned = new Date(dateVal + 'T' + timeVal);
-        if (planned.getTime() <= Date.now()) {
+        var plannedIso = wallClockParisToUtcIso(dateVal, timeVal);
+        if (!plannedIso || new Date(plannedIso).getTime() <= Date.now()) {
             slots.push({ enabled: true, error: 'past' });
             return;
         }
@@ -4133,7 +5291,7 @@ async function submitWeeklyPlan() {
         slots.push({
             enabled: true,
             template_id: templateId,
-            scheduled_at_iso: planned.toISOString(),
+            scheduled_at_iso: plannedIso,
             sujet: tpl ? (tpl.subject || '') : '',
         });
     });
@@ -4181,6 +5339,7 @@ async function submitWeeklyPlan() {
                 delay: delayInput ? (parseInt(delayInput.value, 10) || 2) : 2,
                 rotation_mode: rotationSelect ? rotationSelect.value : 'all',
                 recurrence_enabled: recurrenceCb ? recurrenceCb.checked : false,
+                recipients: weeklyPlanSelectedRecipients,
                 mail_account_id: (window.__MAIL_ACCOUNT_ID__ !== null && window.__MAIL_ACCOUNT_ID__ !== undefined)
                     ? window.__MAIL_ACCOUNT_ID__
                     : null,

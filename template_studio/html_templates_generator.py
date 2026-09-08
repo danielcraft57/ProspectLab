@@ -33,10 +33,11 @@ class HtmlTemplatesGenerator:
         self.get_html_content_by_id = get_html_content_by_id
 
     def build_html_template_record(self, spec: Dict[str, Any], content: str, now_iso: str) -> Dict[str, Any]:
+        category = spec.get("category") or "html_email"
         return {
             "id": spec["id"],
             "name": spec["name"],
-            "category": "html_email",
+            "category": category,
             "subject": spec["subject"],
             "content": content,
             "is_html": True,

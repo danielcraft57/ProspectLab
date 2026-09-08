@@ -4753,6 +4753,7 @@ class EntrepriseManager(DatabaseBase):
         principal_only=False,
         exclude_risky=False,
         max_emails_per_entreprise=None,
+        keep_without_email=False,
     ):
         """
         Groupe les lignes SQL campagne en entreprises + liste d'emails.
@@ -4765,6 +4766,7 @@ class EntrepriseManager(DatabaseBase):
         @param principal_only: Ne garder que l'email principal
         @param exclude_risky: Écarter gouv / SaaS / support (voir ``is_campaign_risky_email``)
         @param max_emails_per_entreprise: Plafond d'emails par entreprise (None = illimité)
+        @param keep_without_email: Conserver les entreprises sans email après filtres
         @returns: Liste d'entreprises {id, nom, secteur, responsable, emails}
         """
         from utils.email_quality import is_campaign_risky_email, is_placeholder_email
@@ -4795,8 +4797,6 @@ class EntrepriseManager(DatabaseBase):
                 continue
             if exclude_risky and is_campaign_risky_email(email_addr, source_for_quality):
                 continue
-            if principal_only and not is_principal:
-                continue
 
             email_nom = format_name(r.get('email_nom')) if not is_principal else (r.get('responsable') or 'Principal')
             emails_list = entreprises_dict[entreprise_id]['emails']
@@ -4822,6 +4822,27 @@ class EntrepriseManager(DatabaseBase):
                 'domain': domain,
             })
 
+        # Filtre « principal uniquement » : email_principal explicite, sinon meilleur scraper
+        if principal_only:
+            for ent in entreprises_dict.values():
+                emails = ent.get('emails') or []
+                if not emails:
+                    continue
+                principals = [em for em in emails if em.get('is_principal')]
+                if principals:
+                    ent['emails'] = principals
+                    continue
+                ranked = sorted(
+                    emails,
+                    key=lambda em: (
+                        0 if em.get('is_person') else 1,
+                        (em.get('email') or '').lower(),
+                    ),
+                )
+                best = dict(ranked[0])
+                best['is_principal'] = True
+                ent['emails'] = [best]
+
         # Plafond : prioriser principal puis personnes
         try:
             max_n = int(max_emails_per_entreprise) if max_emails_per_entreprise is not None else None
@@ -4842,8 +4863,39 @@ class EntrepriseManager(DatabaseBase):
                 )
                 ent['emails'] = ranked[:max_n]
 
-        # Entreprises sans aucun email après filtres : on les retire
+        # Entreprises sans aucun email après filtres
+        if keep_without_email:
+            return list(entreprises_dict.values())
         return [e for e in entreprises_dict.values() if e.get('emails')]
+
+    def _merge_campagne_empty_entreprises(self, items, entreprise_ids, meta_by_id):
+        """
+        Ajoute les entreprises sans email à la liste (mode plan hebdo / groupe complet).
+
+        @param items: Entreprises déjà groupées avec emails
+        @param entreprise_ids: IDs attendus sur la page
+        @param meta_by_id: Métadonnées entreprise par id
+        @returns: Liste complétée
+        """
+        seen = {int(e.get('id')) for e in (items or []) if e.get('id') is not None}
+        merged = list(items or [])
+        for eid in entreprise_ids or []:
+            try:
+                eid_int = int(eid)
+            except (TypeError, ValueError):
+                continue
+            if eid_int in seen:
+                continue
+            meta = meta_by_id.get(eid_int) or meta_by_id.get(eid) or {}
+            merged.append({
+                'id': eid_int,
+                'nom': meta.get('nom'),
+                'secteur': meta.get('secteur'),
+                'responsable': meta.get('responsable'),
+                'email_principal': (meta.get('email_principal') or '').strip() or None,
+                'emails': [],
+            })
+        return merged
 
     def get_entreprises_for_campagne(self, filters=None, limit=None, offset=0):
         """
@@ -4884,6 +4936,13 @@ class EntrepriseManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
 
+        include_without_email = bool(
+            filters.get('include_without_email')
+            and filters.get('groupe_ids')
+            and isinstance(filters.get('groupe_ids'), list)
+            and len(filters['groupe_ids']) > 0
+        )
+
         # Entreprises ayant au moins un email (scraper non bounce OU principal non bounce)
         bounce_email_sql = '''
             NOT EXISTS (
@@ -4893,36 +4952,36 @@ class EntrepriseManager(DatabaseBase):
                   AND LOWER(TRIM(ee.email)) = LOWER(TRIM({email_expr}))
             )
         '''
-        id_sql = f'''
-            SELECT e.id, e.nom, e.secteur, e.responsable, e.email_principal
-            FROM entreprises e
-            WHERE (
-                EXISTS (
-                    SELECT 1
-                    FROM scraper_emails se
-                    WHERE se.entreprise_id = e.id
-                      AND se.email IS NOT NULL AND TRIM(se.email) <> ''
-                      AND {bounce_email_sql.format(email_expr='se.email')}
+        if include_without_email:
+            id_sql = '''
+                SELECT e.id, e.nom, e.secteur, e.responsable, e.email_principal
+                FROM entreprises e
+                WHERE 1=1
+            '''
+        else:
+            id_sql = f'''
+                SELECT e.id, e.nom, e.secteur, e.responsable, e.email_principal
+                FROM entreprises e
+                WHERE (
+                    EXISTS (
+                        SELECT 1
+                        FROM scraper_emails se
+                        WHERE se.entreprise_id = e.id
+                          AND se.email IS NOT NULL AND TRIM(se.email) <> ''
+                          AND {bounce_email_sql.format(email_expr='se.email')}
+                    )
+                    OR (
+                        e.email_principal IS NOT NULL AND TRIM(e.email_principal) <> ''
+                        AND {bounce_email_sql.format(email_expr='e.email_principal')}
+                    )
                 )
-                OR (
-                    e.email_principal IS NOT NULL AND TRIM(e.email_principal) <> ''
-                    AND {bounce_email_sql.format(email_expr='e.email_principal')}
-                )
-            )
-        '''
+            '''
         params = []
         id_sql = self._append_campagne_entreprise_filters(id_sql, params, filters)
         id_sql += ' ORDER BY e.nom, e.id'
 
         self.execute_sql(cursor, id_sql, tuple(params) if params else None)
         id_rows = [dict(r) for r in cursor.fetchall()]
-
-        # Si principal_only : ne garder que celles avec un email_principal non bounce
-        if principal_only:
-            id_rows = [
-                r for r in id_rows
-                if (r.get('email_principal') or '').strip()
-            ]
 
         needs_full_scan = bool(
             filters.get('sort_commercial')
@@ -5001,7 +5060,10 @@ class EntrepriseManager(DatabaseBase):
                 principal_only=principal_only,
                 exclude_risky=exclude_risky,
                 max_emails_per_entreprise=max_emails_per_entreprise,
+                keep_without_email=include_without_email,
             )
+            if include_without_email:
+                items = self._merge_campagne_empty_entreprises(items, page_ids, meta_by_id)
             order_index = {eid: idx for idx, eid in enumerate(page_ids)}
             items.sort(key=lambda e: order_index.get(e['id'], 10**9))
             from utils.helpers import clean_json_dict
@@ -5021,7 +5083,10 @@ class EntrepriseManager(DatabaseBase):
             principal_only=principal_only,
             exclude_risky=exclude_risky,
             max_emails_per_entreprise=max_emails_per_entreprise,
+            keep_without_email=include_without_email,
         )
+        if include_without_email:
+            result = self._merge_campagne_empty_entreprises(result, all_ids, meta_by_id)
 
         # Réordonner selon l'ordre des id_rows (nom)
         order_index = {eid: idx for idx, eid in enumerate(all_ids)}

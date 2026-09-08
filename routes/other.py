@@ -8,7 +8,7 @@ from flask import Blueprint, render_template, request, jsonify, send_file, redir
 import time
 import os
 from services.email_sender import EmailSender
-from config import MAIL_DEFAULT_RECIPIENT
+from config import CAMPAIGN_REPORT_RECIPIENT
 from services.template_manager import TemplateManager
 from config import EXPORT_FOLDER
 from utils.template_helpers import render_page
@@ -520,6 +520,35 @@ def api_templates():
     return jsonify({'success': True, 'template': tpl}), 201
 
 
+@other_bp.route('/api/templates/preview', methods=['POST'])
+@login_required
+def api_template_preview():
+    """
+    API: Aperçu live d'un modèle avec variables de test.
+
+    Body JSON:
+        template_id (str, optionnel)
+        content (str, optionnel): contenu non sauvegardé
+        subject (str, optionnel)
+        nom, entreprise, email, website, secteur
+    """
+    data = request.get_json() or {}
+    try:
+        result = template_manager.preview_for_editor(
+            template_id=(data.get('template_id') or '').strip() or None,
+            content=data.get('content'),
+            subject=data.get('subject'),
+            nom=(data.get('nom') or '').strip(),
+            entreprise=(data.get('entreprise') or '').strip(),
+            email=(data.get('email') or '').strip(),
+            website=(data.get('website') or '').strip(),
+            secteur=(data.get('secteur') or '').strip(),
+        )
+        return jsonify({'success': True, **result})
+    except Exception as exc:
+        return jsonify({'error': str(exc)}), 500
+
+
 @other_bp.route('/api/templates/<template_id>', methods=['GET', 'PUT', 'DELETE'])
 @login_required
 def api_template_detail(template_id):
@@ -781,10 +810,11 @@ def api_list_campagnes():
             c['click_rate'] = 0.0
 
     from utils.campagne_metadata import enrich_campagne_from_params
+    from utils.helpers import clean_json_dict
     for c in campagnes or []:
         enrich_campagne_from_params(c)
 
-    return jsonify(campagnes)
+    return jsonify(clean_json_dict(campagnes))
 
 
 @other_bp.route('/api/campagnes', methods=['POST'])
@@ -960,7 +990,7 @@ def api_create_weekly_plan():
     from utils.email_subject import clean_email_subject
     from utils.weekly_plan_recipients import build_recipients_from_groupe
     from utils.campaign_exclusions import split_recipients_for_rotation
-    from utils.weekly_plan_service import build_slot_pattern_from_slots
+    from utils.weekly_plan_service import build_slot_pattern_from_slots, build_weekly_plan_campagne_nom, default_weekly_plan_nom
     from utils.campagne_metadata import build_campaign_params
     import json
 
@@ -1047,7 +1077,11 @@ def api_create_weekly_plan():
     if not validated_slots:
         return jsonify({'error': 'Aucun créneau actif avec modèle et date valides'}), 400
 
-    nom_plan = data.get('nom') or f"Plan semaine — {groupe.get('nom', 'Groupe')}"
+    nom_plan = (data.get('nom') or '').strip()
+    if not nom_plan:
+        week_start = validated_slots[0]['scheduled_at'][:10] if validated_slots else ''
+        week_end = validated_slots[-1]['scheduled_at'][:10] if validated_slots else ''
+        nom_plan = default_weekly_plan_nom(groupe.get('nom', 'Groupe'), week_start, week_end)
     plan_mgr = WeeklyPlanManager()
     campagne_mgr = CampagneManager()
 
@@ -1077,8 +1111,7 @@ def api_create_weekly_plan():
         if not slot_recipients:
             continue
         tpl_name = slot['template_name']
-        date_label = slot['scheduled_at'][:10]
-        campagne_nom = clean_email_subject(f"{tpl_name} — {groupe.get('nom', '')} — {date_label}") or nom_plan
+        campagne_nom = build_weekly_plan_campagne_nom(nom_plan, tpl_name, slot['scheduled_at'])
         campaign_params = build_campaign_params(
             recipients=slot_recipients,
             template_id=slot['template_id'],
@@ -1438,7 +1471,7 @@ def api_send_campagne_report_email(campagne_id):
     API: Envoie par email le rapport détaillé d'une campagne
     (statistiques globales + tableau des contacts).
 
-    L'email est envoyé à contact@danielcraft.fr.
+    L'email est envoyé à CAMPAIGN_REPORT_RECIPIENT.
 
     Returns:
         JSON: {'success': bool, 'message': str}
@@ -1480,14 +1513,22 @@ def api_send_campagne_report_email(campagne_id):
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     report_generated_at = _format_dt(now_str)
 
-    # Sujet d'email plus convivial
-    # Exemple: "Rapport du 19/03/2026 – Optimisation conversion Technologie"
     date_for_subject = report_generated_at.split(' ')[0] if report_generated_at else ''
-    subject = f"Rapport du {date_for_subject} – {campagne.get('nom') or f'Campagne #{campagne_id}'}"
+    from utils.campaign_report import compose_single_campagne_header
+
+    title, subject, impression = compose_single_campagne_header(
+        campagne.get('nom') or '',
+        campagne_id,
+        open_rate,
+        click_rate,
+        date_for_subject,
+    )
 
     # Corps texte simple
     lines = [
-        f"Rapport du {date_for_subject} – campagne #{campagne_id}",
+        title,
+        f"Impression : {impression}",
+        "",
         f"Nom : {campagne.get('nom') or '-'}",
         f"Sujet : {sujet_email or '-'}",
         f"Date de création : {date_creation}",
@@ -1575,8 +1616,9 @@ def api_send_campagne_report_email(campagne_id):
         <div style="max-width:840px; margin:0 auto; background:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 18px 40px rgba(15,23,42,0.12); border:1px solid #e5e7eb;">
           <!-- Header -->
           <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6); padding:18px 22px 14px; color:#ffffff;">
-            <div style="font-size:13px; opacity:0.9; margin-bottom:4px;">Rapport du {date_for_subject}</div>
-            <div style="font-size:20px; font-weight:600; margin-bottom:10px;">{(campagne.get('nom') or f"Campagne #{campagne_id}")}</div>
+            <div style="font-size:13px; opacity:0.9; margin-bottom:4px;">Bilan campagne ProspectLab</div>
+            <div style="font-size:20px; font-weight:600; margin-bottom:8px;">{title}</div>
+            <div style="font-size:13px; opacity:0.95; font-style:italic; margin-bottom:10px;">{impression}</div>
             <div style="display:flex; flex-wrap:wrap; gap:18px; font-size:12px; opacity:0.96;">
               <div>📅 <strong>Créée :</strong> {date_creation or 'N/A'}</div>
               <div>🕒 <strong>Rapport :</strong> {report_generated_at}</div>
@@ -1650,7 +1692,7 @@ def api_send_campagne_report_email(campagne_id):
     except Exception:
         pass
     result = sender.send_email(
-        to=MAIL_DEFAULT_RECIPIENT,
+        to=CAMPAIGN_REPORT_RECIPIENT,
         subject=subject,
         body=text_body,
         html_body=html_body,
@@ -1659,7 +1701,7 @@ def api_send_campagne_report_email(campagne_id):
     if not result.get('success'):
         return jsonify({'success': False, 'message': result.get('message', 'Erreur lors de l\'envoi')}), 500
 
-    return jsonify({'success': True, 'message': 'Rapport de campagne envoyé à l\'adresse de réception par défaut'})
+    return jsonify({'success': True, 'message': f'Rapport de campagne envoyé à {CAMPAIGN_REPORT_RECIPIENT}'})
 
 
 @other_bp.route('/api/entreprises/emails', methods=['GET'])
@@ -1767,7 +1809,7 @@ def api_ciblage_entreprises():
     Query params: secteur, secteur_contains, opportunite (virgule), statut, tags_contains,
     favori (1/0), search, score_securite_max, exclude_already_contacted (1/true),
     groupe_ids (virgule), etape_prospection, sort_commercial (1), priority_min, commercial_profile_id,
-    commercial_limit (avec tri commercial).
+    commercial_limit (avec tri commercial), include_without_email (1/true avec groupe_ids).
     """
     from services.database.entreprises import EntrepriseManager
     from utils.helpers import clean_json_dict
@@ -1855,6 +1897,8 @@ def api_ciblage_entreprises():
             filters['max_emails_per_entreprise'] = int(request.args.get('max_emails_per_entreprise'))
         except ValueError:
             pass
+    if request.args.get('include_without_email') in ('1', 'true', 'True'):
+        filters['include_without_email'] = True
 
     page = request.args.get('page', type=int)
     page_size = request.args.get('page_size', type=int)

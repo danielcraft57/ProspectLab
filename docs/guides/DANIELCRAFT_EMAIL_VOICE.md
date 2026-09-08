@@ -58,55 +58,44 @@ Ecrire comme une personne reelle :
 - Apostrophes droites uniquement : `'`
 - Tirets simples uniquement : `-` (jamais `—`)
 
-### Ton Grand Est / Lorrain (léger)
+### Ton oral, francais simple
 
-Dosage : **1 touche locale max** par mail (hero, PS ou CTA soft) - pas un mot dialectal par phrase.
-Le client doit comprendre du **premier coup**.
+Pas d'argot regional. Le client doit comprendre du **premier coup**, partout en France.
 
-#### Le plus connu / populaire (à privilégier)
+Formulations preferes :
 
-| Dire | Sens | Exemple mail |
-|------|------|----------------|
-| `entre midi` | entre 12 h et 14 h | « On peut se parler entre midi si t'es au magasin. » |
-| `dis voir` / `regarde voir` | impératif + voir | « Regarde voir, c'est prêt. » / « Dis voir ce qui bloque. » |
-| `nareux` / `nareuse` | tatillon / difficile | « Pas pour faire le nareux. » / « Cette note est un peu nareuse. » |
-| `clanche` / `clancher` | poignée / fermer la porte | « La clanche web est un peu ouverte. » |
-| `cornet` | sac plastique | métaphore rare OK |
-| `schneck` | pain au raisin | touche très légère, humour |
-| `prendre une rincée` | être trempé / vieillir sous les intempéries | « Ton site a pris une rincée du temps. » |
-| article + prénom | « le Loïc » | très léger, signature / bio |
-
-À l'oral Metz = **Mess** ; à l'écrit garder **Metz**.
-
-#### Moins universel (1 max, ou éviter en mail froid)
-
-`couarail`, `bassoter`, `beugner`, `trisser`, `chawée`, `ça geths` - OK entre Lorrains,
-mais moins connus hors Moselle. Préférer la colonne du dessus.
+| Dire | Exemple mail |
+|------|----------------|
+| `autour de midi` | « On peut se parler autour de midi si t'es au magasin. » |
+| `dis-moi` / `jette un oeil` | « Jette un oeil, c'est pret. » / « Dis-moi ce qui bloque. » |
+| `tatillon` / `pas terrible` | « Pas pour faire le tatillon. » / « Cette note est pas terrible. » |
+| `porte` / `fermer` | « La porte web est un peu ouverte. » |
+| `coup de vieux` | « Ton site a pris un coup de vieux. » |
 
 **Exemples de ton (avec accents)** :
 
-- « On peut se parler entre midi si t'es au magasin. »
-- « Pas la peine de faire le nareux avec le devis : prix affiché, PDF direct. »
-- « Dis voir ce qui bloque - on démêle ça ensemble. »
-- « Regarde voir, le rapport est prêt. »
+- « On peut se parler autour de midi si t'es au magasin. »
+- « Pas la peine de faire le tatillon avec le devis : prix affiche, PDF direct. »
+- « Dis-moi ce qui bloque - on demele ca ensemble. »
+- « Jette un oeil, le rapport est pret. »
 
 #### Accents (obligatoire)
 
-Écrire le français correctement : `prêt`, `Loïc`, `téléphone`, `priorité`, `créneau`,
-`français`, `réglé`, `passée`, `réponse`, `démêle`, `rincée`, `clanchée`, `préfère`, etc.
-Pas de français « sans accents » dans les maquettes ni les modèles envoyés.
+Ecrire le francais correctement : `pret`, `Loic`, `telephone`, `priorite`, `creneau`,
+`francais`, `regle`, `passee`, `reponse`, `demele`, `prefere`, etc.
+Pas de francais « sans accents » dans les maquettes ni les modeles envoyes.
 
 #### Grammaire (mails)
 
 Garder le ton oral, mais corriger le socle :
 
-- Tutoiement cohérent partout (CTA inclus : « Regarde… », pas « Regarder… »)
+- Tutoiement coherent partout (CTA inclus : « Regarde… », pas « Regarder… »)
 - Ne pas avaler le `ne` : `ce n'est pas`, `il faut`, `qui n'a pas`, `Il y a`
-- Phrase complète : `Tu préfères en parler…` (pas `Préfères en parler…`)
-- Accords : `nareuse` (fém.), `clanchée`, `priorités`, `Loïc`
-- Virgules utiles : `Moi, c'est Loïc`
+- Phrase complete : `Tu preferes en parler…` (pas `Preferes en parler…`)
+- Accords : `priorites`, `Loic`
+- Virgules utiles : `Moi, c'est Loic`
 
-OK à l'oral léger : `t'es`, `À plus`, `Dis voir`, `Regarde voir`.
+OK a l'oral leger : `t'es`, `A plus`, `Dis-moi`, `Jette un oeil`.
 
 ### Public client (prioritaire)
 
@@ -153,7 +142,7 @@ Params : `website`, `full=1`, `email`, `name`.
 
 Libelles CTA preferes (francais simple, oriente click) :
 - « Ouvrir mon rapport (30 sec) »
-- « Regarde voir le rapport »
+- « Jette un oeil au rapport »
 - « Voir ou ca laisse entrer »
 - « Allez, je regarde »
 
@@ -162,12 +151,12 @@ Eviter : « Lancer le pentest », « Voir les CVE », « Audit Lighthouse ».
 ### Sujets d'email (max clicks)
 
 Formules qui marchent bien avec le ton DanielCraft :
-- curiosite : « 30 secondes - regarde voir ce que j'ai vu »
-- metaphore locale : « Ta clanche web est un peu ouverte »
-- contraste : « 3 notes… une est un peu nareuse »
+- curiosite : « 30 secondes - jette un oeil a ce que j'ai vu »
+- metaphore : « Ta porte web est un peu ouverte »
+- contraste : « 3 notes… une est pas terrible »
 - social : « Le commerce d'a cote est plus facile a trouver »
-- age : « Ton site a pris une rincee du temps »
-- friction : « Ton site bassote un peu cote demandes »
+- age : « Ton site a pris un coup de vieux »
+- friction : « Les gens arrivent - puis ca coince »
 
 Toujours : prenom ou nom de site dans l'objet quand possible, preheader qui complete (pas qui repete).
 
