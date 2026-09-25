@@ -50,6 +50,7 @@ def _parse_entreprise_list_query_filters():
     analyse_id = request.args.get('analyse_id', type=int)
     filters = {
         'secteur': request.args.get('secteur'),
+        'categorie': request.args.get('categorie'),
         'statut': _maybe_expand_statut_filter(request.args.get('statut')),
         'opportunite': request.args.get('opportunite'),
         'favori': request.args.get('favori') == 'true',
@@ -388,17 +389,14 @@ def entreprises():
             page_size = max(1, min(page_size, 200))
             offset = (page - 1) * page_size
 
-            entreprises_list = database.get_entreprises(
+            # Une seule requête (COUNT(*) OVER) au lieu de liste + count séparés
+            entreprises_list, total = database.get_entreprises(
                 analyse_id=analyse_id,
                 filters=filters if filters else None,
                 limit=page_size,
                 offset=offset,
                 include_og=include_og,
-            )
-
-            total = database.count_entreprises(
-                analyse_id=analyse_id,
-                filters=filters if filters else None,
+                with_total=True,
             )
 
             from utils.helpers import clean_json_dict
@@ -1154,40 +1152,129 @@ def entreprise_metric_snapshots_rescan(entreprise_id):
 @login_required
 def secteurs():
     """
-    API: Liste des secteurs disponibles
-    
-    Returns:
-        JSON: Liste des secteurs
+    API: Liste des groupes secteurs canoniques (taxonomie hierarchique).
+
+    Retourne les labels FR macros, avec counts BDD si disponibles.
+    Les groupes a 0 restent listes pour le select Segmentation.
+
+    @returns: JSON liste de strings (groupes) ou objets {secteur, count}
     """
     try:
+        from utils.taxonomie_secteurs import GROUPES, GROUPES_ORDERED
+
         conn = database.get_connection()
         cursor = conn.cursor()
-        
-        database.execute_sql(cursor, '''
-            SELECT DISTINCT secteur
-            FROM entreprises
-            WHERE secteur IS NOT NULL AND secteur != ''
-            ORDER BY secteur
-        ''')
-        
-        rows = cursor.fetchall()
-        # Gérer les dictionnaires PostgreSQL et les tuples SQLite
-        secteurs_list = []
-        for row in rows:
-            if isinstance(row, dict):
-                secteur = row.get('secteur')
-            else:
-                secteur = row[0] if row else None
-            if secteur:
-                secteurs_list.append(secteur)
-        
+
+        counts = {}
+        try:
+            database.execute_sql(cursor, '''
+                SELECT secteur, COUNT(*) AS c
+                FROM entreprises
+                WHERE secteur IS NOT NULL AND TRIM(secteur) <> ''
+                GROUP BY secteur
+            ''')
+            for row in cursor.fetchall() or []:
+                if isinstance(row, dict):
+                    secteur = row.get('secteur')
+                    count = row.get('c')
+                else:
+                    secteur = row[0] if row else None
+                    count = row[1] if row and len(row) > 1 else 0
+                if secteur:
+                    counts[str(secteur)] = int(count or 0)
+        except Exception:
+            counts = {}
+
         conn.close()
-        
-        return jsonify(secteurs_list)
+
+        # Ordre canonique + eventuels leftovers BDD non canoniques
+        ordered = list(GROUPES_ORDERED)
+        for s in sorted(counts.keys(), key=lambda x: x.lower()):
+            if s not in GROUPES and s not in ordered:
+                ordered.append(s)
+
+        with_counts = request.args.get('with_counts') == '1'
+        if with_counts:
+            return jsonify([{'secteur': s, 'count': counts.get(s, 0)} for s in ordered])
+        return jsonify(ordered)
     except Exception as e:
         import logging
         import traceback
         logging.getLogger(__name__).error(f'Erreur dans secteurs: {e}\n{traceback.format_exc()}')
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/categories')
+@login_required
+def categories():
+    """
+    API: Liste des categories metier (niveau 2 de la taxonomie).
+
+    Query:
+      - secteur: filtre optionnel par groupe macro
+      - with_counts: si 1, retourne [{categorie, count}]
+
+    @returns: JSON liste de categories FR
+    """
+    try:
+        from utils.taxonomie_secteurs import list_categories_for_groupe
+
+        secteur = (request.args.get('secteur') or '').strip() or None
+        known = list_categories_for_groupe(secteur)
+
+        conn = database.get_connection()
+        cursor = conn.cursor()
+        counts = {}
+        try:
+            if secteur:
+                database.execute_sql(
+                    cursor,
+                    '''
+                    SELECT categorie, COUNT(*) AS c
+                    FROM entreprises
+                    WHERE categorie IS NOT NULL AND TRIM(categorie) <> ''
+                      AND secteur = ?
+                    GROUP BY categorie
+                    ''',
+                    (secteur,),
+                )
+            else:
+                database.execute_sql(
+                    cursor,
+                    '''
+                    SELECT categorie, COUNT(*) AS c
+                    FROM entreprises
+                    WHERE categorie IS NOT NULL AND TRIM(categorie) <> ''
+                    GROUP BY categorie
+                    ''',
+                )
+            for row in cursor.fetchall() or []:
+                if isinstance(row, dict):
+                    cat = row.get('categorie')
+                    count = row.get('c')
+                else:
+                    cat = row[0] if row else None
+                    count = row[1] if row and len(row) > 1 else 0
+                if cat:
+                    counts[str(cat)] = int(count or 0)
+        except Exception:
+            counts = {}
+        conn.close()
+
+        # Union taxonomie + valeurs presentes en BDD
+        merged = list(known)
+        for cat in sorted(counts.keys(), key=lambda x: x.lower()):
+            if cat not in merged:
+                merged.append(cat)
+
+        with_counts = request.args.get('with_counts') == '1'
+        if with_counts:
+            return jsonify([{'categorie': c, 'count': counts.get(c, 0)} for c in merged])
+        return jsonify(merged)
+    except Exception as e:
+        import logging
+        import traceback
+        logging.getLogger(__name__).error(f'Erreur dans categories: {e}\n{traceback.format_exc()}')
         return jsonify({'error': str(e)}), 500
 
 

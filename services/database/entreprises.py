@@ -10,6 +10,7 @@ import re
 from typing import Optional
 from urllib.parse import urljoin
 from utils.url_utils import normalize_website_domain
+from utils.taxonomie_secteurs import resolve_hierarchie
 from .base import DatabaseBase
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,7 @@ SEARCH_SCORE_NOM_FIRST_TOKEN = 88
 SEARCH_SCORE_NOM_PHRASE = 82
 SEARCH_SCORE_NOM_ALL_TOKENS = 70
 SEARCH_SCORE_SECTEUR_PHRASE = 55
+SEARCH_SCORE_CATEGORIE_PHRASE = 52
 SEARCH_SCORE_RESPONSABLE_PHRASE = 48
 SEARCH_SCORE_WEBSITE_PHRASE = 35
 SEARCH_SCORE_ADDRESS_PHRASE = 25
@@ -210,6 +212,7 @@ class EntrepriseManager(DatabaseBase):
         parts = [
             f'LOWER({e}.nom) LIKE ?',
             f'LOWER({e}.secteur) LIKE ?',
+            f'LOWER(COALESCE({e}.categorie, \'\')) LIKE ?',
             f'LOWER(COALESCE({e}.email_principal, \'\')) LIKE ?',
             f'LOWER(COALESCE({e}.responsable, \'\')) LIKE ?',
             f'LOWER(COALESCE({e}.address_1, \'\')) LIKE ?',
@@ -280,6 +283,7 @@ class EntrepriseManager(DatabaseBase):
 
         case_lines.extend([
             f'WHEN LOWER(COALESCE({p}secteur, \'\')) LIKE ? THEN {SEARCH_SCORE_SECTEUR_PHRASE}',
+            f'WHEN LOWER(COALESCE({p}categorie, \'\')) LIKE ? THEN {SEARCH_SCORE_CATEGORIE_PHRASE}',
             f'WHEN LOWER(COALESCE({p}responsable, \'\')) LIKE ? THEN {SEARCH_SCORE_RESPONSABLE_PHRASE}',
             f'WHEN LOWER(COALESCE({p}website, \'\')) LIKE ? THEN {SEARCH_SCORE_WEBSITE_PHRASE}',
             f'WHEN LOWER(COALESCE({p}address_1, \'\')) LIKE ?'
@@ -289,7 +293,8 @@ class EntrepriseManager(DatabaseBase):
             f'ELSE {SEARCH_SCORE_FALLBACK}',
         ])
         params.extend([
-            phrase_like, phrase_like, phrase_like, phrase_like, phrase_like, phrase_like, phrase_like,
+            phrase_like, phrase_like, phrase_like, phrase_like,
+            phrase_like, phrase_like, phrase_like, phrase_like,
         ])
 
         sql = f'''
@@ -351,10 +356,11 @@ class EntrepriseManager(DatabaseBase):
             phrase_clause = f'''(
                 LOWER({e}.nom) LIKE ?
                 OR LOWER({e}.secteur) LIKE ?
+                OR LOWER(COALESCE({e}.categorie, '')) LIKE ?
                 OR LOWER(COALESCE({e}.responsable, '')) LIKE ?
             )'''
             sql = ' AND (' + phrase_clause + ' OR (' + ' AND '.join(token_clauses) + '))'
-            params = [phrase_like, phrase_like, phrase_like] + params
+            params = [phrase_like, phrase_like, phrase_like, phrase_like] + params
         else:
             sql = ' AND (' + token_clauses[0] + ')'
 
@@ -519,7 +525,20 @@ class EntrepriseManager(DatabaseBase):
         if not nom:
             nom = entreprise_data.get('website') or 'Entreprise inconnue'
         website = entreprise_data.get('website')
-        secteur = entreprise_data.get('secteur') or entreprise_data.get('category_translate') or entreprise_data.get('category')
+        secteur_brut = (
+            entreprise_data.get('secteur')
+            or entreprise_data.get('category_translate')
+            or entreprise_data.get('category')
+        )
+        hierarchie = resolve_hierarchie(
+            secteur_brut,
+            nom=nom,
+            categorie_actuelle=entreprise_data.get('categorie'),
+            secteur_raw=entreprise_data.get('secteur_raw') or secteur_brut,
+        )
+        secteur = hierarchie.get('secteur') or secteur_brut
+        categorie = hierarchie.get('categorie') or entreprise_data.get('categorie') or None
+        secteur_raw = hierarchie.get('source_raw') or secteur_brut
         telephone = entreprise_data.get('phone_number') or entreprise_data.get('telephone')
         pays = entreprise_data.get('country') or entreprise_data.get('pays')
         address_1 = entreprise_data.get('address_1')
@@ -623,6 +642,8 @@ class EntrepriseManager(DatabaseBase):
             nom,
             website,
             secteur,
+            categorie,
+            secteur_raw,
             (entreprise_data.get('statut') or 'Nouveau'),
             etape_prospection,
             entreprise_data.get('site_opportunity'),
@@ -652,12 +673,12 @@ class EntrepriseManager(DatabaseBase):
         if self.is_postgresql():
             insert_sql = '''
                 INSERT INTO entreprises (
-                    analyse_id, nom, website, secteur, statut, etape_prospection, opportunite,
+                    analyse_id, nom, website, secteur, categorie, secteur_raw, statut, etape_prospection, opportunite,
                     email_principal, responsable, taille_estimee, hosting_provider,
                     framework, score_securite, telephone, pays, address_1, address_2,
                     longitude, latitude, note_google, nb_avis_google, resume, og_image, favicon, logo
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s, %s, %s
@@ -678,11 +699,11 @@ class EntrepriseManager(DatabaseBase):
             # Mode SQLite (ou autre) : on garde execute_sql + lastrowid
             self.execute_sql(cursor, '''
                 INSERT INTO entreprises (
-                    analyse_id, nom, website, secteur, statut, etape_prospection, opportunite,
+                    analyse_id, nom, website, secteur, categorie, secteur_raw, statut, etape_prospection, opportunite,
                     email_principal, responsable, taille_estimee, hosting_provider,
                     framework, score_securite, telephone, pays, address_1, address_2,
                     longitude, latitude, note_google, nb_avis_google, resume, og_image, favicon, logo
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', params)
             entreprise_id = cursor.lastrowid
         
@@ -984,39 +1005,32 @@ class EntrepriseManager(DatabaseBase):
         conn.close()
         return all_og_data
     
-    def get_entreprises(self, analyse_id=None, filters=None, limit=None, offset=None, include_og=True):
+    def _entreprises_latest_score_sql(self):
         """
-        Récupère les entreprises avec filtres optionnels
-        
-        Args:
-            analyse_id: ID de l'analyse (optionnel)
-            filters: Dictionnaire de filtres (secteur, statut, opportunite, favori, search,
-                     security_min, security_max, pentest_min, pentest_max)
-            limit: Nombre maximum de résultats (optionnel)
-            offset: Offset pour la pagination (optionnel)
-
-        Returns:
-            Liste des entreprises avec, optionnellement, leurs données OG et score pentest / SEO (derniers scores disponibles)
+        SELECT + FROM extras pour les derniers scores pentest/SEO.
+        PostgreSQL: JOIN LATERAL (meilleur avec index (entreprise_id, date_analyse DESC)).
+        SQLite: sous-requêtes corrélées.
         """
-        conn = self.get_connection()
-        cursor = conn.cursor()
-
-        has_security_filters = filters and (
-            any(filters.get(k) is not None for k in ('security_min', 'security_max'))
-            or EntrepriseManager._truthy_filter(filters, 'security_null')
-        )
-        has_pentest_filters = filters and (
-            any(filters.get(k) is not None for k in ('pentest_min', 'pentest_max'))
-            or EntrepriseManager._truthy_filter(filters, 'pentest_null')
-        )
-        has_seo_filters = filters and (
-            any(filters.get(k) is not None for k in ('seo_min', 'seo_max'))
-            or EntrepriseManager._truthy_filter(filters, 'seo_null')
-        )
-        wrap_subquery = has_security_filters or has_pentest_filters or has_seo_filters
-
-        inner_query = '''
-            SELECT e.*,
+        if self.is_postgresql():
+            select_sql = 'pt.risk_score AS score_pentest, seo.score AS score_seo'
+            from_sql = '''
+            LEFT JOIN LATERAL (
+                SELECT risk_score
+                FROM analyses_pentest
+                WHERE entreprise_id = e.id
+                ORDER BY date_analyse DESC NULLS LAST
+                LIMIT 1
+            ) pt ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT score
+                FROM analyses_seo
+                WHERE entreprise_id = e.id
+                ORDER BY date_analyse DESC NULLS LAST
+                LIMIT 1
+            ) seo ON TRUE
+            '''
+            return select_sql, from_sql
+        select_sql = '''
                    (SELECT risk_score
                     FROM analyses_pentest
                     WHERE entreprise_id = e.id
@@ -1026,20 +1040,96 @@ class EntrepriseManager(DatabaseBase):
                     FROM analyses_seo
                     WHERE entreprise_id = e.id
                     ORDER BY date_analyse DESC
-                    LIMIT 1) as score_seo
-            FROM entreprises e
-            WHERE 1=1
-        '''
-        params = []
+                    LIMIT 1) as score_seo'''
+        return select_sql, ''
+
+    @staticmethod
+    def _has_email_filter_sql():
+        """Filtre « au moins un email connu » — sans TRIM pour rester index-friendly."""
+        return """
+                    AND (
+                        (e.email_principal IS NOT NULL AND e.email_principal <> '')
+                        OR EXISTS (
+                            SELECT 1
+                            FROM scraper_emails se
+                            WHERE se.entreprise_id = e.id
+                              AND se.email IS NOT NULL
+                              AND se.email <> ''
+                        )
+                        OR EXISTS (
+                            SELECT 1
+                            FROM personnes p
+                            WHERE p.entreprise_id = e.id
+                              AND p.email IS NOT NULL
+                              AND p.email <> ''
+                        )
+                        OR EXISTS (
+                            SELECT 1
+                            FROM scraper_people sp
+                            WHERE sp.entreprise_id = e.id
+                              AND sp.email IS NOT NULL
+                              AND sp.email <> ''
+                        )
+                        OR EXISTS (
+                            SELECT 1
+                            FROM analyses_osint ao
+                            JOIN analysis_osint_emails aoe ON aoe.analysis_id = ao.id
+                            WHERE ao.entreprise_id = e.id
+                              AND aoe.email IS NOT NULL
+                              AND aoe.email <> ''
+                        )
+                    )
+                """
+
+    def _append_entreprise_list_filters(self, inner_query, params, analyse_id=None, filters=None,
+                                        score_alias_pentest='score_pentest', score_alias_seo='score_seo',
+                                        apply_score_filters_inline=False):
+        """
+        Applique les filtres liste entreprises sur inner_query (alias e).
+        Si apply_score_filters_inline: filtre sécu/pentest/SEO dans le WHERE (pas de wrapper).
+        score_alias_* = noms de colonnes/aliases déjà présents dans le SELECT (LATERAL ou sous-req).
+        Retourne (inner_query, params, flags) où flags indique quels filtres scores restent à wrapper.
+        """
+        has_security_filters = bool(filters) and (
+            any(filters.get(k) is not None for k in ('security_min', 'security_max'))
+            or EntrepriseManager._truthy_filter(filters, 'security_null')
+        )
+        has_pentest_filters = bool(filters) and (
+            any(filters.get(k) is not None for k in ('pentest_min', 'pentest_max'))
+            or EntrepriseManager._truthy_filter(filters, 'pentest_null')
+        )
+        has_seo_filters = bool(filters) and (
+            any(filters.get(k) is not None for k in ('seo_min', 'seo_max'))
+            or EntrepriseManager._truthy_filter(filters, 'seo_null')
+        )
+        security_applied = False
+        pentest_applied = False
+        seo_applied = False
 
         if analyse_id:
             inner_query += ' AND e.analyse_id = ?'
             params.append(analyse_id)
 
         if filters:
+            # Score sécu = colonne sur entreprises : filtrer AVANT has_email / EXISTS coûteux
+            if has_security_filters:
+                if EntrepriseManager._truthy_filter(filters, 'security_null'):
+                    inner_query += ' AND e.score_securite IS NULL'
+                else:
+                    if filters.get('security_min') is not None:
+                        inner_query += ' AND COALESCE(e.score_securite, 0) >= ?'
+                        params.append(filters['security_min'])
+                    if filters.get('security_max') is not None:
+                        inner_query += ' AND COALESCE(e.score_securite, 0) <= ?'
+                        params.append(filters['security_max'])
+                security_applied = True
+
             if filters.get('secteur'):
                 inner_query += ' AND e.secteur = ?'
                 params.append(filters['secteur'])
+            if filters.get('categorie'):
+                inner_query += ' AND e.categorie = ?'
+                params.append(filters['categorie'])
             if filters.get('statut'):
                 statut_val = filters['statut']
                 if isinstance(statut_val, (list, tuple, set)):
@@ -1059,52 +1149,44 @@ class EntrepriseManager(DatabaseBase):
                 params.append(filters['etape_prospection'])
             if filters.get('favori'):
                 inner_query += ' AND e.favori = 1'
-            # Filtrer par appartenance à un groupe spécifique
             if filters.get('groupe_id') is not None:
-                inner_query += ' AND e.id IN (SELECT entreprise_id FROM entreprise_groupes WHERE groupe_id = ?)'
+                inner_query += (
+                    ' AND EXISTS (SELECT 1 FROM entreprise_groupes eg '
+                    'WHERE eg.entreprise_id = e.id AND eg.groupe_id = ?)'
+                )
                 params.append(filters['groupe_id'])
-            # Filtrer les entreprises qui n'appartiennent à aucun groupe
             if str(filters.get('no_group', '')).lower() in ('1', 'true', 'yes'):
-                inner_query += ' AND e.id NOT IN (SELECT entreprise_id FROM entreprise_groupes)'
+                inner_query += (
+                    ' AND NOT EXISTS (SELECT 1 FROM entreprise_groupes eg '
+                    'WHERE eg.entreprise_id = e.id)'
+                )
+
+            if apply_score_filters_inline:
+                if has_pentest_filters:
+                    if EntrepriseManager._truthy_filter(filters, 'pentest_null'):
+                        inner_query += f' AND {score_alias_pentest} IS NULL'
+                    else:
+                        if filters.get('pentest_min') is not None:
+                            inner_query += f' AND COALESCE({score_alias_pentest}, 0) >= ?'
+                            params.append(filters['pentest_min'])
+                        if filters.get('pentest_max') is not None:
+                            inner_query += f' AND COALESCE({score_alias_pentest}, 0) <= ?'
+                            params.append(filters['pentest_max'])
+                    pentest_applied = True
+                if has_seo_filters:
+                    if EntrepriseManager._truthy_filter(filters, 'seo_null'):
+                        inner_query += f' AND {score_alias_seo} IS NULL'
+                    else:
+                        if filters.get('seo_min') is not None:
+                            inner_query += f' AND COALESCE({score_alias_seo}, 0) >= ?'
+                            params.append(filters['seo_min'])
+                        if filters.get('seo_max') is not None:
+                            inner_query += f' AND COALESCE({score_alias_seo}, 0) <= ?'
+                            params.append(filters['seo_max'])
+                    seo_applied = True
+
             if str(filters.get('has_email', '')).lower() in ('1', 'true', 'yes'):
-                # "has_email" côté UI veut dire "entreprise avec au moins un email connu".
-                # Sources prises en compte: email principal, scraper_emails,
-                # personnes.email, scraper_people.email et emails OSINT.
-                inner_query += """
-                    AND (
-                        (e.email_principal IS NOT NULL AND TRIM(e.email_principal) <> '')
-                        OR EXISTS (
-                            SELECT 1
-                            FROM scraper_emails se
-                            WHERE se.entreprise_id = e.id
-                              AND se.email IS NOT NULL
-                              AND TRIM(se.email) <> ''
-                        )
-                        OR EXISTS (
-                            SELECT 1
-                            FROM personnes p
-                            WHERE p.entreprise_id = e.id
-                              AND p.email IS NOT NULL
-                              AND TRIM(p.email) <> ''
-                        )
-                        OR EXISTS (
-                            SELECT 1
-                            FROM scraper_people sp
-                            WHERE sp.entreprise_id = e.id
-                              AND sp.email IS NOT NULL
-                              AND TRIM(sp.email) <> ''
-                        )
-                        OR EXISTS (
-                            SELECT 1
-                            FROM analyses_osint ao
-                            JOIN analysis_osint_emails aoe ON aoe.analysis_id = ao.id
-                            WHERE ao.entreprise_id = e.id
-                              AND aoe.email IS NOT NULL
-                              AND TRIM(aoe.email) <> ''
-                        )
-                    )
-                """
-            # Nouveaux filtres de segmentation
+                inner_query += EntrepriseManager._has_email_filter_sql()
             if filters.get('cms'):
                 cms_val = filters['cms']
                 if isinstance(cms_val, (list, tuple, set)):
@@ -1144,8 +1226,6 @@ class EntrepriseManager(DatabaseBase):
                 )
                 inner_query += search_sql
                 params.extend(search_params)
-
-            # Filtres sur les tags (JSON/texte)
             if filters.get('tags_contains'):
                 inner_query += ' AND e.tags LIKE ?'
                 params.append('%' + str(filters['tags_contains']) + '%')
@@ -1167,56 +1247,44 @@ class EntrepriseManager(DatabaseBase):
                     inner_query += ' AND e.tags LIKE ?'
                     params.append('%' + str(v) + '%')
 
-        if wrap_subquery:
-            # Filtres plage : analyses non faites = score 0 via COALESCE (exclure avec min > 0).
-            # Filtres *_null : uniquement entreprises sans analyse (score IS NULL en base / sous-requête).
-            query = 'SELECT sub.* FROM (' + inner_query + ') sub WHERE 1=1'
-            if has_security_filters:
-                if EntrepriseManager._truthy_filter(filters, 'security_null'):
-                    query += ' AND sub.score_securite IS NULL'
-                else:
-                    if filters.get('security_min') is not None:
-                        query += ' AND (COALESCE(sub.score_securite, 0) >= ?)'
-                        params.append(filters['security_min'])
-                    if filters.get('security_max') is not None:
-                        query += ' AND (COALESCE(sub.score_securite, 0) <= ?)'
-                        params.append(filters['security_max'])
-            if has_pentest_filters:
-                if EntrepriseManager._truthy_filter(filters, 'pentest_null'):
-                    query += ' AND sub.score_pentest IS NULL'
-                else:
-                    if filters.get('pentest_min') is not None:
-                        query += ' AND (COALESCE(sub.score_pentest, 0) >= ?)'
-                        params.append(filters['pentest_min'])
-                    if filters.get('pentest_max') is not None:
-                        query += ' AND (COALESCE(sub.score_pentest, 0) <= ?)'
-                        params.append(filters['pentest_max'])
-            if has_seo_filters:
-                if EntrepriseManager._truthy_filter(filters, 'seo_null'):
-                    query += ' AND sub.score_seo IS NULL'
-                else:
-                    if filters.get('seo_min') is not None:
-                        query += ' AND (COALESCE(sub.score_seo, 0) >= ?)'
-                        params.append(filters['seo_min'])
-                    if filters.get('seo_max') is not None:
-                        query += ' AND (COALESCE(sub.score_seo, 0) <= ?)'
-                        params.append(filters['seo_max'])
+        flags = {
+            'has_security_filters': has_security_filters and not security_applied,
+            'has_pentest_filters': has_pentest_filters and not pentest_applied,
+            'has_seo_filters': has_seo_filters and not seo_applied,
+        }
+        return inner_query, params, flags
 
-            # Tri par pertinence si recherche textuelle présente
-            if filters and filters.get('search'):
-                order_sql, order_params = EntrepriseManager._build_search_order_sql('sub.', filters['search'])
-                query += order_sql
-                params.extend(order_params)
-            else:
-                query += ' ORDER BY sub.favori DESC, sub.date_analyse DESC'
+    def get_entreprises(self, analyse_id=None, filters=None, limit=None, offset=None, include_og=True,
+                        with_total=False):
+        """
+        Récupère les entreprises avec filtres optionnels
+        
+        Args:
+            analyse_id: ID de l'analyse (optionnel)
+            filters: Dictionnaire de filtres (secteur, statut, opportunite, favori, search,
+                     security_min, security_max, pentest_min, pentest_max)
+            limit: Nombre maximum de résultats (optionnel)
+            offset: Offset pour la pagination (optionnel)
+            with_total: Si True, retourne (liste, total) via COUNT(*) OVER() (une seule requête)
+
+        Returns:
+            Liste des entreprises (ou tuple liste+total si with_total) avec scores pentest/SEO
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        from_sql, params = self._build_filtered_entreprises_subquery_from(analyse_id, filters)
+        if with_total:
+            query = 'SELECT COUNT(*) OVER() AS _filtered_total, sub.* FROM ' + from_sql
         else:
-            # Pas de sous-requête: mêmes règles de tri mais en se basant directement sur e.*
-            if filters and filters.get('search'):
-                order_sql, order_params = EntrepriseManager._build_search_order_sql('e.', filters['search'])
-                query = inner_query + order_sql
-                params.extend(order_params)
-            else:
-                query = inner_query + ' ORDER BY e.favori DESC, e.date_analyse DESC'
+            query = 'SELECT sub.* FROM ' + from_sql
+
+        if filters and filters.get('search'):
+            order_sql, order_params = EntrepriseManager._build_search_order_sql('sub.', filters['search'])
+            query += order_sql
+            params.extend(order_params)
+        else:
+            query += ' ORDER BY sub.favori DESC, sub.date_analyse DESC'
 
         if limit:
             query += ' LIMIT ?'
@@ -1229,16 +1297,20 @@ class EntrepriseManager(DatabaseBase):
         rows = cursor.fetchall()
         conn.close()
         
-        # Importer la fonction de nettoyage depuis les utils
         from utils.helpers import clean_json_dict
         
-        # Parser les tags et, optionnellement, charger les données OpenGraph pour chaque entreprise
         entreprises = []
         import logging
         logger = logging.getLogger(__name__)
+        total = 0
 
         for row in rows:
             entreprise = self.clean_row_dict(dict(row))
+            if with_total:
+                if '_filtered_total' in entreprise:
+                    total = int(entreprise.pop('_filtered_total') or 0)
+                else:
+                    entreprise.pop('_filtered_total', None)
             
             if entreprise.get('tags'):
                 try:
@@ -1249,186 +1321,64 @@ class EntrepriseManager(DatabaseBase):
                 entreprise['tags'] = []
             
             if include_og:
-                # Charger les données OpenGraph depuis les tables normalisées
                 try:
                     entreprise['og_data'] = self.get_og_data(entreprise['id'])
                 except Exception as og_error:
-                    # Sur certains environnements anciens, les tables OG peuvent ne pas encore exister.
                     logger.warning(f"[Database] Erreur lors du chargement des données OG pour entreprise {entreprise.get('id')}: {og_error}")
                     entreprise['og_data'] = None
             
             entreprises.append(entreprise)
         
-        # Nettoyer toutes les entreprises en une seule fois (double sécurité)
         entreprises = clean_json_dict(entreprises)
-        
+        if with_total:
+            return entreprises, total
         return entreprises
 
     def _build_filtered_entreprises_subquery_from(self, analyse_id=None, filters=None):
         """
-        Même sous-requête que count_entreprises : (SELECT e.* …) sub WHERE 1=1 + filtres scores.
-        Retourne la partie SQL utilisable après FROM pour COUNT ou GROUP BY statut.
+        Sous-requête filtrée : (SELECT e.*, scores…) sub [WHERE filtres scores restants].
+        Utilisable après FROM pour COUNT, GROUP BY, ou SELECT liste.
         """
-        has_security_filters = filters and (
-            any(filters.get(k) is not None for k in ('security_min', 'security_max'))
-            or EntrepriseManager._truthy_filter(filters, 'security_null')
-        )
-        has_pentest_filters = filters and (
-            any(filters.get(k) is not None for k in ('pentest_min', 'pentest_max'))
-            or EntrepriseManager._truthy_filter(filters, 'pentest_null')
-        )
-        has_seo_filters = filters and (
-            any(filters.get(k) is not None for k in ('seo_min', 'seo_max'))
-            or EntrepriseManager._truthy_filter(filters, 'seo_null')
-        )
+        score_select, score_from = self._entreprises_latest_score_sql()
+        use_lateral = bool(score_from)
+        # Avec LATERAL, les alias pt/seo sont filtrables dans le WHERE interne.
+        # Sans LATERAL (SQLite), on wrappe pour filtrer score_pentest / score_seo.
+        apply_inline = use_lateral
 
-        inner_query = '''
+        if use_lateral:
+            inner_query = f'''
             SELECT e.*,
-                   (SELECT risk_score
-                    FROM analyses_pentest
-                    WHERE entreprise_id = e.id
-                    ORDER BY date_analyse DESC
-                    LIMIT 1) as score_pentest,
-                   (SELECT score
-                    FROM analyses_seo
-                    WHERE entreprise_id = e.id
-                    ORDER BY date_analyse DESC
-                    LIMIT 1) as score_seo
+                   {score_select}
+            FROM entreprises e
+            {score_from}
+            WHERE 1=1
+            '''
+            score_alias_pentest = 'pt.risk_score'
+            score_alias_seo = 'seo.score'
+        else:
+            inner_query = f'''
+            SELECT e.*,
+                   {score_select}
             FROM entreprises e
             WHERE 1=1
-        '''
+            '''
+            score_alias_pentest = 'score_pentest'
+            score_alias_seo = 'score_seo'
+
         params: list[object] = []
-
-        if analyse_id:
-            inner_query += ' AND e.analyse_id = ?'
-            params.append(analyse_id)
-
-        if filters:
-            if filters.get('secteur'):
-                inner_query += ' AND e.secteur = ?'
-                params.append(filters['secteur'])
-            if filters.get('statut'):
-                statut_val = filters['statut']
-                if isinstance(statut_val, (list, tuple, set)):
-                    statut_list = [s for s in statut_val if s is not None and str(s).strip() != '']
-                    if statut_list:
-                        placeholders = ','.join(['?' for _ in statut_list])
-                        inner_query += f' AND e.statut IN ({placeholders})'
-                        params.extend(statut_list)
-                else:
-                    inner_query += ' AND e.statut = ?'
-                    params.append(statut_val)
-            if filters.get('opportunite'):
-                inner_query += ' AND e.opportunite = ?'
-                params.append(filters['opportunite'])
-            if filters.get('etape_prospection'):
-                inner_query += ' AND e.etape_prospection = ?'
-                params.append(filters['etape_prospection'])
-            if filters.get('favori'):
-                inner_query += ' AND e.favori = 1'
-            if filters.get('groupe_id') is not None:
-                inner_query += ' AND e.id IN (SELECT entreprise_id FROM entreprise_groupes WHERE groupe_id = ?)'
-                params.append(filters['groupe_id'])
-            if str(filters.get('no_group', '')).lower() in ('1', 'true', 'yes'):
-                inner_query += ' AND e.id NOT IN (SELECT entreprise_id FROM entreprise_groupes)'
-            if str(filters.get('has_email', '')).lower() in ('1', 'true', 'yes'):
-                inner_query += """
-                    AND (
-                        (e.email_principal IS NOT NULL AND TRIM(e.email_principal) <> '')
-                        OR EXISTS (
-                            SELECT 1
-                            FROM scraper_emails se
-                            WHERE se.entreprise_id = e.id
-                              AND se.email IS NOT NULL
-                              AND TRIM(se.email) <> ''
-                        )
-                        OR EXISTS (
-                            SELECT 1
-                            FROM personnes p
-                            WHERE p.entreprise_id = e.id
-                              AND p.email IS NOT NULL
-                              AND TRIM(p.email) <> ''
-                        )
-                        OR EXISTS (
-                            SELECT 1
-                            FROM scraper_people sp
-                            WHERE sp.entreprise_id = e.id
-                              AND sp.email IS NOT NULL
-                              AND TRIM(sp.email) <> ''
-                        )
-                        OR EXISTS (
-                            SELECT 1
-                            FROM analyses_osint ao
-                            JOIN analysis_osint_emails aoe ON aoe.analysis_id = ao.id
-                            WHERE ao.entreprise_id = e.id
-                              AND aoe.email IS NOT NULL
-                              AND TRIM(aoe.email) <> ''
-                        )
-                    )
-                """
-            if filters.get('cms'):
-                cms_val = filters['cms']
-                if isinstance(cms_val, (list, tuple, set)):
-                    placeholders = ','.join(['?' for _ in cms_val])
-                    inner_query += f' AND e.cms IN ({placeholders})'
-                    params.extend(list(cms_val))
-                else:
-                    inner_query += ' AND e.cms = ?'
-                    params.append(cms_val)
-            if filters.get('framework'):
-                fw_val = filters['framework']
-                if isinstance(fw_val, (list, tuple, set)):
-                    placeholders = ','.join(['?' for _ in fw_val])
-                    inner_query += f' AND e.framework IN ({placeholders})'
-                    params.extend(list(fw_val))
-                else:
-                    inner_query += ' AND e.framework = ?'
-                    params.append(fw_val)
-            if str(filters.get('has_blog', '')).lower() in ('1', 'true', 'yes'):
-                inner_query += ' AND e.has_blog = 1'
-            if str(filters.get('has_form', '')).lower() in ('1', 'true', 'yes'):
-                inner_query += ' AND e.has_contact_form = 1'
-            if str(filters.get('has_tunnel', '')).lower() in ('1', 'true', 'yes'):
-                inner_query += ' AND e.has_checkout = 1'
-            if filters.get('performance_min') is not None:
-                inner_query += ' AND e.performance_score IS NOT NULL AND e.performance_score >= ?'
-                params.append(int(filters['performance_min']))
-            if filters.get('performance_max') is not None:
-                inner_query += ' AND e.performance_score IS NOT NULL AND e.performance_score <= ?'
-                params.append(int(filters['performance_max']))
-            if filters.get('search'):
-                search_sql, search_params = EntrepriseManager._build_search_filter_sql(
-                    filters['search'],
-                    include_tags=True,
-                    include_scraper_emails=True,
-                    include_website=True,
-                )
-                inner_query += search_sql
-                params.extend(search_params)
-
-            if filters.get('tags_contains'):
-                inner_query += ' AND e.tags LIKE ?'
-                params.append('%' + str(filters['tags_contains']) + '%')
-            if filters.get('tags_any'):
-                values = filters['tags_any']
-                if isinstance(values, str):
-                    values = [v.strip() for v in values.split(',') if v.strip()]
-                conditions = []
-                for v in values:
-                    conditions.append('e.tags LIKE ?')
-                    params.append('%' + str(v) + '%')
-                if conditions:
-                    inner_query += ' AND (' + ' OR '.join(conditions) + ')'
-            if filters.get('tags_all'):
-                values = filters['tags_all']
-                if isinstance(values, str):
-                    values = [v.strip() for v in values.split(',') if v.strip()]
-                for v in values:
-                    inner_query += ' AND e.tags LIKE ?'
-                    params.append('%' + str(v) + '%')
+        inner_query, params, flags = self._append_entreprise_list_filters(
+            inner_query,
+            params,
+            analyse_id=analyse_id,
+            filters=filters,
+            score_alias_pentest=score_alias_pentest,
+            score_alias_seo=score_alias_seo,
+            apply_score_filters_inline=apply_inline,
+        )
 
         query = '(' + inner_query + ') sub WHERE 1=1'
-        if has_security_filters:
+        # Filtres scores non appliqués inline (SQLite / fallback)
+        if flags['has_security_filters']:
             if EntrepriseManager._truthy_filter(filters, 'security_null'):
                 query += ' AND sub.score_securite IS NULL'
             else:
@@ -1438,7 +1388,7 @@ class EntrepriseManager(DatabaseBase):
                 if filters.get('security_max') is not None:
                     query += ' AND (COALESCE(sub.score_securite, 0) <= ?)'
                     params.append(filters['security_max'])
-        if has_pentest_filters:
+        if flags['has_pentest_filters']:
             if EntrepriseManager._truthy_filter(filters, 'pentest_null'):
                 query += ' AND sub.score_pentest IS NULL'
             else:
@@ -1448,7 +1398,7 @@ class EntrepriseManager(DatabaseBase):
                 if filters.get('pentest_max') is not None:
                     query += ' AND (COALESCE(sub.score_pentest, 0) <= ?)'
                     params.append(filters['pentest_max'])
-        if has_seo_filters:
+        if flags['has_seo_filters']:
             if EntrepriseManager._truthy_filter(filters, 'seo_null'):
                 query += ' AND sub.score_seo IS NULL'
             else:
@@ -2337,11 +2287,15 @@ class EntrepriseManager(DatabaseBase):
             conn = self.get_connection()
             cursor = conn.cursor()
             from_sql, params = self._build_filtered_entreprises_subquery_from(analyse_id, filters)
-            total = self.count_entreprises(analyse_id, filters)
+            # Une seule passe : GROUP BY + total = somme des counts (évite count_entreprises ×2)
             query = 'SELECT sub.statut, COUNT(*) as count FROM ' + from_sql + ' GROUP BY sub.statut'
             self.execute_sql(cursor, query, params)
             rows = cursor.fetchall() or []
             conn.close()
+            total = 0
+            for r in rows:
+                d = dict(r)
+                total += int(d.get('count') or 0)
         else:
             conn = self.get_connection()
             cursor = conn.cursor()
@@ -2350,14 +2304,6 @@ class EntrepriseManager(DatabaseBase):
             if analyse_id is not None:
                 where_base += ' AND analyse_id = ?'
                 params.append(analyse_id)
-
-            self.execute_sql(
-                cursor,
-                f'SELECT COUNT(*) as count FROM entreprises WHERE {where_base}',
-                params,
-            )
-            row_total = cursor.fetchone()
-            total = int(row_total['count'] if isinstance(row_total, dict) else row_total[0])
 
             self.execute_sql(
                 cursor,
@@ -2371,6 +2317,10 @@ class EntrepriseManager(DatabaseBase):
             )
             rows = cursor.fetchall() or []
             conn.close()
+            total = 0
+            for r in rows:
+                d = dict(r)
+                total += int(d.get('count') or 0)
 
         counts_ref = {s: 0 for s in ENTERPRISE_STATUSES}
         hors: list[dict[str, object]] = []
@@ -2439,7 +2389,7 @@ class EntrepriseManager(DatabaseBase):
             conn = self.get_connection()
             cursor = conn.cursor()
             from_sql, params = self._build_filtered_entreprises_subquery_from(analyse_id, filters)
-            total = self.count_entreprises(analyse_id, filters)
+            # Une seule passe SQL (évite un second count_entreprises ~10s en prod)
             query = (
                 f'SELECT {etape_expr_sub} AS etape_crm, COUNT(*) as count FROM '
                 + from_sql
@@ -2448,6 +2398,10 @@ class EntrepriseManager(DatabaseBase):
             self.execute_sql(cursor, query, params)
             rows = cursor.fetchall() or []
             conn.close()
+            total = 0
+            for r in rows:
+                d = dict(r)
+                total += int(d.get('count') or 0)
         else:
             conn = self.get_connection()
             cursor = conn.cursor()
@@ -2456,14 +2410,6 @@ class EntrepriseManager(DatabaseBase):
             if analyse_id is not None:
                 where_base += ' AND analyse_id = ?'
                 params.append(analyse_id)
-
-            self.execute_sql(
-                cursor,
-                f'SELECT COUNT(*) as count FROM entreprises WHERE {where_base}',
-                params,
-            )
-            row_total = cursor.fetchone()
-            total = int(row_total['count'] if isinstance(row_total, dict) else row_total[0])
 
             self.execute_sql(
                 cursor,
@@ -2477,6 +2423,10 @@ class EntrepriseManager(DatabaseBase):
             )
             rows = cursor.fetchall() or []
             conn.close()
+            total = 0
+            for r in rows:
+                d = dict(r)
+                total += int(d.get('count') or 0)
 
         counts_ref = {s: 0 for s in CRM_PIPELINE_ETAPES}
         hors: list[dict[str, object]] = []
@@ -4642,6 +4592,22 @@ class EntrepriseManager(DatabaseBase):
         if filters.get('secteur'):
             base_sql += ' AND e.secteur = ?'
             params.append(filters['secteur'])
+        if filters.get('categorie'):
+            base_sql += ' AND e.categorie = ?'
+            params.append(filters['categorie'])
+        if filters.get('categorie_contains'):
+            base_sql += ' AND e.categorie LIKE ?'
+            params.append('%' + str(filters['categorie_contains']) + '%')
+        if filters.get('categorie_any'):
+            values = filters['categorie_any']
+            if isinstance(values, str):
+                values = [v.strip() for v in values.split(',') if v.strip()]
+            conditions = []
+            for v in values or []:
+                conditions.append('LOWER(COALESCE(e.categorie, \'\')) LIKE ?')
+                params.append('%' + str(v).lower() + '%')
+            if conditions:
+                base_sql += ' AND (' + ' OR '.join(conditions) + ')'
         if filters.get('secteur_contains'):
             base_sql += ' AND e.secteur LIKE ?'
             params.append('%' + str(filters['secteur_contains']) + '%')

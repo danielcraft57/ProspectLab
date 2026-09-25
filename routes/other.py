@@ -1816,6 +1816,14 @@ def api_ciblage_entreprises():
     filters = {}
     if request.args.get('secteur'):
         filters['secteur'] = request.args.get('secteur')
+    if request.args.get('categorie'):
+        filters['categorie'] = request.args.get('categorie')
+    if request.args.get('categorie_contains'):
+        filters['categorie_contains'] = request.args.get('categorie_contains')
+    if request.args.get('categorie_any'):
+        filters['categorie_any'] = [
+            s.strip() for s in request.args.get('categorie_any').split(',') if s.strip()
+        ]
     if request.args.get('secteur_contains'):
         filters['secteur_contains'] = request.args.get('secteur_contains')
     if request.args.get('secteur_any'):

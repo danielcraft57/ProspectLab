@@ -274,6 +274,7 @@
         return {
             search: getElValue('search-input'),
             secteur: getElValue('filter-secteur'),
+            categorie: getElValue('filter-categorie'),
             groupe: getElValue('filter-groupe'), // '' | 'none' | <id>
             opportunite: getElValue('filter-opportunite'),
             statut: getElValue('filter-statut'),
@@ -326,6 +327,9 @@
             
             const filterSecteur = document.getElementById('filter-secteur');
             if (filterSecteur && typeof s.secteur === 'string') filterSecteur.value = s.secteur;
+
+            const filterCategorie = document.getElementById('filter-categorie');
+            if (filterCategorie && typeof s.categorie === 'string') filterCategorie.value = s.categorie;
             
             const filterGroupe = document.getElementById('filter-groupe');
             if (filterGroupe && typeof s.groupe === 'string') filterGroupe.value = s.groupe;
@@ -499,11 +503,12 @@
         });
     }
     
-    // Charger les secteurs pour le filtre
+    // Charger les secteurs (groupes) pour le filtre
     async function loadSecteurs() {
         try {
             const secteurs = await EntreprisesAPI.loadSecteurs();
             const select = document.getElementById('filter-secteur');
+            if (!select) return;
             secteurs.forEach(secteur => {
                 const option = document.createElement('option');
                 option.value = secteur;
@@ -512,6 +517,33 @@
             });
         } catch (error) {
             console.error('Erreur lors du chargement des secteurs:', error);
+        }
+    }
+
+    /**
+     * Charge les categories metier pour le filtre (optionnellement filtrees par secteur).
+     * @param {string} [secteur]
+     */
+    async function loadCategories(secteur) {
+        try {
+            const select = document.getElementById('filter-categorie');
+            if (!select) return;
+            const currentValue = select.value;
+            const categories = await EntreprisesAPI.loadCategories(secteur || '');
+            select.innerHTML = '<option value="">Toutes les catégories</option>';
+            (categories || []).forEach((categorie) => {
+                if (!categorie) return;
+                const option = document.createElement('option');
+                option.value = categorie;
+                option.textContent = categorie;
+                select.appendChild(option);
+            });
+            if (currentValue) {
+                const match = select.querySelector(`option[value="${CSS.escape(currentValue)}"]`);
+                if (match) select.value = currentValue;
+            }
+        } catch (error) {
+            console.error('Erreur lors du chargement des categories:', error);
         }
     }
 
@@ -720,6 +752,7 @@
         const get = (id) => (document.getElementById(id) || {}).value;
         const search = (get('search-input') || '').trim();
         const secteur = get('filter-secteur') || '';
+        const categorie = get('filter-categorie') || '';
         const groupeFilter = get('filter-groupe') || '';
         const opportunite = get('filter-opportunite') || '';
         const statut = get('filter-statut') || '';
@@ -754,6 +787,7 @@
         const filters = {};
         if (search) filters.search = search;
         if (secteur) filters.secteur = secteur;
+        if (categorie) filters.categorie = categorie;
         if (groupeFilter) {
             if (groupeFilter === 'none') {
                 filters.no_group = 'true';
@@ -1649,6 +1683,7 @@
                     ${resumePreview ? `<p class="resume-preview" style="color: #666; font-size: 0.9rem; margin-bottom: 0.75rem; font-style: italic;">${Formatters.escapeHtml(resumePreview)}</p>` : ''}
                     ${entreprise.website ? `<p><strong>Site:</strong> <a href="${entreprise.website}" target="_blank">${Formatters.escapeHtml(getDisplayDomain(entreprise.website))}</a></p>` : ''}
                     ${entreprise.secteur ? `<p><strong>Secteur:</strong> ${Formatters.escapeHtml(entreprise.secteur)}</p>` : ''}
+                    ${entreprise.categorie ? `<p><strong>Catégorie:</strong> ${Formatters.escapeHtml(entreprise.categorie)}</p>` : ''}
                     ${scoresSection}
                     ${visibleTagsHtml ? `<div class="tags-container">${visibleTagsHtml}</div>` : ''}
                 </div>
@@ -1887,7 +1922,8 @@
                         ${visibleTagsHtml ? `<div class="tags-container">${visibleTagsHtml}</div>` : ''}
                     </div>
                     <div class="row-meta">
-                        ${entreprise.secteur ? `<span class="row-chip row-chip-sector" title="Secteur"><i class="fas fa-industry" aria-hidden="true"></i> ${Formatters.escapeHtml(entreprise.secteur)}</span>` : ''}
+                        ${entreprise.secteur ? `<span class="row-chip row-chip-sector" title="Secteur (groupe)"><i class="fas fa-industry" aria-hidden="true"></i> ${Formatters.escapeHtml(entreprise.secteur)}</span>` : ''}
+                        ${entreprise.categorie ? `<span class="row-chip row-chip-category" title="Catégorie (métier)"><i class="fas fa-folder" aria-hidden="true"></i> ${Formatters.escapeHtml(entreprise.categorie)}</span>` : ''}
                         ${langChipLabel ? `<span class="row-chip row-chip-lang" title="Langue principale"><i class="fas fa-language" aria-hidden="true"></i> ${Formatters.escapeHtml(langChipLabel)}</span>` : ''}
                         ${commercialTopMode && entreprise.priority_score != null ? `
                         <span class="row-chip row-chip-priority" title="Priorité commerciale">
@@ -2688,6 +2724,7 @@
         // Changement des filtres avancés => rafraîchissement auto
         const advancedFilterIds = [
             'filter-secteur',
+            'filter-categorie',
             'filter-groupe',
             'filter-opportunite',
             'filter-statut',
@@ -3314,6 +3351,7 @@
         }
 
         const secteur = document.getElementById('filter-secteur')?.value;
+        const categorie = document.getElementById('filter-categorie')?.value;
         const groupe = document.getElementById('filter-groupe')?.value;
         const opportunite = document.getElementById('filter-opportunite')?.value;
         const statut = document.getElementById('filter-statut')?.value;
@@ -3335,6 +3373,7 @@
 
         const segmentationCount =
             (secteur ? 1 : 0) +
+            (categorie ? 1 : 0) +
             (groupe ? 1 : 0) +
             (opportunite ? 1 : 0) +
             (statut ? 1 : 0) +
@@ -4087,6 +4126,7 @@
                             ${createInfoRow('Nom', entreprise.nom)}
                             ${createInfoRow('Site web', entreprise.website, true)}
                             ${createInfoRow('Secteur', entreprise.secteur)}
+                            ${createInfoRow('Catégorie', entreprise.categorie)}
                             <div class="info-row" id="info-statut-row">
                                 <span class="info-label">Statut:</span>
                                 <span class="info-value" id="info-statut-value">${Badges.getStatusBadge(entreprise.statut)}</span>
@@ -5686,6 +5726,25 @@
             await loadSecteurs();
         } catch (e) {
             console.error('[entreprises] Erreur init secteurs:', e);
+        }
+        try {
+            await loadCategories(document.getElementById('filter-secteur')?.value || '');
+        } catch (e) {
+            console.error('[entreprises] Erreur init categories:', e);
+        }
+        try {
+            const secteurSelect = document.getElementById('filter-secteur');
+            if (secteurSelect) {
+                secteurSelect.addEventListener('change', async () => {
+                    try {
+                        await loadCategories(secteurSelect.value || '');
+                    } catch (err) {
+                        console.error('[entreprises] reload categories:', err);
+                    }
+                });
+            }
+        } catch (e) {
+            // ignore
         }
         try {
             await loadOpportunites();

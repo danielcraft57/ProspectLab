@@ -15,29 +15,16 @@ from __future__ import annotations
 import unicodedata
 from typing import Dict, Optional
 
-
-# Secteurs canoniques (affichage FR + filtres campagnes)
-TARGET_SECTEURS = frozenset(
-    {
-        "Technologie",
-        "Services",
-        "Restauration",
-        "Commerce",
-        "Éducation",
-        "Automobile",
-        "Beauté",
-        "Immobilier",
-        "BTP",
-        "Communication",
-        "Santé",
-        "Industrie",
-        "Finance",
-        "Hôtellerie",
-        "Juridique",
-        "Transport",
-        "Artisanat",
-    }
+from utils.taxonomie_secteurs import (  # noqa: E402
+    GROUPES as TARGET_SECTEURS,
+    GROUPES_ORDERED as TARGET_SECTEURS_ORDERED,
+    resolve_hierarchie,
 )
+
+
+# Alias historiques (imports existants)
+GROUPES = TARGET_SECTEURS
+GROUPES_ORDERED = TARGET_SECTEURS_ORDERED
 
 
 # Types Google Places / libelles bruts -> secteur FR
@@ -76,7 +63,6 @@ RAW_TO_TARGET: Dict[str, str] = {
     "electrician": "BTP",
     "real estate agency": "Immobilier",
     "hair care": "Beauté",
-    "gym": "Santé",
     "school": "Éducation",
     "primary school": "Éducation",
     "bakery": "Commerce",
@@ -86,7 +72,7 @@ RAW_TO_TARGET: Dict[str, str] = {
     "home goods store": "Commerce",
     "moving company": "Transport",
     "accounting": "Finance",
-    "travel agency": "Services",
+    "travel agency": "Tourisme",
     "electronics store": "Commerce",
     "book store": "Commerce",
     "insurance agency": "Finance",
@@ -94,7 +80,7 @@ RAW_TO_TARGET: Dict[str, str] = {
     "church": "Services",
     "local government office": "Services",
     "pharmacy": "Santé",
-    "drugstore": "Commerce",
+    "drugstore": "Santé",
     "car rental": "Automobile",
     "doctor": "Santé",
     "veterinary care": "Santé",
@@ -109,26 +95,29 @@ RAW_TO_TARGET: Dict[str, str] = {
     "gas station": "Automobile",
     "shoe store": "Commerce",
     "taxi stand": "Transport",
-    "library": "Services",
+    "library": "Éducation",
     "bank": "Finance",
     "convenience store": "Commerce",
-    "movie theater": "Services",
+    "movie theater": "Loisirs",
     "train station": "Transport",
     "shopping mall": "Commerce",
     "funeral home": "Services",
     "atm": "Finance",
     "courthouse": "Services",
-    "museum": "Services",
+    "museum": "Loisirs",
     "place of worship": "Services",
-    "art gallery": "Artisanat",
-    "amusement park": "Services",
-    "tourist attraction": "Services",
+    "art gallery": "Loisirs",
+    "amusement park": "Loisirs",
+    "tourist attraction": "Tourisme",
     "department store": "Commerce",
     "storage": "Services",
     "parking": "Services",
-    "aquarium": "Services",
-    "stadium": "Services",
-    "park": "Services",
+    "aquarium": "Loisirs",
+    "stadium": "Loisirs",
+    "park": "Loisirs",
+    "loisirs": "Loisirs",
+    "tourisme": "Tourisme",
+    "gym": "Loisirs",
     # --- libelles divers / legacy mapping ---
     "etablissement": "Services",
     "alimentation": "Commerce",
@@ -142,10 +131,10 @@ RAW_TO_TARGET: Dict[str, str] = {
     "florist": "Artisanat",
     "garage": "Automobile",
     "magasin vetements": "Commerce",
-    "rugby club": "Services",
+    "rugby club": "Loisirs",
     "training center": "Éducation",
     "advertising agency": "Communication",
-    "agence de voyage": "Services",
+    "agence de voyage": "Tourisme",
     "architecture": "BTP",
     "computer store": "Commerce",
     "ecole": "Éducation",
@@ -155,15 +144,15 @@ RAW_TO_TARGET: Dict[str, str] = {
     "agence immobiliere": "Immobilier",
     "apartment rental agency": "Hôtellerie",
     "assurance": "Finance",
-    "bicycle club": "Services",
-    "board game club": "Services",
+    "bicycle club": "Loisirs",
+    "board game club": "Loisirs",
     "chartered accountant": "Finance",
     "design agency": "Communication",
     "embassy": "Services",
     "equipment rental agency": "Services",
     "family counselor": "Santé",
     "graphic designer": "Communication",
-    "handball club": "Services",
+    "handball club": "Loisirs",
     "handicraft": "Artisanat",
     "holiday apartment rental": "Hôtellerie",
     "lieu de culte": "Services",
@@ -172,16 +161,17 @@ RAW_TO_TARGET: Dict[str, str] = {
     "mosque": "Services",
     "music instructor": "Éducation",
     "orthopedic shoe store": "Commerce",
-    "parc d'attractions": "Services",
+    "parc d'attractions": "Loisirs",
     "pet trainer": "Artisanat",
-    "pilates studio": "Santé",
+    "pilates studio": "Loisirs",
     "plasterer": "BTP",
     "shoe repair shop": "Commerce",
     "temp agency": "Services",
-    "tennis club": "Services",
+    "tennis club": "Loisirs",
     "vacation rental": "Hôtellerie",
     "wedding planner": "Communication",
     "wholesaler": "Commerce",
+    "gym": "Loisirs",
 }
 
 
@@ -204,6 +194,8 @@ SECTEUR_TO_ECHANTILLON: Dict[str, str] = {
     "Juridique": "juridique",
     "Transport": "automobile",
     "Artisanat": "artisan",
+    "Loisirs": "services",
+    "Tourisme": "etablissement",
 }
 
 
@@ -226,7 +218,21 @@ SECTEUR_ACCROCHES: Dict[str, str] = {
     "Juridique": "expertises, forfaits et prise de contact",
     "Transport": "zones, delais et demande de devis",
     "Artisanat": "depannage, zones d'intervention et devis rapide",
+    "Loisirs": "horaires, tarifs et reservation visibles sur telephone",
+    "Tourisme": "offres, disponibilites et demande de devis simples",
 }
+
+
+def resolve_secteur(raw: Optional[str], nom: Optional[str] = None) -> str:
+    """
+    Resolut le groupe macro (secteur) a partir du brut et du nom.
+
+    @param raw: Valeur BDD / type Google
+    @param nom: Nom entreprise (optionnel, pour establishment)
+    @returns: Secteur FR canonique ou chaine vide
+    """
+    resolved = resolve_hierarchie(raw, nom=nom)
+    return str(resolved.get("secteur") or "")
 
 
 def normalize_key(value: str) -> str:

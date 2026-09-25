@@ -555,6 +555,7 @@ class DatabaseSchema(DatabaseBase):
                 nom TEXT NOT NULL,
                 website TEXT,
                 secteur TEXT,
+                categorie TEXT,
                 statut TEXT,
                 opportunite TEXT,
                 email_principal TEXT,
@@ -624,6 +625,14 @@ class DatabaseSchema(DatabaseBase):
         # Localisation fine (scraping / imports)
         self.safe_execute_sql(cursor, 'ALTER TABLE entreprises ADD COLUMN ville TEXT')
         self.safe_execute_sql(cursor, 'ALTER TABLE entreprises ADD COLUMN code_postal TEXT')
+
+        # Taxonomie hierarchique : metier fin (sous secteur/groupe)
+        self.safe_execute_sql(cursor, 'ALTER TABLE entreprises ADD COLUMN categorie TEXT')
+        self.safe_execute_sql(cursor, 'ALTER TABLE entreprises ADD COLUMN secteur_raw TEXT')
+        self.execute_sql(
+            cursor,
+            'CREATE INDEX IF NOT EXISTS idx_entreprises_categorie ON entreprises(categorie)',
+        )
 
         # Étapes pipeline CRM (Sprint 1) — distinct du champ statut (campagnes / délivrabilité)
         self.safe_execute_sql(cursor, 'ALTER TABLE entreprises ADD COLUMN etape_prospection TEXT')
@@ -2070,11 +2079,25 @@ class DatabaseSchema(DatabaseBase):
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_entreprises_analyse ON entreprises(analyse_id)')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_entreprises_nom ON entreprises(nom)')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_entreprises_secteur ON entreprises(secteur)')
+        self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_entreprises_categorie ON entreprises(categorie)')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_entreprises_geo ON entreprises(longitude, latitude)')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_emails_campagne ON emails_envoyes(campagne_id)')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_tech_entreprise ON analyses_techniques(entreprise_id)')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_osint_entreprise ON analyses_osint(entreprise_id)')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_pentest_entreprise ON analyses_pentest(entreprise_id)')
+        # Dernier score pentest/SEO par entreprise (filtres liste + kanban)
+        self.execute_sql(
+            cursor,
+            'CREATE INDEX IF NOT EXISTS idx_pentest_entreprise_date ON analyses_pentest(entreprise_id, date_analyse DESC)',
+        )
+        self.execute_sql(
+            cursor,
+            'CREATE INDEX IF NOT EXISTS idx_seo_entreprise_date ON analyses_seo(entreprise_id, date_analyse DESC)',
+        )
+        self.execute_sql(
+            cursor,
+            'CREATE INDEX IF NOT EXISTS idx_entreprises_score_securite ON entreprises(score_securite)',
+        )
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_scrapers_entreprise ON scrapers(entreprise_id)')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_scrapers_url ON scrapers(url)')
         self.execute_sql(cursor,'CREATE INDEX IF NOT EXISTS idx_personnes_entreprise ON personnes(entreprise_id)')

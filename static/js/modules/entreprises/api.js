@@ -58,6 +58,18 @@
         },
 
         /**
+         * Charge les categories metier (optionnellement filtrees par secteur/groupe).
+         * @param {string} [secteur]
+         * @returns {Promise<Array>}
+         */
+        async loadCategories(secteur) {
+            const qs = secteur ? `?secteur=${encodeURIComponent(secteur)}` : '';
+            const response = await fetch(`/api/categories${qs}`);
+            if (!response.ok) throw new Error('Erreur lors du chargement des categories');
+            return await response.json();
+        },
+
+        /**
          * Charge les opportunites disponibles (valeurs distinctes en base).
          * @returns {Promise<Array>}
          */
