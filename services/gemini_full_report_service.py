@@ -603,7 +603,8 @@ def build_full_report_for_entreprise(
     _emit(f'Contexte pret (~{len(context_text)} caracteres)', 52)
 
     _emit('Chargement images screenshots pour Vision…', 55)
-    images = _load_screenshot_images(latest, max_images=3)
+    # Desktop + mobile suffisent pour UX/UI ; 3 images + url_context ralenti trop
+    images = _load_screenshot_images(latest, max_images=2)
     for img in images:
         _emit(f'  · Image {img.get("device")}: {len(img.get("bytes") or b"")} octets', 56)
     if not images:
@@ -617,7 +618,7 @@ def build_full_report_for_entreprise(
         'pentest': (pipeline.get('pentest') or {}).get('status'),
         'screenshots': 'done' if images else ((pipeline.get('screenshots') or {}).get('status') or 'never'),
         'screenshot_images_sent': len(images),
-        'url_context': True,
+        'url_context': False,
     }
 
     use_gemini = bool(
@@ -628,10 +629,9 @@ def build_full_report_for_entreprise(
 
     report: Dict[str, Any]
     source = 'heuristic'
-    gemini_tools = [{'url_context': {}}]
     if use_gemini:
         _emit(
-            f'Appel Gemini Vision ({len(images)} image(s) + URL {website}) — patience…',
+            f'Appel Gemini Vision ({len(images)} image(s), site {website})…',
             60,
         )
         try:
@@ -641,38 +641,54 @@ def build_full_report_for_entreprise(
             prompt = (
                 f"Audit complet du site : {website}\n\n"
                 "Mission :\n"
-                "1) Consulte l'URL ci-dessus (outil url_context) pour comprendre le site reel.\n"
-                "2) Analyse les screenshots joints (devices: "
+                "1) Analyse les screenshots joints (devices: "
                 f"{devices}) pour le design, l'UX/UI, le responsive et la conversion.\n"
-                "3) Croise avec les modules ProspectLab du contexte JSON "
+                "2) Croise avec les modules ProspectLab du contexte JSON "
                 "(technique, SEO, OSINT, pentest, age/refonte).\n"
-                "4) Produis un rapport actionnable : ce qui marche, ce qui cloche, "
+                "3) Produis un rapport actionnable : ce qui marche, ce qui cloche, "
                 "ce qu'il faut refaire (design + tech + SEO + securite).\n"
                 "Interdit : se contenter de dire que des captures existent.\n\n"
                 f"CONTEXTE PROSPECTLAB:\n{context_text}"
             )
-            if images:
-                _emit('Envoi multimodal (URL + texte + images) a Gemini…', 65)
-                raw = gemini_vision_multi_json(
-                    prompt=prompt,
-                    images=images,
-                    system_instruction=FULL_REPORT_SYSTEM_PROMPT,
-                    max_tokens=8192,
-                    timeout_ms=120_000,
-                    tools=gemini_tools,
-                )
-            else:
-                _emit('Envoi texte + URL a Gemini…', 65)
+
+            def _call_gemini(with_url_tool: bool) -> Dict[str, Any]:
+                """
+                Appelle Gemini (vision ou texte).
+
+                @param with_url_tool: Active l'outil url_context
+                @returns: Dict JSON brut
+                """
+                tools = [{'url_context': {}}] if with_url_tool else None
+                if images:
+                    return gemini_vision_multi_json(
+                        prompt=prompt,
+                        images=images,
+                        system_instruction=FULL_REPORT_SYSTEM_PROMPT,
+                        max_tokens=6144,
+                        timeout_ms=90_000,
+                        tools=tools,
+                    )
                 text = gemini_generate_content(
                     parts=[{'text': prompt}],
                     system_instruction=FULL_REPORT_SYSTEM_PROMPT,
                     json_mode=True,
                     temperature=0.25,
-                    max_tokens=8192,
-                    timeout_ms=120_000,
-                    tools=gemini_tools,
+                    max_tokens=6144,
+                    timeout_ms=90_000,
+                    tools=tools,
                 )
-                raw = json.loads(text) if isinstance(text, str) else text
+                return json.loads(text) if isinstance(text, str) else text
+
+            # 1) Vision + contexte ProspectLab (rapide / fiable)
+            _emit('Envoi multimodal (texte + images) a Gemini…', 65)
+            try:
+                raw = _call_gemini(with_url_tool=False)
+            except Exception as first_exc:
+                # 2) Retry avec url_context si le 1er tour echoue
+                _emit(f'1er appel echoue ({first_exc}) — retry avec url_context…', 70)
+                modules_used['url_context'] = True
+                raw = _call_gemini(with_url_tool=True)
+
             _emit('Reponse Gemini recue — normalisation JSON…', 85)
             report = _normalize_full_report(raw if isinstance(raw, dict) else {}, 'gemini')
             source = 'gemini'

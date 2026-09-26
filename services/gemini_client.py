@@ -204,9 +204,25 @@ def _try_all_keys(
                 logger.warning('[Gemini] %s — quota (429), cle suivante…', tag)
                 break
 
-            if status in (401, 403):
+            if status == 401:
                 _revoked_keys.add(api_key)
-                logger.warning('[Gemini] %s — refus (%s), cle ignoree…', tag, status)
+                logger.warning('[Gemini] %s — 401, cle ignoree…', tag)
+                break
+
+            if status == 403:
+                # Cle invalide → blacklist. PERMISSION_DENIED projet / feature →
+                # on passe a la cle suivante SANS blacklist permanente (souvent intermittent).
+                lowered = (raw or '').lower()
+                hard_revoke = (
+                    'api key not valid' in lowered
+                    or 'api_key_invalid' in lowered
+                    or 'invalid api key' in lowered
+                )
+                if hard_revoke:
+                    _revoked_keys.add(api_key)
+                    logger.warning('[Gemini] %s — 403 cle invalide, ignoree…', tag)
+                else:
+                    logger.warning('[Gemini] %s — 403 (pas de blacklist): %s', tag, raw[:180])
                 break
 
             if status >= 500 and attempt < 2:
@@ -259,11 +275,13 @@ def gemini_generate_content(
     )
     api_keys = get_gemini_api_keys()
 
+    # thinkingLevel low : gemini-3.x flash peut sinon "réfléchir" 30-60s pour un JSON simple
     body: Dict[str, Any] = {
         'contents': [{'role': 'user', 'parts': parts}],
         'generationConfig': {
             'temperature': temperature,
             'maxOutputTokens': max_tokens,
+            'thinkingConfig': {'thinkingLevel': 'low'},
         },
     }
     if system_instruction:
