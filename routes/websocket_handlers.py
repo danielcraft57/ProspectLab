@@ -110,10 +110,29 @@ def _celery_success_result_as_dict(result):
     return None
 
 
+def _ws_sleep(seconds: float) -> None:
+    """
+    Sleep compatible eventlet (ne bloque pas tout le worker Gunicorn).
+
+    Sous -k eventlet, un time.sleep mal patché peut geler HTTP + ouverture des fiches
+    pendant qu'un monitor Celery tourne (ex. rapport Gemini long).
+    """
+    sec = max(0.0, float(seconds or 0))
+    if sec <= 0:
+        return
+    try:
+        import eventlet
+        eventlet.sleep(sec)
+        return
+    except Exception:
+        pass
+    time.sleep(sec)
+
+
 def _sleep_before_monitor_poll(countdown_sec: int) -> None:
     """Évite de poller AsyncResult en boucle pendant le countdown Celery (charge Redis / CPU)."""
     if countdown_sec and countdown_sec > 0:
-        time.sleep(min(float(countdown_sec), 120.0))
+        _ws_sleep(min(float(countdown_sec), 120.0))
 
 
 def _start_monitor_background(socketio, target):
@@ -1640,7 +1659,7 @@ def register_websocket_handlers(socketio, app):
                                 if session_id in active_tasks:
                                     del active_tasks[session_id]
                             break
-                        time.sleep(_WS_MONITOR_POLL_SEC)
+                        _ws_sleep(_WS_MONITOR_POLL_SEC)
                 except Exception as e:
                     safe_emit(socketio, 'osint_analysis_error', {
                         'error': f'Erreur dans le suivi: {str(e)}',
@@ -1826,7 +1845,7 @@ def register_websocket_handlers(socketio, app):
                                 if session_id in active_tasks:
                                     del active_tasks[session_id]
                             break
-                        time.sleep(_WS_MONITOR_POLL_SEC)
+                        _ws_sleep(_WS_MONITOR_POLL_SEC)
                 except Exception as e:
                     safe_emit(socketio, 'pentest_analysis_error', {
                         'error': f'Erreur dans le suivi: {str(e)}',
@@ -1980,7 +1999,7 @@ def register_websocket_handlers(socketio, app):
                                 if session_id in active_tasks:
                                     del active_tasks[session_id]
                             break
-                        time.sleep(_WS_MONITOR_POLL_SEC)
+                        _ws_sleep(_WS_MONITOR_POLL_SEC)
                 except Exception as e:
                     safe_emit(socketio, 'seo_analysis_error', {
                         'error': f'Erreur dans le suivi: {str(e)}',
@@ -2163,7 +2182,7 @@ def register_websocket_handlers(socketio, app):
                                 if session_id in active_tasks:
                                     del active_tasks[session_id]
                             break
-                        time.sleep(_WS_MONITOR_POLL_SEC)
+                        _ws_sleep(_WS_MONITOR_POLL_SEC)
                 except Exception as e:
                     safe_emit(socketio, 'technical_analysis_error', {
                         'error': f'Erreur dans le suivi: {str(e)}',
@@ -2293,7 +2312,7 @@ def register_websocket_handlers(socketio, app):
                                 room=session_id,
                             )
                             break
-                        time.sleep(_WS_MONITOR_POLL_SEC)
+                        _ws_sleep(_WS_MONITOR_POLL_SEC)
                 except Exception as e:
                     safe_emit(
                         socketio,
@@ -2462,7 +2481,7 @@ def register_websocket_handlers(socketio, app):
                                 room=session_id,
                             )
                             break
-                        time.sleep(_WS_MONITOR_POLL_SEC)
+                        _ws_sleep(_WS_MONITOR_POLL_SEC)
                 except Exception as e:
                     safe_emit(
                         socketio,
@@ -2879,7 +2898,7 @@ def register_websocket_handlers(socketio, app):
                                         del active_tasks[session_id]
                                 break
 
-                            time.sleep(_WS_MONITOR_POLL_SEC)
+                            _ws_sleep(_WS_MONITOR_POLL_SEC)
                         except Exception as e:
                             logger.warning(
                                 'monitor_full_website_analysis: %s',

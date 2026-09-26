@@ -206,6 +206,8 @@
     let currentModalEntrepriseId = null;
     let currentModalEntrepriseData = null;
     let currentModalPentestScore = null;
+    /** Annule un chargement de fiche en cours si on en ouvre une autre. */
+    let modalLoadAbortController = null;
     const entrepriseGroupsCache = {};
     const selectedEntreprises = new Set();
     let tagsSuggestions = [];
@@ -1958,42 +1960,42 @@
                             <i class="fas fa-exclamation-triangle row-pentest-warn" style="color: ${entreprise.score_pentest >= 70 ? '#ef4444' : '#f59e0b'};" title="Score Pentest: ${entreprise.score_pentest}/100"></i>
                             ` : ''}
                         </div>
+                        <div class="row-meta">
+                            ${entreprise.secteur ? `<span class="row-chip row-chip-sector" title="Secteur (groupe)"><i class="fas fa-industry" aria-hidden="true"></i> ${Formatters.escapeHtml(entreprise.secteur)}</span>` : ''}
+                            ${entreprise.categorie ? `<span class="row-chip row-chip-category" title="Catégorie (métier)"><i class="fas fa-folder" aria-hidden="true"></i> ${Formatters.escapeHtml(entreprise.categorie)}</span>` : ''}
+                            <span class="row-chip row-chip-screenshots ${entreprise.has_screenshots ? 'is-ready' : 'is-missing'}" data-action="launch-screenshots" data-entreprise-id="${entreprise.id}" title="${entreprise.has_screenshots ? 'Screenshots OK (cliquer pour relancer)' : 'Pas de screenshots / 404 — cliquer pour capturer'}" role="button" tabindex="0">
+                                <i class="fas fa-camera" aria-hidden="true"></i>
+                            </span>
+                            <span class="row-chip row-chip-gemini ${entreprise.has_gemini_report ? 'is-ready' : 'is-missing'}" data-action="launch-gemini" data-entreprise-id="${entreprise.id}" title="${entreprise.has_gemini_report ? 'Rapport Gemini OK (cliquer pour relancer)' : 'Pas de rapport Gemini — cliquer pour lancer'}" role="button" tabindex="0">
+                                <i class="fas fa-robot" aria-hidden="true"></i>
+                            </span>
+                            ${langChipLabel ? `<span class="row-chip row-chip-lang" title="Langue principale"><i class="fas fa-language" aria-hidden="true"></i> ${Formatters.escapeHtml(langChipLabel)}</span>` : ''}
+                            ${commercialTopMode && entreprise.priority_score != null ? `
+                            <span class="row-chip row-chip-priority" title="Priorité commerciale">
+                                <i class="fas fa-sort-amount-down" aria-hidden="true"></i> ${Math.round(Number(entreprise.priority_score))}
+                                ${entreprise.last_touchpoint_at ? ` · ${Formatters.escapeHtml(String(entreprise.last_touchpoint_at).slice(0, 16))}` : ' · —'}
+                            </span>` : ''}
+                            ${entreprise.statut ? (() => {
+                                const statut = String(entreprise.statut || '').trim();
+                                const cls = (Badges && typeof Badges.getStatusClass === 'function') ? Badges.getStatusClass(statut) : 'secondary';
+                                const icon = statut === 'Nouveau' ? 'fa-bolt'
+                                    : statut === 'À qualifier' ? 'fa-question-circle'
+                                    : statut === 'Relance' ? 'fa-phone'
+                                    : statut === 'Gagné' ? 'fa-trophy'
+                                    : statut === 'Perdu' ? 'fa-times-circle'
+                                    : statut === 'Désabonné' ? 'fa-ban'
+                                    : statut === 'Réponse négative' ? 'fa-thumbs-down'
+                                    : statut === 'Réponse positive' ? 'fa-thumbs-up'
+                                    : statut === 'Bounce' ? 'fa-exclamation-triangle'
+                                    : statut === 'Plainte spam' ? 'fa-skull-crossbones'
+                                    : statut === 'Ne pas contacter' ? 'fa-user-slash'
+                                    : statut === 'À rappeler' ? 'fa-clock'
+                                    : 'fa-tag';
+                                return `<span class="row-chip row-chip-status badge badge-${cls}" title="Statut"><i class="fas ${icon}" aria-hidden="true"></i> ${Formatters.escapeHtml(statut)}</span>`;
+                            })() : ''}
+                            ${entreprise.email_principal ? `<span class="row-meta-item row-meta-email">${Formatters.escapeHtml(entreprise.email_principal)}</span>` : ''}
+                        </div>
                         ${visibleTagsHtml ? `<div class="tags-container">${visibleTagsHtml}</div>` : ''}
-                    </div>
-                    <div class="row-meta">
-                        ${entreprise.secteur ? `<span class="row-chip row-chip-sector" title="Secteur (groupe)"><i class="fas fa-industry" aria-hidden="true"></i> ${Formatters.escapeHtml(entreprise.secteur)}</span>` : ''}
-                        ${entreprise.categorie ? `<span class="row-chip row-chip-category" title="Catégorie (métier)"><i class="fas fa-folder" aria-hidden="true"></i> ${Formatters.escapeHtml(entreprise.categorie)}</span>` : ''}
-                        <span class="row-chip row-chip-screenshots ${entreprise.has_screenshots ? 'is-ready' : 'is-missing'}" data-action="launch-screenshots" data-entreprise-id="${entreprise.id}" title="${entreprise.has_screenshots ? 'Screenshots OK (cliquer pour relancer)' : 'Pas de screenshots / 404 — cliquer pour capturer'}" role="button" tabindex="0">
-                            <i class="fas fa-camera" aria-hidden="true"></i>
-                        </span>
-                        <span class="row-chip row-chip-gemini ${entreprise.has_gemini_report ? 'is-ready' : 'is-missing'}" data-action="launch-gemini" data-entreprise-id="${entreprise.id}" title="${entreprise.has_gemini_report ? 'Rapport Gemini OK (cliquer pour relancer)' : 'Pas de rapport Gemini — cliquer pour lancer'}" role="button" tabindex="0">
-                            <i class="fas fa-robot" aria-hidden="true"></i>
-                        </span>
-                        ${langChipLabel ? `<span class="row-chip row-chip-lang" title="Langue principale"><i class="fas fa-language" aria-hidden="true"></i> ${Formatters.escapeHtml(langChipLabel)}</span>` : ''}
-                        ${commercialTopMode && entreprise.priority_score != null ? `
-                        <span class="row-chip row-chip-priority" title="Priorité commerciale">
-                            <i class="fas fa-sort-amount-down" aria-hidden="true"></i> ${Math.round(Number(entreprise.priority_score))}
-                            ${entreprise.last_touchpoint_at ? ` · ${Formatters.escapeHtml(String(entreprise.last_touchpoint_at).slice(0, 16))}` : ' · —'}
-                        </span>` : ''}
-                        ${entreprise.statut ? (() => {
-                            const statut = String(entreprise.statut || '').trim();
-                            const cls = (Badges && typeof Badges.getStatusClass === 'function') ? Badges.getStatusClass(statut) : 'secondary';
-                            const icon = statut === 'Nouveau' ? 'fa-bolt'
-                                : statut === 'À qualifier' ? 'fa-question-circle'
-                                : statut === 'Relance' ? 'fa-phone'
-                                : statut === 'Gagné' ? 'fa-trophy'
-                                : statut === 'Perdu' ? 'fa-times-circle'
-                                : statut === 'Désabonné' ? 'fa-ban'
-                                : statut === 'Réponse négative' ? 'fa-thumbs-down'
-                                : statut === 'Réponse positive' ? 'fa-thumbs-up'
-                                : statut === 'Bounce' ? 'fa-exclamation-triangle'
-                                : statut === 'Plainte spam' ? 'fa-skull-crossbones'
-                                : statut === 'Ne pas contacter' ? 'fa-user-slash'
-                                : statut === 'À rappeler' ? 'fa-clock'
-                                : 'fa-tag';
-                            return `<span class="row-chip row-chip-status badge badge-${cls}" title="Statut"><i class="fas ${icon}" aria-hidden="true"></i> ${Formatters.escapeHtml(statut)}</span>`;
-                        })() : ''}
-                        ${entreprise.email_principal ? `<span class="row-meta-item row-meta-email">${Formatters.escapeHtml(entreprise.email_principal)}</span>` : ''}
                     </div>
                 </div>
                 ${rowScoresSection}
@@ -3493,7 +3495,14 @@
     
     // Ouvrir la modal d'entreprise
     async function openEntrepriseModal(entrepriseId) {
-        currentModalEntrepriseId = entrepriseId;
+        const requestedId = Number(entrepriseId);
+        if (modalLoadAbortController) {
+            try { modalLoadAbortController.abort(); } catch (e) {}
+        }
+        modalLoadAbortController = new AbortController();
+        const loadSignal = modalLoadAbortController.signal;
+
+        currentModalEntrepriseId = requestedId;
         const modal = document.getElementById('entreprise-modal');
         const modalBody = document.getElementById('modal-entreprise-body');
         const modalTitle = document.getElementById('modal-entreprise-nom');
@@ -3509,24 +3518,34 @@
         modalTitle.textContent = 'Chargement...';
         
         try {
-            currentModalEntrepriseData = await EntreprisesAPI.loadDetails(entrepriseId);
+            currentModalEntrepriseData = await EntreprisesAPI.loadDetails(requestedId, {
+                signal: loadSignal,
+                timeoutMs: 20000,
+            });
+            // Une autre fiche a peut-être été demandée pendant l'attente
+            if (Number(currentModalEntrepriseId) !== requestedId || loadSignal.aborted) {
+                return;
+            }
             currentModalPentestScore = null;
             modalTitle.textContent = currentModalEntrepriseData.nom || 'Sans nom';
             modalBody.innerHTML = createModalContent(currentModalEntrepriseData);
             
             setupModalInteractions();
-            loadEntrepriseInfoScreenshots(entrepriseId);
-            loadEntrepriseImages(entrepriseId);
+            loadEntrepriseInfoScreenshots(requestedId);
+            loadEntrepriseImages(requestedId);
             loadEntreprisePages(currentModalEntrepriseData);
-            loadGeminiFullReport(entrepriseId);
-            loadScrapingResults(entrepriseId);
-            loadTechnicalAnalysis(entrepriseId);
-            loadOSINTAnalysis(entrepriseId);
-            loadPentestAnalysis(entrepriseId);
-            loadProspectionTab(entrepriseId);
-            loadMetricEvolutionTab(entrepriseId);
-            refreshOpportunityScore(entrepriseId);
+            loadGeminiFullReport(requestedId);
+            loadScrapingResults(requestedId);
+            loadTechnicalAnalysis(requestedId);
+            loadOSINTAnalysis(requestedId);
+            loadPentestAnalysis(requestedId);
+            loadProspectionTab(requestedId);
+            loadMetricEvolutionTab(requestedId);
+            refreshOpportunityScore(requestedId);
         } catch (error) {
+            if (loadSignal.aborted || Number(currentModalEntrepriseId) !== requestedId) {
+                return;
+            }
             console.error('Erreur lors du chargement:', error);
             modalBody.innerHTML = `
                 <div class="error">
@@ -4834,6 +4853,10 @@
     }
     
     function closeEntrepriseModal() {
+        if (modalLoadAbortController) {
+            try { modalLoadAbortController.abort(); } catch (e) {}
+            modalLoadAbortController = null;
+        }
         const modal = document.getElementById('entreprise-modal');
         if (modal) {
             modal.style.display = 'none';
@@ -5156,7 +5179,8 @@
             };
         }
         
-        if (modal) {
+        if (modal && modal.dataset.modalClickBound !== '1') {
+            modal.dataset.modalClickBound = '1';
             modal.onclick = (e) => {
                 if (e.target === modal) {
                     closeEntrepriseModal();
@@ -5188,7 +5212,9 @@
                     openPreviewCollection(currentImagesItems, Number.isNaN(idx) ? 0 : idx);
                 }
             });
+        }
 
+        if (modal) {
             const screenshotBtn = document.getElementById('info-screenshots-refresh-btn');
             if (screenshotBtn) {
                 screenshotBtn.onclick = (e) => {

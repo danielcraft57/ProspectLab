@@ -86,10 +86,32 @@
          * @param {number} id
          * @returns {Promise<Object>}
          */
-        async loadDetails(id) {
-            const response = await fetch(`/api/entreprise/${id}`);
-            if (!response.ok) throw new Error('Erreur lors du chargement des détails');
-            return await response.json();
+        async loadDetails(id, options = {}) {
+            const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 20000;
+            const controller = new AbortController();
+            const external = options.signal;
+            const onExternalAbort = () => controller.abort();
+            if (external) {
+                if (external.aborted) controller.abort();
+                else external.addEventListener('abort', onExternalAbort, { once: true });
+            }
+            const timer = setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                const response = await fetch(`/api/entreprise/${id}`, {
+                    credentials: 'same-origin',
+                    signal: controller.signal,
+                });
+                if (!response.ok) throw new Error('Erreur lors du chargement des détails');
+                return await response.json();
+            } catch (err) {
+                if (err && err.name === 'AbortError') {
+                    throw new Error('Chargement trop long — réessaie (une analyse lourde peut bloquer un instant)');
+                }
+                throw err;
+            } finally {
+                clearTimeout(timer);
+                if (external) external.removeEventListener('abort', onExternalAbort);
+            }
         },
 
         /**
