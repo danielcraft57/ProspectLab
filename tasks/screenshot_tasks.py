@@ -719,6 +719,28 @@ def website_screenshot_task(
         deleted_files,
         elapsed_ms,
     )
+
+    design_task_id = None
+    desktop_ok = bool((capture_by_device.get('desktop') or {}).get('file_path'))
+    if screenshot_set_id and desktop_ok:
+        try:
+            from tasks.design_review_tasks import analyze_screenshot_design_task
+
+            design_async = analyze_screenshot_design_task.apply_async(
+                kwargs=dict(
+                    entreprise_id=eid,
+                    screenshot_set_id=int(screenshot_set_id),
+                ),
+                queue='screenshot',
+            )
+            design_task_id = design_async.id
+        except Exception as exc:
+            logger.warning(
+                'Auto design-review non lancee apres capture (entreprise=%s): %s',
+                eid,
+                exc,
+            )
+
     return {
         'success': True,
         'screenshot_set_id': screenshot_set_id,
@@ -737,4 +759,5 @@ def website_screenshot_task(
         'block_trackers': WEBSITE_SCREENSHOT_BLOCK_TRACKERS,
         'device_scale_factor': WEBSITE_SCREENSHOT_DEVICE_SCALE_FACTOR,
         'elapsed_ms': elapsed_ms,
+        'design_review_task_id': design_task_id,
     }

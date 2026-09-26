@@ -664,7 +664,10 @@ class EntrepriseManager(DatabaseBase):
             resume,
             og_image,
             favicon,
-            logo
+            logo,
+            entreprise_data.get('site_age_score'),
+            entreprise_data.get('site_indicators'),
+            entreprise_data.get('http_last_modified') or entreprise_data.get('last_modified'),
         )
 
         # IMPORTANT :
@@ -676,12 +679,14 @@ class EntrepriseManager(DatabaseBase):
                     analyse_id, nom, website, secteur, categorie, secteur_raw, statut, etape_prospection, opportunite,
                     email_principal, responsable, taille_estimee, hosting_provider,
                     framework, score_securite, telephone, pays, address_1, address_2,
-                    longitude, latitude, note_google, nb_avis_google, resume, og_image, favicon, logo
+                    longitude, latitude, note_google, nb_avis_google, resume, og_image, favicon, logo,
+                    site_age_score, site_indicators, http_last_modified
                 ) VALUES (
                     %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s
                 )
                 RETURNING id
             '''
@@ -702,8 +707,9 @@ class EntrepriseManager(DatabaseBase):
                     analyse_id, nom, website, secteur, categorie, secteur_raw, statut, etape_prospection, opportunite,
                     email_principal, responsable, taille_estimee, hosting_provider,
                     framework, score_securite, telephone, pays, address_1, address_2,
-                    longitude, latitude, note_google, nb_avis_google, resume, og_image, favicon, logo
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    longitude, latitude, note_google, nb_avis_google, resume, og_image, favicon, logo,
+                    site_age_score, site_indicators, http_last_modified
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', params)
             entreprise_id = cursor.lastrowid
         
@@ -724,6 +730,12 @@ class EntrepriseManager(DatabaseBase):
                 self.update_opportunity_score(entreprise_id)
             except Exception as e:
                 logger.warning(f'Erreur lors du calcul initial de l\'opportunité pour entreprise {entreprise_id}: {e}')
+
+        if entreprise_id and entreprise_data.get('email_principal'):
+            try:
+                self.refresh_has_known_email(entreprise_id)
+            except Exception as e:
+                logger.warning('refresh_has_known_email après save_entreprise: %s', e)
         
         return entreprise_id
     
@@ -1007,45 +1019,14 @@ class EntrepriseManager(DatabaseBase):
     
     def _entreprises_latest_score_sql(self):
         """
-        SELECT + FROM extras pour les derniers scores pentest/SEO.
-        PostgreSQL: JOIN LATERAL (meilleur avec index (entreprise_id, date_analyse DESC)).
-        SQLite: sous-requêtes corrélées.
+        Scores pentest/SEO dénormalisés sur entreprises (hooks écriture + backfill).
+        Évite LATERAL / sous-requêtes sur chaque ligne de la liste filtrée.
         """
-        if self.is_postgresql():
-            select_sql = 'pt.risk_score AS score_pentest, seo.score AS score_seo'
-            from_sql = '''
-            LEFT JOIN LATERAL (
-                SELECT risk_score
-                FROM analyses_pentest
-                WHERE entreprise_id = e.id
-                ORDER BY date_analyse DESC NULLS LAST
-                LIMIT 1
-            ) pt ON TRUE
-            LEFT JOIN LATERAL (
-                SELECT score
-                FROM analyses_seo
-                WHERE entreprise_id = e.id
-                ORDER BY date_analyse DESC NULLS LAST
-                LIMIT 1
-            ) seo ON TRUE
-            '''
-            return select_sql, from_sql
-        select_sql = '''
-                   (SELECT risk_score
-                    FROM analyses_pentest
-                    WHERE entreprise_id = e.id
-                    ORDER BY date_analyse DESC
-                    LIMIT 1) as score_pentest,
-                   (SELECT score
-                    FROM analyses_seo
-                    WHERE entreprise_id = e.id
-                    ORDER BY date_analyse DESC
-                    LIMIT 1) as score_seo'''
-        return select_sql, ''
+        return 'e.score_pentest AS score_pentest, e.score_seo AS score_seo', ''
 
     @staticmethod
     def _has_email_filter_sql():
-        """Filtre « au moins un email connu » — sans TRIM pour rester index-friendly."""
+        """EXISTS multi-sources — utilisé uniquement pour refresh/backfill has_known_email."""
         return """
                     AND (
                         (e.email_principal IS NOT NULL AND e.email_principal <> '')
@@ -1080,6 +1061,254 @@ class EntrepriseManager(DatabaseBase):
                         )
                     )
                 """
+
+    def refresh_has_known_email(self, entreprise_id, cursor=None):
+        """Met à jour entreprises.has_known_email (0/1) pour une fiche."""
+        if not entreprise_id:
+            return
+        owns = cursor is None
+        conn = None
+        if owns:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+        try:
+            self.execute_sql(
+                cursor,
+                '''
+                UPDATE entreprises
+                SET has_known_email = CASE
+                    WHEN (
+                        (email_principal IS NOT NULL AND email_principal <> '')
+                        OR EXISTS (
+                            SELECT 1 FROM scraper_emails se
+                            WHERE se.entreprise_id = entreprises.id
+                              AND se.email IS NOT NULL AND se.email <> ''
+                        )
+                        OR EXISTS (
+                            SELECT 1 FROM personnes p
+                            WHERE p.entreprise_id = entreprises.id
+                              AND p.email IS NOT NULL AND p.email <> ''
+                        )
+                        OR EXISTS (
+                            SELECT 1 FROM scraper_people sp
+                            WHERE sp.entreprise_id = entreprises.id
+                              AND sp.email IS NOT NULL AND sp.email <> ''
+                        )
+                        OR EXISTS (
+                            SELECT 1 FROM analyses_osint ao
+                            JOIN analysis_osint_emails aoe ON aoe.analysis_id = ao.id
+                            WHERE ao.entreprise_id = entreprises.id
+                              AND aoe.email IS NOT NULL AND aoe.email <> ''
+                        )
+                    ) THEN 1 ELSE 0 END
+                WHERE id = ?
+                ''',
+                (int(entreprise_id),),
+            )
+            if owns:
+                conn.commit()
+        finally:
+            if owns and conn is not None:
+                conn.close()
+
+    def refresh_has_screenshots(self, entreprise_id: int, cursor=None) -> bool:
+        """
+        Met a jour entreprises.has_screenshots (0/1) selon fichiers reels sur disque.
+
+        Un public_url en BDD sans fichier = 0 (corrige les badges 404).
+
+        @param entreprise_id: ID entreprise
+        @param cursor: Curseur optionnel
+        @returns: True si screenshots valides
+        """
+        from pathlib import Path
+
+        if not entreprise_id:
+            return False
+        latest = self.get_latest_entreprise_screenshots(int(entreprise_id)) or {}
+        ok = False
+        for device in ('desktop', 'tablet', 'mobile'):
+            block = latest.get(device) or {}
+            fp = block.get('file_path')
+            if fp and Path(str(fp)).is_file():
+                ok = True
+                break
+
+        owns = cursor is None
+        conn = None
+        if owns:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+        try:
+            self.execute_sql(
+                cursor,
+                'UPDATE entreprises SET has_screenshots = ? WHERE id = ?',
+                (1 if ok else 0, int(entreprise_id)),
+            )
+            if owns:
+                conn.commit()
+        finally:
+            if owns and conn is not None:
+                conn.close()
+        return ok
+
+    def refresh_has_gemini_report(self, entreprise_id: int, cursor=None) -> bool:
+        """
+        Met a jour entreprises.has_gemini_report (0/1) si un rapport done existe.
+
+        @param entreprise_id: ID entreprise
+        @param cursor: Curseur optionnel
+        @returns: True si rapport present
+        """
+        if not entreprise_id:
+            return False
+        owns = cursor is None
+        conn = None
+        if owns:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+        try:
+            self.execute_sql(
+                cursor,
+                '''
+                UPDATE entreprises
+                SET has_gemini_report = CASE
+                    WHEN EXISTS (
+                        SELECT 1 FROM entreprise_gemini_reports g
+                        WHERE g.entreprise_id = entreprises.id
+                          AND g.status = 'done'
+                    ) THEN 1 ELSE 0 END
+                WHERE id = ?
+                ''',
+                (int(entreprise_id),),
+            )
+            if owns:
+                conn.commit()
+            self.execute_sql(
+                cursor,
+                'SELECT COALESCE(has_gemini_report, 0) AS v FROM entreprises WHERE id = ?',
+                (int(entreprise_id),),
+            )
+            row = cursor.fetchone()
+            val = 0
+            if row:
+                d = dict(row) if not isinstance(row, dict) else row
+                try:
+                    val = int(d.get('v') if isinstance(d, dict) else row[0])
+                except Exception:
+                    val = 0
+            return bool(val)
+        finally:
+            if owns and conn is not None:
+                conn.close()
+
+    def backfill_has_screenshots_flags(self) -> int:
+        """
+        Recalcule has_screenshots pour toutes les entreprises ayant un set (check disque).
+
+        @returns: Nombre de fiches marquees a 1
+        """
+        from pathlib import Path
+        import logging
+
+        log = logging.getLogger(__name__)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            if self.is_postgresql():
+                self.execute_sql(
+                    cursor,
+                    '''
+                    SELECT DISTINCT ON (entreprise_id)
+                        entreprise_id, desktop_file_path, tablet_file_path, mobile_file_path
+                    FROM entreprise_screenshots
+                    ORDER BY entreprise_id, captured_at DESC NULLS LAST, id DESC
+                    ''',
+                )
+            else:
+                self.execute_sql(
+                    cursor,
+                    '''
+                    SELECT es.entreprise_id, es.desktop_file_path, es.tablet_file_path, es.mobile_file_path
+                    FROM entreprise_screenshots es
+                    INNER JOIN (
+                        SELECT entreprise_id, MAX(id) AS mid
+                        FROM entreprise_screenshots
+                        GROUP BY entreprise_id
+                    ) t ON t.mid = es.id
+                    ''',
+                )
+            rows = cursor.fetchall() or []
+            # Reset puis set les valides
+            self.execute_sql(cursor, 'UPDATE entreprises SET has_screenshots = 0')
+            ready_ids = []
+            for r in rows:
+                d = self.clean_row_dict(dict(r))
+                eid = d.get('entreprise_id')
+                if eid is None:
+                    continue
+                ok = False
+                for key in ('desktop_file_path', 'tablet_file_path', 'mobile_file_path'):
+                    fp = d.get(key)
+                    if fp and Path(str(fp)).is_file():
+                        ok = True
+                        break
+                if ok:
+                    ready_ids.append(int(eid))
+            # Update par lots
+            for i in range(0, len(ready_ids), 200):
+                chunk = ready_ids[i : i + 200]
+                placeholders = ','.join(['?'] * len(chunk))
+                self.execute_sql(
+                    cursor,
+                    f'UPDATE entreprises SET has_screenshots = 1 WHERE id IN ({placeholders})',
+                    tuple(chunk),
+                )
+            conn.commit()
+            log.info(
+                'Backfill has_screenshots: %s prets / %s sets (404 exclus)',
+                len(ready_ids),
+                len(rows),
+            )
+            return len(ready_ids)
+        finally:
+            conn.close()
+
+    def refresh_cached_analysis_scores(self, entreprise_id, cursor=None):
+        """Recopie le dernier score pentest/SEO sur entreprises."""
+        if not entreprise_id:
+            return
+        owns = cursor is None
+        conn = None
+        if owns:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+        try:
+            self.execute_sql(
+                cursor,
+                '''
+                UPDATE entreprises SET
+                    score_pentest = (
+                        SELECT risk_score FROM analyses_pentest
+                        WHERE entreprise_id = ?
+                        ORDER BY date_analyse DESC
+                        LIMIT 1
+                    ),
+                    score_seo = (
+                        SELECT score FROM analyses_seo
+                        WHERE entreprise_id = ?
+                        ORDER BY date_analyse DESC
+                        LIMIT 1
+                    )
+                WHERE id = ?
+                ''',
+                (entreprise_id, entreprise_id, entreprise_id),
+            )
+            if owns:
+                conn.commit()
+        finally:
+            if owns and conn is not None:
+                conn.close()
 
     def _append_entreprise_list_filters(self, inner_query, params, analyse_id=None, filters=None,
                                         score_alias_pentest='score_pentest', score_alias_seo='score_seo',
@@ -1186,7 +1415,12 @@ class EntrepriseManager(DatabaseBase):
                     seo_applied = True
 
             if str(filters.get('has_email', '')).lower() in ('1', 'true', 'yes'):
-                inner_query += EntrepriseManager._has_email_filter_sql()
+                # Flag dénormalisé (évite 5 EXISTS sur 100k+ emails)
+                inner_query += ' AND e.has_known_email = 1'
+            if str(filters.get('has_screenshots', '')).lower() in ('1', 'true', 'yes'):
+                inner_query += ' AND COALESCE(e.has_screenshots, 0) = 1'
+            if str(filters.get('has_gemini_report', '')).lower() in ('1', 'true', 'yes'):
+                inner_query += ' AND COALESCE(e.has_gemini_report, 0) = 1'
             if filters.get('cms'):
                 cms_val = filters['cms']
                 if isinstance(cms_val, (list, tuple, set)):
@@ -1319,6 +1553,14 @@ class EntrepriseManager(DatabaseBase):
                     entreprise['tags'] = []
             else:
                 entreprise['tags'] = []
+
+            # Booléens denorm liste
+            for flag_key in ('has_screenshots', 'has_gemini_report'):
+                hs = entreprise.get(flag_key)
+                try:
+                    entreprise[flag_key] = bool(int(hs)) if hs is not None else False
+                except (TypeError, ValueError):
+                    entreprise[flag_key] = bool(hs)
             
             if include_og:
                 try:
@@ -1339,31 +1581,12 @@ class EntrepriseManager(DatabaseBase):
         Sous-requête filtrée : (SELECT e.*, scores…) sub [WHERE filtres scores restants].
         Utilisable après FROM pour COUNT, GROUP BY, ou SELECT liste.
         """
-        score_select, score_from = self._entreprises_latest_score_sql()
-        use_lateral = bool(score_from)
-        # Avec LATERAL, les alias pt/seo sont filtrables dans le WHERE interne.
-        # Sans LATERAL (SQLite), on wrappe pour filtrer score_pentest / score_seo.
-        apply_inline = use_lateral
-
-        if use_lateral:
-            inner_query = f'''
-            SELECT e.*,
-                   {score_select}
-            FROM entreprises e
-            {score_from}
-            WHERE 1=1
-            '''
-            score_alias_pentest = 'pt.risk_score'
-            score_alias_seo = 'seo.score'
-        else:
-            inner_query = f'''
-            SELECT e.*,
-                   {score_select}
+        # Scores + flags denorm = colonnes sur e (plus de CASE EXISTS screenshots)
+        inner_query = '''
+            SELECT e.*
             FROM entreprises e
             WHERE 1=1
             '''
-            score_alias_pentest = 'score_pentest'
-            score_alias_seo = 'score_seo'
 
         params: list[object] = []
         inner_query, params, flags = self._append_entreprise_list_filters(
@@ -1371,9 +1594,9 @@ class EntrepriseManager(DatabaseBase):
             params,
             analyse_id=analyse_id,
             filters=filters,
-            score_alias_pentest=score_alias_pentest,
-            score_alias_seo=score_alias_seo,
-            apply_score_filters_inline=apply_inline,
+            score_alias_pentest='e.score_pentest',
+            score_alias_seo='e.score_seo',
+            apply_score_filters_inline=True,
         )
 
         query = '(' + inner_query + ') sub WHERE 1=1'
@@ -2657,6 +2880,10 @@ class EntrepriseManager(DatabaseBase):
         sid = cursor.lastrowid
         conn.commit()
         conn.close()
+        try:
+            self.refresh_has_screenshots(int(entreprise_id))
+        except Exception:
+            pass
         return int(sid or 0)
 
     def list_entreprise_screenshots(self, entreprise_id: int, limit: int = 50, device_type: str | None = None):
@@ -2673,6 +2900,7 @@ class EntrepriseManager(DatabaseBase):
                 id, entreprise_id, analysis_id, source_task_id, page_url, full_page,
                 desktop_file_path, desktop_public_url, tablet_file_path, tablet_public_url,
                 mobile_file_path, mobile_public_url, desktop_error, tablet_error, mobile_error,
+                design_review_json, design_score, design_analyzed_at, design_source,
                 captured_at, created_at, updated_at
             FROM entreprise_screenshots
             WHERE entreprise_id = ?
@@ -2682,15 +2910,83 @@ class EntrepriseManager(DatabaseBase):
         self.execute_sql(cursor, q, tuple(params))
         rows = cursor.fetchall() or []
         conn.close()
-        return [self.clean_row_dict(dict(r)) for r in rows]
+        from services.design_review_service import parse_design_review
+        out = []
+        for r in rows:
+            d = self.clean_row_dict(dict(r))
+            d['design_review'] = parse_design_review(d.pop('design_review_json', None))
+            out.append(d)
+        return out
+
+    def update_entreprise_screenshot_design(
+        self,
+        screenshot_set_id: int,
+        design_review_json: str | None = None,
+        design_score: int | None = None,
+        design_source: str | None = None,
+        design_analyzed_at: str | None = None,
+    ) -> bool:
+        """
+        Met a jour les champs design_review d'un set de screenshots.
+
+        @param screenshot_set_id: ID du set
+        @param design_review_json: JSON texte de l'analyse
+        @param design_score: Score 0-100
+        @param design_source: gemini|heuristic
+        @param design_analyzed_at: Timestamp ISO / SQL
+        @returns: True si mis a jour
+        """
+        if not screenshot_set_id:
+            return False
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            score = None
+            if design_score is not None:
+                try:
+                    score = max(0, min(100, int(design_score)))
+                except (TypeError, ValueError):
+                    score = None
+            self.execute_sql(
+                cursor,
+                '''
+                UPDATE entreprise_screenshots
+                SET design_review_json = ?,
+                    design_score = ?,
+                    design_source = ?,
+                    design_analyzed_at = COALESCE(?, CURRENT_TIMESTAMP),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                ''',
+                (
+                    design_review_json,
+                    score,
+                    (str(design_source).strip()[:40] if design_source else None),
+                    design_analyzed_at,
+                    int(screenshot_set_id),
+                ),
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.warning('update_entreprise_screenshot_design(%s): %s', screenshot_set_id, e)
+            return False
+        finally:
+            conn.close()
 
     def get_latest_entreprise_screenshots(self, entreprise_id: int):
         """
         Retourne le dernier set de captures (desktop/tablet/mobile) pour une entreprise.
         """
+        from services.design_review_service import parse_design_review
+
         rows = self.list_entreprise_screenshots(entreprise_id=entreprise_id, limit=1)
         if rows:
             row = rows[0]
+            # list_entreprise_screenshots a deja parse design_review_json -> design_review
+            design_review = row.get('design_review')
+            if design_review is None:
+                design_review = parse_design_review(row.get('design_review_json'))
             latest = {
                 'id': row.get('id'),
                 'entreprise_id': row.get('entreprise_id'),
@@ -2699,6 +2995,10 @@ class EntrepriseManager(DatabaseBase):
                 'page_url': row.get('page_url'),
                 'full_page': row.get('full_page'),
                 'captured_at': row.get('captured_at'),
+                'design_score': row.get('design_score'),
+                'design_review': design_review,
+                'design_analyzed_at': row.get('design_analyzed_at'),
+                'design_source': row.get('design_source'),
                 'desktop': {
                     'file_path': row.get('desktop_file_path'),
                     'public_url': row.get('desktop_public_url'),
@@ -2819,6 +3119,11 @@ class EntrepriseManager(DatabaseBase):
             )
             conn.commit()
         conn.close()
+        # Recalcule le flag denorm (fichiers discards vs dernier set restant)
+        try:
+            self.refresh_has_screenshots(int(entreprise_id))
+        except Exception:
+            pass
         return to_delete
 
     def list_entreprise_ids_with_screenshots(self, limit: int = 2000) -> list[int]:
@@ -2851,6 +3156,223 @@ class EntrepriseManager(DatabaseBase):
                 out.append(int(eid))
             except Exception:
                 continue
+        return out
+
+    def save_entreprise_gemini_report(
+        self,
+        *,
+        entreprise_id: int,
+        report: dict | None = None,
+        overall_score: int | None = None,
+        refonte_recommendation: str | None = None,
+        source: str | None = None,
+        status: str = 'done',
+        error_message: str | None = None,
+        modules_used: dict | None = None,
+        screenshot_set_id: int | None = None,
+        analyzed_at: str | None = None,
+    ) -> int:
+        """
+        Persiste un rapport Gemini complet pour une entreprise.
+
+        @param entreprise_id: ID entreprise
+        @param report: Dict rapport (serialise en JSON)
+        @param overall_score: Score 0-100
+        @param refonte_recommendation: aucune|legere|partielle|totale
+        @param source: gemini|heuristic
+        @param status: done|failed|pending
+        @param error_message: Message d'erreur optionnel
+        @param modules_used: Dict modules utilises
+        @param screenshot_set_id: ID set screenshots
+        @param analyzed_at: Timestamp
+        @returns: ID de la ligne creee
+        """
+        import json as _json
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        score = None
+        if overall_score is not None:
+            try:
+                score = max(0, min(100, int(overall_score)))
+            except (TypeError, ValueError):
+                score = None
+        report_json = None
+        if report is not None:
+            try:
+                report_json = _json.dumps(report, ensure_ascii=False, default=str)
+            except Exception:
+                report_json = None
+        modules_json = None
+        if modules_used is not None:
+            try:
+                modules_json = _json.dumps(modules_used, ensure_ascii=False, default=str)
+            except Exception:
+                modules_json = None
+        if self.is_postgresql():
+            cursor.execute(
+                '''
+                INSERT INTO entreprise_gemini_reports (
+                    entreprise_id, status, report_json, overall_score, refonte_recommendation,
+                    source, error_message, modules_used_json, screenshot_set_id, analyzed_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP))
+                RETURNING id
+                ''',
+                (
+                    int(entreprise_id),
+                    (str(status).strip()[:40] if status else 'done'),
+                    report_json,
+                    score,
+                    (str(refonte_recommendation).strip()[:40] if refonte_recommendation else None),
+                    (str(source).strip()[:40] if source else None),
+                    (str(error_message).strip()[:2000] if error_message else None),
+                    modules_json,
+                    int(screenshot_set_id) if screenshot_set_id else None,
+                    analyzed_at,
+                ),
+            )
+            row = cursor.fetchone()
+            if not row:
+                rid = 0
+            elif isinstance(row, dict):
+                rid = row.get('id') or 0
+            else:
+                rid = row[0] or 0
+        else:
+            self.execute_sql(
+                cursor,
+                '''
+                INSERT INTO entreprise_gemini_reports (
+                    entreprise_id, status, report_json, overall_score, refonte_recommendation,
+                    source, error_message, modules_used_json, screenshot_set_id, analyzed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+                ''',
+                (
+                    int(entreprise_id),
+                    (str(status).strip()[:40] if status else 'done'),
+                    report_json,
+                    score,
+                    (str(refonte_recommendation).strip()[:40] if refonte_recommendation else None),
+                    (str(source).strip()[:40] if source else None),
+                    (str(error_message).strip()[:2000] if error_message else None),
+                    modules_json,
+                    int(screenshot_set_id) if screenshot_set_id else None,
+                    analyzed_at,
+                ),
+            )
+            rid = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        try:
+            if str(status or 'done').strip().lower() == 'done':
+                self.refresh_has_gemini_report(int(entreprise_id))
+        except Exception:
+            pass
+        return int(rid or 0)
+
+    def get_latest_entreprise_gemini_report(self, entreprise_id: int) -> dict | None:
+        """
+        Retourne le dernier rapport Gemini d'une entreprise (JSON parse).
+
+        @param entreprise_id: ID entreprise
+        @returns: Dict ou None
+        """
+        import json as _json
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self.execute_sql(
+            cursor,
+            '''
+            SELECT id, entreprise_id, status, report_json, overall_score, refonte_recommendation,
+                   source, error_message, modules_used_json, screenshot_set_id, analyzed_at,
+                   created_at, updated_at
+            FROM entreprise_gemini_reports
+            WHERE entreprise_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            ''',
+            (int(entreprise_id),),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        d = self.clean_row_dict(dict(row))
+        raw = d.pop('report_json', None)
+        report = None
+        if isinstance(raw, dict):
+            report = raw
+        elif isinstance(raw, str) and raw.strip():
+            try:
+                parsed = _json.loads(raw)
+                report = parsed if isinstance(parsed, dict) else None
+            except Exception:
+                report = None
+        d['report'] = report
+        mods = d.pop('modules_used_json', None)
+        if isinstance(mods, str) and mods.strip():
+            try:
+                d['modules_used'] = _json.loads(mods)
+            except Exception:
+                d['modules_used'] = None
+        elif isinstance(mods, dict):
+            d['modules_used'] = mods
+        else:
+            d['modules_used'] = None
+        return d
+
+    def list_entreprise_gemini_reports(self, entreprise_id: int, limit: int = 10) -> list[dict]:
+        """
+        Historique des rapports Gemini (plus recent en premier).
+
+        @param entreprise_id: ID entreprise
+        @param limit: Nombre max
+        @returns: Liste de dicts
+        """
+        import json as _json
+
+        lim = max(1, min(int(limit or 10), 50))
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self.execute_sql(
+            cursor,
+            '''
+            SELECT id, entreprise_id, status, report_json, overall_score, refonte_recommendation,
+                   source, error_message, modules_used_json, screenshot_set_id, analyzed_at,
+                   created_at, updated_at
+            FROM entreprise_gemini_reports
+            WHERE entreprise_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            ''',
+            (int(entreprise_id), lim),
+        )
+        rows = cursor.fetchall() or []
+        conn.close()
+        out = []
+        for r in rows:
+            d = self.clean_row_dict(dict(r))
+            raw = d.pop('report_json', None)
+            report = None
+            if isinstance(raw, dict):
+                report = raw
+            elif isinstance(raw, str) and raw.strip():
+                try:
+                    parsed = _json.loads(raw)
+                    report = parsed if isinstance(parsed, dict) else None
+                except Exception:
+                    report = None
+            d['report'] = report
+            mods = d.pop('modules_used_json', None)
+            if isinstance(mods, str) and mods.strip():
+                try:
+                    d['modules_used'] = _json.loads(mods)
+                except Exception:
+                    d['modules_used'] = None
+            else:
+                d['modules_used'] = mods if isinstance(mods, dict) else None
+            out.append(d)
         return out
 
     def create_landing_variant_run(

@@ -479,13 +479,18 @@ class OpportunityCalculator:
                 'indicators': []
             }
         
-        # Extraire le score d'âge du site depuis les indicateurs
-        site_indicators = entreprise_data.get('site_indicators', '')
-        site_age_score = 0
-        if site_indicators:
-            # Compter les indicateurs d'obsolescence
-            indicators_list = site_indicators.split('; ')
-            site_age_score = len([i for i in indicators_list if i and i != 'Aucun'])
+        # Extraire le score d'âge du site (colonne persistée, sinon indicateurs texte)
+        site_age_score = entreprise_data.get('site_age_score')
+        try:
+            site_age_score = int(site_age_score) if site_age_score is not None else None
+        except (TypeError, ValueError):
+            site_age_score = None
+        if site_age_score is None:
+            site_indicators = entreprise_data.get('site_indicators', '')
+            site_age_score = 0
+            if site_indicators:
+                indicators_list = str(site_indicators).split('; ')
+                site_age_score = len([i for i in indicators_list if i and i != 'Aucun'])
         
         return self.calculate_opportunity_score(
             entreprise_id=entreprise_id,

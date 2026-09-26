@@ -838,6 +838,7 @@ class EntrepriseAnalyzer:
                 'site_status': age_analysis['status'],
                 'site_opportunity': age_analysis['opportunity'],
                 'site_indicators': age_analysis['indicators'],
+                'site_age_score': age_analysis.get('score'),
                 'social_linkedin': social_media.get('linkedin'),
                 'social_facebook': social_media.get('facebook'),
                 'social_twitter': social_media.get('twitter'),

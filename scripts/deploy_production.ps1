@@ -97,10 +97,16 @@ if ($UseRemoteGitClone) {
         Write-Host $resetOutput -ForegroundColor Gray
         exit 1
     }
+    # git clone ecrit "Cloning into..." sur stderr : avec ErrorActionPreference Stop,
+    # PowerShell traite ca comme une erreur fatale. On capture sans planter.
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     $cloneOutput = ssh "$User@$Server" "git clone --branch $RemoteGitBranch --single-branch $RepoUrl $RemotePath" 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    $cloneExit = $LASTEXITCODE
+    $ErrorActionPreference = $prevEap
+    if ($cloneExit -ne 0) {
         Write-Host "❌ Impossible de cloner $RemoteGitBranch sur le serveur" -ForegroundColor Red
-        Write-Host $cloneOutput -ForegroundColor Gray
+        Write-Host ($cloneOutput | Out-String) -ForegroundColor Gray
         exit 1
     }
     Write-Host "✅ Clone $RemoteGitBranch effectué depuis $RepoUrl" -ForegroundColor Green

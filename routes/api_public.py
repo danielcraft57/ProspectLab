@@ -563,13 +563,21 @@ def get_entreprises():
         if request.args.get('search'):
             filters['search'] = request.args.get('search')
         
-        entreprises = database.get_entreprises(filters=filters if filters else None, limit=limit, offset=offset)
-
-        # Total correspondant aux mêmes filtres (liste + recherche) : une seule requête COUNT
-        # sur la première page pour limiter le coût lors du « load more ».
+        # Total via COUNT(*) OVER sur la 1re page uniquement (évite un 2e scan COUNT)
         total = None
         if offset == 0:
-            total = database.count_entreprises(filters=filters if filters else None)
+            entreprises, total = database.get_entreprises(
+                filters=filters if filters else None,
+                limit=limit,
+                offset=offset,
+                with_total=True,
+            )
+        else:
+            entreprises = database.get_entreprises(
+                filters=filters if filters else None,
+                limit=limit,
+                offset=offset,
+            )
 
         # Nettoyer les valeurs NaN pour la sérialisation JSON
         from utils.helpers import clean_json_dict
@@ -1637,6 +1645,8 @@ def public_website_analysis():
 def get_entreprise_screenshots_public(entreprise_id: int):
     """
     API publique : dernier set de captures (desktop/tablet/mobile) + historique.
+
+    Chaque set / latest inclut aussi design_score, design_review, design_analyzed_at, design_source.
     """
     try:
         entreprise = database.get_entreprise(entreprise_id)
@@ -1655,6 +1665,201 @@ def get_entreprise_screenshots_public(entreprise_id: int):
                 'data': items,
             }
         )
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _build_public_design_review_payload(entreprise_id: int) -> dict:
+    """
+    Construit la charge utile design-review pour l'API publique.
+
+    @param entreprise_id: ID entreprise
+    @returns: Dict status / design_* / screenshot_set_id
+    """
+    from pathlib import Path
+
+    latest = database.get_latest_entreprise_screenshots(int(entreprise_id)) or {}
+    has_shot = False
+    for device in ('desktop', 'tablet', 'mobile'):
+        block = latest.get(device) or {}
+        fp = block.get('file_path')
+        if fp and Path(str(fp)).is_file():
+            has_shot = True
+            break
+    design_review = latest.get('design_review')
+    design_score = latest.get('design_score')
+    analyzed_at = latest.get('design_analyzed_at')
+    source = latest.get('design_source')
+
+    if design_review or design_score is not None:
+        status = 'done'
+    elif has_shot:
+        status = 'never'
+    else:
+        status = 'never'
+
+    return {
+        'success': True,
+        'entreprise_id': int(entreprise_id),
+        'status': status,
+        'design_score': design_score,
+        'design_review': design_review,
+        'screenshot_set_id': latest.get('id'),
+        'analyzed_at': analyzed_at,
+        'source': source,
+        'has_screenshots': has_shot,
+    }
+
+
+@api_public_bp.route('/entreprises/<int:entreprise_id>/design-review', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+@public_response_cache(20)
+def get_entreprise_design_review_public(entreprise_id: int):
+    """
+    API publique : lecture de l'analyse design UX/UI (Gemini Vision) du dernier screenshot.
+
+    @param entreprise_id: ID de l'entreprise
+    """
+    try:
+        entreprise = database.get_entreprise(entreprise_id)
+        if not entreprise:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable'}), 404
+        return jsonify(_build_public_design_review_payload(entreprise_id))
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@api_public_bp.route('/entreprises/<int:entreprise_id>/design-review', methods=['POST'])
+@api_token_required
+@require_api_permission('entreprises')
+def post_entreprise_design_review_public(entreprise_id: int):
+    """
+    API publique : lance l'analyse design UX/UI (Celery) sur le dernier set de screenshots.
+
+    Repond 202 + task_id si un screenshot existe, 409 sinon.
+
+    @param entreprise_id: ID de l'entreprise
+    """
+    try:
+        entreprise = database.get_entreprise(entreprise_id)
+        if not entreprise:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable'}), 404
+
+        latest = database.get_latest_entreprise_screenshots(int(entreprise_id)) or {}
+        if not latest or not latest.get('id'):
+            return jsonify({
+                'success': False,
+                'error': 'Aucun screenshot disponible — lancez d\'abord une capture',
+            }), 409
+
+        payload = request.get_json(silent=True) or {}
+        screenshot_set_id = payload.get('screenshot_set_id') or latest.get('id')
+        try:
+            screenshot_set_id = int(screenshot_set_id)
+        except Exception:
+            screenshot_set_id = int(latest.get('id'))
+
+        from tasks.design_review_tasks import analyze_screenshot_design_task
+
+        task = analyze_screenshot_design_task.apply_async(
+            kwargs=dict(
+                entreprise_id=int(entreprise_id),
+                screenshot_set_id=screenshot_set_id,
+            ),
+            queue='screenshot',
+        )
+        return jsonify(
+            {
+                'success': True,
+                'entreprise_id': int(entreprise_id),
+                'screenshot_set_id': screenshot_set_id,
+                'task_id': task.id,
+                'status': 'pending',
+                'message': 'Analyse design enfilee. Relisez GET .../design-review apres quelques secondes.',
+            }
+        ), 202
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@api_public_bp.route('/entreprises/<int:entreprise_id>/gemini-report', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+@public_response_cache(20)
+def get_entreprise_gemini_report_public(entreprise_id: int):
+    """
+    API publique : dernier rapport d'audit complet Gemini.
+
+    @param entreprise_id: ID de l'entreprise
+    """
+    try:
+        entreprise = database.get_entreprise(entreprise_id)
+        if not entreprise:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable'}), 404
+
+        latest = database.get_latest_entreprise_gemini_report(int(entreprise_id))
+        if not latest:
+            return jsonify({
+                'success': True,
+                'entreprise_id': int(entreprise_id),
+                'status': 'never',
+                'latest': None,
+            })
+        return jsonify({
+            'success': True,
+            'entreprise_id': int(entreprise_id),
+            'status': latest.get('status') or 'done',
+            'latest': latest,
+            'overall_score': latest.get('overall_score'),
+            'refonte_recommendation': latest.get('refonte_recommendation'),
+            'source': latest.get('source'),
+            'report': latest.get('report'),
+            'analyzed_at': latest.get('analyzed_at'),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@api_public_bp.route('/entreprises/<int:entreprise_id>/gemini-report', methods=['POST'])
+@api_token_required
+@require_api_permission('entreprises')
+def post_entreprise_gemini_report_public(entreprise_id: int):
+    """
+    API publique : lance un rapport Gemini complet (screenshots auto si besoin).
+
+    @param entreprise_id: ID de l'entreprise
+    """
+    try:
+        entreprise = database.get_entreprise(entreprise_id)
+        if not entreprise:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable'}), 404
+
+        website = (entreprise.get('website') or '').strip()
+        if not website:
+            return jsonify({'success': False, 'error': 'Aucun website sur cette entreprise'}), 400
+
+        payload = request.get_json(silent=True) or {}
+        ensure_screenshots = payload.get('ensure_screenshots', True)
+        if isinstance(ensure_screenshots, str):
+            ensure_screenshots = ensure_screenshots.strip().lower() in ('1', 'true', 'yes', 'oui')
+
+        from tasks.gemini_full_report_tasks import analyze_entreprise_gemini_full_report_task
+
+        task = analyze_entreprise_gemini_full_report_task.apply_async(
+            kwargs=dict(
+                entreprise_id=int(entreprise_id),
+                ensure_screenshots=bool(ensure_screenshots),
+            ),
+            queue='screenshot',
+        )
+        return jsonify({
+            'success': True,
+            'entreprise_id': int(entreprise_id),
+            'task_id': task.id,
+            'status': 'pending',
+            'message': 'Rapport Gemini enfile. Relisez GET .../gemini-report apres quelques secondes.',
+        }), 202
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 

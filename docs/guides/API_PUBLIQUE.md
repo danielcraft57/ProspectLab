@@ -141,6 +141,11 @@ Tous les chemins ci‑dessous sont **relatifs** à `/api/public`.
 | **GET** | `/campagnes/<id>/statistics` | Campagnes | Tracking (ouvertures, clics) |
 | **GET** | `/website-analysis` | Entreprises | Rapport agrégé (`website`, `full`) |
 | **POST** | `/website-analysis` | Entreprises | Lance les analyses asynchrones (réponse typique **202**) |
+| **GET** | `/entreprises/<id>/screenshots` | Entreprises | Dernier set + historique (desktop/tablette/mobile) + champs `design_*` |
+| **GET** | `/entreprises/<id>/design-review` | Entreprises | Analyse design UX/UI (Gemini) du dernier screenshot |
+| **POST** | `/entreprises/<id>/design-review` | Entreprises | Lance l'analyse design (202 + `task_id`) |
+| **GET** | `/entreprises/<id>/gemini-report` | Entreprises | Rapport d'audit complet Gemini (tech/SEO/OSINT/pentest + screenshots) |
+| **POST** | `/entreprises/<id>/gemini-report` | Entreprises | Lance le rapport complet (202 + `task_id`, capture screenshots si besoin) |
 | **POST** | `/website-audit-report` | Auth audit (voir ci‑dessous) | Analyse **simple** (technique + SEO) → PDF local → email |
 | **POST** | `/website-audit-report/complete` | Auth audit | Analyse **complète** (6 modules) → PDF serv1 → email |
 | **GET** | `/website-audit-report/<task_id>` | Auth audit | Suivi tâche Celery (état, résultat si terminé) |
@@ -340,6 +345,148 @@ Suivi de la tâche Celery (`state`, `ready`, `successful`, `result` si terminé)
 - **Workers** : queue `technical` (simple) ; pour le complet, workers sur la queue d'analyse complète **et** queues screenshots / osint / pentest selon déploiement.
 - **Agent Cursor** (complet) : variables `LANDING_VARIANTS_REMOTE_*` + section `WEBSITE_AUDIT_AGENT_*` dans `env.example` / `config.py`.
 - **Tests** : `python scripts/tests/test_website_audit_report.py`
+
+---
+
+### Screenshots et analyse design UX/UI (Gemini)
+
+Permission requise : **entreprises**. Les cles Gemini ne sont jamais exposees dans les reponses.
+
+Le rapport pipeline (`GET /website-analysis`) inclut aussi `screenshots.latest` avec les champs `design_*` si une analyse a deja ete faite.
+
+#### GET `/entreprises/<id>/screenshots`
+
+Dernier set de captures + historique.
+
+| Parametre | Emplacement | Defaut | Description |
+|-----------|-------------|--------|-------------|
+| `limit` | query | `20` | Nombre max d'entrees d'historique (1-100) |
+
+Chaque set (`latest` et items de `data`) peut contenir :
+
+| Champ | Type | Description |
+|-------|------|-------------|
+| `design_score` | int \| null | Score 0-100 (plus bas = design plus faible) |
+| `design_review` | object \| null | `{ score, positives[], negatives[], refonte_priority, pitch, source }` |
+| `design_analyzed_at` | string \| null | Date d'analyse |
+| `design_source` | string \| null | `gemini` ou `heuristic` |
+
+#### GET `/entreprises/<id>/design-review`
+
+Lecture de l'analyse design du dernier screenshot.
+
+Exemple :
+
+```bash
+curl -s -H "Authorization: Bearer VOTRE_TOKEN" \
+  "https://<domaine>/api/public/entreprises/123/design-review"
+```
+
+Reponse type (`status: done`) :
+
+```json
+{
+  "success": true,
+  "entreprise_id": 123,
+  "status": "done",
+  "design_score": 38,
+  "design_review": {
+    "score": 38,
+    "positives": ["Header clair", "CTA visible"],
+    "negatives": ["Contraste faible", "Typo datee"],
+    "refonte_priority": "elevee",
+    "pitch": "Une modernisation UX renforcerait la credibilite.",
+    "source": "gemini"
+  },
+  "screenshot_set_id": 456,
+  "analyzed_at": "2026-04-01 12:00:00",
+  "source": "gemini",
+  "has_screenshots": true
+}
+```
+
+`status` vaut `done` si une analyse existe, sinon `never` (meme s'il y a deja un screenshot).
+
+#### POST `/entreprises/<id>/design-review`
+
+Lance l'analyse (file Celery `screenshot`). Il faut qu'un screenshot existe deja (sinon **409**).
+
+```bash
+curl -s -X POST -H "Authorization: Bearer VOTRE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{}" \
+  "https://<domaine>/api/public/entreprises/123/design-review"
+```
+
+Reponse **202** :
+
+```json
+{
+  "success": true,
+  "entreprise_id": 123,
+  "screenshot_set_id": 456,
+  "task_id": "uuid-celery",
+  "status": "pending",
+  "message": "Analyse design enfilee. Relisez GET .../design-review apres quelques secondes."
+}
+```
+
+Corps JSON optionnel : `{ "screenshot_set_id": 456 }` pour cibler un set precis.
+
+#### GET `/entreprises/<id>/gemini-report`
+
+Rapport d'audit **complet** : screenshots (captures auto si manquants/404) + synthese tech / SEO / OSINT / pentest via Gemini Vision.
+
+```bash
+curl -s -H "Authorization: Bearer VOTRE_TOKEN" \
+  "https://<domaine>/api/public/entreprises/123/gemini-report"
+```
+
+Reponse type (`status: done`) :
+
+```json
+{
+  "success": true,
+  "entreprise_id": 123,
+  "status": "done",
+  "overall_score": 42,
+  "refonte_recommendation": "partielle",
+  "source": "gemini",
+  "analyzed_at": "2026-04-01 12:00:00",
+  "report": {
+    "overall_score": 42,
+    "refonte_recommendation": "partielle",
+    "executive_summary": "…",
+    "what_works": ["…"],
+    "whats_wrong": ["…"],
+    "improvements": [
+      {"area": "seo", "priority": "haute", "action": "…"}
+    ],
+    "priority_actions": ["…"],
+    "commercial_pitch": "…",
+    "modules_used": {
+      "technical": "done",
+      "seo": "done",
+      "screenshots": "done"
+    }
+  }
+}
+```
+
+`status` vaut `never` s'il n'y a encore aucun rapport.
+
+#### POST `/entreprises/<id>/gemini-report`
+
+Lance le rapport complet (file Celery `screenshot`). Si les screenshots manquent ou que les fichiers sont absents du disque, une capture est lancee avant l'appel Gemini.
+
+```bash
+curl -s -X POST -H "Authorization: Bearer VOTRE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"ensure_screenshots\": true}" \
+  "https://<domaine>/api/public/entreprises/123/gemini-report"
+```
+
+Reponse **202** : `{ success, task_id, status: "pending", … }`. Relire ensuite le GET.
 
 ---
 

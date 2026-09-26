@@ -215,15 +215,18 @@
 
     async function loadSecteurs() {
         try {
-            const response = await fetch('/api/secteurs');
+            const response = await fetch('/api/secteurs?with_counts=1');
             const raw = await response.json();
             const list = Array.isArray(raw) ? raw : [];
             const select = document.getElementById('filter-secteur');
             if (!select) return;
-            list.forEach(function(secteur) {
+            list.forEach(function(item) {
+                const name = typeof item === 'string' ? item : (item && item.secteur);
+                if (!name) return;
+                const count = typeof item === 'object' && item != null ? Number(item.count || 0) : null;
                 const option = document.createElement('option');
-                option.value = secteur;
-                option.textContent = secteur;
+                option.value = name;
+                option.textContent = count != null ? (name + ' (' + count + ')') : name;
                 select.appendChild(option);
             });
         } catch (err) {

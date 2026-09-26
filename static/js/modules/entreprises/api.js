@@ -48,11 +48,11 @@
         },
         
         /**
-         * Charge les secteurs disponibles
-         * @returns {Promise<Array>}
+         * Charge les secteurs (groupes) avec effectifs.
+         * @returns {Promise<Array<{secteur: string, count: number}|string>>}
          */
         async loadSecteurs() {
-            const response = await fetch('/api/secteurs');
+            const response = await fetch('/api/secteurs?with_counts=1');
             if (!response.ok) throw new Error('Erreur lors du chargement des secteurs');
             return await response.json();
         },
@@ -60,11 +60,13 @@
         /**
          * Charge les categories metier (optionnellement filtrees par secteur/groupe).
          * @param {string} [secteur]
-         * @returns {Promise<Array>}
+         * @returns {Promise<Array<{categorie: string, count: number}|string>>}
          */
         async loadCategories(secteur) {
-            const qs = secteur ? `?secteur=${encodeURIComponent(secteur)}` : '';
-            const response = await fetch(`/api/categories${qs}`);
+            const params = new URLSearchParams();
+            params.set('with_counts', '1');
+            if (secteur) params.set('secteur', secteur);
+            const response = await fetch(`/api/categories?${params.toString()}`);
             if (!response.ok) throw new Error('Erreur lors du chargement des categories');
             return await response.json();
         },

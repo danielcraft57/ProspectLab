@@ -2312,6 +2312,180 @@ def register_websocket_handlers(socketio, app):
             except Exception:
                 pass
 
+    @socketio.on('start_gemini_report')
+    def handle_start_gemini_report(data):
+        """
+        Lance un rapport d'audit Gemini complet (screenshots + modules) via Celery.
+        """
+        try:
+            entreprise_id = data.get('entreprise_id') if isinstance(data, dict) else None
+            session_id = request.sid
+            ensure_screenshots = True
+            if isinstance(data, dict) and 'ensure_screenshots' in data:
+                ensure_screenshots = bool(data.get('ensure_screenshots'))
+
+            if not entreprise_id:
+                safe_emit(
+                    socketio,
+                    'gemini_report_error',
+                    {'error': 'entreprise_id requis'},
+                    room=session_id,
+                )
+                return
+
+            try:
+                entreprise = database.get_entreprise(int(entreprise_id))
+            except Exception:
+                entreprise = None
+            if not entreprise:
+                safe_emit(
+                    socketio,
+                    'gemini_report_error',
+                    {'error': 'Entreprise introuvable', 'entreprise_id': entreprise_id},
+                    room=session_id,
+                )
+                return
+            if not (entreprise.get('website') or '').strip():
+                safe_emit(
+                    socketio,
+                    'gemini_report_error',
+                    {'error': 'Aucun website sur cette entreprise', 'entreprise_id': entreprise_id},
+                    room=session_id,
+                )
+                return
+
+            if not broker_ping_ok():
+                safe_emit(
+                    socketio,
+                    'gemini_report_error',
+                    {'error': _CELERY_BROKER_UNREACHABLE_MSG, 'entreprise_id': entreprise_id},
+                    room=session_id,
+                )
+                return
+
+            from tasks.gemini_full_report_tasks import analyze_entreprise_gemini_full_report_task
+
+            cd = next_websocket_stagger_countdown(session_id)
+            try:
+                task = analyze_entreprise_gemini_full_report_task.apply_async(
+                    kwargs=dict(
+                        entreprise_id=int(entreprise_id),
+                        ensure_screenshots=ensure_screenshots,
+                    ),
+                    countdown=cd,
+                    queue='screenshot',
+                )
+            except Exception as e:
+                logger.exception(
+                    '[Socket.IO] apply_async gemini_report échoué sid=%s entreprise_id=%s',
+                    session_id,
+                    entreprise_id,
+                )
+                safe_emit(
+                    socketio,
+                    'gemini_report_error',
+                    {
+                        'error': f'Erreur lors du démarrage de la tâche: {str(e)}',
+                        'entreprise_id': entreprise_id,
+                    },
+                    room=session_id,
+                )
+                return
+
+            safe_emit(
+                socketio,
+                'gemini_report_started',
+                {
+                    'message': 'Rapport Gemini démarré...',
+                    'task_id': task.id,
+                    'entreprise_id': entreprise_id,
+                },
+                room=session_id,
+            )
+
+            def monitor_task():
+                try:
+                    _sleep_before_monitor_poll(cd)
+                    last_meta = None
+                    while True:
+                        try:
+                            task_result = celery.AsyncResult(task.id)
+                            current_state = task_result.state
+
+                            if current_state == 'PROGRESS':
+                                meta = _celery_progress_meta_as_dict(task_result.info)
+                                if meta != last_meta:
+                                    safe_emit(
+                                        socketio,
+                                        'gemini_report_progress',
+                                        {
+                                            'entreprise_id': entreprise_id,
+                                            'progress': meta.get('progress', 0),
+                                            'message': meta.get('message', ''),
+                                            'logs': meta.get('logs') or [],
+                                        },
+                                        room=session_id,
+                                    )
+                                    last_meta = meta
+                            elif current_state == 'SUCCESS':
+                                result = _celery_success_result_as_dict(task_result.result)
+                                safe_emit(
+                                    socketio,
+                                    'gemini_report_complete',
+                                    {
+                                        'success': True,
+                                        'entreprise_id': entreprise_id,
+                                        'result': result or {},
+                                    },
+                                    room=session_id,
+                                )
+                                break
+                            elif current_state == 'FAILURE':
+                                safe_emit(
+                                    socketio,
+                                    'gemini_report_error',
+                                    {
+                                        'entreprise_id': entreprise_id,
+                                        'error': str(task_result.info),
+                                    },
+                                    room=session_id,
+                                )
+                                break
+                        except Exception as e:
+                            safe_emit(
+                                socketio,
+                                'gemini_report_error',
+                                {
+                                    'entreprise_id': entreprise_id,
+                                    'error': f'Erreur lors du suivi: {str(e)}',
+                                },
+                                room=session_id,
+                            )
+                            break
+                        time.sleep(_WS_MONITOR_POLL_SEC)
+                except Exception as e:
+                    safe_emit(
+                        socketio,
+                        'gemini_report_error',
+                        {
+                            'entreprise_id': entreprise_id,
+                            'error': f'Erreur dans le suivi: {str(e)}',
+                        },
+                        room=session_id,
+                    )
+
+            _start_monitor_background(socketio, monitor_task)
+        except Exception as e:
+            try:
+                safe_emit(
+                    socketio,
+                    'gemini_report_error',
+                    {'error': f'Erreur démarrage rapport Gemini: {str(e)}'},
+                    room=request.sid,
+                )
+            except Exception:
+                pass
+
     @socketio.on('monitor_campagne')
     def handle_monitor_campagne(data):
         """

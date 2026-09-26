@@ -67,6 +67,8 @@ def _parse_entreprise_list_query_filters():
         'groupe_id': request.args.get('groupe_id', type=int),
         'no_group': request.args.get('no_group'),
         'has_email': request.args.get('has_email'),
+        'has_screenshots': request.args.get('has_screenshots'),
+        'has_gemini_report': request.args.get('has_gemini_report'),
         'cms': request.args.get('cms'),
         'framework': request.args.get('framework'),
         'has_blog': request.args.get('has_blog'),
@@ -87,7 +89,8 @@ def _parse_entreprise_list_query_filters():
                  'performance_min', 'performance_max'):
             return 0 <= v <= 100
         if k in ('has_email', 'no_group', 'has_blog', 'has_form', 'has_tunnel',
-                 'security_null', 'pentest_null', 'seo_null'):
+                 'security_null', 'pentest_null', 'seo_null', 'has_screenshots',
+                 'has_gemini_report'):
             return str(v).lower() in ('1', 'true', 'yes')
         if k == 'etape_prospection':
             return bool(v and str(v).strip())
@@ -565,6 +568,14 @@ def entreprise_detail(entreprise_id):
                     entreprise['tags'] = []
             else:
                 entreprise['tags'] = []
+
+            # Flags denorm liste (0/1 -> bool, coherent avec /api/entreprises)
+            for flag_key in ('has_screenshots', 'has_gemini_report'):
+                hs = entreprise.get(flag_key)
+                try:
+                    entreprise[flag_key] = bool(int(hs)) if hs is not None else False
+                except (TypeError, ValueError):
+                    entreprise[flag_key] = bool(hs)
             
             # Charger les données OpenGraph depuis les tables normalisées
             try:

@@ -1213,6 +1213,19 @@ class TechnicalAnalyzer:
                     results.update(more_services)
                 except Exception:
                     pass
+
+                # Age / fraicheur du site (copyright, vieilles tech, HTML ancien)
+                try:
+                    from services.entreprise_analyzer import EntrepriseAnalyzer
+                    age_analyzer = EntrepriseAnalyzer()
+                    age_analysis = age_analyzer.analyze_site_age(soup, html_content)
+                    if isinstance(age_analysis, dict):
+                        results['site_age_score'] = age_analysis.get('score')
+                        results['site_indicators'] = age_analysis.get('indicators')
+                        results['site_status'] = age_analysis.get('status')
+                        results['site_opportunity'] = age_analysis.get('opportunity')
+                except Exception:
+                    pass
                 
             except Exception as e:
                 pass  # Continuer même si le HTML ne peut pas être récupéré

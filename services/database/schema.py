@@ -71,6 +71,218 @@ class DatabaseSchema(DatabaseBase):
         finally:
             conn.close()
 
+    def ensure_entreprise_list_denorm_columns(self):
+        """
+        Colonnes dénormalisées pour accélérer les filtres liste/kanban :
+        has_known_email, score_pentest, score_seo (+ index + backfill idempotent).
+        """
+        import logging
+        log = logging.getLogger(__name__)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            for col_name, col_type in (
+                ('has_known_email', 'INTEGER DEFAULT 0'),
+                ('score_pentest', 'INTEGER'),
+                ('score_seo', 'INTEGER'),
+                ('has_screenshots', 'INTEGER DEFAULT 0'),
+                ('has_gemini_report', 'INTEGER DEFAULT 0'),
+            ):
+                self.safe_execute_sql(
+                    cursor, f'ALTER TABLE entreprises ADD COLUMN {col_name} {col_type}'
+                )
+            conn.commit()
+
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_entreprises_has_known_email ON entreprises(has_known_email)',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_entreprises_score_pentest ON entreprises(score_pentest)',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_entreprises_score_seo ON entreprises(score_seo)',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_entreprises_has_screenshots ON entreprises(has_screenshots)',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_entreprises_has_gemini_report ON entreprises(has_gemini_report)',
+            )
+            # Filtre UI fréquent : email + plages de scores
+            if self.is_postgresql():
+                self.execute_sql(
+                    cursor,
+                    '''
+                    CREATE INDEX IF NOT EXISTS idx_entreprises_list_email_scores
+                    ON entreprises (has_known_email, score_securite, score_pentest, score_seo)
+                    WHERE has_known_email = 1
+                    ''',
+                )
+            conn.commit()
+
+            # Backfill has_known_email si aucun flag à 1 alors que des emails existent
+            self.execute_sql(
+                cursor,
+                'SELECT COUNT(*) AS c FROM entreprises WHERE COALESCE(has_known_email, 0) = 1',
+            )
+            row = cursor.fetchone()
+            flagged = int(row['c'] if isinstance(row, dict) else row[0]) if row else 0
+            need_email_backfill = flagged == 0
+            if need_email_backfill:
+                self.execute_sql(
+                    cursor,
+                    '''
+                    SELECT 1 AS x FROM scraper_emails
+                    WHERE email IS NOT NULL AND email <> '' LIMIT 1
+                    ''',
+                )
+                need_email_backfill = bool(cursor.fetchone())
+            if need_email_backfill:
+                log.info('Backfill has_known_email…')
+                self.execute_sql(
+                    cursor,
+                    '''
+                    UPDATE entreprises SET has_known_email = 1
+                    WHERE COALESCE(has_known_email, 0) = 0
+                      AND (
+                        (email_principal IS NOT NULL AND email_principal <> '')
+                        OR EXISTS (
+                            SELECT 1 FROM scraper_emails se
+                            WHERE se.entreprise_id = entreprises.id
+                              AND se.email IS NOT NULL AND se.email <> ''
+                        )
+                        OR EXISTS (
+                            SELECT 1 FROM personnes p
+                            WHERE p.entreprise_id = entreprises.id
+                              AND p.email IS NOT NULL AND p.email <> ''
+                        )
+                        OR EXISTS (
+                            SELECT 1 FROM scraper_people sp
+                            WHERE sp.entreprise_id = entreprises.id
+                              AND sp.email IS NOT NULL AND sp.email <> ''
+                        )
+                        OR EXISTS (
+                            SELECT 1 FROM analyses_osint ao
+                            JOIN analysis_osint_emails aoe ON aoe.analysis_id = ao.id
+                            WHERE ao.entreprise_id = entreprises.id
+                              AND aoe.email IS NOT NULL AND aoe.email <> ''
+                        )
+                      )
+                    ''',
+                )
+                conn.commit()
+                log.info('Backfill has_known_email terminé (rowcount=%s)', cursor.rowcount)
+
+            # Backfill scores si colonnes vides alors que des analyses existent
+            self.execute_sql(
+                cursor,
+                'SELECT COUNT(*) AS c FROM entreprises WHERE score_pentest IS NOT NULL',
+            )
+            row = cursor.fetchone()
+            with_pentest = int(row['c'] if isinstance(row, dict) else row[0]) if row else 0
+            if with_pentest == 0:
+                self.execute_sql(cursor, 'SELECT 1 AS x FROM analyses_pentest LIMIT 1')
+                if cursor.fetchone():
+                    log.info('Backfill score_pentest…')
+                    self.execute_sql(
+                        cursor,
+                        '''
+                        UPDATE entreprises SET score_pentest = (
+                            SELECT risk_score FROM analyses_pentest
+                            WHERE entreprise_id = entreprises.id
+                            ORDER BY date_analyse DESC
+                            LIMIT 1
+                        )
+                        WHERE EXISTS (
+                            SELECT 1 FROM analyses_pentest
+                            WHERE entreprise_id = entreprises.id
+                        )
+                        ''',
+                    )
+                    conn.commit()
+                    log.info('Backfill score_pentest terminé (rowcount=%s)', cursor.rowcount)
+
+            self.execute_sql(
+                cursor,
+                'SELECT COUNT(*) AS c FROM entreprises WHERE score_seo IS NOT NULL',
+            )
+            row = cursor.fetchone()
+            with_seo = int(row['c'] if isinstance(row, dict) else row[0]) if row else 0
+            if with_seo == 0:
+                self.execute_sql(cursor, 'SELECT 1 AS x FROM analyses_seo LIMIT 1')
+                if cursor.fetchone():
+                    log.info('Backfill score_seo…')
+                    self.execute_sql(
+                        cursor,
+                        '''
+                        UPDATE entreprises SET score_seo = (
+                            SELECT score FROM analyses_seo
+                            WHERE entreprise_id = entreprises.id
+                            ORDER BY date_analyse DESC
+                            LIMIT 1
+                        )
+                        WHERE EXISTS (
+                            SELECT 1 FROM analyses_seo
+                            WHERE entreprise_id = entreprises.id
+                        )
+                        ''',
+                    )
+                    conn.commit()
+                    log.info('Backfill score_seo terminé (rowcount=%s)', cursor.rowcount)
+
+            # Flags screenshots / Gemini (denorm liste)
+            try:
+                self.execute_sql(
+                    cursor,
+                    'SELECT COUNT(*) AS c FROM entreprises WHERE COALESCE(has_gemini_report, 0) = 1',
+                )
+                row = cursor.fetchone()
+                gemini_flagged = int(row['c'] if isinstance(row, dict) else row[0]) if row else 0
+                if gemini_flagged == 0:
+                    self.execute_sql(
+                        cursor,
+                        '''
+                        SELECT 1 AS x FROM entreprise_gemini_reports
+                        WHERE status = 'done' LIMIT 1
+                        ''',
+                    )
+                    if cursor.fetchone():
+                        log.info('Backfill has_gemini_report…')
+                        self.execute_sql(
+                            cursor,
+                            '''
+                            UPDATE entreprises SET has_gemini_report = 1
+                            WHERE EXISTS (
+                                SELECT 1 FROM entreprise_gemini_reports g
+                                WHERE g.entreprise_id = entreprises.id
+                                  AND g.status = 'done'
+                            )
+                            ''',
+                        )
+                        conn.commit()
+                        log.info('Backfill has_gemini_report terminé (rowcount=%s)', cursor.rowcount)
+            except Exception as gem_exc:
+                log.warning('Backfill has_gemini_report ignore: %s', gem_exc)
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+        finally:
+            conn.close()
+
+        # Screenshots: check fichiers sur disque (corrige les badges 404)
+        try:
+            if hasattr(self, 'backfill_has_screenshots_flags'):
+                self.backfill_has_screenshots_flags()
+        except Exception as shot_exc:
+            import logging as _logging
+            _logging.getLogger(__name__).warning('Backfill has_screenshots ignore: %s', shot_exc)
+
     def ensure_entreprise_metric_snapshots_table(self):
         """
         Migration idempotente : snapshots de métriques pour suivi avant/après (Sprint 3).
@@ -147,6 +359,10 @@ class DatabaseSchema(DatabaseBase):
                 ('mobile_error', 'TEXT'),
                 ('captured_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
                 ('updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+                ('design_review_json', 'TEXT'),
+                ('design_score', 'INTEGER'),
+                ('design_analyzed_at', 'TIMESTAMP'),
+                ('design_source', 'TEXT'),
             ):
                 self.safe_execute_sql(cursor, f'ALTER TABLE entreprise_screenshots ADD COLUMN {col_name} {col_type}')
             self.execute_sql(
@@ -158,6 +374,72 @@ class DatabaseSchema(DatabaseBase):
                 'CREATE INDEX IF NOT EXISTS idx_entreprise_screenshots_analysis ON entreprise_screenshots (analysis_id)',
             )
             conn.commit()
+        finally:
+            conn.close()
+
+    def ensure_entreprise_gemini_reports_table(self):
+        """
+        Migration idempotente : rapports d'audit complets Gemini (vision + modules).
+
+        Stocke le JSON normalise, le score global et la reco de refonte.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS entreprise_gemini_reports (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entreprise_id INTEGER NOT NULL,
+                    status TEXT DEFAULT 'done',
+                    report_json TEXT,
+                    overall_score INTEGER,
+                    refonte_recommendation TEXT,
+                    source TEXT,
+                    error_message TEXT,
+                    modules_used_json TEXT,
+                    screenshot_set_id INTEGER,
+                    analyzed_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE
+                )
+                ''',
+            )
+            # Commit immediat : sinon un ALTER "colonne deja la" rollback toute la tx PG
+            # et efface le CREATE TABLE.
+            conn.commit()
+
+            for col_name, col_type in (
+                ('status', 'TEXT'),
+                ('report_json', 'TEXT'),
+                ('overall_score', 'INTEGER'),
+                ('refonte_recommendation', 'TEXT'),
+                ('source', 'TEXT'),
+                ('error_message', 'TEXT'),
+                ('modules_used_json', 'TEXT'),
+                ('screenshot_set_id', 'INTEGER'),
+                ('analyzed_at', 'TIMESTAMP'),
+                ('updated_at', 'TIMESTAMP'),
+            ):
+                self.safe_execute_sql(
+                    cursor,
+                    f'ALTER TABLE entreprise_gemini_reports ADD COLUMN {col_name} {col_type}',
+                )
+
+            self.safe_execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_entreprise_gemini_reports_ent_created '
+                'ON entreprise_gemini_reports (entreprise_id, created_at DESC)',
+            )
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
         finally:
             conn.close()
 
@@ -629,6 +911,10 @@ class DatabaseSchema(DatabaseBase):
         # Taxonomie hierarchique : metier fin (sous secteur/groupe)
         self.safe_execute_sql(cursor, 'ALTER TABLE entreprises ADD COLUMN categorie TEXT')
         self.safe_execute_sql(cursor, 'ALTER TABLE entreprises ADD COLUMN secteur_raw TEXT')
+        # Age / fraicheur du site (refonte)
+        self.safe_execute_sql(cursor, 'ALTER TABLE entreprises ADD COLUMN site_age_score INTEGER')
+        self.safe_execute_sql(cursor, 'ALTER TABLE entreprises ADD COLUMN site_indicators TEXT')
+        self.safe_execute_sql(cursor, 'ALTER TABLE entreprises ADD COLUMN http_last_modified TEXT')
         self.execute_sql(
             cursor,
             'CREATE INDEX IF NOT EXISTS idx_entreprises_categorie ON entreprises(categorie)',

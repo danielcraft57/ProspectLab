@@ -290,6 +290,8 @@
             seo_null: getElChecked('filter-seo-null'),
             pentest_null: getElChecked('filter-pentest-null'),
             has_email: getElChecked('filter-has-email'),
+            has_screenshots: getElChecked('filter-has-screenshots'),
+            has_gemini_report: getElChecked('filter-has-gemini-report'),
             has_blog: getElChecked('filter-has-blog'),
             has_form: getElChecked('filter-has-form'),
             has_tunnel: getElChecked('filter-has-tunnel'),
@@ -376,6 +378,8 @@
             setCheckbox('filter-seo-null', s.seo_null);
             setCheckbox('filter-pentest-null', s.pentest_null);
             setCheckbox('filter-has-email', s.has_email);
+            setCheckbox('filter-has-screenshots', s.has_screenshots);
+            setCheckbox('filter-has-gemini-report', s.has_gemini_report);
             setCheckbox('filter-has-blog', s.has_blog);
             setCheckbox('filter-has-form', s.has_form);
             setCheckbox('filter-has-tunnel', s.has_tunnel);
@@ -509,12 +513,22 @@
             const secteurs = await EntreprisesAPI.loadSecteurs();
             const select = document.getElementById('filter-secteur');
             if (!select) return;
-            secteurs.forEach(secteur => {
+            const currentValue = select.value;
+            // Garder l'option "Tous"
+            select.innerHTML = '<option value="">Tous les secteurs</option>';
+            (secteurs || []).forEach((item) => {
+                const name = typeof item === 'string' ? item : (item && item.secteur);
+                if (!name) return;
+                const count = typeof item === 'object' && item != null ? Number(item.count || 0) : null;
                 const option = document.createElement('option');
-                option.value = secteur;
-                option.textContent = secteur;
+                option.value = name;
+                option.textContent = count != null ? `${name} (${count})` : name;
                 select.appendChild(option);
             });
+            if (currentValue) {
+                const match = select.querySelector(`option[value="${CSS.escape(currentValue)}"]`);
+                if (match) select.value = currentValue;
+            }
         } catch (error) {
             console.error('Erreur lors du chargement des secteurs:', error);
         }
@@ -531,11 +545,28 @@
             const currentValue = select.value;
             const categories = await EntreprisesAPI.loadCategories(secteur || '');
             select.innerHTML = '<option value="">Toutes les catégories</option>';
-            (categories || []).forEach((categorie) => {
-                if (!categorie) return;
+            const rows = (categories || []).map((item) => {
+                if (typeof item === 'string') {
+                    return { name: item, count: null };
+                }
+                return {
+                    name: item && item.categorie,
+                    count: item != null ? Number(item.count || 0) : 0,
+                };
+            }).filter((r) => r.name);
+            // Tri : d'abord celles avec effectif, par count desc, puis alpha
+            rows.sort((a, b) => {
+                const ca = a.count == null ? -1 : a.count;
+                const cb = b.count == null ? -1 : b.count;
+                if (cb !== ca) return cb - ca;
+                return String(a.name).localeCompare(String(b.name), 'fr');
+            });
+            rows.forEach((row) => {
+                // Masquer les categories a 0 (bruit) sauf si deja selectionnee
+                if (row.count === 0 && row.name !== currentValue) return;
                 const option = document.createElement('option');
-                option.value = categorie;
-                option.textContent = categorie;
+                option.value = row.name;
+                option.textContent = row.count != null ? `${row.name} (${row.count})` : row.name;
                 select.appendChild(option);
             });
             if (currentValue) {
@@ -805,6 +836,14 @@
         const hasEmailCheckbox = document.getElementById('filter-has-email');
         if (hasEmailCheckbox && hasEmailCheckbox.checked) {
             filters.has_email = 'true';
+        }
+        const hasScreenshotsCheckbox = document.getElementById('filter-has-screenshots');
+        if (hasScreenshotsCheckbox && hasScreenshotsCheckbox.checked) {
+            filters.has_screenshots = 'true';
+        }
+        const hasGeminiCheckbox = document.getElementById('filter-has-gemini-report');
+        if (hasGeminiCheckbox && hasGeminiCheckbox.checked) {
+            filters.has_gemini_report = 'true';
         }
         if (securityNull) {
             filters.security_null = 'true';
@@ -1924,6 +1963,12 @@
                     <div class="row-meta">
                         ${entreprise.secteur ? `<span class="row-chip row-chip-sector" title="Secteur (groupe)"><i class="fas fa-industry" aria-hidden="true"></i> ${Formatters.escapeHtml(entreprise.secteur)}</span>` : ''}
                         ${entreprise.categorie ? `<span class="row-chip row-chip-category" title="Catégorie (métier)"><i class="fas fa-folder" aria-hidden="true"></i> ${Formatters.escapeHtml(entreprise.categorie)}</span>` : ''}
+                        <span class="row-chip row-chip-screenshots ${entreprise.has_screenshots ? 'is-ready' : 'is-missing'}" data-action="launch-screenshots" data-entreprise-id="${entreprise.id}" title="${entreprise.has_screenshots ? 'Screenshots OK (cliquer pour relancer)' : 'Pas de screenshots / 404 — cliquer pour capturer'}" role="button" tabindex="0">
+                            <i class="fas fa-camera" aria-hidden="true"></i>
+                        </span>
+                        <span class="row-chip row-chip-gemini ${entreprise.has_gemini_report ? 'is-ready' : 'is-missing'}" data-action="launch-gemini" data-entreprise-id="${entreprise.id}" title="${entreprise.has_gemini_report ? 'Rapport Gemini OK (cliquer pour relancer)' : 'Pas de rapport Gemini — cliquer pour lancer'}" role="button" tabindex="0">
+                            <i class="fas fa-robot" aria-hidden="true"></i>
+                        </span>
                         ${langChipLabel ? `<span class="row-chip row-chip-lang" title="Langue principale"><i class="fas fa-language" aria-hidden="true"></i> ${Formatters.escapeHtml(langChipLabel)}</span>` : ''}
                         ${commercialTopMode && entreprise.priority_score != null ? `
                         <span class="row-chip row-chip-priority" title="Priorité commerciale">
@@ -2218,6 +2263,23 @@
                 });
             });
         }
+
+        const shotChip = document.querySelector(`.row-chip-screenshots[data-entreprise-id="${entrepriseId}"]`);
+        if (shotChip) {
+            shotChip.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                triggerScreenshotsCaptureFromList(entrepriseId);
+            });
+        }
+        const geminiChip = document.querySelector(`.row-chip-gemini[data-entreprise-id="${entrepriseId}"]`);
+        if (geminiChip) {
+            geminiChip.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                triggerGeminiFullReport(entrepriseId);
+            });
+        }
     }
 
     function setEntrepriseSelected(entrepriseId, selected) {
@@ -2242,7 +2304,7 @@
         const isInteractiveTarget = (el) => {
             if (!el) return false;
             return Boolean(
-                el.closest('button, a, input, select, textarea, label, details, summary, .btn, .btn-icon, .btn-view-details, .btn-delete-entreprise, .btn-favori, .btn-groups, .score-relaunch-btn')
+                el.closest('button, a, input, select, textarea, label, details, summary, .btn, .btn-icon, .btn-view-details, .btn-delete-entreprise, .btn-favori, .btn-groups, .score-relaunch-btn, .row-chip-screenshots, .row-chip-gemini')
             );
         };
 
@@ -2740,6 +2802,7 @@
             'filter-seo-null',
             'filter-pentest-null',
             'filter-has-email',
+            'filter-has-screenshots',
             'filter-cms',
             'filter-framework',
             'filter-has-blog',
@@ -3364,6 +3427,7 @@
         const pentestMin = document.getElementById('filter-pentest-min')?.value;
         const pentestMax = document.getElementById('filter-pentest-max')?.value;
         const hasEmail = document.getElementById('filter-has-email')?.checked;
+        const hasScreenshots = document.getElementById('filter-has-screenshots')?.checked;
 
         const hasActiveTags = Array.isArray(activeTagFilters) && activeTagFilters.length > 0;
         const typedTags = tagsInputValue
@@ -3378,7 +3442,8 @@
             (opportunite ? 1 : 0) +
             (statut ? 1 : 0) +
             (etapeProspection ? 1 : 0) +
-            (hasEmail ? 1 : 0);
+            (hasEmail ? 1 : 0) +
+            (hasScreenshots ? 1 : 0);
         const commercialProfile = document.getElementById('filter-commercial-profile')?.value;
         const scoresCount =
             (commercialProfile ? 1 : 0) +
@@ -3453,12 +3518,11 @@
             loadEntrepriseInfoScreenshots(entrepriseId);
             loadEntrepriseImages(entrepriseId);
             loadEntreprisePages(currentModalEntrepriseData);
-            loadEntrepriseLandingVariants(entrepriseId);
+            loadGeminiFullReport(entrepriseId);
             loadScrapingResults(entrepriseId);
             loadTechnicalAnalysis(entrepriseId);
             loadOSINTAnalysis(entrepriseId);
             loadPentestAnalysis(entrepriseId);
-            loadAuditPipeline(entrepriseId);
             loadProspectionTab(entrepriseId);
             loadMetricEvolutionTab(entrepriseId);
             refreshOpportunityScore(entrepriseId);
@@ -3539,6 +3603,61 @@
         `;
     }
 
+    /**
+     * Affiche le bloc analyse design UX/UI (Gemini / heuristique) sous les screenshots.
+     * @param {Object|null} latest - Dernier set screenshots (avec design_*)
+     */
+    function renderInfoDesignReview(latest) {
+        const block = document.getElementById('info-design-review-block');
+        if (!block) return;
+        const escape = (txt) => (Formatters && Formatters.escapeHtml ? Formatters.escapeHtml(String(txt || '')) : String(txt || ''));
+        const review = latest && (latest.design_review || null);
+        const score = latest && latest.design_score != null ? Number(latest.design_score) : null;
+        const source = latest && latest.design_source ? String(latest.design_source) : '';
+        const analyzedAt = latest && latest.design_analyzed_at ? String(latest.design_analyzed_at) : '';
+
+        if (!review && (score == null || Number.isNaN(score))) {
+            block.style.display = 'none';
+            block.innerHTML = '';
+            return;
+        }
+
+        const positives = Array.isArray(review && review.positives) ? review.positives : [];
+        const negatives = Array.isArray(review && review.negatives) ? review.negatives : [];
+        const priority = (review && review.refonte_priority) ? String(review.refonte_priority) : '';
+        const pitch = (review && review.pitch) ? String(review.pitch) : '';
+        let scoreClass = 'is-mid';
+        if (score != null && !Number.isNaN(score)) {
+            if (score < 40) scoreClass = 'is-low';
+            else if (score >= 70) scoreClass = 'is-high';
+        }
+        const sourceLabel = source === 'gemini' ? 'Gemini Vision' : (source === 'heuristic' ? 'Heuristique' : (source || '—'));
+
+        block.style.display = 'block';
+        block.innerHTML = `
+            <div class="info-design-review-head">
+                <strong><i class="fas fa-palette"></i> Analyse design UX/UI</strong>
+                <span class="info-design-score ${scoreClass}" title="Score design (plus bas = plus faible)">${score != null && !Number.isNaN(score) ? escape(String(score)) + '/100' : '—'}</span>
+            </div>
+            <div class="info-design-review-meta">
+                Source : ${escape(sourceLabel)}
+                ${priority ? ` · Priorité refonte : <em>${escape(priority)}</em>` : ''}
+                ${analyzedAt ? ` · ${escape(analyzedAt.slice(0, 19))}` : ''}
+            </div>
+            ${pitch ? `<p class="info-design-pitch">${escape(pitch)}</p>` : ''}
+            <div class="info-design-lists">
+                <div class="info-design-list info-design-list--plus">
+                    <h4>Ce qui va</h4>
+                    <ul>${positives.length ? positives.map((p) => `<li>${escape(p)}</li>`).join('') : '<li class="muted">—</li>'}</ul>
+                </div>
+                <div class="info-design-list info-design-list--minus">
+                    <h4>Ce qui cloche</h4>
+                    <ul>${negatives.length ? negatives.map((n) => `<li>${escape(n)}</li>`).join('') : '<li class="muted">—</li>'}</ul>
+                </div>
+            </div>
+        `;
+    }
+
     async function loadEntrepriseInfoScreenshots(entrepriseId) {
         const container = document.getElementById('info-screenshots-content');
         if (!container) return;
@@ -3553,6 +3672,379 @@
         } catch (e) {
             console.error('Erreur chargement screenshots info:', e);
             container.innerHTML = '<p class="empty-state" style="margin:0;">Impossible de charger les screenshots.</p>';
+        }
+    }
+
+    /**
+     * Lance l'analyse design Gemini et suit la tache Celery jusqu'au resultat.
+     * @param {number} entrepriseId
+     */
+    async function triggerDesignReview(entrepriseId) {
+        const btn = document.getElementById('info-screenshots-analyze-design-btn');
+        const status = document.getElementById('info-screenshots-status');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyse…';
+        }
+        if (status) {
+            status.style.display = 'block';
+            status.classList.remove('is-error');
+            status.textContent = 'Analyse design en cours (Gemini)…';
+        }
+        try {
+            const res = await fetch(`/api/entreprise/${entrepriseId}/screenshots/analyze-design`, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({}),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.status === 409) {
+                throw new Error(data.error || 'Aucun screenshot — lance une capture d\'abord.');
+            }
+            if (!res.ok || !data.success || !data.task_id) {
+                throw new Error(data.error || ('HTTP ' + res.status));
+            }
+            const taskId = data.task_id;
+            let result = null;
+            for (let i = 0; i < 90; i += 1) {
+                await new Promise((r) => setTimeout(r, 2000));
+                const poll = await fetch(`/api/celery-task/${encodeURIComponent(taskId)}`, { credentials: 'same-origin' });
+                const st = await poll.json().catch(() => ({}));
+                if (!poll.ok) throw new Error(st.error || ('HTTP ' + poll.status));
+                if (st.state === 'SUCCESS') {
+                    result = st.result || {};
+                    break;
+                }
+                if (st.state === 'FAILURE' || st.state === 'REVOKED' || st.state === 'REJECTED') {
+                    throw new Error(st.error || 'Analyse design echouee.');
+                }
+                if (status && st.meta && st.meta.message) {
+                    status.textContent = String(st.meta.message);
+                }
+            }
+            if (!result) throw new Error('Timeout analyse design.');
+            await loadEntrepriseInfoScreenshots(entrepriseId);
+            if (status) {
+                status.style.display = 'block';
+                status.classList.remove('is-error');
+                const sc = result.design_score != null ? `Score ${result.design_score}/100` : 'Terminee';
+                status.textContent = `Analyse design OK — ${sc} (${result.design_source || '—'})`;
+            }
+            Notifications.show('Analyse design terminee.', 'success');
+        } catch (err) {
+            console.error('triggerDesignReview:', err);
+            if (status) {
+                status.style.display = 'block';
+                status.classList.add('is-error');
+                status.textContent = err && err.message ? err.message : 'Erreur analyse design';
+            }
+            Notifications.show(err && err.message ? err.message : 'Erreur analyse design', 'error');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-palette"></i> Analyser le design';
+            }
+        }
+    }
+
+    /**
+     * Affiche le rapport Gemini complet dans l'onglet dedie.
+     * @param {Object|null} latest
+     */
+    function renderGeminiFullReport(latest) {
+        const container = document.getElementById('gemini-report-content');
+        if (!container) return;
+        const escape = (txt) => (Formatters && Formatters.escapeHtml ? Formatters.escapeHtml(String(txt || '')) : String(txt || ''));
+        if (!latest || !latest.report) {
+            container.innerHTML = `
+                <div class="gemini-report-empty">
+                    <p>Aucun rapport Gemini pour le moment.</p>
+                    <span>Clique sur “Lancer l'analyse complete” — screenshots + tech / SEO / OSINT / pentest.</span>
+                </div>
+            `;
+            return;
+        }
+        const report = latest.report || {};
+        const score = latest.overall_score != null ? Number(latest.overall_score) : Number(report.overall_score);
+        let scoreClass = 'is-mid';
+        if (!Number.isNaN(score)) {
+            if (score < 40) scoreClass = 'is-low';
+            else if (score >= 70) scoreClass = 'is-high';
+        }
+        const refonte = latest.refonte_recommendation || report.refonte_recommendation || '—';
+        const source = latest.source || report.source || '—';
+        const analyzedAt = latest.analyzed_at || report.analyzed_at || '';
+        const works = Array.isArray(report.what_works) ? report.what_works : [];
+        const wrongs = Array.isArray(report.whats_wrong) ? report.whats_wrong : [];
+        const actions = Array.isArray(report.priority_actions) ? report.priority_actions : [];
+        const improvements = Array.isArray(report.improvements) ? report.improvements : [];
+        const pitch = report.commercial_pitch || '';
+        const summary = report.executive_summary || '';
+        const design = (report.design_analysis && typeof report.design_analysis === 'object')
+            ? report.design_analysis
+            : null;
+        const modules = (report.modules && typeof report.modules === 'object') ? report.modules : {};
+        const moduleKeys = ['design', 'technical', 'seo', 'osint', 'pentest'];
+        const modulesHtml = moduleKeys
+            .filter((k) => modules[k] && (modules[k].score != null || modules[k].notes))
+            .map((k) => {
+                const m = modules[k] || {};
+                const sc = m.score != null && !Number.isNaN(Number(m.score))
+                    ? `${escape(String(m.score))}/100`
+                    : '—';
+                const notes = m.notes ? `<div class="gemini-module-notes">${escape(m.notes)}</div>` : '';
+                return `<div class="gemini-module-card"><strong>${escape(k)}</strong>`
+                    + `<span class="gemini-module-score">${sc}</span>${notes}</div>`;
+            })
+            .join('');
+
+        let designHtml = '';
+        if (design && (design.summary || design.ux_notes || design.ui_notes
+            || (design.to_keep && design.to_keep.length)
+            || (design.to_redo && design.to_redo.length))) {
+            const dScore = design.score != null && !Number.isNaN(Number(design.score))
+                ? ` · Score design ${escape(String(design.score))}/100`
+                : '';
+            const keep = Array.isArray(design.to_keep) ? design.to_keep : [];
+            const redo = Array.isArray(design.to_redo) ? design.to_redo : [];
+            designHtml = `
+                <div class="gemini-report-design">
+                    <h4>Design / UX / UI${dScore}</h4>
+                    ${design.summary ? `<p>${escape(design.summary)}</p>` : ''}
+                    ${design.ux_notes ? `<p><em>UX :</em> ${escape(design.ux_notes)}</p>` : ''}
+                    ${design.ui_notes ? `<p><em>UI :</em> ${escape(design.ui_notes)}</p>` : ''}
+                    ${keep.length ? `<p><strong>A garder</strong></p><ul>${keep.map((x) => `<li>${escape(x)}</li>`).join('')}</ul>` : ''}
+                    ${redo.length ? `<p><strong>A refaire</strong></p><ul>${redo.map((x) => `<li>${escape(x)}</li>`).join('')}</ul>` : ''}
+                </div>`;
+        }
+
+        container.innerHTML = `
+            <div class="gemini-report-card">
+                <div class="gemini-report-head">
+                    <div>
+                        <strong><i class="fas fa-robot"></i> Rapport d'audit Gemini</strong>
+                        <div class="gemini-report-meta">
+                            Source : ${escape(source)}
+                            · Refonte : <em>${escape(refonte)}</em>
+                            ${analyzedAt ? ` · ${escape(String(analyzedAt).slice(0, 19))}` : ''}
+                        </div>
+                    </div>
+                    <span class="gemini-report-score ${scoreClass}">${!Number.isNaN(score) ? escape(String(score)) + '/100' : '—'}</span>
+                </div>
+                ${summary ? `<p class="gemini-report-summary">${escape(summary)}</p>` : ''}
+                ${pitch ? `<p class="gemini-report-pitch"><i class="fas fa-bullhorn"></i> ${escape(pitch)}</p>` : ''}
+                ${designHtml}
+                ${modulesHtml ? `
+                <div class="gemini-report-modules">
+                    <h4>Modules</h4>
+                    <div class="gemini-modules-grid">${modulesHtml}</div>
+                </div>` : ''}
+                <div class="gemini-report-lists">
+                    <div class="gemini-report-list gemini-report-list--plus">
+                        <h4>Ce qui va</h4>
+                        <ul>${works.length ? works.map((w) => `<li>${escape(w)}</li>`).join('') : '<li class="muted">—</li>'}</ul>
+                    </div>
+                    <div class="gemini-report-list gemini-report-list--minus">
+                        <h4>Ce qui cloche</h4>
+                        <ul>${wrongs.length ? wrongs.map((w) => `<li>${escape(w)}</li>`).join('') : '<li class="muted">—</li>'}</ul>
+                    </div>
+                </div>
+                ${actions.length ? `
+                <div class="gemini-report-actions">
+                    <h4>Actions prioritaires</h4>
+                    <ol>${actions.map((a) => `<li>${escape(a)}</li>`).join('')}</ol>
+                </div>` : ''}
+                ${improvements.length ? `
+                <div class="gemini-report-improvements">
+                    <h4>Ameliorations</h4>
+                    <ul>
+                        ${improvements.map((it) => {
+                            const area = escape((it && it.area) || '');
+                            const prio = escape((it && it.priority) || '');
+                            const action = escape((it && it.action) || '');
+                            return `<li><span class="gemini-chip">${area}</span> <span class="gemini-chip gemini-chip--prio">${prio}</span> ${action}</li>`;
+                        }).join('')}
+                    </ul>
+                </div>` : ''}
+            </div>
+        `;
+    }
+
+    function setGeminiReportStatus(message, isError) {
+        const status = document.getElementById('gemini-report-status');
+        const list = document.getElementById('gemini-report-log-list');
+        const pctEl = document.getElementById('gemini-report-log-pct');
+        if (!status) return;
+        if (!message && !list) {
+            status.style.display = 'none';
+            return;
+        }
+        status.style.display = 'block';
+        status.classList.toggle('is-error', !!isError);
+        if (!list) {
+            status.textContent = message || '';
+            return;
+        }
+        if (!message) return;
+        const escape = (txt) => (Formatters && Formatters.escapeHtml ? Formatters.escapeHtml(String(txt || '')) : String(txt || ''));
+        const last = list.lastElementChild;
+        if (last && last.getAttribute('data-msg') === String(message)) {
+            return;
+        }
+        const li = document.createElement('li');
+        li.setAttribute('data-msg', String(message));
+        const now = new Date();
+        const hh = String(now.getHours()).padStart(2, '0');
+        const mm = String(now.getMinutes()).padStart(2, '0');
+        const ss = String(now.getSeconds()).padStart(2, '0');
+        li.innerHTML = `<span class="gemini-log-time">${hh}:${mm}:${ss}</span> ${escape(message)}`;
+        if (isError) li.classList.add('is-error');
+        list.appendChild(li);
+        // garder max 80 lignes visibles
+        while (list.children.length > 80) {
+            list.removeChild(list.firstChild);
+        }
+        status.scrollTop = status.scrollHeight;
+        list.scrollTop = list.scrollHeight;
+        if (pctEl && !pctEl.textContent) {
+            // laisse syncGeminiReportLogs gerer le %
+        }
+    }
+
+    /**
+     * Synchronise le journal UI avec meta.logs Celery (+ % progression).
+     * @param {Object} meta
+     */
+    function syncGeminiReportLogs(meta) {
+        const status = document.getElementById('gemini-report-status');
+        const list = document.getElementById('gemini-report-log-list');
+        const pctEl = document.getElementById('gemini-report-log-pct');
+        if (!status || !list) return;
+        status.style.display = 'block';
+        status.classList.remove('is-error');
+        const logs = (meta && Array.isArray(meta.logs)) ? meta.logs : [];
+        const escape = (txt) => (Formatters && Formatters.escapeHtml ? Formatters.escapeHtml(String(txt || '')) : String(txt || ''));
+        const existing = new Set(Array.from(list.querySelectorAll('li')).map((el) => el.getAttribute('data-msg') || ''));
+        logs.forEach((line) => {
+            const msg = String(line || '').trim();
+            if (!msg || existing.has(msg)) return;
+            existing.add(msg);
+            const li = document.createElement('li');
+            li.setAttribute('data-msg', msg);
+            const now = new Date();
+            const hh = String(now.getHours()).padStart(2, '0');
+            const mm = String(now.getMinutes()).padStart(2, '0');
+            const ss = String(now.getSeconds()).padStart(2, '0');
+            li.innerHTML = `<span class="gemini-log-time">${hh}:${mm}:${ss}</span> ${escape(msg)}`;
+            list.appendChild(li);
+        });
+        while (list.children.length > 80) {
+            list.removeChild(list.firstChild);
+        }
+        list.scrollTop = list.scrollHeight;
+        if (pctEl && meta && meta.progress != null) {
+            pctEl.textContent = `${Math.max(0, Math.min(100, Number(meta.progress) || 0))} %`;
+        }
+        if (meta && meta.message) {
+            setGeminiReportStatus(String(meta.message), false);
+        }
+    }
+
+    function resetGeminiReportLogs() {
+        const status = document.getElementById('gemini-report-status');
+        const list = document.getElementById('gemini-report-log-list');
+        const pctEl = document.getElementById('gemini-report-log-pct');
+        if (list) list.innerHTML = '';
+        if (pctEl) pctEl.textContent = '0 %';
+        if (status) {
+            status.style.display = 'block';
+            status.classList.remove('is-error');
+        }
+    }
+
+    async function loadGeminiFullReport(entrepriseId) {
+        const container = document.getElementById('gemini-report-content');
+        if (!container) return;
+        try {
+            const res = await fetch(`/api/entreprise/${entrepriseId}/gemini-report`, { credentials: 'same-origin' });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+            renderGeminiFullReport(data.latest || null);
+        } catch (e) {
+            console.error('loadGeminiFullReport:', e);
+            container.innerHTML = '<p class="empty-state">Impossible de charger le rapport Gemini.</p>';
+        }
+    }
+
+    /**
+     * Lance le rapport Gemini via WebSocket (notifs + journal modal).
+     * @param {number} entrepriseId
+     * @param {Object} [options]
+     */
+    async function triggerGeminiFullReport(entrepriseId, options = {}) {
+        const notify = options.notify !== false;
+        const btn = document.getElementById('gemini-report-start-btn');
+        const socket = window.wsManager && window.wsManager.socket;
+        if (!socket) {
+            if (notify) {
+                Notifications.show('Connexion temps réel non disponible. Rechargez la page.', 'warning');
+            }
+            return;
+        }
+        ensureModalWebSocketListeners();
+        if (btn && Number(entrepriseId) === Number(currentModalEntrepriseId)) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyse…';
+        }
+        document.querySelectorAll(`.row-chip-gemini[data-entreprise-id="${entrepriseId}"]`).forEach((el) => {
+            el.classList.add('is-loading');
+        });
+        if (Number(entrepriseId) === Number(currentModalEntrepriseId)) {
+            resetGeminiReportLogs();
+            setGeminiReportStatus('Lancement du rapport complet…', false);
+        }
+        const nom = getEntrepriseNom(entrepriseId);
+        if (notify) {
+            Notifications.show(nom + ' — Rapport Gemini lancé…', 'info', 'fa-robot');
+        }
+        socket.emit('start_gemini_report', {
+            entreprise_id: Number(entrepriseId),
+            ensure_screenshots: true,
+        });
+    }
+
+    /**
+     * Lance / relance la capture screenshots (liste ou modal).
+     * @param {number} entrepriseId
+     * @param {Object} [options]
+     */
+    function triggerScreenshotsCaptureFromList(entrepriseId, options = {}) {
+        const notify = options.notify !== false;
+        const entreprise = allEntreprises.find(e => e && e.id === entrepriseId)
+            || filteredEntreprises.find(e => e && e.id === entrepriseId);
+        const url = entreprise && entreprise.website ? String(entreprise.website).trim() : '';
+        const socket = window.wsManager && window.wsManager.socket;
+        if (!socket) {
+            if (notify) Notifications.show('Connexion temps réel non disponible. Rechargez la page.', 'warning');
+            return;
+        }
+        if (!url && Number(entrepriseId) !== Number(currentModalEntrepriseId)) {
+            // fallback: modal helper qui prend l'id
+            triggerScreenshotsCapture(entrepriseId);
+            return;
+        }
+        ensureModalWebSocketListeners();
+        document.querySelectorAll(`.row-chip-screenshots[data-entreprise-id="${entrepriseId}"]`).forEach((el) => {
+            el.classList.add('is-loading');
+        });
+        // Pas de notif ici : screenshot_capture_started s'en charge (evite le double toast)
+        socket.emit('start_screenshot_capture', {
+            entreprise_id: Number(entrepriseId),
+            url: url || undefined,
+        });
+        if (Number(entrepriseId) === Number(currentModalEntrepriseId)) {
+            setInfoScreenshotsLoading(true, 'Lancement de la capture screenshots...');
         }
     }
 
@@ -4033,14 +4525,13 @@
                         <button class="tab-btn" data-tab="images">Images (${nbImages})</button>
                         <button class="tab-btn" data-tab="pages">Pages (${nbPages})</button>
                         <button class="tab-btn" data-tab="scraping">Résultats scraping</button>
-                        <button class="tab-btn" data-tab="pipeline">Pipeline d'audit</button>
+                        <button class="tab-btn" data-tab="gemini-report">Rapport Gemini</button>
                         <button class="tab-btn" data-tab="evolution-metrics">Évolution</button>
                         <button class="tab-btn" data-tab="technique">Analyse technique</button>
                         <button class="tab-btn" data-tab="seo">Analyse SEO</button>
                         <button class="tab-btn" data-tab="osint">Analyse OSINT</button>
                         <button class="tab-btn" data-tab="pentest">Analyse Pentest</button>
                         <button class="tab-btn" data-tab="prospection">Prospection</button>
-                        <button class="tab-btn" data-tab="landing-variants">Variantes</button>
                     </div>
                     <button class="tabs-arrow tabs-arrow-right" type="button" aria-label="Onglets suivants">
                         <i class="fas fa-chevron-right"></i>
@@ -4058,9 +4549,11 @@
                         <div class="detail-section info-screenshots-section">
                             <div class="info-screenshots-header">
                                 <h3 class="info-screenshots-title"><i class="fas fa-camera"></i> Screenshots du site</h3>
-                                <button type="button" class="btn btn-outline btn-small" id="info-screenshots-refresh-btn" title="Lancer / relancer la capture screenshots">
-                                    <i class="fas fa-sync-alt"></i> Lancer / Relancer
-                                </button>
+                                <div class="info-screenshots-actions">
+                                    <button type="button" class="btn btn-outline btn-small" id="info-screenshots-refresh-btn" title="Lancer / relancer la capture screenshots">
+                                        <i class="fas fa-sync-alt"></i> Lancer / Relancer
+                                    </button>
+                                </div>
                             </div>
                             <div id="info-screenshots-status" class="info-screenshots-status" style="display:none;"></div>
                             <div id="info-screenshots-content">
@@ -4127,6 +4620,29 @@
                             ${createInfoRow('Site web', entreprise.website, true)}
                             ${createInfoRow('Secteur', entreprise.secteur)}
                             ${createInfoRow('Catégorie', entreprise.categorie)}
+                            ${(function() {
+                                const ageScore = entreprise.site_age_score;
+                                const indicators = entreprise.site_indicators;
+                                const lastMod = entreprise.http_last_modified;
+                                if (ageScore == null && !indicators && !lastMod) return '';
+                                let statusLabel = 'Inconnu';
+                                const n = Number(ageScore);
+                                if (!Number.isNaN(n)) {
+                                    if (n >= 4) statusLabel = 'Très obsolète';
+                                    else if (n >= 2) statusLabel = 'Obsolète';
+                                    else if (n >= 1) statusLabel = 'À moderniser';
+                                    else statusLabel = 'Moderne';
+                                }
+                                const parts = [`${statusLabel}${ageScore != null ? ` (score ${Formatters.escapeHtml(String(ageScore))})` : ''}`];
+                                if (lastMod) parts.push(`Last-Modified: ${Formatters.escapeHtml(String(lastMod).slice(0, 32))}`);
+                                if (indicators && String(indicators) !== 'Aucun') {
+                                    parts.push(Formatters.escapeHtml(String(indicators).slice(0, 120)));
+                                }
+                                return `<div class="info-row">
+                                    <span class="info-label">Fraîcheur du site:</span>
+                                    <span class="info-value">${parts.join(' · ')}</span>
+                                </div>`;
+                            })()}
                             <div class="info-row" id="info-statut-row">
                                 <span class="info-label">Statut:</span>
                                 <span class="info-value" id="info-statut-value">${Badges.getStatusBadge(entreprise.statut)}</span>
@@ -4172,18 +4688,24 @@
                         </div>
                     </div>
 
-                    <div class="tab-panel" id="tab-landing-variants">
-                        <div class="landing-variants-toolbar">
-                            <button type="button" class="btn btn-outline btn-small" id="landing-variants-start-btn">
-                                <i class="fas fa-magic"></i> Lancer / Relancer
+                    <div class="tab-panel" id="tab-gemini-report">
+                        <div class="gemini-report-toolbar">
+                            <button type="button" class="btn btn-primary btn-small" id="gemini-report-start-btn" title="Lance le rapport complet (screenshots + tech/SEO/OSINT/pentest)">
+                                <i class="fas fa-robot"></i> Lancer l'analyse complete
                             </button>
-                            <button type="button" class="btn btn-outline btn-small" id="landing-variants-refresh-btn">
+                            <button type="button" class="btn btn-outline btn-small" id="gemini-report-refresh-btn" title="Recharger le dernier rapport">
                                 <i class="fas fa-sync-alt"></i> Actualiser
                             </button>
                         </div>
-                        <div id="landing-variants-status" class="landing-variants-status" style="display:none;"></div>
-                        <div id="landing-variants-content" class="landing-variants-content">
-                            <p class="loading">Chargement des landing variants...</p>
+                        <div id="gemini-report-status" class="gemini-report-status" style="display:none;">
+                            <div class="gemini-report-log-head">
+                                <strong><i class="fas fa-terminal"></i> Journal d'analyse</strong>
+                                <span id="gemini-report-log-pct" class="gemini-report-log-pct"></span>
+                            </div>
+                            <ul id="gemini-report-log-list" class="gemini-report-log-list"></ul>
+                        </div>
+                        <div id="gemini-report-content" class="gemini-report-content">
+                            <p class="loading">Chargement du rapport Gemini...</p>
                         </div>
                     </div>
                     
@@ -4240,12 +4762,6 @@
                         </div>
                     </div>
                     
-                    <div class="tab-panel" id="tab-pipeline">
-                        <div id="entreprise-pipeline-container" class="pipeline-tab-content">
-                            <p class="empty-state">Chargement du pipeline d'audit...</p>
-                        </div>
-                    </div>
-
                     <div class="tab-panel" id="tab-evolution-metrics">
                         <div id="metric-evolution-root" class="metric-evolution-root">
                             <p class="empty-state">Chargement de l'évolution des métriques…</p>
@@ -4485,6 +5001,12 @@
             if (entrepriseId == null) return;
             const nom = getEntrepriseNom(entrepriseId);
             Notifications.show(nom + ' — Screenshots mis à jour', 'success', 'fa-check-circle');
+            document.querySelectorAll(`.row-chip-screenshots[data-entreprise-id="${entrepriseId}"]`).forEach((el) => {
+                el.classList.remove('is-loading', 'is-missing');
+                el.classList.add('is-ready');
+                el.title = 'Screenshots OK (cliquer pour relancer)';
+            });
+            refreshEntrepriseFromServer(entrepriseId);
             if (entrepriseId === currentModalEntrepriseId) {
                 setInfoScreenshotsLoading(false);
                 loadEntrepriseInfoScreenshots(entrepriseId);
@@ -4497,6 +5019,9 @@
             if (entrepriseId != null) {
                 const nom = getEntrepriseNom(entrepriseId);
                 Notifications.show(nom + ' — ' + err, 'error', 'fa-exclamation-circle');
+                document.querySelectorAll(`.row-chip-screenshots[data-entreprise-id="${entrepriseId}"]`).forEach((el) => {
+                    el.classList.remove('is-loading');
+                });
             } else {
                 Notifications.show(err, 'error', 'fa-exclamation-circle');
             }
@@ -4508,6 +5033,73 @@
                     status.classList.add('is-error');
                     status.textContent = err;
                 }
+            }
+        });
+
+        s.on('gemini_report_started', function(data) {
+            if (!data || data.entreprise_id == null) return;
+            const eid = data.entreprise_id;
+            if (Number(eid) === Number(currentModalEntrepriseId)) {
+                setGeminiReportStatus('Rapport Gemini démarré…', false);
+            }
+        });
+
+        s.on('gemini_report_progress', function(data) {
+            if (!data || data.entreprise_id == null) return;
+            if (Number(data.entreprise_id) !== Number(currentModalEntrepriseId)) return;
+            syncGeminiReportLogs({
+                logs: data.logs || [],
+                progress: data.progress,
+                message: data.message,
+            });
+        });
+
+        s.on('gemini_report_complete', function(data) {
+            if (!data || data.entreprise_id == null) return;
+            const eid = data.entreprise_id;
+            const nom = getEntrepriseNom(eid);
+            const result = data.result || {};
+            const sc = result.overall_score != null ? `Score ${result.overall_score}/100` : 'OK';
+            Notifications.show(nom + ' — Rapport Gemini terminé (' + sc + ')', 'success', 'fa-robot');
+            document.querySelectorAll(`.row-chip-gemini[data-entreprise-id="${eid}"]`).forEach((el) => {
+                el.classList.remove('is-loading', 'is-missing');
+                el.classList.add('is-ready');
+                el.title = 'Rapport Gemini OK (cliquer pour relancer)';
+            });
+            const btn = document.getElementById('gemini-report-start-btn');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-robot"></i> Lancer l\'analyse complete';
+            }
+            refreshEntrepriseFromServer(eid);
+            if (Number(eid) === Number(currentModalEntrepriseId)) {
+                if (Array.isArray(result.logs)) {
+                    syncGeminiReportLogs({ logs: result.logs, progress: 100, message: 'Termine' });
+                }
+                setGeminiReportStatus(`Rapport terminé — ${sc} (${result.source || '—'})`, false);
+                loadGeminiFullReport(eid);
+            }
+        });
+
+        s.on('gemini_report_error', function(data) {
+            const eid = data && data.entreprise_id != null ? data.entreprise_id : null;
+            const err = data && data.error ? data.error : 'Erreur rapport Gemini';
+            if (eid != null) {
+                const nom = getEntrepriseNom(eid);
+                Notifications.show(nom + ' — ' + err, 'error', 'fa-exclamation-circle');
+                document.querySelectorAll(`.row-chip-gemini[data-entreprise-id="${eid}"]`).forEach((el) => {
+                    el.classList.remove('is-loading');
+                });
+            } else {
+                Notifications.show(err, 'error', 'fa-exclamation-circle');
+            }
+            const btn = document.getElementById('gemini-report-start-btn');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-robot"></i> Lancer l\'analyse complete';
+            }
+            if (eid != null && Number(eid) === Number(currentModalEntrepriseId)) {
+                setGeminiReportStatus(err, true);
             }
         });
         window._entrepriseModalWsListenersSetup = true;
@@ -4607,23 +5199,23 @@
                 };
             }
 
-            const landingStartBtn = document.getElementById('landing-variants-start-btn');
-            if (landingStartBtn) {
-                landingStartBtn.onclick = (e) => {
+            const geminiStartBtn = document.getElementById('gemini-report-start-btn');
+            if (geminiStartBtn) {
+                geminiStartBtn.onclick = (e) => {
                     e.preventDefault();
                     e.stopPropagation();
                     if (!currentModalEntrepriseId) return;
-                    startEntrepriseLandingVariants(currentModalEntrepriseId);
+                    triggerGeminiFullReport(currentModalEntrepriseId);
                 };
             }
 
-            const landingRefreshBtn = document.getElementById('landing-variants-refresh-btn');
-            if (landingRefreshBtn) {
-                landingRefreshBtn.onclick = (e) => {
+            const geminiRefreshBtn = document.getElementById('gemini-report-refresh-btn');
+            if (geminiRefreshBtn) {
+                geminiRefreshBtn.onclick = (e) => {
                     e.preventDefault();
                     e.stopPropagation();
                     if (!currentModalEntrepriseId) return;
-                    loadEntrepriseLandingVariants(currentModalEntrepriseId);
+                    loadGeminiFullReport(currentModalEntrepriseId);
                 };
             }
 
@@ -5062,11 +5654,11 @@
             });
         }
 
-        const landingVariantsTab = document.querySelector('.tab-btn[data-tab="landing-variants"]');
-        if (landingVariantsTab) {
-            landingVariantsTab.addEventListener('click', () => {
+        const geminiReportTab = document.querySelector('.tab-btn[data-tab="gemini-report"]');
+        if (geminiReportTab) {
+            geminiReportTab.addEventListener('click', () => {
                 if (currentModalEntrepriseId) {
-                    loadEntrepriseLandingVariants(currentModalEntrepriseId);
+                    loadGeminiFullReport(currentModalEntrepriseId);
                 }
             });
         }

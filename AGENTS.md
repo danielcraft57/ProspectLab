@@ -5,10 +5,12 @@ Ce fichier sert de repere rapide pour l'agent et pour les operations de deploiem
 ## Topologie de production validee
 
 - Noeud application (prod): `pi@node15.lan` (`192.168.1.198`)
+- Noeud PostgreSQL: `pi@node6.lan` (`192.168.1.215`) — base `prospectlab` (accès LAN)
 - Noeud reverse proxy Nginx: `pi@node12.lan` (`192.168.1.209`, IP publique `89.159.124.25`)
 - Noeud VPN (IPsec/XAuth + L2TP): `pi@node13.lan` (`192.168.1.191`, leftid `89.159.124.25`)
 - Jump host public (si VPN coupe / ipsec restart): `pi@danielcraft.fr`
 - Branche cible sur le noeud prod: `main`
+- Redis / NFS restent sur `node15.lan`
 
 ### Acces SSH quand le VPN est instable
 
