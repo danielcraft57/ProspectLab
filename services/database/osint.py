@@ -538,6 +538,7 @@ class OSINTManager(DatabaseBase):
             try:
                 from services.database.entreprises import EntrepriseManager
                 entreprise_manager = EntrepriseManager()
+                entreprise_manager.refresh_has_known_email(entreprise_id)
                 entreprise_manager.update_opportunity_score(entreprise_id)
             except Exception as e:
                 logger.warning(f'Erreur lors du recalcul de l\'opportunité après analyse OSINT: {e}')
@@ -974,11 +975,26 @@ class OSINTManager(DatabaseBase):
         """
         conn = self.get_connection()
         cursor = conn.cursor()
+
+        self.execute_sql(
+            cursor, 'SELECT entreprise_id FROM analyses_osint WHERE id = ?', (analysis_id,)
+        )
+        row = cursor.fetchone()
+        entreprise_id = None
+        if row:
+            entreprise_id = row['entreprise_id'] if isinstance(row, dict) else row[0]
         
         self.execute_sql(cursor,'DELETE FROM analyses_osint WHERE id = ?', (analysis_id,))
         deleted = cursor.rowcount > 0
         
         conn.commit()
         conn.close()
+
+        if deleted and entreprise_id:
+            try:
+                from services.database.entreprises import EntrepriseManager
+                EntrepriseManager().refresh_has_known_email(entreprise_id)
+            except Exception:
+                pass
         
         return deleted

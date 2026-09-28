@@ -53,7 +53,7 @@ sudo sed -i '1i host    prospectlab    prospectlab    127.0.0.1/32    md5' /etc/
 sudo systemctl restart postgresql
 ```
 
-Si **PostgreSQL** tourne sur le même hôte que l’app mais que des **workers Celery** sur d’autres machines du LAN se connectent à la base (même `DATABASE_URL` pointant vers `node15.lan`), autorisez le sous-réseau dans `pg_hba.conf` (adaptez la version PostgreSQL et le chemin) :
+Si **PostgreSQL** tourne sur un hôte dédié (ex. `node6.lan`) ou sur le même hôte que l’app, et que des **workers Celery** sur d’autres machines du LAN se connectent à la base (même `DATABASE_URL` pointant vers cet hôte, ex. `node6.lan`), autorisez le sous-réseau dans `pg_hba.conf` (adaptez la version PostgreSQL et le chemin) :
 
 ```bash
 echo 'host    prospectlab    prospectlab    192.168.1.0/24    scram-sha-256' | sudo tee -a /etc/postgresql/17/main/pg_hba.conf
@@ -159,6 +159,18 @@ conda create --prefix /opt/prospectlab/env python=3.11 -y
 /opt/prospectlab/env/bin/pip install -r requirements.txt
 ```
 
+### 1.4 bis. Navigateur Playwright (screenshots)
+
+Apres `pip install`, telecharger Chromium pour les captures (obligatoire sur les workers qui font les screenshots) :
+
+```bash
+bash /opt/prospectlab/scripts/linux/install_playwright_chromium.sh
+# equivalent :
+# /opt/prospectlab/env/bin/python -m playwright install chromium
+```
+
+Si tu vois `BrowserType.launch: Executable doesn't exist`, c'est que cette etape manque (souvent apres recreate de l'env Conda).
+
 ### 1.5. Configuration de l'environnement
 
 Créer le fichier `.env` de production :
@@ -172,7 +184,8 @@ Variables essentielles à configurer :
 
 ```bash
 SECRET_KEY=ta-cle-ultra-secrete-generee-aleatoirement
-DATABASE_URL=postgresql://prospectlab:ton-mot-de-passe@localhost:5432/prospectlab
+DATABASE_URL=postgresql://prospectlab:ton-mot-de-passe@node6.lan:5432/prospectlab
+# (ou localhost si PostgreSQL est colocalise avec l'app)
 CELERY_BROKER_URL=redis://localhost:6379/1
 CELERY_RESULT_BACKEND=redis://localhost:6379/1
 CELERY_WORKERS=6
@@ -533,6 +546,8 @@ sudo -u postgres psql prospectlab < /opt/prospectlab/backup_YYYYMMDD_HHMMSS.sql
 cd /opt/prospectlab
 git pull  # Si utilisation de git
 /opt/prospectlab/env/bin/pip install -r requirements.txt
+# Si Playwright a change de version (ou env recree) :
+bash scripts/linux/install_playwright_chromium.sh
 sudo systemctl restart prospectlab prospectlab-celery
 ```
 

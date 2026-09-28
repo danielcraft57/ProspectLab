@@ -168,6 +168,14 @@ body {
     position: relative;
 }
 
+/* Panneau ancré à gauche du bouton cloche (sinon il déborde hors écran) */
+.nav-notifications .notifications-panel {
+    left: 0;
+    right: auto;
+    width: min(360px, calc(100vw - 1.5rem));
+    max-width: calc(100vw - 1.5rem);
+}
+
 .notifications-toggle-btn {
     background: transparent;
     border: none;
@@ -212,8 +220,10 @@ body {
 .notifications-panel {
     position: absolute;
     top: 140%;
-    right: 0;
-    width: 320px;
+    left: 0;
+    right: auto;
+    width: min(320px, calc(100vw - 1.5rem));
+    max-width: calc(100vw - 1.5rem);
     max-height: 420px;
     background: #ffffff;
     border-radius: 10px;

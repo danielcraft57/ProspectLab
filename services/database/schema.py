@@ -87,6 +87,7 @@ class DatabaseSchema(DatabaseBase):
                 ('score_seo', 'INTEGER'),
                 ('has_screenshots', 'INTEGER DEFAULT 0'),
                 ('has_gemini_report', 'INTEGER DEFAULT 0'),
+                ('gemini_report_source', 'TEXT'),
             ):
                 self.safe_execute_sql(
                     cursor, f'ALTER TABLE entreprises ADD COLUMN {col_name} {col_type}'
@@ -113,6 +114,35 @@ class DatabaseSchema(DatabaseBase):
                 cursor,
                 'CREATE INDEX IF NOT EXISTS idx_entreprises_has_gemini_report ON entreprises(has_gemini_report)',
             )
+            self.safe_execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_entreprises_gemini_report_source ON entreprises(gemini_report_source)',
+            )
+            # Backfill source depuis le dernier rapport done
+            try:
+                self.execute_sql(
+                    cursor,
+                    '''
+                    UPDATE entreprises e
+                    SET gemini_report_source = (
+                        SELECT g.source
+                        FROM entreprise_gemini_reports g
+                        WHERE g.entreprise_id = e.id
+                          AND g.status = 'done'
+                        ORDER BY g.created_at DESC, g.id DESC
+                        LIMIT 1
+                    )
+                    WHERE COALESCE(e.has_gemini_report, 0) = 1
+                      AND (e.gemini_report_source IS NULL OR e.gemini_report_source = '')
+                    ''',
+                )
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+
             # Filtre UI fréquent : email + plages de scores
             if self.is_postgresql():
                 self.execute_sql(
@@ -379,9 +409,10 @@ class DatabaseSchema(DatabaseBase):
 
     def ensure_entreprise_gemini_reports_table(self):
         """
-        Migration idempotente : rapports d'audit complets Gemini (vision + modules).
+        Migration idempotente : rapports Gemini normalises (scalaires + items FK).
 
-        Stocke le JSON normalise, le score global et la reco de refonte.
+        - entreprise_gemini_reports : en-tete + colonnes denormalisees (email / filtres)
+        - entreprise_gemini_report_items : listes (what_works, problems, actions…)
         """
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -422,17 +453,154 @@ class DatabaseSchema(DatabaseBase):
                 ('screenshot_set_id', 'INTEGER'),
                 ('analyzed_at', 'TIMESTAMP'),
                 ('updated_at', 'TIMESTAMP'),
+                ('executive_summary', 'TEXT'),
+                ('report_document', 'TEXT'),
+                ('commercial_pitch', 'TEXT'),
+                ('design_score', 'INTEGER'),
+                ('design_summary', 'TEXT'),
+                ('design_ux_notes', 'TEXT'),
+                ('design_ui_notes', 'TEXT'),
+                ('score_design', 'INTEGER'),
+                ('score_technical', 'INTEGER'),
+                ('score_seo', 'INTEGER'),
+                ('score_osint', 'INTEGER'),
+                ('score_pentest', 'INTEGER'),
+                ('notes_design', 'TEXT'),
+                ('notes_technical', 'TEXT'),
+                ('notes_seo', 'TEXT'),
+                ('notes_osint', 'TEXT'),
+                ('notes_pentest', 'TEXT'),
             ):
                 self.safe_execute_sql(
                     cursor,
                     f'ALTER TABLE entreprise_gemini_reports ADD COLUMN {col_name} {col_type}',
                 )
 
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS entreprise_gemini_report_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    report_id INTEGER NOT NULL,
+                    kind TEXT NOT NULL,
+                    position INTEGER NOT NULL DEFAULT 0,
+                    text_content TEXT NOT NULL,
+                    area TEXT,
+                    priority TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (report_id) REFERENCES entreprise_gemini_reports(id) ON DELETE CASCADE
+                )
+                ''',
+            )
+            conn.commit()
+
             self.safe_execute_sql(
                 cursor,
                 'CREATE INDEX IF NOT EXISTS idx_entreprise_gemini_reports_ent_created '
                 'ON entreprise_gemini_reports (entreprise_id, created_at DESC)',
             )
+            self.safe_execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_entreprise_gemini_reports_status_score '
+                'ON entreprise_gemini_reports (status, overall_score)',
+            )
+            self.safe_execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_entreprise_gemini_reports_refonte '
+                'ON entreprise_gemini_reports (refonte_recommendation)',
+            )
+            self.safe_execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_gemini_report_items_report_kind '
+                'ON entreprise_gemini_report_items (report_id, kind, position)',
+            )
+            # PG : index partiel utile pour "dernier done"
+            if self.is_postgresql():
+                self.safe_execute_sql(
+                    cursor,
+                    '''
+                    CREATE INDEX IF NOT EXISTS idx_entreprise_gemini_reports_done_ent
+                    ON entreprise_gemini_reports (entreprise_id, created_at DESC)
+                    WHERE status = 'done'
+                    ''',
+                )
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            conn.close()
+
+        # Backfill leger hors de la tx create (connexion separee)
+        try:
+            if hasattr(self, 'backfill_gemini_reports_normalized'):
+                self.backfill_gemini_reports_normalized(limit=200)
+        except Exception:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                'Backfill gemini reports normalises ignore',
+                exc_info=True,
+            )
+
+        # Table maquettes Gemini (images)
+        try:
+            self.ensure_entreprise_gemini_mockups_table()
+        except Exception:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                'Migration entreprise_gemini_mockups ignore',
+                exc_info=True,
+            )
+
+    def ensure_entreprise_gemini_mockups_table(self):
+        """
+        Migration idempotente : maquettes images Gemini (FK entreprise + rapport).
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS entreprise_gemini_mockups (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entreprise_id INTEGER NOT NULL,
+                    report_id INTEGER,
+                    device TEXT NOT NULL DEFAULT 'desktop',
+                    file_path TEXT,
+                    public_url TEXT,
+                    prompt_summary TEXT,
+                    status TEXT DEFAULT 'done',
+                    error_message TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE,
+                    FOREIGN KEY (report_id) REFERENCES entreprise_gemini_reports(id) ON DELETE SET NULL
+                )
+                ''',
+            )
+            conn.commit()
+            self.safe_execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_gemini_mockups_ent_created '
+                'ON entreprise_gemini_mockups (entreprise_id, created_at DESC)',
+            )
+            self.safe_execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_gemini_mockups_report '
+                'ON entreprise_gemini_mockups (report_id)',
+            )
+            if self.is_postgresql():
+                self.safe_execute_sql(
+                    cursor,
+                    '''
+                    CREATE INDEX IF NOT EXISTS idx_gemini_mockups_done_ent_device
+                    ON entreprise_gemini_mockups (entreprise_id, device, created_at DESC)
+                    WHERE status = 'done'
+                    ''',
+                )
             conn.commit()
         except Exception:
             try:

@@ -32,6 +32,7 @@ from .seo import SEOManager
 from .email_templates import EmailTemplateManager
 from .mail_accounts import MailAccountManager
 from .external_links import ExternalLinksManager
+from .gemini_reports import GeminiReportManager
 from .postgresql_tune import apply_postgresql_tuning
 import os
 import threading
@@ -40,6 +41,7 @@ import logging
 
 class Database(
     DatabaseSchema,
+    GeminiReportManager,
     EntrepriseManager,
     GroupeEntrepriseManager,
     DatabaseAnalyses,
@@ -86,45 +88,71 @@ class Database(
         # Cela résout automatiquement le MRO
         super().__init__(db_path)
 
+        # Migrations + tuning : une seule fois par process.
+        # Avant, ensure_* / apply_postgresql_tuning tournaient à CHAQUE Database()
+        # (~15s dont ~14s de tuning) — chaque AuthManager()/requête web payait ça.
+        force_each_instance = str(os.environ.get('DB_INIT_EACH_INSTANCE', '')).strip().lower() in (
+            '1', 'true', 'yes', 'on'
+        )
+        if force_each_instance:
+            self._run_schema_bootstrap()
+        elif not Database._schema_initialized:
+            with Database._schema_init_lock:
+                if not Database._schema_initialized:
+                    self._run_schema_bootstrap()
+                    Database._schema_initialized = True
+                    logging.getLogger(__name__).info(
+                        'Schéma DB initialisé (once par process).'
+                    )
+
+        _log_db_mode_once(self)
+
+    def _run_schema_bootstrap(self) -> None:
+        """Migrations + init tables + tuning PostgreSQL (coûteux, à faire once/process)."""
+        log = logging.getLogger(__name__)
+
         try:
             self.ensure_commercial_priority_profiles_table()
         except Exception:
-            logging.getLogger(__name__).warning(
-                'Migration commercial_priority_profiles non appliquée', exc_info=True
+            log.warning('Migration commercial_priority_profiles non appliquée', exc_info=True)
+
+        try:
+            self.ensure_entreprise_list_denorm_columns()
+        except Exception:
+            log.warning(
+                'Migration colonnes liste dénormalisées (has_known_email/scores) non appliquée',
+                exc_info=True,
             )
 
         try:
             self.ensure_entreprise_metric_snapshots_table()
         except Exception:
-            logging.getLogger(__name__).warning(
-                'Migration entreprise_metric_snapshots non appliquée', exc_info=True
-            )
+            log.warning('Migration entreprise_metric_snapshots non appliquée', exc_info=True)
 
         try:
             self.ensure_entreprise_screenshots_table()
         except Exception:
-            logging.getLogger(__name__).warning(
-                'Migration entreprise_screenshots non appliquée', exc_info=True
-            )
+            log.warning('Migration entreprise_screenshots non appliquée', exc_info=True)
+
+        try:
+            self.ensure_entreprise_gemini_reports_table()
+        except Exception:
+            log.warning('Migration entreprise_gemini_reports non appliquée', exc_info=True)
 
         try:
             self.ensure_market_roadmap_actions_table()
         except Exception:
-            logging.getLogger(__name__).warning(
-                'Migration market_roadmap_actions non appliquée', exc_info=True
-            )
+            log.warning('Migration market_roadmap_actions non appliquée', exc_info=True)
 
         try:
             self.ensure_entreprise_touchpoints_table()
         except Exception:
-            logging.getLogger(__name__).warning(
-                'Migration entreprise_touchpoints non appliquée', exc_info=True
-            )
+            log.warning('Migration entreprise_touchpoints non appliquée', exc_info=True)
 
         try:
             self.ensure_landing_variants_tables()
         except Exception:
-            logging.getLogger(__name__).warning(
+            log.warning(
                 'Migration landing_variant_runs / landing_variant_assets non appliquée',
                 exc_info=True,
             )
@@ -132,31 +160,17 @@ class Database(
         try:
             self.ensure_api_tokens_columns()
         except Exception:
-            logging.getLogger(__name__).warning(
+            log.warning(
                 'Migration api_tokens (can_delete_entreprises, etc.) non appliquée',
                 exc_info=True,
             )
 
-        # Initialiser la base de données (créer les tables) une seule fois par process.
-        # Permet un contournement explicite via env pour debug/migration forcée.
-        force_each_instance = str(os.environ.get('DB_INIT_EACH_INSTANCE', '')).strip().lower() in (
-            '1', 'true', 'yes', 'on'
-        )
-        if force_each_instance:
-            self.init_database()
-        elif not Database._schema_initialized:
-            with Database._schema_init_lock:
-                if not Database._schema_initialized:
-                    self.init_database()
-                    Database._schema_initialized = True
-                    logging.getLogger(__name__).info(
-                        'Schéma DB initialisé (once par process).'
-                    )
+        self.init_database()
 
         try:
             self.ensure_pentest_forms_normalized_tables()
         except Exception:
-            logging.getLogger(__name__).warning(
+            log.warning(
                 'Migration analysis_pentest_forms_summary / analysis_pentest_form_checks non appliquée',
                 exc_info=True,
             )
@@ -164,21 +178,17 @@ class Database(
         try:
             self.ensure_mail_accounts_table()
         except Exception:
-            logging.getLogger(__name__).warning(
-                'Migration mail_accounts non appliquée', exc_info=True
-            )
+            log.warning('Migration mail_accounts non appliquée', exc_info=True)
 
         try:
             self.ensure_inbox_events_table()
         except Exception:
-            logging.getLogger(__name__).warning(
-                'Migration inbox_events non appliquée', exc_info=True
-            )
+            log.warning('Migration inbox_events non appliquée', exc_info=True)
 
         try:
             self.ensure_web_external_links_table()
         except Exception:
-            logging.getLogger(__name__).warning(
+            log.warning(
                 'Schéma graphe externe (external_domains / entreprise_external_links) non appliqué',
                 exc_info=True,
             )
@@ -186,15 +196,10 @@ class Database(
         try:
             apply_postgresql_tuning(self)
         except Exception:
-            logging.getLogger(__name__).warning(
+            log.warning(
                 'Optimisations PostgreSQL (index / extensions) non appliquées',
                 exc_info=True,
             )
-
-        _log_db_mode_once(self)
-
-        if force_each_instance:
-            return
 
 
 def _log_db_mode_once(db: DatabaseBase) -> None:

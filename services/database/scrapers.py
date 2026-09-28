@@ -332,6 +332,7 @@ class ScraperManager(DatabaseBase):
                 from services.database.entreprises import EntrepriseManager
                 entreprise_manager = EntrepriseManager()
                 entreprise_manager.update_opportunity_score(entreprise_id)
+                entreprise_manager.refresh_has_known_email(entreprise_id)
             except Exception as e:
                 logger.warning(f'Erreur lors du recalcul de l\'opportunité après scraping: {e}')
         
@@ -1281,52 +1282,58 @@ class ScraperManager(DatabaseBase):
         
         return unique_images
     
-    def get_scrapers_by_entreprise(self, entreprise_id):
+    def get_scrapers_by_entreprise(self, entreprise_id, *, latest_only: bool = False, include_images: bool = True):
         """
-        Récupère tous les scrapers d'une entreprise avec leurs données normalisées
-        
-        Args:
-            entreprise_id: ID de l'entreprise
-        
-        Returns:
-            list: Liste des scrapers avec leurs données chargées depuis les tables normalisées
+        Récupère les scrapers d'une entreprise avec leurs données normalisées.
+
+        @param entreprise_id: ID de l'entreprise
+        @param latest_only: Si True, ne charge que le scraper le plus recent
+        @param include_images: Si False, omet les images (payload beaucoup plus leger)
+        @returns: Liste des scrapers avec donnees associees
         """
         conn = self.get_connection()
         cursor = conn.cursor()
-        
-        self.execute_sql(cursor,'''
-            SELECT * FROM scrapers WHERE entreprise_id = ? 
-            ORDER BY COALESCE(date_modification, date_creation) DESC
-        ''', (entreprise_id,))
-        
+
+        if latest_only:
+            self.execute_sql(cursor, '''
+                SELECT * FROM scrapers WHERE entreprise_id = ?
+                ORDER BY COALESCE(date_modification, date_creation) DESC
+                LIMIT 1
+            ''', (entreprise_id,))
+        else:
+            self.execute_sql(cursor, '''
+                SELECT * FROM scrapers WHERE entreprise_id = ?
+                ORDER BY COALESCE(date_modification, date_creation) DESC
+            ''', (entreprise_id,))
+
         rows = cursor.fetchall()
         conn.close()
-        
+
         scrapers = []
         for row in rows:
             scraper = dict(row)
             scraper_id = scraper['id']
-            
-            # Charger depuis les tables normalisées
+
             scraper['emails'] = self.get_scraper_emails(scraper_id)
             scraper['phones'] = self.get_scraper_phones(scraper_id)
             scraper['social_profiles'] = self.get_scraper_social_profiles(scraper_id)
             scraper['technologies'] = self.get_scraper_technologies(scraper_id)
             scraper['people'] = self.get_scraper_people(scraper_id)
             scraper['forms'] = self.get_scraper_forms(scraper_id)
-            
-            # Charger les images depuis la table images
-            scraper['images'] = self.get_images_by_scraper(scraper_id)
-            
-            # Metadata reste en JSON pour l'instant (structure complexe)
+
+            if include_images:
+                scraper['images'] = self.get_images_by_scraper(scraper_id)
+            else:
+                scraper['images'] = []
+
             if scraper.get('metadata'):
                 try:
                     scraper['metadata'] = json.loads(scraper['metadata'])
-                except:
+                except Exception:
                     pass
-            
+
             scrapers.append(scraper)
-        
+
         return scrapers
     
     def get_scraper_by_url(self, url, scraper_type):

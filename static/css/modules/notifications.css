@@ -122,8 +122,10 @@
 .notifications-panel {
     position: absolute;
     top: calc(100% + 0.5rem);
-    right: 0;
-    width: 360px;
+    left: 0;
+    right: auto;
+    width: min(360px, calc(100vw - 1.5rem));
+    max-width: calc(100vw - 1.5rem);
     max-height: 440px;
     background: #ffffff;
     border-radius: 14px;

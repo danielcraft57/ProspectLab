@@ -123,6 +123,12 @@ class PersonneManager(DatabaseBase):
                     personne_id = cursor.lastrowid
             
             conn.commit()
+            if email and entreprise_id:
+                try:
+                    from services.database.entreprises import EntrepriseManager
+                    EntrepriseManager().refresh_has_known_email(entreprise_id)
+                except Exception:
+                    pass
             return personne_id
         except Exception as e:
             logger.error(f'Erreur lors de la sauvegarde de la personne: {e}')

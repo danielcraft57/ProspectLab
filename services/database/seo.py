@@ -158,6 +158,12 @@ class SEOManager(DatabaseBase):
         conn.close()
         
         logger.info(f'Analyse SEO sauvegardée: id={analysis_id}, url={url}')
+        if entreprise_id:
+            try:
+                from services.database.entreprises import EntrepriseManager
+                EntrepriseManager().refresh_cached_analysis_scores(entreprise_id)
+            except Exception as e:
+                logger.warning('Refresh score_seo dénormalisé: %s', e)
         return analysis_id
     
     def update_seo_analysis(self, analysis_id, seo_data):
@@ -309,6 +315,12 @@ class SEOManager(DatabaseBase):
         conn.close()
         
         logger.info(f'Analyse SEO mise à jour: id={analysis_id}')
+        if entreprise_id_upd:
+            try:
+                from services.database.entreprises import EntrepriseManager
+                EntrepriseManager().refresh_cached_analysis_scores(entreprise_id_upd)
+            except Exception as e:
+                logger.warning('Refresh score_seo dénormalisé (update): %s', e)
         return analysis_id
     
     def get_seo_analysis_by_url(self, url):

@@ -77,6 +77,11 @@ def analyze_entreprise_gemini_full_report_task(
             )
         except Exception:
             pass
+        try:
+            from services.gemini_queue import release_gemini_queue_slot
+            release_gemini_queue_slot(eid)
+        except Exception:
+            pass
         return {
             'success': False,
             'entreprise_id': eid,
@@ -84,71 +89,85 @@ def analyze_entreprise_gemini_full_report_task(
             'logs': logs[-60:],
         }
 
-    if not result.get('success'):
-        err = result.get('error') or 'Echec rapport'
-        _progress(f'Echec: {err}', 100)
+    try:
+        if not result.get('success'):
+            err = result.get('error') or 'Echec rapport'
+            _progress(f'Echec: {err}', 100)
+            try:
+                database.save_entreprise_gemini_report(
+                    entreprise_id=eid,
+                    status='failed',
+                    error_message=str(err)[:2000],
+                    source='error',
+                )
+            except Exception:
+                pass
+            return {**result, 'logs': logs[-60:]}
+
+        _progress('Persistance du rapport en base…', 96)
+        report = result.get('report') or {}
+        # Garde le journal dans le rapport pour le revoir a l'ouverture de la fiche
+        if logs:
+            report['analysis_logs'] = list(logs[-60:])
+        if result.get('fallback_error'):
+            report['fallback_error'] = result.get('fallback_error')
+        report_id = database.save_entreprise_gemini_report(
+            entreprise_id=eid,
+            report=report,
+            overall_score=result.get('overall_score'),
+            refonte_recommendation=result.get('refonte_recommendation'),
+            source=result.get('source'),
+            status='done',
+            modules_used=result.get('modules_used'),
+            screenshot_set_id=result.get('screenshot_set_id'),
+            analyzed_at=result.get('analyzed_at'),
+        )
+        _progress(f'Rapport enregistre (id={report_id})', 98)
+
+        # Tag commercial si refonte forte
         try:
-            database.save_entreprise_gemini_report(
-                entreprise_id=eid,
-                status='failed',
-                error_message=str(err)[:2000],
-                source='error',
-            )
+            refonte = str(result.get('refonte_recommendation') or '')
+            if refonte in ('partielle', 'totale') and hasattr(database, 'add_entreprise_tag'):
+                database.add_entreprise_tag(eid, 'fort_potentiel_refonte')
+                _progress('Tag fort_potentiel_refonte pose', 99)
+            elif refonte in ('partielle', 'totale'):
+                ent = database.get_entreprise(eid) or {}
+                tags = list(ent.get('tags') or [])
+                if 'fort_potentiel_refonte' not in tags:
+                    tags.append('fort_potentiel_refonte')
+                    if hasattr(database, 'update_entreprise_tags'):
+                        database.update_entreprise_tags(eid, tags)
+                        _progress('Tag fort_potentiel_refonte pose', 99)
+        except Exception as tag_exc:
+            logger.warning('Tag fort_potentiel_refonte non pose: %s', tag_exc)
+            _progress(f'Tag refonte non pose: {tag_exc}', 99)
+
+        _progress('Rapport termine.', 100)
+        logger.info(
+            'Gemini full report done entreprise_id=%s report_id=%s score=%s source=%s',
+            eid,
+            report_id,
+            result.get('overall_score'),
+            result.get('source'),
+        )
+        return {
+            'success': True,
+            'entreprise_id': eid,
+            'report_id': report_id,
+            'overall_score': result.get('overall_score'),
+            'refonte_recommendation': result.get('refonte_recommendation'),
+            'source': result.get('source'),
+            'quota_exceeded': bool(result.get('quota_exceeded')),
+            'fallback_error': result.get('fallback_error'),
+            'report': report,
+            'screenshot_set_id': result.get('screenshot_set_id'),
+            'modules_used': result.get('modules_used'),
+            'analyzed_at': result.get('analyzed_at'),
+            'logs': logs[-60:],
+        }
+    finally:
+        try:
+            from services.gemini_queue import release_gemini_queue_slot
+            release_gemini_queue_slot(eid)
         except Exception:
             pass
-        return {**result, 'logs': logs[-60:]}
-
-    _progress('Persistance du rapport en base…', 96)
-    report = result.get('report') or {}
-    report_id = database.save_entreprise_gemini_report(
-        entreprise_id=eid,
-        report=report,
-        overall_score=result.get('overall_score'),
-        refonte_recommendation=result.get('refonte_recommendation'),
-        source=result.get('source'),
-        status='done',
-        modules_used=result.get('modules_used'),
-        screenshot_set_id=result.get('screenshot_set_id'),
-        analyzed_at=result.get('analyzed_at'),
-    )
-    _progress(f'Rapport enregistre (id={report_id})', 98)
-
-    # Tag commercial si refonte forte
-    try:
-        refonte = str(result.get('refonte_recommendation') or '')
-        if refonte in ('partielle', 'totale') and hasattr(database, 'add_entreprise_tag'):
-            database.add_entreprise_tag(eid, 'fort_potentiel_refonte')
-            _progress('Tag fort_potentiel_refonte pose', 99)
-        elif refonte in ('partielle', 'totale'):
-            ent = database.get_entreprise(eid) or {}
-            tags = list(ent.get('tags') or [])
-            if 'fort_potentiel_refonte' not in tags:
-                tags.append('fort_potentiel_refonte')
-                if hasattr(database, 'update_entreprise_tags'):
-                    database.update_entreprise_tags(eid, tags)
-                    _progress('Tag fort_potentiel_refonte pose', 99)
-    except Exception as tag_exc:
-        logger.warning('Tag fort_potentiel_refonte non pose: %s', tag_exc)
-        _progress(f'Tag refonte non pose: {tag_exc}', 99)
-
-    _progress('Rapport termine.', 100)
-    logger.info(
-        'Gemini full report done entreprise_id=%s report_id=%s score=%s source=%s',
-        eid,
-        report_id,
-        result.get('overall_score'),
-        result.get('source'),
-    )
-    return {
-        'success': True,
-        'entreprise_id': eid,
-        'report_id': report_id,
-        'overall_score': result.get('overall_score'),
-        'refonte_recommendation': result.get('refonte_recommendation'),
-        'source': result.get('source'),
-        'report': report,
-        'screenshot_set_id': result.get('screenshot_set_id'),
-        'modules_used': result.get('modules_used'),
-        'analyzed_at': result.get('analyzed_at'),
-        'logs': logs[-60:],
-    }

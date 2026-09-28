@@ -126,6 +126,36 @@ class TechnicalManager(DatabaseBase):
         if isinstance(performance_score, (int, float)) and performance_score < 40:
             indicators.append('performance_faible')
 
+        # 6) Age HTML / copyright / Last-Modified
+        site_age_score = data.get('site_age_score')
+        try:
+            site_age_score = int(site_age_score) if site_age_score is not None else None
+        except (TypeError, ValueError):
+            site_age_score = None
+
+        site_indicators_raw = data.get('site_indicators') or ''
+        if isinstance(site_indicators_raw, list):
+            site_indicators_text = '; '.join(str(x) for x in site_indicators_raw if x)
+        else:
+            site_indicators_text = str(site_indicators_raw)
+
+        if site_age_score is not None and site_age_score >= 2:
+            indicators.append('site_age_obsolescent')
+        if site_indicators_text and 'Copyright ancien' in site_indicators_text:
+            indicators.append('copyright_ancien')
+
+        last_modified = data.get('last_modified') or data.get('http_last_modified')
+        last_modified_year = None
+        if last_modified:
+            year_match = re.search(r'(19|20)\d{2}', str(last_modified))
+            if year_match:
+                try:
+                    last_modified_year = int(year_match.group(0))
+                except Exception:
+                    last_modified_year = None
+            if last_modified_year and last_modified_year <= 2018:
+                indicators.append('http_last_modified_ancien')
+
         strong_signals = {
             'wordpress_ancien',
             'bootstrap_ancien',
@@ -133,6 +163,9 @@ class TechnicalManager(DatabaseBase):
             'http_sans_https',
             'https_mixed_content',
             'domaine_tres_ancien',
+            'copyright_ancien',
+            'http_last_modified_ancien',
+            'site_age_obsolescent',
         }
         has_strong = any(sig in indicators for sig in strong_signals)
 
@@ -142,14 +175,67 @@ class TechnicalManager(DatabaseBase):
         if isinstance(performance_score, (int, float)) and performance_score < 50:
             low_scores += 1
         has_refonte_potential = has_strong or (low_scores >= 2)
+        if site_age_score is not None and site_age_score >= 4:
+            has_refonte_potential = True
 
         # Enrichir les données brutes pour exploitation ultérieure
         if tech_data is not None:
             tech_data.setdefault('obsolescence', {})
             tech_data['obsolescence']['indicators'] = indicators
             tech_data['obsolescence']['fort_potentiel_refonte'] = has_refonte_potential
+            if site_age_score is not None:
+                tech_data['site_age_score'] = site_age_score
+            if site_indicators_text:
+                tech_data['site_indicators'] = site_indicators_text
+            if last_modified:
+                tech_data['http_last_modified'] = str(last_modified)
 
         return indicators, has_refonte_potential
+
+    def _persist_entreprise_site_age(self, cursor, entreprise_id, tech_data):
+        """
+        Persiste site_age_score, site_indicators et http_last_modified sur la fiche entreprise.
+
+        @param cursor: Curseur SQL actif
+        @param entreprise_id: ID de l'entreprise
+        @param tech_data: Données techniques enrichies (dict)
+        """
+        if not entreprise_id:
+            return
+        data = tech_data or {}
+        site_age_score = data.get('site_age_score')
+        try:
+            site_age_score = int(site_age_score) if site_age_score is not None else None
+        except (TypeError, ValueError):
+            site_age_score = None
+        site_indicators = data.get('site_indicators')
+        if isinstance(site_indicators, list):
+            site_indicators = '; '.join(str(x) for x in site_indicators if x)
+        elif site_indicators is not None:
+            site_indicators = str(site_indicators)
+        http_last_modified = data.get('http_last_modified') or data.get('last_modified')
+        if http_last_modified is not None:
+            http_last_modified = str(http_last_modified)[:120]
+        if site_age_score is None and not site_indicators and not http_last_modified:
+            return
+        try:
+            self.execute_sql(
+                cursor,
+                '''
+                UPDATE entreprises
+                SET site_age_score = COALESCE(?, site_age_score),
+                    site_indicators = COALESCE(?, site_indicators),
+                    http_last_modified = COALESCE(?, http_last_modified)
+                WHERE id = ?
+                ''',
+                (site_age_score, site_indicators, http_last_modified, entreprise_id),
+            )
+        except Exception as e:
+            logger.warning(
+                "Erreur persistance age/fraicheur entreprise %s: %s",
+                entreprise_id,
+                e,
+            )
 
     def _update_entreprise_obsolescence_tags(self, cursor, entreprise_id, indicators, has_refonte_potential):
         """
@@ -382,6 +468,7 @@ class TechnicalManager(DatabaseBase):
                         entreprise_id,
                     ),
                 )
+                self._persist_entreprise_site_age(cursor, entreprise_id, tech_data)
 
                 # Mettre à jour automatiquement les tags d'entreprise en fonction des données techniques
                 try:
@@ -634,6 +721,7 @@ class TechnicalManager(DatabaseBase):
 
         # Mettre à jour les tags d'obsolescence liés à la refonte potentielle
         if entreprise_id:
+            self._persist_entreprise_site_age(cursor, entreprise_id, tech_data)
             self._update_entreprise_obsolescence_tags(cursor, entreprise_id, indicators, has_refonte_potential)
 
         if entreprise_id and analysis_id:
@@ -1107,6 +1195,7 @@ class TechnicalManager(DatabaseBase):
         # Recalculer les signaux d'obsolescence et les tags associés
         if entreprise_id:
             indicators, has_refonte_potential = self._compute_obsolescence_indicators(tech_data, url)
+            self._persist_entreprise_site_age(cursor, entreprise_id, tech_data)
             self._update_entreprise_obsolescence_tags(cursor, entreprise_id, indicators, has_refonte_potential)
 
         if entreprise_id and analysis_id:

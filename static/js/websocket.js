@@ -268,6 +268,9 @@ class ProspectLabWebSocket {
                 this._dbg('connected', { transport: tname, id: this.socket && this.socket.id });
             } catch (e) {}
             this.onConnect();
+            try {
+                this.joinNotifyRoom();
+            } catch (e) {}
         });
 
         this.socket.on('disconnect', (reason) => {
@@ -319,6 +322,9 @@ class ProspectLabWebSocket {
         this.socket.on('reconnect', (attemptNumber) => {
             this.reconnectAttempts = 0;
             this._dbg('reconnect', { attemptNumber });
+            try {
+                this.joinNotifyRoom();
+            } catch (e) {}
         });
 
         this.socket.on('reconnect_error', (error) => {
@@ -488,6 +494,42 @@ class ProspectLabWebSocket {
     onConnect() {
         const event = new CustomEvent('websocket:connected');
         document.dispatchEvent(event);
+    }
+
+    /**
+     * UUID navigateur persistant pour room Socket.IO stable (client:…).
+     * @returns {string}
+     */
+    getOrCreateClientId() {
+        const key = 'prospectlab_ws_client_id';
+        try {
+            let id = localStorage.getItem(key);
+            if (id && /^[A-Za-z0-9_-]{8,64}$/.test(id)) {
+                return id;
+            }
+            if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+                id = window.crypto.randomUUID().replace(/-/g, '');
+            } else {
+                id = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+            }
+            id = String(id).slice(0, 64);
+            localStorage.setItem(key, id);
+            return id;
+        } catch (e) {
+            return 'anon' + Date.now().toString(36);
+        }
+    }
+
+    /**
+     * Rejoint user:/client: rooms cote serveur (notifications apres reconnect).
+     */
+    joinNotifyRoom() {
+        if (!this.socket) return;
+        const clientId = this.getOrCreateClientId();
+        try {
+            this.socket.emit('join_notify_room', { client_id: clientId });
+            this._dbg('join_notify_room', { clientId });
+        } catch (e) {}
     }
 
     onDisconnect() {

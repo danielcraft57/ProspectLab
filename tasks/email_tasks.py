@@ -813,36 +813,83 @@ def _build_inbox_events_report_section():
     return html, text
 
 
-def _build_campaigns_report_html(title, campagnes_stats, inbox_html='', global_impression=''):
+def _escape_html_report(value) -> str:
     """
-    Version claire / moderne du rapport campagnes (fond clair, cartes).
+    Echappe une valeur pour insertion HTML dans les rapports email.
+
+    @param value: Valeur brute
+    @returns: Chaine echappee
+    """
+    text = '' if value is None else str(value)
+    return (
+        text.replace('&', '&amp;')
+        .replace('<', '&lt;')
+        .replace('>', '&gt;')
+        .replace('"', '&quot;')
+    )
+
+
+def _build_campaign_stat_card_html(cs: dict) -> str:
+    """
+    Carte campagne lisible sur mobile (stats en lignes, pas de tableau large).
+
+    @param cs: Dict id, nom, statut, total_emails, open_rate, click_rate
+    @returns: Fragment HTML
     """
     from utils.campaign_report import impression_campaign
 
-    # Section tableau (même si vide on garde un bloc propre)
+    lecture = impression_campaign(cs)
+    nom = _escape_html_report(cs.get('nom') or f"Campagne #{cs.get('id')}")
+    statut = _escape_html_report(cs.get('statut') or '')
+    cid = _escape_html_report(cs.get('id'))
+    total = int(cs.get('total_emails') or 0)
+    open_rate = float(cs.get('open_rate') or 0)
+    click_rate = float(cs.get('click_rate') or 0)
+    return f"""
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 12px;border-collapse:collapse;">
+        <tr>
+          <td style="padding:14px 14px 12px;border:1px solid #e5e7eb;border-radius:12px;background:#ffffff;">
+            <div style="font-size:15px;font-weight:700;color:#111827;line-height:1.35;margin:0 0 4px;">
+              #{cid} · {nom}
+            </div>
+            <div style="font-size:12px;color:#6b7280;text-transform:capitalize;margin:0 0 12px;">{statut or '—'}</div>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:0 0 10px;">
+              <tr>
+                <td width="33%" style="padding:8px 6px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;text-align:center;">
+                  <div style="font-size:11px;color:#6b7280;margin:0 0 2px;">Emails</div>
+                  <div style="font-size:18px;font-weight:700;color:#111827;">{total}</div>
+                </td>
+                <td width="4%" style="font-size:0;line-height:0;">&nbsp;</td>
+                <td width="33%" style="padding:8px 6px;background:#ecfdf3;border:1px solid #bbf7d0;border-radius:8px;text-align:center;">
+                  <div style="font-size:11px;color:#15803d;margin:0 0 2px;">Ouverture</div>
+                  <div style="font-size:18px;font-weight:700;color:#14532d;">{open_rate:.1f}%</div>
+                </td>
+                <td width="4%" style="font-size:0;line-height:0;">&nbsp;</td>
+                <td width="33%" style="padding:8px 6px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;text-align:center;">
+                  <div style="font-size:11px;color:#1d4ed8;margin:0 0 2px;">Clic</div>
+                  <div style="font-size:18px;font-weight:700;color:#1e40af;">{click_rate:.1f}%</div>
+                </td>
+              </tr>
+            </table>
+            <div style="font-size:12px;color:#4b5563;font-style:italic;line-height:1.45;">{_escape_html_report(lecture)}</div>
+          </td>
+        </tr>
+      </table>
+    """
+
+
+def _build_campaigns_report_html(title, campagnes_stats, inbox_html='', global_impression=''):
+    """
+    Rapport campagnes lisible sur mobile : cartes empilees (pas de tableau 7 colonnes).
+    """
     if not campagnes_stats:
-        rows_html = """
-          <tr>
-            <td colspan="7" style="padding:10px 12px; text-align:center; color:#6b7280;">
-              Aucune campagne correspondante sur la période analysée.
-            </td>
-          </tr>
+        cards_html = """
+          <div style="padding:14px;text-align:center;color:#6b7280;border:1px solid #e5e7eb;border-radius:12px;background:#f9fafb;">
+            Aucune campagne en cours a signaler pour le moment.
+          </div>
         """
     else:
-        rows_html = ""
-        for cs in campagnes_stats:
-            lecture = impression_campaign(cs)
-            rows_html += f"""
-              <tr>
-                <td style="padding:8px 10px; border-bottom:1px solid #e5e7eb;">{cs.get('id')}</td>
-                <td style="padding:8px 10px; border-bottom:1px solid #e5e7eb;">{cs.get('nom') or ''}</td>
-                <td style="padding:8px 10px; border-bottom:1px solid #e5e7eb; text-transform:capitalize; color:#4b5563;">{cs.get('statut') or ''}</td>
-                <td style="padding:8px 10px; border-bottom:1px solid #e5e7eb;">{cs.get('total_emails')}</td>
-                <td style="padding:8px 10px; border-bottom:1px solid #e5e7eb;">{cs.get('open_rate'):.1f}%</td>
-                <td style="padding:8px 10px; border-bottom:1px solid #e5e7eb;">{cs.get('click_rate'):.1f}%</td>
-                <td style="padding:8px 10px; border-bottom:1px solid #e5e7eb; font-size:12px; color:#4b5563; font-style:italic;">{lecture}</td>
-              </tr>
-            """
+        cards_html = ''.join(_build_campaign_stat_card_html(cs) for cs in campagnes_stats)
 
     total_emails = sum(cs.get('total_emails', 0) for cs in campagnes_stats) if campagnes_stats else 0
     avg_open = sum(cs.get('open_rate', 0.0) for cs in campagnes_stats) / max(len(campagnes_stats), 1) if campagnes_stats else 0.0
@@ -852,73 +899,68 @@ def _build_campaigns_report_html(title, campagnes_stats, inbox_html='', global_i
         impression_block = f'''
             <div style="margin-bottom:16px; padding:12px 14px; border-radius:12px; background:#fffbeb; border:1px solid #fde68a; font-size:14px; color:#78350f; line-height:1.5;">
               <strong style="display:block; margin-bottom:4px; color:#92400e;">Impression globale</strong>
-              {global_impression}
+              {_escape_html_report(global_impression)}
             </div>
         '''
 
+    n_camp = len(campagnes_stats) if campagnes_stats else 0
     return f"""
     <html>
-      <body style="margin:0; padding:24px; font-family: -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:#f3f4f6;">
-        <div style="max-width:840px; margin:0 auto; background:#ffffff; border-radius:16px; box-shadow:0 18px 40px rgba(15,23,42,0.12); overflow:hidden; border:1px solid #e5e7eb;">
-          <!-- Bandeau -->
-          <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6); padding:18px 22px; color:#ffffff;">
-            <div style="font-size:13px; opacity:0.9; margin-bottom:4px;">Bilan campagnes ProspectLab</div>
-            <div style="font-size:20px; font-weight:600;">{title}</div>
-          </div>
+      <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+      </head>
+      <body style="margin:0; padding:16px; font-family: -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:#f3f4f6;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px; margin:0 auto; border-collapse:collapse;">
+          <tr>
+            <td style="background:#ffffff; border-radius:16px; border:1px solid #e5e7eb; overflow:hidden;">
+              <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6); padding:16px 18px; color:#ffffff;">
+                <div style="font-size:13px; opacity:0.9; margin-bottom:4px;">Bilan campagnes ProspectLab</div>
+                <div style="font-size:18px; font-weight:600; line-height:1.3;">{_escape_html_report(title)}</div>
+              </div>
 
-          <!-- Contenu principal -->
-          <div style="padding:18px 22px 22px;">
-            {impression_block}
-            <!-- Cartes synthèse -->
-            <div style="display:flex; flex-wrap:wrap; gap:12px; margin-bottom:18px;">
-              <div style="flex:1 1 150px; background:#f9fafb; border-radius:12px; padding:12px 14px; border:1px solid #e5e7eb;">
-                <div style="font-size:13px; color:#6b7280; margin-bottom:4px;">Campagnes sur la période</div>
-                <div style="font-size:22px; font-weight:600; color:#111827;">{len(campagnes_stats) if campagnes_stats else 0}</div>
-              </div>
-              <div style="flex:1 1 150px; background:#f9fafb; border-radius:12px; padding:12px 14px; border:1px solid #e5e7eb;">
-                <div style="font-size:13px; color:#6b7280; margin-bottom:4px;">Emails envoyés (total)</div>
-                <div style="font-size:22px; font-weight:600; color:#111827;">{total_emails}</div>
-              </div>
-              <div style="flex:1 1 150px; background:#ecfdf3; border-radius:12px; padding:12px 14px; border:1px solid #bbf7d0;">
-                <div style="font-size:13px; color:#15803d; margin-bottom:4px;">Ouverture moyenne</div>
-                <div style="font-size:22px; font-weight:600; color:#14532d;">{avg_open:.1f}%</div>
-              </div>
-              <div style="flex:1 1 150px; background:#eff6ff; border-radius:12px; padding:12px 14px; border:1px solid #bfdbfe;">
-                <div style="font-size:13px; color:#1d4ed8; margin-bottom:4px;">Clic moyen</div>
-                <div style="font-size:22px; font-weight:600; color:#1e40af;">{avg_click:.1f}%</div>
-              </div>
-            </div>
+              <div style="padding:16px 16px 20px;">
+                {impression_block}
 
-            <!-- Tableau -->
-            <div style="border-radius:12px; border:1px solid #e5e7eb; overflow:hidden;">
-              <div style="padding:10px 12px; background:#f9fafb; border-bottom:1px solid #e5e7eb; font-size:13px; font-weight:600; color:#111827;">
-                Détail par campagne
-              </div>
-              <table cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse; font-size:13px; color:#111827;">
-                <thead>
-                  <tr style="background:#f3f4f6;">
-                    <th align="left" style="padding:8px 10px; border-bottom:1px solid #e5e7eb;">ID</th>
-                    <th align="left" style="padding:8px 10px; border-bottom:1px solid #e5e7eb;">Nom</th>
-                    <th align="left" style="padding:8px 10px; border-bottom:1px solid #e5e7eb;">Statut</th>
-                    <th align="left" style="padding:8px 10px; border-bottom:1px solid #e5e7eb;">Emails</th>
-                    <th align="left" style="padding:8px 10px; border-bottom:1px solid #e5e7eb;">Ouverture</th>
-                    <th align="left" style="padding:8px 10px; border-bottom:1px solid #e5e7eb;">Clic</th>
-                    <th align="left" style="padding:8px 10px; border-bottom:1px solid #e5e7eb;">Lecture</th>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse; margin:0 0 16px;">
+                  <tr>
+                    <td width="48%" style="padding:10px 12px; background:#f9fafb; border:1px solid #e5e7eb; border-radius:12px; vertical-align:top;">
+                      <div style="font-size:12px; color:#6b7280; margin-bottom:4px;">Campagnes</div>
+                      <div style="font-size:20px; font-weight:600; color:#111827;">{n_camp}</div>
+                    </td>
+                    <td width="4%">&nbsp;</td>
+                    <td width="48%" style="padding:10px 12px; background:#f9fafb; border:1px solid #e5e7eb; border-radius:12px; vertical-align:top;">
+                      <div style="font-size:12px; color:#6b7280; margin-bottom:4px;">Emails envoyes</div>
+                      <div style="font-size:20px; font-weight:600; color:#111827;">{total_emails}</div>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {rows_html}
-                </tbody>
-              </table>
-            </div>
+                  <tr><td colspan="3" style="height:8px; font-size:0; line-height:0;">&nbsp;</td></tr>
+                  <tr>
+                    <td width="48%" style="padding:10px 12px; background:#ecfdf3; border:1px solid #bbf7d0; border-radius:12px; vertical-align:top;">
+                      <div style="font-size:12px; color:#15803d; margin-bottom:4px;">Ouverture moy.</div>
+                      <div style="font-size:20px; font-weight:600; color:#14532d;">{avg_open:.1f}%</div>
+                    </td>
+                    <td width="4%">&nbsp;</td>
+                    <td width="48%" style="padding:10px 12px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:12px; vertical-align:top;">
+                      <div style="font-size:12px; color:#1d4ed8; margin-bottom:4px;">Clic moy.</div>
+                      <div style="font-size:20px; font-weight:600; color:#1e40af;">{avg_click:.1f}%</div>
+                    </td>
+                  </tr>
+                </table>
 
-            {inbox_html}
+                <div style="margin:0 0 10px; font-size:13px; font-weight:600; color:#111827;">
+                  Detail par campagne
+                </div>
+                {cards_html}
 
-            <div style="margin-top:14px; font-size:12px; color:#6b7280;">
-              Astuce : surveille les fortes variations de taux d'ouverture/clic pour identifier les séquences qui performent le mieux.
-            </div>
-          </div>
-        </div>
+                {inbox_html}
+
+                <div style="margin-top:14px; font-size:12px; color:#6b7280; line-height:1.45;">
+                  Astuce : surveille les fortes variations de taux d'ouverture/clic pour identifier les sequences qui performent le mieux.
+                </div>
+              </div>
+            </td>
+          </tr>
+        </table>
       </body>
     </html>
     """
@@ -929,12 +971,12 @@ def _build_campaigns_report_text(title, campagnes_stats, inbox_text='', global_i
     from utils.campaign_report import impression_campaign
 
     if not campagnes_stats:
-        base = f"{title}\n\nAucune campagne correspondante sur la période analysée."
+        base = f"{title}\n\nAucune campagne en cours a signaler pour le moment."
     else:
         lines = [title, '']
         if global_impression:
             lines.extend(['Impression globale :', global_impression, ''])
-        lines.append('Récapitulatif des campagnes :')
+        lines.append('Recapitulatif des campagnes en cours :')
         for cs in campagnes_stats:
             line = (
                 f"- #{cs.get('id')} - {cs.get('nom') or ''} "
@@ -954,36 +996,26 @@ def _build_campaigns_report_text(title, campagnes_stats, inbox_text='', global_i
 @celery.task
 def send_campagnes_report_task(report_type='evening'):
     """
-    Envoie un rapport email sur les dernières campagnes.
+    Envoie un rapport email unique regroupant les campagnes en cours.
 
-    - Si report_type == 'evening' :
-        Rapporte les campagnes lancées le matin même (06h-12h, heure de Paris).
-    - Si report_type == 'morning' :
-        Rapporte les campagnes lancées la veille après-midi/soir (12h-23h59).
+    - Inclut running / scheduled + completed/failed des 7 derniers jours
+      (si au moins 1 email envoye).
+    - report_type ('evening' / 'morning') ne change que le libelle du slot.
 
-    Le rapport est envoyé à CAMPAIGN_REPORT_RECIPIENT.
+    Le rapport est envoye a CAMPAIGN_REPORT_RECIPIENT.
     """
     from services.database.campagnes import CampagneManager
     from utils.campaign_report import compose_periodic_report_header
 
     now_paris = _get_paris_now()
     today = now_paris.date()
-
-    if report_type == 'evening':
-        start_local = datetime.combine(today, time(6, 0), tzinfo=now_paris.tzinfo)
-        end_local = datetime.combine(today, time(12, 0), tzinfo=now_paris.tzinfo)
-        period_date = today
-    else:  # 'morning'
-        yesterday = today - timedelta(days=1)
-        start_local = datetime.combine(yesterday, time(12, 0), tzinfo=now_paris.tzinfo)
-        end_local = datetime.combine(yesterday, time(23, 59, 59), tzinfo=now_paris.tzinfo)
-        period_date = yesterday
-
-    start_utc_iso = _to_utc_iso(start_local)
-    end_utc_iso = _to_utc_iso(end_local)
+    period_date = today
+    recent_since = _to_utc_iso(now_paris - timedelta(days=7))
 
     campagne_manager = CampagneManager()
-    campagnes = campagne_manager.get_campagnes_launched_between(start_utc_iso, end_utc_iso)
+    campagnes = campagne_manager.get_campagnes_actives_for_report(
+        recent_completed_since_utc_iso=recent_since,
+    )
 
     campagnes_stats = []
     for c in campagnes:
@@ -992,9 +1024,7 @@ def send_campagnes_report_task(report_type='evening'):
             continue
         stats = campagne_manager.get_campagne_tracking_stats(cid)
         total_emails = int(stats.get('total_emails', 0) or 0)
-        # Ne pas inclure les campagnes sans envoi réel : date_creation / scheduled_at peut
-        # tomber dans la fenêtre alors qu'aucun email n'est encore enregistré (brouillon,
-        # programmation, échec avant enregistrement, etc.) → sinon rapports à 0 partout.
+        # Ne pas inclure les campagnes sans envoi reel
         if total_emails < 1:
             continue
         campagnes_stats.append(
@@ -1010,13 +1040,12 @@ def send_campagnes_report_task(report_type='evening'):
 
     if not campagnes_stats:
         logger.info(
-            f"[Rapport campagnes] Aucun envoi : aucune campagne avec emails envoyés sur la période "
-            f"({report_type}, {len(campagnes)} campagne(s) trouvée(s) sans lignes emails_envoyes)."
+            f"[Rapport campagnes] Aucun envoi : aucune campagne active avec emails "
+            f"({report_type}, {len(campagnes)} candidate(s))."
         )
-        # On envoie quand meme un resume inbox s'il y a des evenements
         inbox_html, inbox_text = _build_inbox_events_report_section()
         if not inbox_text or 'aucun evenement' in inbox_text.lower():
-            return {'success': True, 'count': 0, 'skipped': True, 'reason': 'no_sent_emails_in_window'}
+            return {'success': True, 'count': 0, 'skipped': True, 'reason': 'no_active_campaigns'}
         sender = EmailSender()
         title, subject, global_impression = compose_periodic_report_header(report_type, period_date, [])
         subject = f"{subject} (inbox)"
@@ -1294,7 +1323,7 @@ def check_campaigns_significant_changes_task(
     # Persister l'état (1re boucle + invalidations ready_to_send de la 2e boucle)
     _save_stats_cache(cache)
 
-    to_send = latest_ready if latest_ready else others_ready
+    to_send = list(latest_ready or []) + list(others_ready or [])
 
     if not is_daytime:
         if to_send:
@@ -1346,52 +1375,39 @@ def check_campaigns_significant_changes_task(
         lines.append(f"  Lecture : {impression_campaign(cs)}")
     text_body = "\n".join(lines)
 
-    # HTML simple (évite de ré-injecter des données personnelles détaillées)
-    rows_html = ""
+    # Cartes mobiles (meme rendu que le rapport periodique)
+    cards_html = ""
     for ch in to_send:
-        cs = {
-            'open_rate': ch.get('current_open', 0),
-            'click_rate': ch.get('current_click', 0),
-            'total_emails': ch.get('total_emails', 0),
-        }
-        lecture = impression_campaign(cs)
-        rows_html += f"""
-          <tr>
-            <td style="padding:8px 10px; border-bottom:1px solid #e5e7eb;">{ch['id']}</td>
-            <td style="padding:8px 10px; border-bottom:1px solid #e5e7eb;">{ch.get('nom') or ''}</td>
-            <td style="padding:8px 10px; border-bottom:1px solid #e5e7eb; text-align:center;">{ch['total_emails']}</td>
-            <td style="padding:8px 10px; border-bottom:1px solid #e5e7eb; text-align:center; color:#16a34a; font-weight:600;">{ch['current_open']:.1f}%</td>
-            <td style="padding:8px 10px; border-bottom:1px solid #e5e7eb; text-align:center; color:#2563eb; font-weight:600;">{ch['current_click']:.1f}%</td>
-            <td style="padding:8px 10px; border-bottom:1px solid #e5e7eb; font-size:12px; color:#4b5563; font-style:italic;">{lecture}</td>
-          </tr>
-        """
+        cards_html += _build_campaign_stat_card_html(
+            {
+                'id': ch.get('id'),
+                'nom': ch.get('nom') or '',
+                'statut': ch.get('statut') or 'running',
+                'total_emails': ch.get('total_emails', 0),
+                'open_rate': ch.get('current_open', 0),
+                'click_rate': ch.get('current_click', 0),
+            }
+        )
 
     html_body = f"""
     <html>
-      <body style="margin:0; padding:24px; font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:#f3f4f6; color:#111827;">
-        <div style="max-width:840px; margin:0 auto; background:#ffffff; border-radius:16px; box-shadow:0 18px 40px rgba(15,23,42,0.10); overflow:hidden; border:1px solid #e5e7eb;">
-          <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6); padding:18px 22px; color:#fff;">
-            <div style="font-size:13px; opacity:0.92; margin-bottom:4px;">ProspectLab</div>
-            <div style="font-size:18px; font-weight:600;">{title}</div>
-          </div>
-          <div style="padding:16px 22px 22px;">
-            <table cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse; font-size:13px;">
-              <thead>
-                <tr style="background:#f3f4f6;">
-                  <th style="padding:10px 10px; border-bottom:1px solid #e5e7eb; text-align:left; color:#374151;">ID</th>
-                  <th style="padding:10px 10px; border-bottom:1px solid #e5e7eb; text-align:left; color:#374151;">Nom</th>
-                  <th style="padding:10px 10px; border-bottom:1px solid #e5e7eb; text-align:center; color:#374151;">Emails</th>
-                  <th style="padding:10px 10px; border-bottom:1px solid #e5e7eb; text-align:center; color:#374151;">Open</th>
-                  <th style="padding:10px 10px; border-bottom:1px solid #e5e7eb; text-align:center; color:#374151;">Click</th>
-                  <th style="padding:10px 10px; border-bottom:1px solid #e5e7eb; text-align:left; color:#374151;">Lecture</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows_html}
-              </tbody>
-            </table>
-          </div>
-        </div>
+      <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+      </head>
+      <body style="margin:0; padding:16px; font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:#f3f4f6; color:#111827;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px; margin:0 auto; border-collapse:collapse;">
+          <tr>
+            <td style="background:#ffffff; border-radius:16px; border:1px solid #e5e7eb; overflow:hidden;">
+              <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6); padding:16px 18px; color:#fff;">
+                <div style="font-size:13px; opacity:0.92; margin-bottom:4px;">ProspectLab</div>
+                <div style="font-size:18px; font-weight:600; line-height:1.3;">{_escape_html_report(title)}</div>
+              </div>
+              <div style="padding:16px 16px 20px;">
+                {cards_html}
+              </div>
+            </td>
+          </tr>
+        </table>
       </body>
     </html>
     """

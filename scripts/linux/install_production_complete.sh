@@ -125,6 +125,17 @@ else
 fi
 
 echo ""
+echo "[*] Installation navigateur Playwright (Chromium) pour les screenshots..."
+if [ -x "$PROJECT_DIR/scripts/linux/install_playwright_chromium.sh" ]; then
+    bash "$PROJECT_DIR/scripts/linux/install_playwright_chromium.sh" "$PROJECT_DIR" || {
+        echo "[!] Attention: install Playwright a echoue — les captures screenshots ne marcheront pas"
+        echo "    Relancer: bash $PROJECT_DIR/scripts/linux/install_playwright_chromium.sh"
+    }
+else
+    "$ENV_DIR/bin/python" -m playwright install chromium || echo "[!] playwright install chromium a echoue"
+fi
+
+echo ""
 echo "[*] Étape 5/7: Vérification de la connexion PostgreSQL..."
 
 # Vérifier que le .env existe

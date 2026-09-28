@@ -13,6 +13,121 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+_redis_client = None
+_GEMINI_SLOT_KEY = 'prospectlab:gemini_full_report:slots'
+_GEMINI_SLOT_TTL = 900
+
+
+def _redis():
+    """Client Redis lazy (broker Celery)."""
+    global _redis_client
+    if _redis_client is None:
+        import redis
+        from config import CELERY_BROKER_URL
+        _redis_client = redis.Redis.from_url(
+            CELERY_BROKER_URL or 'redis://127.0.0.1:6379/0',
+            decode_responses=True,
+        )
+    return _redis_client
+
+
+def _acquire_gemini_slot(
+    *,
+    max_concurrent: int = 1,
+    wait_sec: int = 1800,
+    progress_cb=None,
+) -> bool:
+    """
+    Reserve un slot Gemini (evite le burst 429 sur free tier).
+
+    @param max_concurrent: Nb max d'appels Vision en parallele
+    @param wait_sec: Attente max (defaut 30 min pour files de 20+)
+    @param progress_cb: Callback optionnel (message, pct) pendant l'attente
+    @returns: True si slot acquis
+    """
+    import time as _time
+    max_c = max(1, int(max_concurrent or 1))
+    deadline = _time.time() + max(30, int(wait_sec or 1800))
+    script = """
+local key = KEYS[1]
+local maxc = tonumber(ARGV[1])
+local ttl = tonumber(ARGV[2])
+local value = tonumber(redis.call('get', key) or '0')
+if value < maxc then
+  local next = value + 1
+  redis.call('set', key, next, 'EX', ttl)
+  return 1
+end
+return 0
+"""
+    last_emit = 0.0
+    waited = 0
+    while _time.time() < deadline:
+        try:
+            ok = _redis().eval(script, 1, _GEMINI_SLOT_KEY, max_c, _GEMINI_SLOT_TTL)
+            if int(ok or 0) == 1:
+                return True
+        except Exception as exc:
+            logger.warning('Gemini slot acquire ignore: %s', exc)
+            return True  # ne bloque pas si Redis HS
+        now = _time.time()
+        if progress_cb and (now - last_emit) >= 8.0:
+            last_emit = now
+            left = max(0, int(deadline - now))
+            try:
+                progress_cb(
+                    f'File Gemini saturee — attente d\'un slot libre (~{left // 60} min)…',
+                    63,
+                )
+            except Exception:
+                pass
+        waited += 1
+        _time.sleep(3.0)
+    return False
+
+
+def _release_gemini_slot() -> None:
+    """Libere un slot Gemini."""
+    script = """
+local key = KEYS[1]
+local ttl = tonumber(ARGV[1])
+local value = tonumber(redis.call('get', key) or '0')
+if value <= 0 then
+  redis.call('set', key, 0, 'EX', ttl)
+  return 0
+end
+local next = value - 1
+if next <= 0 then
+  redis.call('set', key, 0, 'EX', ttl)
+  return 0
+end
+redis.call('set', key, next, 'EX', ttl)
+return next
+"""
+    try:
+        _redis().eval(script, 1, _GEMINI_SLOT_KEY, _GEMINI_SLOT_TTL)
+    except Exception as exc:
+        logger.warning('Gemini slot release ignore: %s', exc)
+
+
+FULL_REPORT_WRITING_STYLE = (
+    "STYLE D'ECRITURE (obligatoire pour TOUS les textes FR du JSON, "
+    "surtout report_document, executive_summary, notes, pitch) : "
+    "Tu es une personne reelle qui s'exprime de maniere naturelle, spontanee et vivante. "
+    "Evite les phrases toutes faites, les mots trop formels ou techniques, "
+    "et les expressions trop parfaites. Utilise des tournures simples, "
+    "comme dans une discussion entre amis. Sois clair, direct, un peu imparfait "
+    "si besoin, mais toujours humain. Tu peux meme parfois raccourcir des phrases "
+    "ou employer un ton plus detendu. Donne une reponse qui ne semble pas ecrite par une IA. "
+    "Consignes de ponctuation : utilise des apostrophes droites (') et non des "
+    "apostrophes courbees. N'utilise pas de tirets cadratins, uniquement des tirets simples (-). "
+    "Adapte le langage pour que le style soit plus humain, moins formate, "
+    "et ne ressemble pas a une reponse de chatbot. "
+    "ORTHOGRAPHE ET GRAMMAIRE : soigne l'orthographe et la grammaire francaises "
+    "(accords, conjugaisons, accents, elisions). Ton detendu OK, fautes non. "
+    "Des phrases qui se lisent bien a voix haute."
+)
+
 FULL_REPORT_SYSTEM_PROMPT = (
     "Tu es un consultant digital senior B2B francophone (audit site vitrine / PME). "
     "Tu analyses le site COMPLETEMENT : URL fournie (outil url_context si dispo), "
@@ -24,10 +139,20 @@ FULL_REPORT_SYSTEM_PROMPT = (
     "decrit ce que tu vois (hierarchie visuelle, typo, couleurs, CTA, responsive, "
     "obsolescence, trust, accessibilite). "
     "Liste concretement ce qu'il faut garder, corriger ou refaire. "
+    + FULL_REPORT_WRITING_STYLE
+    + " "
+    "Le champ report_document est le coeur lisible du livrable : "
+    "un vrai document Markdown structure (titres # ## ###, paragraphes courts, "
+    "listes a puces, sous-sections). Sections minimales : "
+    "Resume, Design UX/UI, Technique, SEO, Securite / confiance, "
+    "Ce qui marche, Ce qui cloche, Plan d'action, Pitch. "
+    "Paragraphes aeres, titres clairs, pas de pavé unique, pas de JSON dans ce champ. "
     "Reponds UNIQUEMENT en JSON valide avec les cles: "
     "overall_score (0-100, plus bas = site plus problematique), "
     "refonte_recommendation (aucune|legere|partielle|totale), "
     "executive_summary (3-6 phrases FR, synthese business), "
+    "report_document (string Markdown FR, doc d'audit complet et bien structure, "
+    "cible 600-1800 mots), "
     "design_analysis (objet {score 0-100, summary, ux_notes, ui_notes, "
     "to_keep liste, to_redo liste}), "
     "what_works (liste 3-8 points forts concrets, jamais 'captures disponibles'), "
@@ -149,10 +274,20 @@ def _normalize_full_report(raw: Dict[str, Any], source: str) -> Dict[str, Any]:
                 'notes': design_analysis.get('summary') or '',
             }
 
+    report_doc = str(
+        raw.get('report_document')
+        or raw.get('document')
+        or raw.get('markdown')
+        or ''
+    ).strip()
+    if len(report_doc) > 24000:
+        report_doc = report_doc[:24000] + '\n\n…'
+
     return {
         'overall_score': score,
         'refonte_recommendation': refonte,
         'executive_summary': str(raw.get('executive_summary') or raw.get('summary') or '').strip()[:1600],
+        'report_document': report_doc,
         'design_analysis': design_analysis,
         'what_works': _as_list(raw.get('what_works') or raw.get('positives')),
         'whats_wrong': _as_list(raw.get('whats_wrong') or raw.get('negatives')),
@@ -164,11 +299,20 @@ def _normalize_full_report(raw: Dict[str, Any], source: str) -> Dict[str, Any]:
     }
 
 
-def _heuristic_full_report(pipeline: Dict[str, Any], opportunity: Any = None) -> Dict[str, Any]:
+def _heuristic_full_report(
+    pipeline: Dict[str, Any],
+    opportunity: Any = None,
+    *,
+    fallback_reason: str | None = None,
+) -> Dict[str, Any]:
     """
     Fallback local si Gemini indisponible.
 
     Produit une synthese basee sur les modules ProspectLab (pas un audit Vision).
+
+    @param pipeline: Pipeline modules
+    @param opportunity: Score opportunite optionnel
+    @param fallback_reason: Cause (quota 429, pas de cle, …)
     """
     score = 58
     wrong: List[str] = []
@@ -343,15 +487,47 @@ def _heuristic_full_report(pipeline: Dict[str, Any], opportunity: Any = None) ->
             'action': 'Relancer l\'audit Gemini Vision des que le modele API est disponible',
         })
 
+    reason = str(fallback_reason or '').strip()
+    reason_low = reason.lower()
+    if '503' in reason or 'high demand' in reason_low or 'surcharge' in reason_low:
+        why = (
+            'Gemini en surcharge (503 high demand) — ce n\'est pas un quota. '
+            'Relancer dans quelques minutes pour un vrai audit Vision.'
+        )
+    elif '429' in reason or 'quota' in reason_low or 'resource_exhausted' in reason_low:
+        why = (
+            'Gemini en quota (free tier / trop de requetes). '
+            'Relancer plus tard pour un vrai audit Vision.'
+        )
+    elif reason:
+        why = f'Gemini indisponible ({reason[:180]}). Relancer pour le rapport Vision.'
+    else:
+        why = (
+            'Gemini Vision etait indisponible : pas d\'audit design/UX du site '
+            'via URL + screenshots. Relancer pour obtenir le rapport complet.'
+        )
+
     return _normalize_full_report(
         {
             'overall_score': score,
             'refonte_recommendation': refonte,
             'executive_summary': (
                 'Synthese heuristique basee sur les modules ProspectLab '
-                '(technique / SEO / OSINT / pentest). '
-                'Gemini Vision etait indisponible : pas d\'audit design/UX du site '
-                'via URL + screenshots. Relancer pour obtenir le rapport complet.'
+                f'(technique / SEO / OSINT / pentest). {why}'
+            ),
+            'report_document': (
+                '# Resume\n\n'
+                'Synthese locale a partir des modules ProspectLab '
+                '(pas d\'analyse Vision des captures).\n\n'
+                f'{why}\n\n'
+                '## Ce qui marche\n\n'
+                + ''.join(f'- {w}\n' for w in works[:8])
+                + '\n## Ce qui cloche\n\n'
+                + ''.join(f'- {w}\n' for w in wrong[:10])
+                + '\n## Plan d\'action\n\n'
+                + ''.join(f'1. {i["action"]}\n' for i in improvements[:6])
+                + '\n## Note\n\n'
+                'Relancer l\'audit Gemini Vision pour un vrai document design / UX structure.\n'
             ),
             'design_analysis': design_analysis,
             'what_works': works,
@@ -647,6 +823,10 @@ def build_full_report_for_entreprise(
                 "(technique, SEO, OSINT, pentest, age/refonte).\n"
                 "3) Produis un rapport actionnable : ce qui marche, ce qui cloche, "
                 "ce qu'il faut refaire (design + tech + SEO + securite).\n"
+                "4) Remplis surtout report_document en Markdown bien structure "
+                "(titres, sous-titres, paragraphes courts, listes) - une vraie doc lisible.\n"
+                "5) Style humain + orthographe / grammaire soignees "
+                "(voir consignes systeme).\n"
                 "Interdit : se contenter de dire que des captures existent.\n\n"
                 f"CONTEXTE PROSPECTLAB:\n{context_text}"
             )
@@ -659,35 +839,60 @@ def build_full_report_for_entreprise(
                 @returns: Dict JSON brut
                 """
                 tools = [{'url_context': {}}] if with_url_tool else None
+                # Vague sequentielle sur les cles : peu de rounds globaux suffisent
+                retries = 2
                 if images:
                     return gemini_vision_multi_json(
                         prompt=prompt,
                         images=images,
                         system_instruction=FULL_REPORT_SYSTEM_PROMPT,
-                        max_tokens=6144,
+                        max_tokens=8192,
                         timeout_ms=90_000,
                         tools=tools,
+                        quota_retry_rounds=retries,
+                        progress_cb=_emit,
                     )
                 text = gemini_generate_content(
                     parts=[{'text': prompt}],
                     system_instruction=FULL_REPORT_SYSTEM_PROMPT,
                     json_mode=True,
-                    temperature=0.25,
-                    max_tokens=6144,
+                    temperature=0.35,
+                    max_tokens=8192,
                     timeout_ms=90_000,
                     tools=tools,
+                    quota_retry_rounds=retries,
+                    progress_cb=_emit,
                 )
                 return json.loads(text) if isinstance(text, str) else text
+
+            from services.gemini_client import gemini_config as _gemini_cfg
+            # 1 Vision a la fois : plusieurs jobs crament tous les comptes free-tier
+            max_conc = int((_gemini_cfg() or {}).get('max_concurrent_full_reports') or 1)
+            wait_api = int(os.environ.get('GEMINI_SLOT_WAIT_SEC') or 900)
+            _emit(f'File d\'attente Gemini (max {max_conc} Vision en parallele)…', 62)
+            got_slot = _acquire_gemini_slot(
+                max_concurrent=max_conc,
+                wait_sec=wait_api,
+                progress_cb=_emit,
+            )
+            if not got_slot:
+                raise RuntimeError(
+                    'Timeout file d\'attente Gemini (trop de jobs simultanés). '
+                    'Réessaie plus tard — le quota free tier est limite.'
+                )
 
             # 1) Vision + contexte ProspectLab (rapide / fiable)
             _emit('Envoi multimodal (texte + images) a Gemini…', 65)
             try:
-                raw = _call_gemini(with_url_tool=False)
-            except Exception as first_exc:
-                # 2) Retry avec url_context si le 1er tour echoue
-                _emit(f'1er appel echoue ({first_exc}) — retry avec url_context…', 70)
-                modules_used['url_context'] = True
-                raw = _call_gemini(with_url_tool=True)
+                try:
+                    raw = _call_gemini(with_url_tool=False)
+                except Exception as first_exc:
+                    # 2) Retry avec url_context si le 1er tour echoue
+                    _emit(f'1er appel echoue ({first_exc}) — retry avec url_context…', 70)
+                    modules_used['url_context'] = True
+                    raw = _call_gemini(with_url_tool=True)
+            finally:
+                _release_gemini_slot()
 
             _emit('Reponse Gemini recue — normalisation JSON…', 85)
             report = _normalize_full_report(raw if isinstance(raw, dict) else {}, 'gemini')
@@ -699,13 +904,39 @@ def build_full_report_for_entreprise(
             )
         except Exception as exc:
             logger.warning('Gemini full report echec, fallback: %s', exc)
-            _emit(f'Gemini en echec ({exc}) — fallback heuristique…', 80)
-            report = _heuristic_full_report(pipeline, opportunity)
+            from services.gemini_client import is_gemini_quota_error
+            quota_hit = is_gemini_quota_error(exc)
+            err_low = str(exc or '').lower()
+            overload = ('503' in err_low) or ('high demand' in err_low)
+            if quota_hit:
+                _emit(
+                    'Quota Gemini atteint (429) — fallback heuristique local…',
+                    80,
+                )
+            elif overload:
+                _emit(
+                    'Gemini en surcharge (503 high demand) — fallback heuristique… '
+                    'Relancer dans quelques minutes pour Vision.',
+                    80,
+                )
+            else:
+                _emit(f'Gemini en echec ({exc}) — fallback heuristique…', 80)
+            report = _heuristic_full_report(
+                pipeline,
+                opportunity,
+                fallback_reason=str(exc)[:300],
+            )
             source = 'heuristic'
             report['fallback_error'] = str(exc)[:300]
+            report['quota_exceeded'] = bool(quota_hit)
+            report['transient_overload'] = bool(overload)
     else:
         _emit('Pas de cle Gemini — fallback heuristique local…', 70)
-        report = _heuristic_full_report(pipeline, opportunity)
+        report = _heuristic_full_report(
+            pipeline,
+            opportunity,
+            fallback_reason='pas de cle API',
+        )
 
     report['analyzed_at'] = analyzed_at
     report['entreprise_id'] = eid
@@ -721,6 +952,8 @@ def build_full_report_for_entreprise(
         'overall_score': report.get('overall_score'),
         'refonte_recommendation': report.get('refonte_recommendation'),
         'source': source,
+        'quota_exceeded': bool((report or {}).get('quota_exceeded')),
+        'fallback_error': (report or {}).get('fallback_error'),
         'screenshot_set_id': screenshot_set_id,
         'screenshots_ensured': screenshots_ensured,
         'modules_used': modules_used,

@@ -27,45 +27,50 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-def safe_emit(socketio, event, data, room=None):
+def safe_emit(socketio, event, data, room=None, also_rooms=None):
     """
-    Émet un événement WebSocket de manière sécurisée en gérant les erreurs
-    
+    Émet un événement WebSocket de manière sécurisée.
+
+    ``room`` peut être un sid, une room stable (``user:`` / ``client:``),
+    ou une liste (``freeze_notify_rooms``). Une seule cible est utilisee
+    (priorite user > client > sid) pour ne pas multiplier les toasts.
+
     Args:
         socketio: Instance de SocketIO
         event (str): Nom de l'événement à émettre
         data (dict): Données à envoyer
-        room (str, optional): Room spécifique pour l'émission
-        
+        room: Room, sid, ou liste de rooms
+        also_rooms: Rooms supplémentaires (fusionnées puis dedupliquées)
+
     Example:
-        >>> safe_emit(socketio, 'progress', {'percent': 50}, room='session_123')
+        >>> safe_emit(socketio, 'progress', {'percent': 50}, room='client:abc')
+        >>> safe_emit(socketio, 'done', payload, room=freeze_notify_rooms(sid))
     """
     try:
-        # Vérifier que socketio est valide
         if not socketio:
             return
-        
-        # Vérifier que la room existe si spécifiée
-        if room:
-            try:
-                socketio.emit(event, data, room=room)
-            except (RuntimeError, ConnectionError, OSError) as e:
-                # Erreurs de connexion - client déconnecté ou connexion non établie
-                pass
-            except Exception:
-                # Autres erreurs - ignorer silencieusement
-                pass
-        else:
-            try:
+
+        try:
+            from utils.ws_rooms import normalize_rooms
+            targets = normalize_rooms(room=room, also_rooms=also_rooms)
+        except Exception:
+            if isinstance(room, (list, tuple, set)):
+                targets = list(room)[:1] or [None]
+            else:
+                targets = [room]
+
+        # Une seule emission (evite N toasts si le client est dans N rooms)
+        target = targets[0] if targets else None
+        try:
+            if target is None:
                 socketio.emit(event, data)
-            except (RuntimeError, ConnectionError, OSError) as e:
-                # Erreurs de connexion
-                pass
-            except Exception:
-                # Autres erreurs
-                pass
+            else:
+                socketio.emit(event, data, room=target)
+        except (RuntimeError, ConnectionError, OSError):
+            pass
+        except Exception:
+            pass
     except Exception:
-        # Erreur générale - ignorer
         pass
 
 

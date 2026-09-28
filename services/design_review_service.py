@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 
 DESIGN_SYSTEM_PROMPT = (
     "Tu es un expert UX/UI B2B. Analyse le screenshot d'un site vitrine. "
+    "Style d'ecriture : naturel, spontane, vivant, comme une discussion entre amis. "
+    "Evite le jargon trop formel et les phrases toutes faites. "
+    "Apostrophes droites ('), tirets simples (-) uniquement. "
+    "Soigne l'orthographe et la grammaire francaises. "
     "Reponds uniquement en JSON valide avec les cles: "
     "score (0-100, plus bas = design plus faible/obsolète), "
     "positives (liste de 2 a 5 points forts courts en francais), "

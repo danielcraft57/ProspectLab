@@ -404,6 +404,64 @@ class CampagneManager(DatabaseBase):
         conn.close()
         return [dict(row) for row in rows]
 
+    def get_campagnes_actives_for_report(self, recent_completed_since_utc_iso=None):
+        """
+        Campagnes a inclure dans un rapport agrege unique.
+
+        Inclut :
+          - statut running / scheduled (en cours)
+          - completed / failed recents si une date ISO est fournie
+
+        @param recent_completed_since_utc_iso: Borne basse date_creation pour les terminees
+        @returns: Liste de campagnes (dict), sans les brouillons
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        active_statuses = ('running', 'scheduled')
+        if recent_completed_since_utc_iso:
+            self.execute_sql(
+                cursor,
+                """
+                SELECT *
+                FROM campagnes_email
+                WHERE
+                    LOWER(COALESCE(statut, '')) IN ('running', 'scheduled')
+                    OR (
+                        LOWER(COALESCE(statut, '')) IN ('completed', 'failed')
+                        AND date_creation >= ?
+                    )
+                ORDER BY
+                    CASE LOWER(COALESCE(statut, ''))
+                        WHEN 'running' THEN 0
+                        WHEN 'scheduled' THEN 1
+                        ELSE 2
+                    END,
+                    date_creation DESC
+                """,
+                (recent_completed_since_utc_iso,),
+            )
+        else:
+            placeholders = ','.join(['?'] * len(active_statuses))
+            self.execute_sql(
+                cursor,
+                f"""
+                SELECT *
+                FROM campagnes_email
+                WHERE LOWER(COALESCE(statut, '')) IN ({placeholders})
+                ORDER BY
+                    CASE LOWER(COALESCE(statut, ''))
+                        WHEN 'running' THEN 0
+                        WHEN 'scheduled' THEN 1
+                        ELSE 2
+                    END,
+                    date_creation DESC
+                """,
+                active_statuses,
+            )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
     def save_email_envoye(
         self,
         campagne_id,

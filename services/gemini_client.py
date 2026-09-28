@@ -1,9 +1,12 @@
 """
-Client Gemini (Google AI Studio) avec rotation multi-cles.
+Client Gemini (Google AI Studio) avec rotation multi-cles / multi-comptes.
 
-Pattern inspire de SocialDesk (gemini-client.mjs) :
-- 429 → cle suivante
-- 401/403 → cle ignoree jusqu'au redemarrage process
+Pattern :
+- bascule sequentielle immediate de compte en compte (429/503 → suivant, 0s)
+- 429 RPM → saute au compte suivant (pas de blacklist)
+- 429 RPD reel (retry long) → cle ignoree jusqu'au reset Pacific
+- 503 / high demand → saute au compte suivant (pas d'attente 60s)
+- 401/403 invalide → cle ignoree jusqu'au redemarrage process
 - toutes en quota → pause GEMINI_QUOTA_RETRY_MS puis nouvel essai
 """
 
@@ -13,23 +16,276 @@ import base64
 import json
 import logging
 import os
+import threading
 import time
 from typing import Any, Dict, List, Optional, Sequence
 
 import requests
 
-logger = logging.getLogger(__name__)
+try:
+    from services.logging_config import setup_logger
+    logger = setup_logger(__name__, 'gemini_full_report_tasks.log', console=False)
+except Exception:
+    logger = logging.getLogger(__name__)
 
 BASE_URL = 'https://generativelanguage.googleapis.com/v1beta'
 DEFAULT_TIMEOUT_MS = 60_000
 
 # Cles revoquees (403/401) pour la duree du process
 _revoked_keys: set[str] = set()
+# Cles en quota journalier (RPD) : timestamp unix jusqu'auquel on les ignore
+_rpd_exhausted_until: Dict[str, float] = {}
 _preferred_key_index: int = 0
+_keys_lock = threading.Lock()
 
 
 class GeminiClientError(Exception):
     """Erreur d'appel Gemini apres epuisement des cles / retries."""
+
+
+class GeminiQuotaError(GeminiClientError):
+    """Toutes les cles ont renvoye 429 (quota RPM/RPD epuise)."""
+
+
+def is_gemini_quota_error(exc_or_msg) -> bool:
+    """
+    Detecte un epuisement de quota Gemini (429 / RESOURCE_EXHAUSTED).
+
+    @param exc_or_msg: Exception ou message
+    @returns: True si quota
+    """
+    if isinstance(exc_or_msg, GeminiQuotaError):
+        return True
+    text = str(exc_or_msg or '').lower()
+    markers = (
+        '429',
+        'quota',
+        'resource_exhausted',
+        'resource exhausted',
+        'rate limit',
+        'rate_limit',
+        'too many requests',
+        'generate_content_free_tier',
+    )
+    return any(m in text for m in markers)
+
+
+def _next_pacific_midnight_ts() -> float:
+    """
+    Timestamp du prochain reset RPD Gemini (~minuit Pacific + 5 min).
+
+    @returns: Unix timestamp
+    """
+    try:
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+        pt = ZoneInfo('America/Los_Angeles')
+        now = datetime.now(pt)
+        nxt = (now + timedelta(days=1)).replace(hour=0, minute=5, second=0, microsecond=0)
+        return float(nxt.timestamp())
+    except Exception:
+        return time.time() + 12 * 3600
+
+
+def _is_daily_quota_body(raw: str) -> bool:
+    """
+    Detecte un 429 de quota journalier (RPD) vs RPM ponctuel.
+
+    Google ment souvent : le corps peut contenir ``PerDay`` / ``limit: 20``
+    alors que le message dit ``Please retry in 58s`` (RPM). Dans ce cas
+    on NE blacklist PAS la cle jusqu'au reset Pacific.
+
+    @param raw: Corps reponse API
+    @returns: True seulement si RPD reel (pas de retry court)
+    """
+    import re
+
+    low = (raw or '').lower()
+    compact = low.replace('_', '').replace('-', '').replace(' ', '')
+
+    # Retry court (secondes / quelques minutes) → RPM, jamais blacklist jour
+    m = re.search(r'retry in\s+([\d.]+)\s*(s|sec|second|seconds|m|min|minute|minutes)?', low)
+    if m:
+        val = float(m.group(1))
+        unit = (m.group(2) or 's').lower()
+        sec = val * 60.0 if unit.startswith('m') else val
+        if sec < 600:  # < 10 min → RPM / fenetre courte
+            return False
+
+    # Minute explicite → jamais un blacklist jour
+    if any(
+        x in low or x in compact
+        for x in (
+            'perminute',
+            'per minute',
+            'requestsperminute',
+            'generaterequestsperminute',
+            'quotaid":"generaterequestsperminute',
+        )
+    ):
+        return False
+
+    # Marqueurs jour explicites + pas de retry court (deja filtre)
+    if any(
+        x in low or x in compact
+        for x in (
+            'perday',
+            'per day',
+            'requestsperday',
+            'generaterequestsperday',
+            'dailyquota',
+            'quotaid":"generaterequestsperday',
+        )
+    ):
+        return True
+
+    # Details JSON Google (quotaId)
+    try:
+        data = json.loads(raw)
+        blob = json.dumps(data).lower().replace('_', '').replace('-', '')
+        if 'perminute' in blob:
+            return False
+        if 'perday' in blob or 'requestsperday' in blob:
+            # Re-check retry court dans le JSON complet
+            m2 = re.search(
+                r'retry in\s+([\d.]+)\s*(s|sec|second|seconds|m|min|minute|minutes)?',
+                blob,
+            )
+            if m2:
+                val = float(m2.group(1))
+                unit = (m2.group(2) or 's').lower()
+                sec = val * 60.0 if unit.startswith('m') else val
+                if sec < 600:
+                    return False
+            return True
+    except Exception:
+        pass
+
+    # Ambigu → RPM (on tourne a la cle suivante, pas de blacklist jour)
+    return False
+
+
+def _clear_rpd_mark(api_key: str) -> None:
+    """Retire le marqueur RPD d'une cle (apres probe OK / RPM)."""
+    _rpd_exhausted_until.pop(api_key, None)
+
+
+def _probe_revive_rpd_keys(api_keys: Sequence[str], model: str) -> List[str]:
+    """
+    Si toutes les cles sont en RPD memoire, re-teste-les en live.
+
+    Evite le piege : un faux RPD (ou un reset Google deja passe) laisse
+    ``active`` vide et on ne tourne plus jamais les cles jusqu'au restart.
+
+    @param api_keys: Cles configurees
+    @param model: Modele a sonder
+    @returns: Cles remises actives (eventuellement vide)
+    """
+    revived: List[str] = []
+    body = {
+        'contents': [{'role': 'user', 'parts': [{'text': 'OK'}]}],
+        'generationConfig': {
+            'maxOutputTokens': 4,
+            'temperature': 0,
+            'thinkingConfig': {'thinkingLevel': 'low'},
+        },
+    }
+    for i, api_key in enumerate(api_keys):
+        if api_key in _revoked_keys:
+            continue
+        if api_key not in _rpd_exhausted_until and api_key not in revived:
+            # Deja active
+            revived.append(api_key)
+            continue
+        tag = _key_tag(api_key, i + 1, len(api_keys))
+        try:
+            status, raw = _request_gemini(
+                api_key=api_key,
+                model=model,
+                body=body,
+                timeout_ms=20_000,
+            )
+        except Exception as exc:
+            logger.warning('[Gemini] probe %s — reseau %s', tag, exc)
+            continue
+
+        if status == 200:
+            _clear_rpd_mark(api_key)
+            revived.append(api_key)
+            logger.warning('[Gemini] probe %s — OK, cle remotivee', tag)
+            continue
+
+        if status == 429:
+            # Sur probe : on ne re-confirme un RPD QUE si PerDay est explicite.
+            # Sinon on leve le blacklist memoire (souvent un faux RPD / RPM).
+            if _is_daily_quota_body(raw):
+                _mark_key_rpd_exhausted(api_key, tag)
+                logger.warning('[Gemini] probe %s — RPD confirme (PerDay)', tag)
+            else:
+                _clear_rpd_mark(api_key)
+                revived.append(api_key)
+                logger.warning(
+                    '[Gemini] probe %s — 429 ambigu/RPM, blacklist leve → remotivee',
+                    tag,
+                )
+            continue
+
+        if status in (401, 403):
+            lowered = (raw or '').lower()
+            if status == 401 or 'denied' in lowered or 'api key not valid' in lowered:
+                _revoked_keys.add(api_key)
+                _clear_rpd_mark(api_key)
+                logger.warning('[Gemini] probe %s — %s, ignoree', tag, status)
+            else:
+                _clear_rpd_mark(api_key)
+                revived.append(api_key)
+            continue
+
+        # 503 / autre : on retente la cle (pas un RPD)
+        _clear_rpd_mark(api_key)
+        revived.append(api_key)
+        logger.warning('[Gemini] probe %s — status %s, cle remotivee pour retry', tag, status)
+
+    return revived
+
+
+def _mark_key_rpd_exhausted(api_key: str, tag: str) -> None:
+    """
+    Ignore une cle jusqu'au reset Pacific (evite de cramer les autres projets).
+
+    @param api_key: Cle API
+    @param tag: Label log
+    """
+    until = _next_pacific_midnight_ts()
+    _rpd_exhausted_until[api_key] = until
+    left_h = max(0.1, (until - time.time()) / 3600.0)
+    logger.warning(
+        '[Gemini] %s — RPD/jour epuise, ignoree ~%.1fh (protege les autres comptes)',
+        tag,
+        left_h,
+    )
+
+
+def _active_api_keys(api_keys: Sequence[str]) -> List[str]:
+    """
+    Filtre cles revoquees + RPD epuisees (purge les expirations).
+
+    @param api_keys: Liste brute
+    @returns: Cles utilisables maintenant
+    """
+    now = time.time()
+    expired = [k for k, until in list(_rpd_exhausted_until.items()) if until <= now]
+    for k in expired:
+        _rpd_exhausted_until.pop(k, None)
+    out: List[str] = []
+    for k in api_keys:
+        if k in _revoked_keys:
+            continue
+        until = _rpd_exhausted_until.get(k)
+        if until and until > now:
+            continue
+        out.append(k)
+    return out
 
 
 def get_gemini_api_keys() -> List[str]:
@@ -76,8 +332,11 @@ def gemini_config() -> Dict[str, Any]:
             or os.environ.get('GEMINI_MODEL')
             or 'gemini-3.8-flash'
         ),
-        'quota_retry_ms': int(os.environ.get('GEMINI_QUOTA_RETRY_MS') or 65_000),
-        'quota_retry_rounds': int(os.environ.get('GEMINI_QUOTA_RETRY_ROUNDS') or 1),
+        # Pause seulement quand TOUS les comptes ont rate (pas entre chaque cle)
+        'quota_retry_ms': int(os.environ.get('GEMINI_QUOTA_RETRY_MS') or 35_000),
+        'quota_retry_rounds': int(os.environ.get('GEMINI_QUOTA_RETRY_ROUNDS') or 3),
+        # 1 seul Vision a la fois : sinon les comptes free-tier se crament mutuellement
+        'max_concurrent_full_reports': int(os.environ.get('GEMINI_FULL_REPORT_MAX_CONCURRENT') or 1),
     }
 
 
@@ -140,102 +399,367 @@ def _request_gemini(
     return resp.status_code, resp.text or ''
 
 
+def _is_transient_overload_body(status: int, raw: str) -> bool:
+    """
+    Detecte une surcharge temporaire Gemini (503 / high demand / UNAVAILABLE).
+
+    Ce n'est PAS un quota journalier : il faut attendre et reessayer,
+    pas basculer tout de suite en heuristique.
+
+    @param status: Code HTTP
+    @param raw: Corps reponse
+    @returns: True si surcharge temporaire
+    """
+    if status == 503:
+        return True
+    low = (raw or '').lower()
+    markers = (
+        'high demand',
+        'currently experiencing',
+        'try again later',
+        'unavailable',
+        'overloaded',
+    )
+    if status >= 500 and any(m in low for m in markers):
+        return True
+    if status == 429 and 'high demand' in low:
+        return True
+    return False
+
+
+def _notify_progress(progress_cb, message: str, pct: Optional[int] = None) -> None:
+    """
+    Pousse un message vers le journal UI (PROGRESS Celery) si callback fourni.
+
+    @param progress_cb: Callable (message, pct?) ou None
+    @param message: Ligne de log visible dans la fiche
+    @param pct: Progression optionnelle 0-100
+    """
+    if not progress_cb:
+        return
+    msg = str(message or '').strip()
+    if not msg:
+        return
+    try:
+        progress_cb(msg, pct)
+    except TypeError:
+        try:
+            progress_cb(msg)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+def _call_one_key(
+    *,
+    api_key: str,
+    tag: str,
+    idx: int,
+    model: str,
+    body: Dict[str, Any],
+    timeout_ms: int,
+) -> Dict[str, Any]:
+    """
+    Un seul essai HTTP sur une cle (pas de pause longue : bascule rapide).
+
+    @param api_key: Cle API
+    @param tag: Label log
+    @param idx: Index dans la liste active
+    @param model: Modele Gemini
+    @param body: Corps generateContent
+    @param timeout_ms: Timeout HTTP
+    @returns: Dict outcome (ok/content ou flags erreur)
+    """
+    try:
+        status, raw = _request_gemini(
+            api_key=api_key,
+            model=model,
+            body=body,
+            timeout_ms=timeout_ms,
+        )
+    except requests.RequestException as exc:
+        logger.warning('[Gemini] %s — reseau: %s → compte suivant', tag, exc)
+        return {
+            'ok': False,
+            'api_key': api_key,
+            'tag': tag,
+            'idx': idx,
+            'error': GeminiClientError(f'Gemini reseau: {exc}'),
+            'saw_429': False,
+            'saw_transient': False,
+        }
+
+    if status == 200:
+        try:
+            content = _parse_gemini_content(raw)
+        except GeminiClientError as exc:
+            logger.warning('[Gemini] %s — 200 mais parse KO: %s → compte suivant', tag, exc)
+            return {
+                'ok': False,
+                'api_key': api_key,
+                'tag': tag,
+                'idx': idx,
+                'error': exc,
+                'saw_429': False,
+                'saw_transient': False,
+            }
+        return {
+            'ok': True,
+            'api_key': api_key,
+            'tag': tag,
+            'idx': idx,
+            'content': content,
+        }
+
+    last_error = GeminiClientError(f'Gemini {status}: {(raw or "")[:400]}')
+
+    if status == 429:
+        is_rpd = _is_daily_quota_body(raw or '')
+        with _keys_lock:
+            if is_rpd:
+                _mark_key_rpd_exhausted(api_key, tag)
+        logger.warning(
+            '[Gemini] %s — %s → saute au compte suivant',
+            tag,
+            'RPD jour (blacklist)' if is_rpd else '429 quota/RPM',
+        )
+        return {
+            'ok': False,
+            'api_key': api_key,
+            'tag': tag,
+            'idx': idx,
+            'error': last_error,
+            'saw_429': True,
+            'saw_transient': False,
+            'is_rpd': is_rpd,
+            'raw': raw or '',
+        }
+
+    if status == 401:
+        with _keys_lock:
+            _revoked_keys.add(api_key)
+        logger.warning('[Gemini] %s — 401, ignoree → compte suivant', tag)
+        return {
+            'ok': False,
+            'api_key': api_key,
+            'tag': tag,
+            'idx': idx,
+            'error': last_error,
+            'saw_429': False,
+            'saw_transient': False,
+        }
+
+    if status == 403:
+        lowered = (raw or '').lower()
+        hard_revoke = (
+            'api key not valid' in lowered
+            or 'api_key_invalid' in lowered
+            or 'invalid api key' in lowered
+            or 'permission_denied' in lowered
+            or 'denied access' in lowered
+            or 'has been denied' in lowered
+        )
+        if hard_revoke:
+            with _keys_lock:
+                _revoked_keys.add(api_key)
+            logger.warning('[Gemini] %s — 403 refuse → compte suivant', tag)
+        else:
+            logger.warning('[Gemini] %s — 403 → compte suivant: %s', tag, (raw or '')[:180])
+        return {
+            'ok': False,
+            'api_key': api_key,
+            'tag': tag,
+            'idx': idx,
+            'error': last_error,
+            'saw_429': False,
+            'saw_transient': False,
+        }
+
+    if _is_transient_overload_body(status, raw or '') or status >= 500:
+        logger.warning(
+            '[Gemini] %s — surcharge/erreur %s → saute au compte suivant',
+            tag,
+            status,
+        )
+        return {
+            'ok': False,
+            'api_key': api_key,
+            'tag': tag,
+            'idx': idx,
+            'error': last_error,
+            'saw_429': False,
+            'saw_transient': True,
+        }
+
+    logger.warning('[Gemini] %s — erreur %s → compte suivant', tag, status)
+    return {
+        'ok': False,
+        'api_key': api_key,
+        'tag': tag,
+        'idx': idx,
+        'error': last_error,
+        'saw_429': False,
+        'saw_transient': False,
+    }
+
+
 def _try_all_keys(
     *,
     api_keys: Sequence[str],
     model: str,
     body: Dict[str, Any],
     timeout_ms: int,
+    progress_cb=None,
 ) -> Dict[str, Any]:
     """
-    Essaie chaque cle active (round-robin) jusqu'a succes ou epuisement.
+    Bascule immediate de compte en compte (pas de parallele, pas d'attente 60s).
 
-    @returns: Dict avec content ou error / saw_429 / all_keys_exhausted
+    Une requete Vision = 1 cle a la fois. Si 429/503, on passe DIRECTEMENT
+    a la cle suivante. Le parallele brulait 5x le quota free-tier.
+
+    @param api_keys: Cles configurees
+    @param model: Modele Gemini
+    @param body: Corps generateContent
+    @param timeout_ms: Timeout HTTP par cle
+    @param progress_cb: Callback journal UI (message, pct)
+    @returns: Dict avec content ou error / saw_429 / saw_transient / all_keys_exhausted
     """
     global _preferred_key_index
 
-    active = [k for k in api_keys if k not in _revoked_keys]
+    active = _active_api_keys(api_keys)
+    if not active and _rpd_exhausted_until:
+        logger.warning(
+            '[Gemini] %s cle(s) en RPD memoire — probe live avant d\'abandonner…',
+            len(_rpd_exhausted_until),
+        )
+        _notify_progress(
+            progress_cb,
+            f'Reveil de {len(_rpd_exhausted_until)} compte(s) marques RPD…',
+            66,
+        )
+        active = _probe_revive_rpd_keys(api_keys, model)
+
     n = len(active)
     if not n:
+        rpd_n = len(_rpd_exhausted_until)
+        if rpd_n:
+            msg = (
+                f'Gemini — aucune cle active ({rpd_n} compte(s) en RPD jusqu\'au reset Pacific)'
+            )
+        else:
+            msg = 'Gemini — aucune cle active (toutes revoquees 403 ?)'
+        _notify_progress(progress_cb, msg, 68)
         return {
-            'error': GeminiClientError('Gemini — aucune cle active (toutes revoquees 403 ?)'),
-            'saw_429': False,
+            'error': GeminiQuotaError(msg) if rpd_n else GeminiClientError(msg),
+            'saw_429': bool(rpd_n),
+            'saw_transient': False,
             'all_keys_exhausted': True,
         }
 
+    # Prefere la derniere cle OK, puis tourne sur les autres
+    start = _preferred_key_index % n
+    order = list(range(start, n)) + list(range(0, start))
+
+    logger.warning(
+        '[Gemini] rotation sequentielle: %s compte(s) actif(s) / %s, debut=%s',
+        n,
+        len(api_keys),
+        start + 1,
+    )
+    _notify_progress(
+        progress_cb,
+        f'Rotation multi-comptes : {n} actif(s) — bascule immediate si 429/503…',
+        66,
+    )
+
     last_error: Optional[Exception] = None
     saw_429 = False
+    saw_transient = False
     keys_attempted = 0
+    tried_tags: List[str] = []
 
-    for offset in range(n):
-        idx = (_preferred_key_index + offset) % n
+    for pos, idx in enumerate(order):
         api_key = active[idx]
-        tag = _key_tag(api_key, offset + 1, len(api_keys))
+        tag = _key_tag(api_key, pos + 1, n)
         keys_attempted += 1
+        tried_tags.append(tag)
+        logger.warning('[Gemini] essai compte %s/%s — %s', pos + 1, n, tag)
+        _notify_progress(
+            progress_cb,
+            f'Essai compte {pos + 1}/{n} ({tag})…',
+            min(78, 66 + pos),
+        )
 
-        for attempt in range(3):
-            try:
-                status, raw = _request_gemini(
-                    api_key=api_key,
-                    model=model,
-                    body=body,
-                    timeout_ms=timeout_ms,
-                )
-            except requests.RequestException as exc:
-                last_error = GeminiClientError(f'Gemini reseau: {exc}')
-                logger.warning('[Gemini] %s — erreur reseau, cle suivante…', tag)
-                break
+        outcome = _call_one_key(
+            api_key=api_key,
+            tag=tag,
+            idx=idx,
+            model=model,
+            body=body,
+            timeout_ms=timeout_ms,
+        )
+        if outcome.get('saw_429'):
+            saw_429 = True
+        if outcome.get('saw_transient'):
+            saw_transient = True
+        if outcome.get('error'):
+            last_error = outcome['error']
 
-            if status == 200:
-                try:
-                    content = _parse_gemini_content(raw)
-                except GeminiClientError as exc:
-                    last_error = exc
-                    break
+        if outcome.get('ok'):
+            with _keys_lock:
                 _preferred_key_index = idx
-                if offset > 0:
-                    logger.warning('[Gemini] OK avec %s', tag)
-                return {'content': content}
-
-            last_error = GeminiClientError(f'Gemini {status}: {raw[:400]}')
-
-            if status == 429:
-                saw_429 = True
-                logger.warning('[Gemini] %s — quota (429), cle suivante…', tag)
-                break
-
-            if status == 401:
-                _revoked_keys.add(api_key)
-                logger.warning('[Gemini] %s — 401, cle ignoree…', tag)
-                break
-
-            if status == 403:
-                # Cle invalide → blacklist. PERMISSION_DENIED projet / feature →
-                # on passe a la cle suivante SANS blacklist permanente (souvent intermittent).
-                lowered = (raw or '').lower()
-                hard_revoke = (
-                    'api key not valid' in lowered
-                    or 'api_key_invalid' in lowered
-                    or 'invalid api key' in lowered
+            if pos > 0:
+                logger.warning(
+                    '[Gemini] OK avec %s (apres bascule depuis un autre compte)',
+                    tag,
                 )
-                if hard_revoke:
-                    _revoked_keys.add(api_key)
-                    logger.warning('[Gemini] %s — 403 cle invalide, ignoree…', tag)
-                else:
-                    logger.warning('[Gemini] %s — 403 (pas de blacklist): %s', tag, raw[:180])
-                break
+                _notify_progress(
+                    progress_cb,
+                    f'OK avec {tag} (bascule depuis un autre compte)',
+                    80,
+                )
+            else:
+                logger.warning('[Gemini] OK avec %s', tag)
+                _notify_progress(progress_cb, f'OK avec {tag}', 80)
+            return {'content': outcome['content']}
 
-            if status >= 500 and attempt < 2:
-                time.sleep(4 * (attempt + 1))
-                continue
+        # Echec → message lisible dans la fiche
+        if outcome.get('saw_429'):
+            why = 'RPD' if outcome.get('is_rpd') else '429'
+            _notify_progress(
+                progress_cb,
+                f'{tag} — {why}, saute au compte suivant…',
+                min(78, 66 + pos),
+            )
+        elif outcome.get('saw_transient'):
+            _notify_progress(
+                progress_cb,
+                f'{tag} — surcharge 503, saute au compte suivant…',
+                min(78, 66 + pos),
+            )
+        else:
+            _notify_progress(
+                progress_cb,
+                f'{tag} — echec, saute au compte suivant…',
+                min(78, 66 + pos),
+            )
 
-            logger.warning('[Gemini] %s — erreur %s, cle suivante…', tag, status)
-            break
-
+    logger.warning(
+        '[Gemini] tous les comptes ont echoue (%s) — %s',
+        keys_attempted,
+        ', '.join(tried_tags),
+    )
+    _notify_progress(
+        progress_cb,
+        f'Tous les comptes ont echoue ({keys_attempted})',
+        79,
+    )
     return {
         'error': last_error or GeminiClientError('Gemini — echec inconnu'),
         'saw_429': saw_429,
-        'all_keys_exhausted': keys_attempted >= n,
+        'saw_transient': saw_transient,
+        'all_keys_exhausted': True,
     }
 
 
@@ -250,6 +774,7 @@ def gemini_generate_content(
     timeout_ms: int = DEFAULT_TIMEOUT_MS,
     quota_retry_rounds: Optional[int] = None,
     tools: Optional[List[Dict[str, Any]]] = None,
+    progress_cb=None,
 ) -> str:
     """
     Appel Gemini generateContent avec rotation de cles.
@@ -263,6 +788,7 @@ def gemini_generate_content(
     @param timeout_ms: Timeout HTTP en ms
     @param quota_retry_rounds: Tours de pause apres epuisement 429
     @param tools: Outils Gemini optionnels (ex: [{"url_context": {}}])
+    @param progress_cb: Callback journal UI (message, pct)
     @returns: Texte de reponse
     @raises GeminiClientError: Echec apres retries
     """
@@ -298,33 +824,227 @@ def gemini_generate_content(
             model=resolved_model,
             body=body,
             timeout_ms=timeout_ms,
+            progress_cb=progress_cb,
         )
         if result.get('content'):
             return result['content']
 
         last_error = result.get('error')
+        # 429 RPM/RPD OU 503 high demand : pause puis nouvel essai sur les cles
         can_wait = (
-            result.get('saw_429')
+            (result.get('saw_429') or result.get('saw_transient'))
             and result.get('all_keys_exhausted')
             and round_idx < rounds
             and cfg['quota_retry_ms'] > 0
         )
         if not can_wait:
             break
-        secs = round(cfg['quota_retry_ms'] / 1000)
+        # Surcharge modele : pause un peu plus longue que le RPM classique
+        wait_ms = int(cfg['quota_retry_ms'])
+        if result.get('saw_transient') and not result.get('saw_429'):
+            wait_ms = max(wait_ms, int(os.environ.get('GEMINI_TRANSIENT_RETRY_MS') or 90_000))
+        secs = round(wait_ms / 1000)
+        why = 'surcharge 503' if result.get('saw_transient') and not result.get('saw_429') else 'quota 429'
         logger.warning(
-            '[Gemini] pause %ss puis nouvel essai sur les %s cles…',
+            '[Gemini] pause %ss (%s) puis nouvel essai sur les %s cles…',
             secs,
+            why,
             len(api_keys),
         )
-        time.sleep(cfg['quota_retry_ms'] / 1000.0)
+        _notify_progress(
+            progress_cb,
+            f'Pause {secs}s ({why}) puis nouvel essai sur les {len(api_keys)} comptes…',
+            70,
+        )
+        time.sleep(wait_ms / 1000.0)
 
     hint = (
         f' ({len(api_keys)} cles configurees)'
         if len(api_keys) > 1
         else ''
     )
+    # Dernier tour encore en 429 sur toutes les cles → erreur quota explicite
+    if last_error and is_gemini_quota_error(last_error):
+        raise GeminiQuotaError(
+            f'Quota Gemini atteint — toutes les cles en 429{hint}. '
+            f'Reessayer dans quelques minutes (reset RPM) ou demain (reset RPD Pacific). '
+            f'Detail: {last_error}'
+        )
+    # 503 persistant apres retries → message clair (pas confondre avec quota)
+    err_txt = str(last_error or '')
+    if '503' in err_txt or 'high demand' in err_txt.lower():
+        raise GeminiClientError(
+            f'Gemini surcharge temporaire (503 high demand){hint}. '
+            f'Reessayer dans quelques minutes — ce n\'est pas un quota journalier. '
+            f'Detail: {last_error}'
+        )
     raise GeminiClientError(f'{last_error}{hint}' if last_error else f'Gemini echec{hint}')
+
+
+def _parse_gemini_parts(raw: str) -> List[Dict[str, Any]]:
+    """
+    Extrait toutes les parts (texte + inline_data) d'une reponse generateContent.
+
+    @param raw: Corps JSON brut
+    @returns: Liste de parts
+    @raises GeminiClientError: JSON invalide ou aucune part
+    """
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise GeminiClientError(f'Gemini — reponse JSON invalide: {raw[:200]}') from exc
+
+    parts = (
+        (data.get('candidates') or [{}])[0]
+        .get('content', {})
+        .get('parts')
+        or []
+    )
+    if not parts:
+        reason = (
+            (data.get('candidates') or [{}])[0].get('finishReason')
+            or (data.get('promptFeedback') or {}).get('blockReason')
+            or 'inconnu'
+        )
+        raise GeminiClientError(f'Gemini — contenu vide ({reason})')
+    return parts
+
+
+def gemini_generate_images(
+    *,
+    prompt: str,
+    system_instruction: Optional[str] = None,
+    model: Optional[str] = None,
+    aspect_ratio: str = '16:9',
+    timeout_ms: int = 120_000,
+    reference_images: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Genere une ou plusieurs images via Gemini (Nano Banana / flash-image).
+
+    @param prompt: Consigne texte
+    @param system_instruction: Instruction systeme optionnelle
+    @param model: Modele image (defaut GEMINI_IMAGE_MODEL)
+    @param aspect_ratio: 1:1|3:4|4:3|9:16|16:9
+    @param timeout_ms: Timeout HTTP
+    @param reference_images: Images de reference optionnelles
+        [{bytes|data_b64, mime_type, device?}]
+    @returns: Liste {mime_type, data_b64, bytes}
+    @raises GeminiClientError: Echec API
+    """
+    cfg = gemini_config()
+    resolved_model = (
+        model
+        or os.environ.get('GEMINI_IMAGE_MODEL')
+        or 'gemini-2.5-flash-image'
+    )
+    api_keys = get_gemini_api_keys()
+
+    parts: List[Dict[str, Any]] = [{'text': prompt}]
+    for img in reference_images or []:
+        mime = str(img.get('mime_type') or 'image/webp')
+        raw_b = img.get('bytes')
+        if raw_b is None and img.get('data_b64'):
+            raw_b = base64.b64decode(img['data_b64'])
+        if not raw_b:
+            continue
+        parts.append({
+            'inline_data': {
+                'mime_type': mime,
+                'data': base64.b64encode(raw_b).decode('ascii'),
+            },
+        })
+
+    body: Dict[str, Any] = {
+        'contents': [{'role': 'user', 'parts': parts}],
+        'generationConfig': {
+            'responseModalities': ['TEXT', 'IMAGE'],
+            'imageConfig': {
+                'aspectRatio': aspect_ratio if aspect_ratio in (
+                    '1:1', '3:4', '4:3', '9:16', '16:9'
+                ) else '16:9',
+            },
+        },
+    }
+    if system_instruction:
+        body['systemInstruction'] = {'parts': [{'text': system_instruction}]}
+
+    last_error: Optional[Exception] = None
+    active = _active_api_keys(api_keys)
+    if not active:
+        rpd_n = len(_rpd_exhausted_until)
+        if rpd_n:
+            raise GeminiQuotaError(
+                f'Gemini image — aucune cle active ({rpd_n} compte(s) en RPD)'
+            )
+        raise GeminiClientError('Gemini — aucune cle active pour image gen')
+
+    global _preferred_key_index
+    n = len(active)
+    for offset in range(n):
+        idx = (_preferred_key_index + offset) % n
+        api_key = active[idx]
+        tag = _key_tag(api_key, offset + 1, len(api_keys))
+        try:
+            status, raw = _request_gemini(
+                api_key=api_key,
+                model=resolved_model,
+                body=body,
+                timeout_ms=timeout_ms,
+            )
+        except requests.RequestException as exc:
+            last_error = GeminiClientError(f'Gemini reseau: {exc}')
+            logger.warning('[GeminiImg] %s — reseau, cle suivante…', tag)
+            continue
+
+        if status == 200:
+            try:
+                resp_parts = _parse_gemini_parts(raw)
+            except GeminiClientError as exc:
+                last_error = exc
+                continue
+            images: List[Dict[str, Any]] = []
+            for p in resp_parts:
+                inline = p.get('inline_data') or p.get('inlineData') or {}
+                data_b64 = inline.get('data')
+                mime = inline.get('mime_type') or inline.get('mimeType') or 'image/png'
+                if not data_b64:
+                    continue
+                try:
+                    raw_bytes = base64.b64decode(data_b64)
+                except Exception:
+                    continue
+                images.append({
+                    'mime_type': mime,
+                    'data_b64': data_b64,
+                    'bytes': raw_bytes,
+                })
+            if images:
+                _preferred_key_index = idx
+                if offset > 0:
+                    logger.warning('[GeminiImg] OK avec %s (%s image(s))', tag, len(images))
+                return images
+            last_error = GeminiClientError('Gemini image — aucune image dans la reponse')
+            continue
+
+        last_error = GeminiClientError(f'Gemini {status}: {raw[:400]}')
+        if status == 429:
+            if _is_daily_quota_body(raw):
+                _mark_key_rpd_exhausted(api_key, tag)
+            else:
+                logger.warning('[GeminiImg] %s — quota RPM 429, cle suivante…', tag)
+            continue
+        if status in (401, 403):
+            lowered = (raw or '').lower()
+            if status == 401 or 'api key not valid' in lowered or 'api_key_invalid' in lowered:
+                _revoked_keys.add(api_key)
+                logger.warning('[GeminiImg] %s — cle ignoree (%s)', tag, status)
+            else:
+                logger.warning('[GeminiImg] %s — %s, cle suivante…', tag, status)
+            continue
+        logger.warning('[GeminiImg] %s — erreur %s', tag, status)
+
+    raise GeminiClientError(str(last_error) if last_error else 'Gemini image echec')
 
 
 def gemini_vision_json(
@@ -364,6 +1084,8 @@ def gemini_vision_multi_json(
     max_tokens: int = 4096,
     timeout_ms: int = DEFAULT_TIMEOUT_MS,
     tools: Optional[List[Dict[str, Any]]] = None,
+    quota_retry_rounds: Optional[int] = None,
+    progress_cb=None,
 ) -> Dict[str, Any]:
     """
     Analyse multimodale (plusieurs images + texte) via Gemini, reponse JSON.
@@ -375,6 +1097,8 @@ def gemini_vision_multi_json(
     @param max_tokens: Limite de sortie
     @param timeout_ms: Timeout HTTP en ms
     @param tools: Outils Gemini optionnels (ex. url_context)
+    @param quota_retry_rounds: Tours de pause 429 (defaut config)
+    @param progress_cb: Callback journal UI (message, pct)
     @returns: Dict JSON parse
     @raises GeminiClientError: Echec API ou JSON invalide
     """
@@ -400,6 +1124,8 @@ def gemini_vision_multi_json(
         max_tokens=max_tokens,
         timeout_ms=timeout_ms,
         tools=tools,
+        quota_retry_rounds=quota_retry_rounds,
+        progress_cb=progress_cb,
     )
     try:
         return json.loads(raw)

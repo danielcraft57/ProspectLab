@@ -19,8 +19,14 @@ class AuthManager:
     """
     
     def __init__(self):
-        """Initialise le gestionnaire d'authentification (DB disponible pour compatibilité)."""
-        self.db = Database()
+        """Initialise le gestionnaire d'authentification (DB lazy — is_authenticated n'en a pas besoin)."""
+        self._db = None
+
+    @property
+    def db(self) -> Database:
+        if self._db is None:
+            self._db = Database()
+        return self._db
     
     def hash_password(self, password: str) -> str:
         """

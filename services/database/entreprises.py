@@ -1154,7 +1154,7 @@ class EntrepriseManager(DatabaseBase):
 
     def refresh_has_gemini_report(self, entreprise_id: int, cursor=None) -> bool:
         """
-        Met a jour entreprises.has_gemini_report (0/1) si un rapport done existe.
+        Met a jour entreprises.has_gemini_report + gemini_report_source.
 
         @param entreprise_id: ID entreprise
         @param cursor: Curseur optionnel
@@ -1177,7 +1177,15 @@ class EntrepriseManager(DatabaseBase):
                         SELECT 1 FROM entreprise_gemini_reports g
                         WHERE g.entreprise_id = entreprises.id
                           AND g.status = 'done'
-                    ) THEN 1 ELSE 0 END
+                    ) THEN 1 ELSE 0 END,
+                    gemini_report_source = (
+                        SELECT g.source
+                        FROM entreprise_gemini_reports g
+                        WHERE g.entreprise_id = entreprises.id
+                          AND g.status = 'done'
+                        ORDER BY g.created_at DESC, g.id DESC
+                        LIMIT 1
+                    )
                 WHERE id = ?
                 ''',
                 (int(entreprise_id),),
@@ -1561,6 +1569,8 @@ class EntrepriseManager(DatabaseBase):
                     entreprise[flag_key] = bool(int(hs)) if hs is not None else False
                 except (TypeError, ValueError):
                     entreprise[flag_key] = bool(hs)
+            src = entreprise.get('gemini_report_source')
+            entreprise['gemini_report_source'] = (str(src).strip() if src else '') or ''
             
             if include_og:
                 try:
@@ -3158,222 +3168,7 @@ class EntrepriseManager(DatabaseBase):
                 continue
         return out
 
-    def save_entreprise_gemini_report(
-        self,
-        *,
-        entreprise_id: int,
-        report: dict | None = None,
-        overall_score: int | None = None,
-        refonte_recommendation: str | None = None,
-        source: str | None = None,
-        status: str = 'done',
-        error_message: str | None = None,
-        modules_used: dict | None = None,
-        screenshot_set_id: int | None = None,
-        analyzed_at: str | None = None,
-    ) -> int:
-        """
-        Persiste un rapport Gemini complet pour une entreprise.
-
-        @param entreprise_id: ID entreprise
-        @param report: Dict rapport (serialise en JSON)
-        @param overall_score: Score 0-100
-        @param refonte_recommendation: aucune|legere|partielle|totale
-        @param source: gemini|heuristic
-        @param status: done|failed|pending
-        @param error_message: Message d'erreur optionnel
-        @param modules_used: Dict modules utilises
-        @param screenshot_set_id: ID set screenshots
-        @param analyzed_at: Timestamp
-        @returns: ID de la ligne creee
-        """
-        import json as _json
-
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        score = None
-        if overall_score is not None:
-            try:
-                score = max(0, min(100, int(overall_score)))
-            except (TypeError, ValueError):
-                score = None
-        report_json = None
-        if report is not None:
-            try:
-                report_json = _json.dumps(report, ensure_ascii=False, default=str)
-            except Exception:
-                report_json = None
-        modules_json = None
-        if modules_used is not None:
-            try:
-                modules_json = _json.dumps(modules_used, ensure_ascii=False, default=str)
-            except Exception:
-                modules_json = None
-        if self.is_postgresql():
-            cursor.execute(
-                '''
-                INSERT INTO entreprise_gemini_reports (
-                    entreprise_id, status, report_json, overall_score, refonte_recommendation,
-                    source, error_message, modules_used_json, screenshot_set_id, analyzed_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP))
-                RETURNING id
-                ''',
-                (
-                    int(entreprise_id),
-                    (str(status).strip()[:40] if status else 'done'),
-                    report_json,
-                    score,
-                    (str(refonte_recommendation).strip()[:40] if refonte_recommendation else None),
-                    (str(source).strip()[:40] if source else None),
-                    (str(error_message).strip()[:2000] if error_message else None),
-                    modules_json,
-                    int(screenshot_set_id) if screenshot_set_id else None,
-                    analyzed_at,
-                ),
-            )
-            row = cursor.fetchone()
-            if not row:
-                rid = 0
-            elif isinstance(row, dict):
-                rid = row.get('id') or 0
-            else:
-                rid = row[0] or 0
-        else:
-            self.execute_sql(
-                cursor,
-                '''
-                INSERT INTO entreprise_gemini_reports (
-                    entreprise_id, status, report_json, overall_score, refonte_recommendation,
-                    source, error_message, modules_used_json, screenshot_set_id, analyzed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
-                ''',
-                (
-                    int(entreprise_id),
-                    (str(status).strip()[:40] if status else 'done'),
-                    report_json,
-                    score,
-                    (str(refonte_recommendation).strip()[:40] if refonte_recommendation else None),
-                    (str(source).strip()[:40] if source else None),
-                    (str(error_message).strip()[:2000] if error_message else None),
-                    modules_json,
-                    int(screenshot_set_id) if screenshot_set_id else None,
-                    analyzed_at,
-                ),
-            )
-            rid = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        try:
-            if str(status or 'done').strip().lower() == 'done':
-                self.refresh_has_gemini_report(int(entreprise_id))
-        except Exception:
-            pass
-        return int(rid or 0)
-
-    def get_latest_entreprise_gemini_report(self, entreprise_id: int) -> dict | None:
-        """
-        Retourne le dernier rapport Gemini d'une entreprise (JSON parse).
-
-        @param entreprise_id: ID entreprise
-        @returns: Dict ou None
-        """
-        import json as _json
-
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        self.execute_sql(
-            cursor,
-            '''
-            SELECT id, entreprise_id, status, report_json, overall_score, refonte_recommendation,
-                   source, error_message, modules_used_json, screenshot_set_id, analyzed_at,
-                   created_at, updated_at
-            FROM entreprise_gemini_reports
-            WHERE entreprise_id = ?
-            ORDER BY created_at DESC, id DESC
-            LIMIT 1
-            ''',
-            (int(entreprise_id),),
-        )
-        row = cursor.fetchone()
-        conn.close()
-        if not row:
-            return None
-        d = self.clean_row_dict(dict(row))
-        raw = d.pop('report_json', None)
-        report = None
-        if isinstance(raw, dict):
-            report = raw
-        elif isinstance(raw, str) and raw.strip():
-            try:
-                parsed = _json.loads(raw)
-                report = parsed if isinstance(parsed, dict) else None
-            except Exception:
-                report = None
-        d['report'] = report
-        mods = d.pop('modules_used_json', None)
-        if isinstance(mods, str) and mods.strip():
-            try:
-                d['modules_used'] = _json.loads(mods)
-            except Exception:
-                d['modules_used'] = None
-        elif isinstance(mods, dict):
-            d['modules_used'] = mods
-        else:
-            d['modules_used'] = None
-        return d
-
-    def list_entreprise_gemini_reports(self, entreprise_id: int, limit: int = 10) -> list[dict]:
-        """
-        Historique des rapports Gemini (plus recent en premier).
-
-        @param entreprise_id: ID entreprise
-        @param limit: Nombre max
-        @returns: Liste de dicts
-        """
-        import json as _json
-
-        lim = max(1, min(int(limit or 10), 50))
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        self.execute_sql(
-            cursor,
-            '''
-            SELECT id, entreprise_id, status, report_json, overall_score, refonte_recommendation,
-                   source, error_message, modules_used_json, screenshot_set_id, analyzed_at,
-                   created_at, updated_at
-            FROM entreprise_gemini_reports
-            WHERE entreprise_id = ?
-            ORDER BY created_at DESC, id DESC
-            LIMIT ?
-            ''',
-            (int(entreprise_id), lim),
-        )
-        rows = cursor.fetchall() or []
-        conn.close()
-        out = []
-        for r in rows:
-            d = self.clean_row_dict(dict(r))
-            raw = d.pop('report_json', None)
-            report = None
-            if isinstance(raw, dict):
-                report = raw
-            elif isinstance(raw, str) and raw.strip():
-                try:
-                    parsed = _json.loads(raw)
-                    report = parsed if isinstance(parsed, dict) else None
-                except Exception:
-                    report = None
-            d['report'] = report
-            mods = d.pop('modules_used_json', None)
-            if isinstance(mods, str) and mods.strip():
-                try:
-                    d['modules_used'] = _json.loads(mods)
-                except Exception:
-                    d['modules_used'] = None
-            else:
-                d['modules_used'] = mods if isinstance(mods, dict) else None
-            out.append(d)
-        return out
+    # save/get/list gemini reports: voir services.database.gemini_reports.GeminiReportManager
 
     def create_landing_variant_run(
         self,

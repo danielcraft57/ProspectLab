@@ -6,8 +6,16 @@ scraping et autres opérations longues.
 """
 
 from flask import request
-from flask_socketio import emit
+from flask_socketio import emit, join_room
 from utils.helpers import safe_emit
+from utils.ws_rooms import (
+    freeze_notify_rooms,
+    register_sid_room,
+    unregister_sid,
+    sanitize_client_id,
+    client_room,
+    user_room,
+)
 from celery_app import celery
 from tasks.analysis_tasks import analyze_entreprise_orchestrator_task
 from tasks.scraping_tasks import (
@@ -82,6 +90,75 @@ def _flatten_scrape_socket_payload(results, entreprise_id=None):
         'scraped_location': r.get('scraped_location'),
         'results': r,
     }
+
+
+def _gemini_result_is_quota(result) -> bool:
+    """
+    Detecte un rapport Gemini tombe en quota (heuristique / flag explicite).
+
+    @param result: Dict resultat Celery SUCCESS
+    @returns: True si quota Gemini
+    """
+    if not isinstance(result, dict):
+        return False
+    if result.get('quota_exceeded'):
+        return True
+    src = str(result.get('source') or '').lower()
+    fb = str(result.get('fallback_error') or '')
+    err = str(result.get('error') or '')
+    blob = f'{fb} {err}'.lower()
+    if any(m in blob for m in ('429', 'quota', 'resource_exhausted', 'resource exhausted', 'rate limit', 'rate_limit')):
+        return True
+    if src == 'heuristic' and any(m in blob for m in ('429', 'quota')):
+        return True
+    return False
+
+
+def _gemini_error_is_quota(error_text) -> bool:
+    """
+    Detecte un message d'erreur Celery FAILURE lie au quota.
+
+    @param error_text: Exception / str
+    @returns: True si quota
+    """
+    text = str(error_text or '').lower()
+    return any(
+        m in text
+        for m in ('429', 'quota', 'resource_exhausted', 'resource exhausted', 'rate limit', 'rate_limit')
+    )
+
+
+def _gemini_progress_is_quota(meta) -> bool:
+    """
+    Detecte un message PROGRESS indiquant un 429 global (toutes cles).
+
+    Permet d'emettre ``gemini_report_quota`` avant la fin du fallback heuristique,
+    pour couper le spinner et afficher le toast warning tout de suite.
+
+    @param meta: Dict meta Celery PROGRESS
+    @returns: True si quota visible dans message/logs
+    """
+    if not isinstance(meta, dict):
+        return False
+    parts = [str(meta.get('message') or '')]
+    logs = meta.get('logs') or []
+    if isinstance(logs, (list, tuple)):
+        parts.extend(str(x) for x in logs[-8:])
+    blob = ' '.join(parts).lower()
+    markers = (
+        'toutes les cles en 429',
+        'aucune cle active',
+        'quota gemini atteint',
+        'resource_exhausted',
+        'resource exhausted',
+    )
+    if any(m in blob for m in markers):
+        return True
+    # 429 explicite sans 503 (evite de confondre surcharge et quota)
+    if '429' in blob and '503' not in blob and 'high demand' not in blob:
+        return True
+    return False
+
 
 # Initialiser les services
 database = Database()
@@ -167,16 +244,70 @@ def register_websocket_handlers(socketio, app):
 
     @socketio.on('connect')
     def handle_socket_connect():
-        """Voir prospectlab.log (niveau DEBUG) ou activer logging DEBUG pour tracer les connexions."""
+        """
+        Connexion Socket.IO : joint automatiquement user:{id} si session loggee.
+        Le client doit aussi emettre join_notify_room (client uuid localStorage).
+        """
         try:
-            app.logger.debug('[Socket.IO] connect sid=%s', request.sid)
+            sid = request.sid
+            app.logger.debug('[Socket.IO] connect sid=%s', sid)
+            try:
+                from flask import session
+                uid = session.get('user_id')
+                if uid:
+                    room = user_room(int(uid))
+                    join_room(room)
+                    register_sid_room(sid, room)
+                    app.logger.debug('[Socket.IO] join %s (sid=%s)', room, sid)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    @socketio.on('join_notify_room')
+    def handle_join_notify_room(data):
+        """
+        Rejoint une room stable client:{uuid} (+ user:{id} si logge).
+
+        Args:
+            data (dict): { client_id: str }
+        """
+        try:
+            from flask import session
+            sid = request.sid
+            joined = []
+            client_id = sanitize_client_id((data or {}).get('client_id') if isinstance(data, dict) else None)
+            if client_id:
+                room = client_room(client_id)
+                join_room(room)
+                register_sid_room(sid, room)
+                joined.append(room)
+            uid = session.get('user_id')
+            if uid:
+                room = user_room(int(uid))
+                join_room(room)
+                register_sid_room(sid, room)
+                if room not in joined:
+                    joined.append(room)
+            safe_emit(
+                socketio,
+                'notify_room_joined',
+                {'rooms': joined, 'sid': sid},
+                room=sid,
+            )
+            try:
+                app.logger.debug('[Socket.IO] join_notify_room sid=%s rooms=%s', sid, joined)
+            except Exception:
+                pass
         except Exception:
             pass
 
     @socketio.on('disconnect')
     def handle_socket_disconnect():
         try:
-            app.logger.debug('[Socket.IO] disconnect sid=%s', request.sid)
+            sid = request.sid
+            unregister_sid(sid)
+            app.logger.debug('[Socket.IO] disconnect sid=%s', sid)
         except Exception:
             pass
     
@@ -198,6 +329,7 @@ def register_websocket_handlers(socketio, app):
             enable_osint = data.get('enable_osint', False)
             session_id = request.sid
             
+            notify_rooms = freeze_notify_rooms(session_id)
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             # Sur certains déploiements (volume réseau / IO lente / multi-instances),
             # le fichier peut ne pas être visible immédiatement. Attente courte + retry.
@@ -216,7 +348,7 @@ def register_websocket_handlers(socketio, app):
                     socketio,
                     'analysis_error',
                     {'error': f'Fichier introuvable: {filepath}'},
-                    room=session_id
+                    room=notify_rooms
                 )
                 return
 
@@ -237,12 +369,12 @@ def register_websocket_handlers(socketio, app):
                             'total': 0,
                             'percentage': 0,
                             'message': 'Copie du fichier vers le cluster...'
-                        }, room=session_id)
+                        }, room=notify_rooms)
                         filepath = cluster_copy_upload_to_workers(filepath, remote_filename=filename)
             except Exception as e:
                 safe_emit(socketio, 'analysis_error', {
                     'error': f'Erreur copie fichier vers cluster: {str(e)}'
-                }, room=session_id)
+                }, room=notify_rooms)
                 return
             
             # Créer le fichier de sortie
@@ -264,7 +396,7 @@ def register_websocket_handlers(socketio, app):
                 error_msg += '(ex: .\\scripts\\windows\\start-celery.ps1 ou celery -A celery_app worker --loglevel=info).'
                 safe_emit(socketio, 'analysis_error', {
                     'error': error_msg
-                }, room=session_id)
+                }, room=notify_rooms)
                 logger.warning(f'Start_analysis refusé (erreur connexion broker): {e}')
                 return
             
@@ -283,14 +415,14 @@ def register_websocket_handlers(socketio, app):
             except Exception as e:
                 safe_emit(socketio, 'analysis_error', {
                     'error': f'Erreur lors du démarrage de la tâche: {str(e)}'
-                }, room=session_id)
+                }, room=notify_rooms)
                 return
         
             # Stocker la tâche
             with tasks_lock:
                 active_tasks[session_id] = {'task_id': task.id, 'type': 'analysis'}
             
-            safe_emit(socketio, 'analysis_started', {'message': 'Analyse démarrée...', 'task_id': task.id}, room=session_id)
+            safe_emit(socketio, 'analysis_started', {'message': 'Analyse démarrée...', 'task_id': task.id}, room=notify_rooms)
         
             # Surveiller la progression de la tâche dans un thread séparé
             scraping_launched = False  # Marqueur pour éviter de relancer le scraping plusieurs fois
@@ -316,7 +448,7 @@ def register_websocket_handlers(socketio, app):
                                         'percentage': meta.get('percentage', 0),
                                         'message': meta.get('message', '')
                                     }
-                                    safe_emit(socketio, 'analysis_progress', progress_data, room=session_id)
+                                    safe_emit(socketio, 'analysis_progress', progress_data, room=notify_rooms)
 
                                     # Si le Celery meta contient des infos de scraping, les propager aussi
                                     scraping_message = meta.get('scraping_message')
@@ -325,7 +457,7 @@ def register_websocket_handlers(socketio, app):
                                             'message': scraping_message,
                                             'url': meta.get('scraping_url'),
                                             'entreprise': meta.get('scraping_entreprise')
-                                        }, room=session_id)
+                                        }, room=notify_rooms)
 
                                     last_meta = meta
                             elif current_state == 'PENDING' and last_state != 'PENDING':
@@ -335,7 +467,7 @@ def register_websocket_handlers(socketio, app):
                                     'total': 0,
                                     'percentage': 0,
                                     'message': 'Tâche en attente...'
-                                }, room=session_id)
+                                }, room=notify_rooms)
                             elif current_state == 'SUCCESS':
                                 # Ne traiter SUCCESS qu'une seule fois
                                 if scraping_launched:
@@ -363,7 +495,7 @@ def register_websocket_handlers(socketio, app):
                                     'stats': stats,
                                     'message': f'Analyse terminée avec succès ! {effective_total} nouvelles entreprises analysées.'
                                     },
-                                    room=session_id
+                                    room=notify_rooms
                                 )
 
                                 # Lancer automatiquement le scraping de toutes les entreprises de cette analyse
@@ -435,7 +567,7 @@ def register_websocket_handlers(socketio, app):
                                                     'analysis_id': analysis_id,
                                                     'total': total_entreprises_avec_site
                                                 },
-                                                room=session_id
+                                                room=notify_rooms
                                             )
     
                                             # L'analyse technique est maintenant lancée en parallèle dans la tâche de scraping
@@ -451,7 +583,7 @@ def register_websocket_handlers(socketio, app):
                                                         'current': 0,
                                                         'immediate_100': False
                                                     },
-                                                    room=session_id
+                                                    room=notify_rooms
                                                 )
                                                 logger.debug(f'Événement technical_analysis_started émis pour {total_entreprises_avec_site} entreprises')
                                             
@@ -496,7 +628,7 @@ def register_websocket_handlers(socketio, app):
                                                                             'total_technologies': meta_scraping.get('total_technologies', 0),
                                                                             'total_images': meta_scraping.get('total_images', 0),
                                                                         },
-                                                                        room=session_id
+                                                                        room=notify_rooms
                                                                     )
     
                                                                     # Récupérer les IDs des tâches techniques depuis le meta
@@ -552,7 +684,7 @@ def register_websocket_handlers(socketio, app):
                                                                                                         'entreprise': tech_info.get('nom', 'N/A'),
                                                                                                         'task_progress': progress_tech
                                                                                                     },
-                                                                                                    room=session_id
+                                                                                                    room=notify_rooms
                                                                                                 )
                                                                                                 tech_tasks_status[task_id]['last_progress'] = progress_tech
                                                                                         elif current_state == 'PENDING':
@@ -579,7 +711,7 @@ def register_websocket_handlers(socketio, app):
                                                                                                         'url': tech_info.get('url', ''),
                                                                                                         'entreprise': tech_info.get('nom', 'N/A')
                                                                                                     },
-                                                                                                    room=session_id
+                                                                                                    room=notify_rooms
                                                                                                 )
                                                                                             else:
                                                                                                 total_progress_sum += 100
@@ -604,7 +736,7 @@ def register_websocket_handlers(socketio, app):
                                                                                                         'url': tech_info.get('url', ''),
                                                                                                         'entreprise': tech_info.get('nom', 'N/A')
                                                                                                     },
-                                                                                                    room=session_id
+                                                                                                    room=notify_rooms
                                                                                                 )
                                                                                             else:
                                                                                                 total_progress_sum += 100
@@ -624,7 +756,7 @@ def register_websocket_handlers(socketio, app):
                                                                                     'current': tech_completed,
                                                                                     'total': total_tech
                                                                                 },
-                                                                                room=session_id
+                                                                                room=notify_rooms
                                                                             )
                                                                         
                                                                         _start_monitor_background(socketio, monitor_tech_tasks_realtime)
@@ -658,7 +790,7 @@ def register_websocket_handlers(socketio, app):
                                                                                         'expected_total': expected_total_osint,
                                                                                         'current': 0
                                                                                     },
-                                                                                    room=session_id
+                                                                                    room=notify_rooms
                                                                                 )
                                                                         
                                                                         # Démarrer le monitoring si ce n'est pas déjà fait
@@ -677,7 +809,7 @@ def register_websocket_handlers(socketio, app):
                                                                                     'expected_total': expected_total_osint,
                                                                                     'current': 0
                                                                                 },
-                                                                                room=session_id
+                                                                                room=notify_rooms
                                                                             )
                                                                         
                                                                         # Démarrer le monitoring des analyses OSINT en temps réel
@@ -769,7 +901,7 @@ def register_websocket_handlers(socketio, app):
                                                                                                         'task_progress': progress_osint,
                                                                                                         'cumulative_totals': osint_cumulative_totals.copy()
                                                                                                     },
-                                                                                                    room=session_id
+                                                                                                    room=notify_rooms
                                                                                                 )
                                                                                         elif current_state == 'SUCCESS':
                                                                                             if not osint_tasks_status[task_id]['completed']:
@@ -829,7 +961,7 @@ def register_websocket_handlers(socketio, app):
                                                                                                         'summary': summary,
                                                                                                         'cumulative_totals': osint_cumulative_totals.copy()
                                                                                                     },
-                                                                                                    room=session_id
+                                                                                                    room=notify_rooms
                                                                                                 )
                                                                                         elif current_state == 'FAILURE':
                                                                                             if not osint_tasks_status[task_id]['completed']:
@@ -855,7 +987,7 @@ def register_websocket_handlers(socketio, app):
                                                                                                         'url': osint_info.get('url', ''),
                                                                                                         'entreprise': osint_info.get('nom', 'N/A')
                                                                                                     },
-                                                                                                    room=session_id
+                                                                                                    room=notify_rooms
                                                                                                 )
                                                                                             else:
                                                                                                 total_progress_sum += 100
@@ -880,7 +1012,7 @@ def register_websocket_handlers(socketio, app):
                                                                                     'total': final_total,
                                                                                     'expected_total': expected_total_osint
                                                                                 },
-                                                                                room=session_id
+                                                                                room=notify_rooms
                                                                             )
                                                                         
                                                                         _start_monitor_background(socketio, monitor_osint_tasks_realtime)
@@ -912,7 +1044,7 @@ def register_websocket_handlers(socketio, app):
                                                                                         'expected_total': expected_total_entreprises,
                                                                                         'current': 0
                                                                                     },
-                                                                                    room=session_id
+                                                                                    room=notify_rooms
                                                                                 )
                                                                         
                                                                         if not monitor_scraping.pentest_monitoring_started and len(monitor_scraping.pentest_tasks_to_monitor) > 0:
@@ -928,7 +1060,7 @@ def register_websocket_handlers(socketio, app):
                                                                                     'expected_total': expected_total_entreprises,
                                                                                     'current': 0
                                                                                 },
-                                                                                room=session_id
+                                                                                room=notify_rooms
                                                                             )
                                                                             
                                                                             def monitor_pentest_tasks_realtime():
@@ -993,7 +1125,7 @@ def register_websocket_handlers(socketio, app):
                                                                                                             'task_progress': progress_pentest,
                                                                                                             'cumulative_totals': pentest_cumulative_totals.copy()
                                                                                                         },
-                                                                                                        room=session_id
+                                                                                                        room=notify_rooms
                                                                                                     )
                                                                                                     pentest_status[task_id]['last_progress'] = progress_pentest
                                                                                             elif current_state == 'SUCCESS':
@@ -1043,7 +1175,7 @@ def register_websocket_handlers(socketio, app):
                                                                                                             'risk_score': risk_score,
                                                                                                             'cumulative_totals': pentest_cumulative_totals.copy()
                                                                                                         },
-                                                                                                        room=session_id
+                                                                                                        room=notify_rooms
                                                                                                     )
                                                                                             elif current_state == 'FAILURE':
                                                                                                 if not pentest_status[task_id]['completed']:
@@ -1061,7 +1193,7 @@ def register_websocket_handlers(socketio, app):
                                                                                                             'entreprise': pentest_info.get('nom', 'N/A'),
                                                                                                             'progress': global_progress
                                                                                                         },
-                                                                                                        room=session_id
+                                                                                                        room=notify_rooms
                                                                                                     )
                                                                                         except Exception as e:
                                                                                             logger.warning(f'Erreur monitoring tâche Pentest {task_id}: {e}')
@@ -1082,7 +1214,7 @@ def register_websocket_handlers(socketio, app):
                                                                                                     'progress': global_progress,
                                                                                                     'message': 'Analyse Pentest en cours...'
                                                                                                 },
-                                                                                                room=session_id
+                                                                                                room=notify_rooms
                                                                                             )
                                                                                             last_global_progress = global_progress
                                                                                     
@@ -1108,7 +1240,7 @@ def register_websocket_handlers(socketio, app):
                                                                                         'total': final_total,
                                                                                         'expected_total': expected_total_entreprises
                                                                                     },
-                                                                                    room=session_id
+                                                                                    room=notify_rooms
                                                                                 )
                                                                             
                                                                             _start_monitor_background(socketio, monitor_pentest_tasks_realtime)
@@ -1157,7 +1289,7 @@ def register_websocket_handlers(socketio, app):
                                                                         'total_technologies': stats.get('total_technologies', 0),
                                                                         'total_images': stats.get('total_images', 0)
                                                                     },
-                                                                    room=session_id
+                                                                    room=notify_rooms
                                                                 )
                                                                 
                                                                 
@@ -1174,7 +1306,7 @@ def register_websocket_handlers(socketio, app):
                                                                     {
                                                                         'error': str(scraping_result.info)
                                                                     },
-                                                                    room=session_id
+                                                                    room=notify_rooms
                                                                 )
                                                                 with tasks_lock:
                                                                     if session_id in active_tasks:
@@ -1187,7 +1319,7 @@ def register_websocket_handlers(socketio, app):
                                                                 {
                                                                     'error': f'Erreur lors du suivi du scraping: {str(e_scraping)}'
                                                                 },
-                                                                room=session_id
+                                                                room=notify_rooms
                                                             )
                                                             with tasks_lock:
                                                                 if session_id in active_tasks:
@@ -1201,7 +1333,7 @@ def register_websocket_handlers(socketio, app):
                                                         {
                                                             'error': f'Erreur générale dans le suivi du scraping: {str(e_scraping)}'
                                                         },
-                                                        room=session_id
+                                                        room=notify_rooms
                                                     )
     
                                             _start_monitor_background(socketio, monitor_scraping)
@@ -1219,7 +1351,7 @@ def register_websocket_handlers(socketio, app):
                                             {
                                                 'error': f'Impossible de démarrer le scraping automatique: {str(e_scraping_start)}'
                                             },
-                                            room=session_id
+                                            room=notify_rooms
                                         )
 
                                 else:
@@ -1230,7 +1362,7 @@ def register_websocket_handlers(socketio, app):
                             elif current_state == 'FAILURE':
                                 safe_emit(socketio, 'analysis_error', {
                                     'error': str(task_result.info)
-                                }, room=session_id)
+                                }, room=notify_rooms)
                                 with tasks_lock:
                                     if session_id in active_tasks:
                                         del active_tasks[session_id]
@@ -1241,7 +1373,7 @@ def register_websocket_handlers(socketio, app):
                             # Erreur lors de la vérification de l'état de la tâche
                             safe_emit(socketio, 'analysis_error', {
                                 'error': f'Erreur lors du suivi de la tâche: {str(e)}'
-                            }, room=session_id)
+                            }, room=notify_rooms)
                             with tasks_lock:
                                 if session_id in active_tasks:
                                     del active_tasks[session_id]
@@ -1251,7 +1383,7 @@ def register_websocket_handlers(socketio, app):
                     # Erreur générale dans le thread de monitoring
                     safe_emit(socketio, 'analysis_error', {
                         'error': f'Erreur dans le suivi: {str(e)}'
-                    }, room=session_id)
+                    }, room=notify_rooms)
             
             _start_monitor_background(socketio, monitor_task)
         except Exception as e:
@@ -1269,13 +1401,14 @@ def register_websocket_handlers(socketio, app):
         Arrête une analyse en cours
         """
         session_id = request.sid
+        notify_rooms = freeze_notify_rooms(session_id)
         with tasks_lock:
             if session_id in active_tasks and active_tasks[session_id]['type'] == 'analysis':
                 task_id = active_tasks[session_id]['task_id']
                 # Révoquer la tâche Celery
                 celery.AsyncResult(task_id).revoke(terminate=True)
                 del active_tasks[session_id]
-                safe_emit(socketio, 'analysis_stopped', {'message': 'Analyse arrêtée'}, room=session_id)
+                safe_emit(socketio, 'analysis_stopped', {'message': 'Analyse arrêtée'}, room=notify_rooms)
     
     @socketio.on('start_scraping')
     def handle_start_scraping(data):
@@ -1298,6 +1431,7 @@ def register_websocket_handlers(socketio, app):
                 entreprise_id = None
             session_id = request.sid
 
+            notify_rooms = freeze_notify_rooms(session_id)
             try:
                 logger.info(
                     '[Socket.IO] start_scraping sid=%s entreprise_id=%s url=%s depth=%s workers=%s time=%s pages=%s',
@@ -1332,7 +1466,7 @@ def register_websocket_handlers(socketio, app):
                     )
             
             if not url:
-                safe_emit(socketio, 'scraping_error', {'error': 'URL requise', 'entreprise_id': entreprise_id}, room=session_id)
+                safe_emit(socketio, 'scraping_error', {'error': 'URL requise', 'entreprise_id': entreprise_id}, room=notify_rooms)
                 return
             
             if not broker_ping_ok():
@@ -1353,7 +1487,7 @@ def register_websocket_handlers(socketio, app):
                             'task_id': 'local-scraping',
                             'entreprise_id': entreprise_id,
                         },
-                        room=session_id,
+                        room=notify_rooms,
                     )
 
                     def monitor_local_scrape():
@@ -1369,12 +1503,12 @@ def register_websocket_handlers(socketio, app):
                                     socketio,
                                     'scraping_progress',
                                     {'message': m, 'entreprise_id': entreprise_id},
-                                    room=session_id,
+                                    room=notify_rooms,
                                 ),
                             )
                             res_block = (out or {}).get('results') or {}
                             payload = _flatten_scrape_socket_payload(res_block, entreprise_id)
-                            safe_emit(socketio, 'scraping_complete', payload, room=session_id)
+                            safe_emit(socketio, 'scraping_complete', payload, room=notify_rooms)
                         except Exception as ex:
                             logger.exception(
                                 '[Socket.IO] scraping local in-process échoué sid=%s',
@@ -1384,7 +1518,7 @@ def register_websocket_handlers(socketio, app):
                                 socketio,
                                 'scraping_error',
                                 {'error': str(ex), 'entreprise_id': entreprise_id},
-                                room=session_id,
+                                room=notify_rooms,
                             )
                         finally:
                             with tasks_lock:
@@ -1401,7 +1535,7 @@ def register_websocket_handlers(socketio, app):
                 )
                 safe_emit(socketio, 'scraping_error', {
                     'error': _CELERY_BROKER_UNREACHABLE_MSG
-                }, room=session_id)
+                }, room=notify_rooms)
                 return
             
             # Lancer la tâche Celery
@@ -1427,7 +1561,7 @@ def register_websocket_handlers(socketio, app):
                 safe_emit(socketio, 'scraping_error', {
                     'error': f'Erreur lors du démarrage de la tâche: {str(e)}',
                     'entreprise_id': entreprise_id
-                }, room=session_id)
+                }, room=notify_rooms)
                 return
         
             # Stocker la tâche
@@ -1442,7 +1576,7 @@ def register_websocket_handlers(socketio, app):
                 (url[:100] + '...') if isinstance(url, str) and len(url) > 100 else url,
             )
             
-            safe_emit(socketio, 'scraping_started', {'message': 'Scraping démarré...', 'task_id': task.id, 'entreprise_id': entreprise_id}, room=session_id)
+            safe_emit(socketio, 'scraping_started', {'message': 'Scraping démarré...', 'task_id': task.id, 'entreprise_id': entreprise_id}, room=notify_rooms)
             
             # Surveiller la progression (similaire à l'analyse)
             def monitor_task():
@@ -1455,12 +1589,12 @@ def register_websocket_handlers(socketio, app):
                                 safe_emit(socketio, 'scraping_progress', {
                                     'message': meta.get('message', ''),
                                     'entreprise_id': entreprise_id
-                                }, room=session_id)
+                                }, room=notify_rooms)
                             elif task_result.state == 'SUCCESS':
                                 result = _celery_success_result_as_dict(task_result.result)
                                 res_block = (result or {}).get('results') or {}
                                 payload = _flatten_scrape_socket_payload(res_block, entreprise_id)
-                                safe_emit(socketio, 'scraping_complete', payload, room=session_id)
+                                safe_emit(socketio, 'scraping_complete', payload, room=notify_rooms)
                                 with tasks_lock:
                                     if session_id in active_tasks:
                                         del active_tasks[session_id]
@@ -1469,7 +1603,7 @@ def register_websocket_handlers(socketio, app):
                                 safe_emit(socketio, 'scraping_error', {
                                     'error': str(task_result.info),
                                     'entreprise_id': entreprise_id
-                                }, room=session_id)
+                                }, room=notify_rooms)
                                 with tasks_lock:
                                     if session_id in active_tasks:
                                         del active_tasks[session_id]
@@ -1478,7 +1612,7 @@ def register_websocket_handlers(socketio, app):
                             safe_emit(socketio, 'scraping_error', {
                                 'error': f'Erreur lors du suivi de la tâche: {str(e)}',
                                 'entreprise_id': entreprise_id
-                            }, room=session_id)
+                            }, room=notify_rooms)
                             with tasks_lock:
                                 if session_id in active_tasks:
                                     del active_tasks[session_id]
@@ -1487,7 +1621,7 @@ def register_websocket_handlers(socketio, app):
                 except Exception as e:
                     safe_emit(socketio, 'scraping_error', {
                         'error': f'Erreur dans le suivi: {str(e)}'
-                    }, room=session_id)
+                    }, room=notify_rooms)
             
             _start_monitor_background(socketio, monitor_task)
         except Exception as e:
@@ -1511,6 +1645,7 @@ def register_websocket_handlers(socketio, app):
             entreprise_id = data.get('entreprise_id')
             session_id = request.sid
 
+            notify_rooms = freeze_notify_rooms(session_id)
             try:
                 logger.info(
                     '[Socket.IO] start_osint_analysis sid=%s entreprise_id=%s url=%s',
@@ -1541,7 +1676,7 @@ def register_websocket_handlers(socketio, app):
                     )
             
             if not url:
-                safe_emit(socketio, 'osint_analysis_error', {'error': 'URL requise'}, room=session_id)
+                safe_emit(socketio, 'osint_analysis_error', {'error': 'URL requise', 'entreprise_id': entreprise_id}, room=notify_rooms)
                 return
             
             if not broker_ping_ok():
@@ -1551,8 +1686,9 @@ def register_websocket_handlers(socketio, app):
                     entreprise_id,
                 )
                 safe_emit(socketio, 'osint_analysis_error', {
-                    'error': _CELERY_BROKER_UNREACHABLE_MSG
-                }, room=session_id)
+                    'error': _CELERY_BROKER_UNREACHABLE_MSG,
+                    'entreprise_id': entreprise_id,
+                }, room=notify_rooms)
                 return
             
             # Récupérer les personnes des scrapers si nécessaire
@@ -1588,8 +1724,9 @@ def register_websocket_handlers(socketio, app):
                     entreprise_id,
                 )
                 safe_emit(socketio, 'osint_analysis_error', {
-                    'error': f'Erreur lors du démarrage de la tâche: {str(e)}'
-                }, room=session_id)
+                    'error': f'Erreur lors du démarrage de la tâche: {str(e)}',
+                    'entreprise_id': entreprise_id,
+                }, room=notify_rooms)
                 return
             
             # Stocker la tâche
@@ -1604,7 +1741,7 @@ def register_websocket_handlers(socketio, app):
                 (url[:100] + '...') if isinstance(url, str) and len(url) > 100 else url,
             )
             
-            safe_emit(socketio, 'osint_analysis_started', {'message': 'Analyse OSINT démarrée...', 'task_id': task.id}, room=session_id)
+            safe_emit(socketio, 'osint_analysis_started', {'message': 'Analyse OSINT démarrée...', 'task_id': task.id, 'entreprise_id': entreprise_id}, room=notify_rooms)
             
             # Surveiller la progression
             def monitor_task():
@@ -1625,7 +1762,7 @@ def register_websocket_handlers(socketio, app):
                                         'task_progress': meta.get('progress', 0),  # Progression de cette tâche
                                         'url': url,
                                         'entreprise_id': entreprise_id
-                                    }, room=session_id)
+                                    }, room=notify_rooms)
                                     last_meta = meta
                             elif current_state == 'SUCCESS':
                                 result = _celery_success_result_as_dict(task_result.result)
@@ -1636,7 +1773,7 @@ def register_websocket_handlers(socketio, app):
                                     'entreprise_id': entreprise_id,
                                     'summary': result.get('summary', {}) if result else {},
                                     'updated': result.get('updated', False) if result else False
-                                }, room=session_id)
+                                }, room=notify_rooms)
                                 with tasks_lock:
                                     if session_id in active_tasks:
                                         del active_tasks[session_id]
@@ -1645,7 +1782,7 @@ def register_websocket_handlers(socketio, app):
                                 safe_emit(socketio, 'osint_analysis_error', {
                                     'error': str(task_result.info),
                                     'entreprise_id': entreprise_id
-                                }, room=session_id)
+                                }, room=notify_rooms)
                                 with tasks_lock:
                                     if session_id in active_tasks:
                                         del active_tasks[session_id]
@@ -1654,7 +1791,7 @@ def register_websocket_handlers(socketio, app):
                             safe_emit(socketio, 'osint_analysis_error', {
                                 'error': f'Erreur lors du suivi de la tâche: {str(e)}',
                                 'entreprise_id': entreprise_id
-                            }, room=session_id)
+                            }, room=notify_rooms)
                             with tasks_lock:
                                 if session_id in active_tasks:
                                     del active_tasks[session_id]
@@ -1664,13 +1801,14 @@ def register_websocket_handlers(socketio, app):
                     safe_emit(socketio, 'osint_analysis_error', {
                         'error': f'Erreur dans le suivi: {str(e)}',
                         'entreprise_id': entreprise_id
-                    }, room=session_id)
+                    }, room=notify_rooms)
             
             _start_monitor_background(socketio, monitor_task)
         except Exception as e:
             try:
                 safe_emit(socketio, 'osint_analysis_error', {
-                    'error': f'Erreur lors du démarrage de l\'analyse OSINT: {str(e)}'
+                    'error': f'Erreur lors du démarrage de l\'analyse OSINT: {str(e)}',
+                    'entreprise_id': data.get('entreprise_id') if isinstance(data, dict) else None,
                 }, room=request.sid)
             except:
                 pass
@@ -1689,6 +1827,7 @@ def register_websocket_handlers(socketio, app):
             options = data.get('options', {})
             session_id = request.sid
 
+            notify_rooms = freeze_notify_rooms(session_id)
             # Log côté serveur (utile quand le front n'a "aucun retour / aucun log").
             try:
                 logger.info(
@@ -1722,7 +1861,7 @@ def register_websocket_handlers(socketio, app):
                     )
 
             if not url:
-                safe_emit(socketio, 'pentest_analysis_error', {'error': 'URL requise'}, room=session_id)
+                safe_emit(socketio, 'pentest_analysis_error', {'error': 'URL requise', 'entreprise_id': entreprise_id}, room=notify_rooms)
                 return
             
             if not broker_ping_ok():
@@ -1732,8 +1871,9 @@ def register_websocket_handlers(socketio, app):
                     entreprise_id,
                 )
                 safe_emit(socketio, 'pentest_analysis_error', {
-                    'error': _CELERY_BROKER_UNREACHABLE_MSG
-                }, room=session_id)
+                    'error': _CELERY_BROKER_UNREACHABLE_MSG,
+                    'entreprise_id': entreprise_id,
+                }, room=notify_rooms)
                 return
 
             # Récupérer les formulaires depuis les scrapers si disponibles (pour tester les formulaires côté Pentest)
@@ -1776,8 +1916,9 @@ def register_websocket_handlers(socketio, app):
                     entreprise_id,
                 )
                 safe_emit(socketio, 'pentest_analysis_error', {
-                    'error': f'Erreur lors du démarrage de la tâche: {str(e)}'
-                }, room=session_id)
+                    'error': f'Erreur lors du démarrage de la tâche: {str(e)}',
+                    'entreprise_id': entreprise_id,
+                }, room=notify_rooms)
                 return
             
             # Stocker la tâche
@@ -1792,7 +1933,7 @@ def register_websocket_handlers(socketio, app):
                 (url[:100] + '...') if isinstance(url, str) and len(url) > 100 else url,
             )
             
-            safe_emit(socketio, 'pentest_analysis_started', {'message': 'Analyse de sécurité démarrée...', 'task_id': task.id}, room=session_id)
+            safe_emit(socketio, 'pentest_analysis_started', {'message': 'Analyse de sécurité démarrée...', 'task_id': task.id, 'entreprise_id': entreprise_id}, room=notify_rooms)
             
             # Surveiller la progression
             def monitor_task():
@@ -1810,7 +1951,7 @@ def register_websocket_handlers(socketio, app):
                                     safe_emit(socketio, 'pentest_analysis_progress', {
                                         'progress': meta.get('progress', 0),
                                         'message': meta.get('message', '')
-                                    }, room=session_id)
+                                    }, room=notify_rooms)
                                     last_meta = meta
                             elif current_state == 'SUCCESS':
                                 result = _celery_success_result_as_dict(task_result.result)
@@ -1822,7 +1963,7 @@ def register_websocket_handlers(socketio, app):
                                     'summary': result.get('summary', {}) if result else {},
                                     'risk_score': result.get('risk_score', 0) if result else 0,
                                     'updated': result.get('updated', False) if result else False
-                                }, room=session_id)
+                                }, room=notify_rooms)
                                 with tasks_lock:
                                     if session_id in active_tasks:
                                         del active_tasks[session_id]
@@ -1831,7 +1972,7 @@ def register_websocket_handlers(socketio, app):
                                 safe_emit(socketio, 'pentest_analysis_error', {
                                     'error': str(task_result.info),
                                     'entreprise_id': entreprise_id
-                                }, room=session_id)
+                                }, room=notify_rooms)
                                 with tasks_lock:
                                     if session_id in active_tasks:
                                         del active_tasks[session_id]
@@ -1840,7 +1981,7 @@ def register_websocket_handlers(socketio, app):
                             safe_emit(socketio, 'pentest_analysis_error', {
                                 'error': f'Erreur lors du suivi de la tâche: {str(e)}',
                                 'entreprise_id': entreprise_id
-                            }, room=session_id)
+                            }, room=notify_rooms)
                             with tasks_lock:
                                 if session_id in active_tasks:
                                     del active_tasks[session_id]
@@ -1850,13 +1991,14 @@ def register_websocket_handlers(socketio, app):
                     safe_emit(socketio, 'pentest_analysis_error', {
                         'error': f'Erreur dans le suivi: {str(e)}',
                         'entreprise_id': entreprise_id
-                    }, room=session_id)
+                    }, room=notify_rooms)
             
             _start_monitor_background(socketio, monitor_task)
         except Exception as e:
             try:
                 safe_emit(socketio, 'pentest_analysis_error', {
-                    'error': f'Erreur lors du démarrage de l\'analyse Pentest: {str(e)}'
+                    'error': f'Erreur lors du démarrage de l\'analyse Pentest: {str(e)}',
+                    'entreprise_id': data.get('entreprise_id') if isinstance(data, dict) else None,
                 }, room=request.sid)
             except:
                 pass
@@ -1876,6 +2018,7 @@ def register_websocket_handlers(socketio, app):
             use_lighthouse = data.get('use_lighthouse', SEO_USE_LIGHTHOUSE_DEFAULT)
             session_id = request.sid
 
+            notify_rooms = freeze_notify_rooms(session_id)
             # app.logger : même cible que setup_root_logger (prospectlab.log sous Gunicorn)
             try:
                 app.logger.info(
@@ -1909,14 +2052,15 @@ def register_websocket_handlers(socketio, app):
                         pass
             
             if not url:
-                safe_emit(socketio, 'seo_analysis_error', {'error': 'URL requise'}, room=session_id)
+                safe_emit(socketio, 'seo_analysis_error', {'error': 'URL requise', 'entreprise_id': entreprise_id}, room=notify_rooms)
                 return
             
             if not broker_ping_ok():
                 app.logger.warning('[Socket.IO] start_seo_analysis: broker Redis injoignable sid=%s', session_id)
                 safe_emit(socketio, 'seo_analysis_error', {
-                    'error': _CELERY_BROKER_UNREACHABLE_MSG
-                }, room=session_id)
+                    'error': _CELERY_BROKER_UNREACHABLE_MSG,
+                    'entreprise_id': entreprise_id,
+                }, room=notify_rooms)
                 return
             
             cd = next_websocket_stagger_countdown(session_id)
@@ -1934,8 +2078,9 @@ def register_websocket_handlers(socketio, app):
             except Exception as e:
                 app.logger.exception('[Socket.IO] apply_async SEO échoué sid=%s: %s', session_id, e)
                 safe_emit(socketio, 'seo_analysis_error', {
-                    'error': f'Erreur lors du démarrage de la tâche: {str(e)}'
-                }, room=session_id)
+                    'error': f'Erreur lors du démarrage de la tâche: {str(e)}',
+                    'entreprise_id': entreprise_id,
+                }, room=notify_rooms)
                 return
             
             app.logger.info(
@@ -1946,7 +2091,7 @@ def register_websocket_handlers(socketio, app):
             with tasks_lock:
                 active_tasks[session_id] = {'task_id': task.id, 'type': 'seo', 'url': url}
             
-            safe_emit(socketio, 'seo_analysis_started', {'message': 'Analyse SEO démarrée...', 'task_id': task.id}, room=session_id)
+            safe_emit(socketio, 'seo_analysis_started', {'message': 'Analyse SEO démarrée...', 'task_id': task.id, 'entreprise_id': entreprise_id}, room=notify_rooms)
             
             # Surveiller la progression
             def monitor_task():
@@ -1964,7 +2109,7 @@ def register_websocket_handlers(socketio, app):
                                     safe_emit(socketio, 'seo_analysis_progress', {
                                         'progress': meta.get('progress', 0),
                                         'message': meta.get('message', '')
-                                    }, room=session_id)
+                                    }, room=notify_rooms)
                                     last_meta = meta
                             elif current_state == 'SUCCESS':
                                 result = _celery_success_result_as_dict(task_result.result)
@@ -1976,7 +2121,7 @@ def register_websocket_handlers(socketio, app):
                                     'summary': result.get('summary', {}) if result else {},
                                     'score': result.get('score', 0) if result else 0,
                                     'updated': result.get('updated', False) if result else False
-                                }, room=session_id)
+                                }, room=notify_rooms)
                                 with tasks_lock:
                                     if session_id in active_tasks:
                                         del active_tasks[session_id]
@@ -1985,7 +2130,7 @@ def register_websocket_handlers(socketio, app):
                                 safe_emit(socketio, 'seo_analysis_error', {
                                     'error': str(task_result.info),
                                     'entreprise_id': entreprise_id
-                                }, room=session_id)
+                                }, room=notify_rooms)
                                 with tasks_lock:
                                     if session_id in active_tasks:
                                         del active_tasks[session_id]
@@ -1994,7 +2139,7 @@ def register_websocket_handlers(socketio, app):
                             safe_emit(socketio, 'seo_analysis_error', {
                                 'error': f'Erreur lors du suivi de la tâche: {str(e)}',
                                 'entreprise_id': entreprise_id
-                            }, room=session_id)
+                            }, room=notify_rooms)
                             with tasks_lock:
                                 if session_id in active_tasks:
                                     del active_tasks[session_id]
@@ -2004,13 +2149,14 @@ def register_websocket_handlers(socketio, app):
                     safe_emit(socketio, 'seo_analysis_error', {
                         'error': f'Erreur dans le suivi: {str(e)}',
                         'entreprise_id': entreprise_id
-                    }, room=session_id)
+                    }, room=notify_rooms)
             
             _start_monitor_background(socketio, monitor_task)
         except Exception as e:
             try:
                 safe_emit(socketio, 'seo_analysis_error', {
-                    'error': f'Erreur lors du démarrage de l\'analyse SEO: {str(e)}'
+                    'error': f'Erreur lors du démarrage de l\'analyse SEO: {str(e)}',
+                    'entreprise_id': data.get('entreprise_id') if isinstance(data, dict) else None,
                 }, room=request.sid)
             except:
                 pass
@@ -2030,6 +2176,7 @@ def register_websocket_handlers(socketio, app):
             enable_screenshot = data.get('enable_screenshot', True)
             session_id = request.sid
 
+            notify_rooms = freeze_notify_rooms(session_id)
             try:
                 logger.info(
                     '[Socket.IO] start_technical_analysis sid=%s entreprise_id=%s url=%s enable_nmap=%s',
@@ -2061,7 +2208,7 @@ def register_websocket_handlers(socketio, app):
                     )
 
             if not url:
-                safe_emit(socketio, 'technical_analysis_error', {'error': 'URL requise'}, room=session_id)
+                safe_emit(socketio, 'technical_analysis_error', {'error': 'URL requise', 'entreprise_id': entreprise_id}, room=notify_rooms)
                 return
 
             if not broker_ping_ok():
@@ -2070,7 +2217,7 @@ def register_websocket_handlers(socketio, app):
                     session_id,
                     entreprise_id,
                 )
-                safe_emit(socketio, 'technical_analysis_error', {'error': _CELERY_BROKER_UNREACHABLE_MSG}, room=session_id)
+                safe_emit(socketio, 'technical_analysis_error', {'error': _CELERY_BROKER_UNREACHABLE_MSG, 'entreprise_id': entreprise_id}, room=notify_rooms)
                 return
 
             cd = next_websocket_stagger_countdown(session_id)
@@ -2088,8 +2235,9 @@ def register_websocket_handlers(socketio, app):
                     entreprise_id,
                 )
                 safe_emit(socketio, 'technical_analysis_error', {
-                    'error': f'Erreur lors du démarrage de la tâche: {str(e)}'
-                }, room=session_id)
+                    'error': f'Erreur lors du démarrage de la tâche: {str(e)}',
+                    'entreprise_id': entreprise_id,
+                }, room=notify_rooms)
                 return
 
             screenshot_task_id = None
@@ -2131,7 +2279,8 @@ def register_websocket_handlers(socketio, app):
                 'message': 'Analyse technique démarrée...',
                 'task_id': task.id,
                 'screenshot_task_id': screenshot_task_id,
-            }, room=session_id)
+                'entreprise_id': entreprise_id,
+            }, room=notify_rooms)
 
             # Surveiller la progression
             def monitor_task():
@@ -2149,7 +2298,7 @@ def register_websocket_handlers(socketio, app):
                                     safe_emit(socketio, 'technical_analysis_progress', {
                                         'progress': meta.get('progress', 0),
                                         'message': meta.get('message', '')
-                                    }, room=session_id)
+                                    }, room=notify_rooms)
                                     last_meta = meta
                             elif current_state == 'SUCCESS':
                                 result = _celery_success_result_as_dict(task_result.result)
@@ -2159,7 +2308,7 @@ def register_websocket_handlers(socketio, app):
                                     'url': url,
                                     'entreprise_id': entreprise_id,
                                     'results': result.get('results', {}) if result else {}
-                                }, room=session_id)
+                                }, room=notify_rooms)
                                 with tasks_lock:
                                     if session_id in active_tasks:
                                         del active_tasks[session_id]
@@ -2168,7 +2317,7 @@ def register_websocket_handlers(socketio, app):
                                 safe_emit(socketio, 'technical_analysis_error', {
                                     'error': str(task_result.info),
                                     'entreprise_id': entreprise_id
-                                }, room=session_id)
+                                }, room=notify_rooms)
                                 with tasks_lock:
                                     if session_id in active_tasks:
                                         del active_tasks[session_id]
@@ -2177,7 +2326,7 @@ def register_websocket_handlers(socketio, app):
                             safe_emit(socketio, 'technical_analysis_error', {
                                 'error': f'Erreur lors du suivi de la tâche: {str(e)}',
                                 'entreprise_id': entreprise_id
-                            }, room=session_id)
+                            }, room=notify_rooms)
                             with tasks_lock:
                                 if session_id in active_tasks:
                                     del active_tasks[session_id]
@@ -2187,13 +2336,14 @@ def register_websocket_handlers(socketio, app):
                     safe_emit(socketio, 'technical_analysis_error', {
                         'error': f'Erreur dans le suivi: {str(e)}',
                         'entreprise_id': entreprise_id
-                    }, room=session_id)
+                    }, room=notify_rooms)
 
             _start_monitor_background(socketio, monitor_task)
         except Exception as e:
             try:
                 safe_emit(socketio, 'technical_analysis_error', {
-                    'error': f'Erreur lors du démarrage de l\'analyse technique: {str(e)}'
+                    'error': f'Erreur lors du démarrage de l\'analyse technique: {str(e)}',
+                    'entreprise_id': data.get('entreprise_id') if isinstance(data, dict) else None,
                 }, room=request.sid)
             except:
                 pass
@@ -2208,6 +2358,7 @@ def register_websocket_handlers(socketio, app):
             entreprise_id = data.get('entreprise_id') if isinstance(data, dict) else None
             session_id = request.sid
 
+            notify_rooms = freeze_notify_rooms(session_id)
             if not url and entreprise_id:
                 try:
                     entreprise = database.get_entreprise(entreprise_id)
@@ -2222,11 +2373,11 @@ def register_websocket_handlers(socketio, app):
                     )
 
             if not url:
-                safe_emit(socketio, 'screenshot_capture_error', {'error': 'URL requise', 'entreprise_id': entreprise_id}, room=session_id)
+                safe_emit(socketio, 'screenshot_capture_error', {'error': 'URL requise', 'entreprise_id': entreprise_id}, room=notify_rooms)
                 return
 
             if not broker_ping_ok():
-                safe_emit(socketio, 'screenshot_capture_error', {'error': _CELERY_BROKER_UNREACHABLE_MSG, 'entreprise_id': entreprise_id}, room=session_id)
+                safe_emit(socketio, 'screenshot_capture_error', {'error': _CELERY_BROKER_UNREACHABLE_MSG, 'entreprise_id': entreprise_id}, room=notify_rooms)
                 return
 
             cd = next_websocket_stagger_countdown(session_id)
@@ -2238,7 +2389,7 @@ def register_websocket_handlers(socketio, app):
                 )
             except Exception as e:
                 logger.exception('[Socket.IO] apply_async screenshot échoué sid=%s entreprise_id=%s', session_id, entreprise_id)
-                safe_emit(socketio, 'screenshot_capture_error', {'error': f'Erreur lors du démarrage de la tâche: {str(e)}', 'entreprise_id': entreprise_id}, room=session_id)
+                safe_emit(socketio, 'screenshot_capture_error', {'error': f'Erreur lors du démarrage de la tâche: {str(e)}', 'entreprise_id': entreprise_id}, room=notify_rooms)
                 return
 
             safe_emit(
@@ -2249,7 +2400,7 @@ def register_websocket_handlers(socketio, app):
                     'task_id': task.id,
                     'entreprise_id': entreprise_id,
                 },
-                room=session_id,
+                room=notify_rooms,
             )
 
             def monitor_task():
@@ -2273,7 +2424,7 @@ def register_websocket_handlers(socketio, app):
                                             'message': meta.get('message', ''),
                                             'device': meta.get('device'),
                                         },
-                                        room=session_id,
+                                        room=notify_rooms,
                                     )
                                     last_meta = meta
                             elif current_state == 'SUCCESS':
@@ -2287,7 +2438,7 @@ def register_websocket_handlers(socketio, app):
                                         'url': url,
                                         'result': result or {},
                                     },
-                                    room=session_id,
+                                    room=notify_rooms,
                                 )
                                 break
                             elif current_state == 'FAILURE':
@@ -2298,7 +2449,7 @@ def register_websocket_handlers(socketio, app):
                                         'entreprise_id': entreprise_id,
                                         'error': str(task_result.info),
                                     },
-                                    room=session_id,
+                                    room=notify_rooms,
                                 )
                                 break
                         except Exception as e:
@@ -2309,7 +2460,7 @@ def register_websocket_handlers(socketio, app):
                                     'entreprise_id': entreprise_id,
                                     'error': f'Erreur lors du suivi de la tâche: {str(e)}',
                                 },
-                                room=session_id,
+                                room=notify_rooms,
                             )
                             break
                         _ws_sleep(_WS_MONITOR_POLL_SEC)
@@ -2321,7 +2472,7 @@ def register_websocket_handlers(socketio, app):
                             'entreprise_id': entreprise_id,
                             'error': f'Erreur dans le suivi: {str(e)}',
                         },
-                        room=session_id,
+                        room=notify_rooms,
                     )
 
             _start_monitor_background(socketio, monitor_task)
@@ -2339,6 +2490,7 @@ def register_websocket_handlers(socketio, app):
         try:
             entreprise_id = data.get('entreprise_id') if isinstance(data, dict) else None
             session_id = request.sid
+            notify_rooms = freeze_notify_rooms(session_id)
             ensure_screenshots = True
             if isinstance(data, dict) and 'ensure_screenshots' in data:
                 ensure_screenshots = bool(data.get('ensure_screenshots'))
@@ -2348,7 +2500,7 @@ def register_websocket_handlers(socketio, app):
                     socketio,
                     'gemini_report_error',
                     {'error': 'entreprise_id requis'},
-                    room=session_id,
+                    room=notify_rooms,
                 )
                 return
 
@@ -2361,7 +2513,7 @@ def register_websocket_handlers(socketio, app):
                     socketio,
                     'gemini_report_error',
                     {'error': 'Entreprise introuvable', 'entreprise_id': entreprise_id},
-                    room=session_id,
+                    room=notify_rooms,
                 )
                 return
             if not (entreprise.get('website') or '').strip():
@@ -2369,7 +2521,7 @@ def register_websocket_handlers(socketio, app):
                     socketio,
                     'gemini_report_error',
                     {'error': 'Aucun website sur cette entreprise', 'entreprise_id': entreprise_id},
-                    room=session_id,
+                    room=notify_rooms,
                 )
                 return
 
@@ -2378,13 +2530,34 @@ def register_websocket_handlers(socketio, app):
                     socketio,
                     'gemini_report_error',
                     {'error': _CELERY_BROKER_UNREACHABLE_MSG, 'entreprise_id': entreprise_id},
-                    room=session_id,
+                    room=notify_rooms,
                 )
                 return
 
             from tasks.gemini_full_report_tasks import analyze_entreprise_gemini_full_report_task
+            from services.gemini_queue import (
+                reserve_gemini_queue_slot,
+                format_gemini_queue_message,
+                release_gemini_queue_slot,
+            )
 
-            cd = next_websocket_stagger_countdown(session_id)
+            queue_info = reserve_gemini_queue_slot(int(entreprise_id))
+            if queue_info.get('already_pending'):
+                safe_emit(
+                    socketio,
+                    'gemini_report_started',
+                    {
+                        'message': format_gemini_queue_message(queue_info),
+                        'entreprise_id': entreprise_id,
+                        'already_pending': True,
+                        'queue_position': queue_info.get('position'),
+                        'queue_eta_sec': queue_info.get('eta_sec'),
+                    },
+                    room=notify_rooms,
+                )
+                return
+
+            cd = float(queue_info.get('countdown') or 0)
             try:
                 task = analyze_entreprise_gemini_full_report_task.apply_async(
                     kwargs=dict(
@@ -2395,6 +2568,7 @@ def register_websocket_handlers(socketio, app):
                     queue='screenshot',
                 )
             except Exception as e:
+                release_gemini_queue_slot(int(entreprise_id))
                 logger.exception(
                     '[Socket.IO] apply_async gemini_report échoué sid=%s entreprise_id=%s',
                     session_id,
@@ -2407,7 +2581,7 @@ def register_websocket_handlers(socketio, app):
                         'error': f'Erreur lors du démarrage de la tâche: {str(e)}',
                         'entreprise_id': entreprise_id,
                     },
-                    room=session_id,
+                    room=notify_rooms,
                 )
                 return
 
@@ -2415,17 +2589,21 @@ def register_websocket_handlers(socketio, app):
                 socketio,
                 'gemini_report_started',
                 {
-                    'message': 'Rapport Gemini démarré...',
+                    'message': format_gemini_queue_message(queue_info),
                     'task_id': task.id,
                     'entreprise_id': entreprise_id,
+                    'queue_position': queue_info.get('position'),
+                    'queue_eta_sec': queue_info.get('eta_sec'),
+                    'countdown': cd,
                 },
-                room=session_id,
+                room=notify_rooms,
             )
 
             def monitor_task():
                 try:
                     _sleep_before_monitor_poll(cd)
                     last_meta = None
+                    quota_emitted = False
                     while True:
                         try:
                             task_result = celery.AsyncResult(task.id)
@@ -2443,31 +2621,83 @@ def register_websocket_handlers(socketio, app):
                                             'message': meta.get('message', ''),
                                             'logs': meta.get('logs') or [],
                                         },
-                                        room=session_id,
+                                        room=notify_rooms,
                                     )
+                                    # Toast warning + stop spinner des le 429 (avant fallback)
+                                    if (not quota_emitted) and _gemini_progress_is_quota(meta):
+                                        quota_emitted = True
+                                        safe_emit(
+                                            socketio,
+                                            'gemini_report_quota',
+                                            {
+                                                'entreprise_id': entreprise_id,
+                                                'message': (
+                                                    'Quota Gemini atteint — toutes les cles en 429. '
+                                                    'Rapport heuristique en cours / réessaie plus tard.'
+                                                ),
+                                                'quota_exceeded': True,
+                                                'early': True,
+                                            },
+                                            room=notify_rooms,
+                                        )
                                     last_meta = meta
                             elif current_state == 'SUCCESS':
                                 result = _celery_success_result_as_dict(task_result.result)
+                                result = result or {}
+                                # Event dedie quota (avant complete) pour toast warning clair cote front
+                                if (not quota_emitted) and _gemini_result_is_quota(result):
+                                    safe_emit(
+                                        socketio,
+                                        'gemini_report_quota',
+                                        {
+                                            'entreprise_id': entreprise_id,
+                                            'message': (
+                                                'Quota Gemini atteint — rapport heuristique local '
+                                                '(pas de Vision). Réessaie plus tard ou demain (reset RPD).'
+                                            ),
+                                            'result': result,
+                                            'source': result.get('source'),
+                                            'quota_exceeded': True,
+                                        },
+                                        room=notify_rooms,
+                                    )
                                 safe_emit(
                                     socketio,
                                     'gemini_report_complete',
                                     {
                                         'success': True,
                                         'entreprise_id': entreprise_id,
-                                        'result': result or {},
+                                        'result': result,
                                     },
-                                    room=session_id,
+                                    room=notify_rooms,
                                 )
                                 break
                             elif current_state == 'FAILURE':
+                                err_info = task_result.info
+                                if _gemini_error_is_quota(err_info):
+                                    safe_emit(
+                                        socketio,
+                                        'gemini_report_quota',
+                                        {
+                                            'entreprise_id': entreprise_id,
+                                            'message': (
+                                                'Quota Gemini atteint. Réessaie dans quelques minutes '
+                                                'ou demain (reset RPD Pacific).'
+                                            ),
+                                            'error': str(err_info),
+                                            'quota_exceeded': True,
+                                        },
+                                        room=notify_rooms,
+                                    )
                                 safe_emit(
                                     socketio,
                                     'gemini_report_error',
                                     {
                                         'entreprise_id': entreprise_id,
-                                        'error': str(task_result.info),
+                                        'error': str(err_info),
+                                        'quota_exceeded': bool(_gemini_error_is_quota(err_info)),
                                     },
-                                    room=session_id,
+                                    room=notify_rooms,
                                 )
                                 break
                         except Exception as e:
@@ -2478,7 +2708,7 @@ def register_websocket_handlers(socketio, app):
                                     'entreprise_id': entreprise_id,
                                     'error': f'Erreur lors du suivi: {str(e)}',
                                 },
-                                room=session_id,
+                                room=notify_rooms,
                             )
                             break
                         _ws_sleep(_WS_MONITOR_POLL_SEC)
@@ -2490,7 +2720,7 @@ def register_websocket_handlers(socketio, app):
                             'entreprise_id': entreprise_id,
                             'error': f'Erreur dans le suivi: {str(e)}',
                         },
-                        room=session_id,
+                        room=notify_rooms,
                     )
 
             _start_monitor_background(socketio, monitor_task)
@@ -2500,6 +2730,157 @@ def register_websocket_handlers(socketio, app):
                     socketio,
                     'gemini_report_error',
                     {'error': f'Erreur démarrage rapport Gemini: {str(e)}'},
+                    room=request.sid,
+                )
+            except Exception:
+                pass
+
+    @socketio.on('start_gemini_mockups')
+    def handle_start_gemini_mockups(data):
+        """
+        Lance la generation de maquettes Gemini (images) si un rapport existe.
+        """
+        try:
+            entreprise_id = data.get('entreprise_id') if isinstance(data, dict) else None
+            session_id = request.sid
+            notify_rooms = freeze_notify_rooms(session_id)
+            if not entreprise_id:
+                safe_emit(
+                    socketio,
+                    'gemini_mockups_error',
+                    {'error': 'entreprise_id requis'},
+                    room=notify_rooms,
+                )
+                return
+
+            try:
+                latest = database.get_latest_entreprise_gemini_report(int(entreprise_id))
+            except Exception:
+                latest = None
+            if not latest or not latest.get('report'):
+                safe_emit(
+                    socketio,
+                    'gemini_mockups_error',
+                    {
+                        'error': 'Fais d\'abord le rapport Gemini',
+                        'entreprise_id': entreprise_id,
+                    },
+                    room=notify_rooms,
+                )
+                return
+
+            if not broker_ping_ok():
+                safe_emit(
+                    socketio,
+                    'gemini_mockups_error',
+                    {'error': _CELERY_BROKER_UNREACHABLE_MSG, 'entreprise_id': entreprise_id},
+                    room=notify_rooms,
+                )
+                return
+
+            from tasks.gemini_mockup_tasks import generate_entreprise_gemini_mockups_task
+
+            cd = next_websocket_stagger_countdown(session_id)
+            try:
+                task = generate_entreprise_gemini_mockups_task.apply_async(
+                    kwargs=dict(entreprise_id=int(entreprise_id)),
+                    countdown=cd,
+                    queue='screenshot',
+                )
+            except Exception as e:
+                logger.exception(
+                    '[Socket.IO] apply_async gemini_mockups échoué sid=%s entreprise_id=%s',
+                    session_id,
+                    entreprise_id,
+                )
+                safe_emit(
+                    socketio,
+                    'gemini_mockups_error',
+                    {
+                        'error': f'Erreur démarrage maquettes: {str(e)}',
+                        'entreprise_id': entreprise_id,
+                    },
+                    room=notify_rooms,
+                )
+                return
+
+            safe_emit(
+                socketio,
+                'gemini_mockups_started',
+                {
+                    'message': 'Generation maquettes démarrée…',
+                    'task_id': task.id,
+                    'entreprise_id': entreprise_id,
+                },
+                room=notify_rooms,
+            )
+
+            def monitor_task():
+                try:
+                    _sleep_before_monitor_poll(cd)
+                    last_meta = None
+                    while True:
+                        task_result = celery.AsyncResult(task.id)
+                        state = task_result.state
+                        info = task_result.info if isinstance(task_result.info, dict) else {}
+                        if state == 'PROGRESS':
+                            meta = {
+                                'entreprise_id': entreprise_id,
+                                'progress': info.get('progress'),
+                                'message': info.get('message'),
+                                'logs': info.get('logs') or [],
+                            }
+                            if meta != last_meta:
+                                last_meta = meta
+                                safe_emit(
+                                    socketio,
+                                    'gemini_mockups_progress',
+                                    meta,
+                                    room=notify_rooms,
+                                )
+                        elif state == 'SUCCESS':
+                            result = task_result.result if isinstance(task_result.result, dict) else {}
+                            safe_emit(
+                                socketio,
+                                'gemini_mockups_complete',
+                                {
+                                    'entreprise_id': entreprise_id,
+                                    'success': bool(result.get('success')),
+                                    'mockups': result.get('mockups') or [],
+                                    'error': result.get('error'),
+                                    'logs': result.get('logs') or [],
+                                },
+                                room=notify_rooms,
+                            )
+                            break
+                        elif state in ('FAILURE', 'REVOKED'):
+                            err = str(task_result.info or task_result.result or 'Echec')
+                            safe_emit(
+                                socketio,
+                                'gemini_mockups_error',
+                                {'entreprise_id': entreprise_id, 'error': err},
+                                room=notify_rooms,
+                            )
+                            break
+                        _ws_sleep(1.2)
+                except Exception as e:
+                    safe_emit(
+                        socketio,
+                        'gemini_mockups_error',
+                        {
+                            'entreprise_id': entreprise_id,
+                            'error': f'Erreur suivi maquettes: {str(e)}',
+                        },
+                        room=notify_rooms,
+                    )
+
+            _start_monitor_background(socketio, monitor_task)
+        except Exception as e:
+            try:
+                safe_emit(
+                    socketio,
+                    'gemini_mockups_error',
+                    {'error': f'Erreur démarrage maquettes Gemini: {str(e)}'},
                     room=request.sid,
                 )
             except Exception:
@@ -2518,11 +2899,12 @@ def register_websocket_handlers(socketio, app):
             campagne_id = data.get('campagne_id')
             session_id = request.sid
 
+            notify_rooms = freeze_notify_rooms(session_id)
             if not task_id:
                 safe_emit(socketio, 'campagne_error', {
                     'campagne_id': campagne_id,
                     'error': 'Task ID manquant'
-                }, room=session_id)
+                }, room=notify_rooms)
                 return
 
             def monitor_task():
@@ -2543,13 +2925,13 @@ def register_websocket_handlers(socketio, app):
                                     'sent': meta.get('sent', 0),
                                     'failed': meta.get('failed', 0),
                                     'message': meta.get('message', 'Envoi en cours...')
-                                }, room=session_id)
+                                }, room=notify_rooms)
                             elif current_state == 'SUCCESS':
                                 result = task_result if isinstance(task_result, dict) else {}
                                 safe_emit(socketio, 'campagne_complete', {
                                     'campagne_id': campagne_id,
                                     'result': result
-                                }, room=session_id)
+                                }, room=notify_rooms)
                                 with tasks_lock:
                                     if session_id in active_tasks:
                                         del active_tasks[session_id]
@@ -2564,7 +2946,7 @@ def register_websocket_handlers(socketio, app):
                                         'total_sent': 0,
                                         'total_failed': 0,
                                     }
-                                }, room=session_id)
+                                }, room=notify_rooms)
                                 with tasks_lock:
                                     if session_id in active_tasks:
                                         del active_tasks[session_id]
@@ -2574,7 +2956,7 @@ def register_websocket_handlers(socketio, app):
                                 safe_emit(socketio, 'campagne_error', {
                                     'campagne_id': campagne_id,
                                     'error': error_msg
-                                }, room=session_id)
+                                }, room=notify_rooms)
                                 with tasks_lock:
                                     if session_id in active_tasks:
                                         del active_tasks[session_id]
@@ -2585,7 +2967,7 @@ def register_websocket_handlers(socketio, app):
                             safe_emit(socketio, 'campagne_error', {
                                 'campagne_id': campagne_id,
                                 'error': f'Erreur lors du suivi: {str(e)}'
-                            }, room=session_id)
+                            }, room=notify_rooms)
                             with tasks_lock:
                                 if session_id in active_tasks:
                                     del active_tasks[session_id]
@@ -2594,7 +2976,7 @@ def register_websocket_handlers(socketio, app):
                     safe_emit(socketio, 'campagne_error', {
                         'campagne_id': campagne_id,
                         'error': f'Erreur dans le monitoring: {str(e)}'
-                    }, room=session_id)
+                    }, room=notify_rooms)
 
             with tasks_lock:
                 existing = active_tasks.get(session_id) or {}
@@ -2630,10 +3012,11 @@ def register_websocket_handlers(socketio, app):
             task_id = (data or {}).get('task_id')
             session_id = request.sid
 
+            notify_rooms = freeze_notify_rooms(session_id)
             if not task_id:
                 safe_emit(socketio, 'full_website_analysis_error', {
                     'error': 'task_id manquant',
-                }, room=session_id)
+                }, room=notify_rooms)
                 return
 
             def _failure_message(info):
@@ -2767,7 +3150,7 @@ def register_websocket_handlers(socketio, app):
                                         socketio,
                                         'full_website_analysis_progress',
                                         {'task_id': task_id, 'meta': meta},
-                                        room=session_id,
+                                        room=notify_rooms,
                                     )
 
                                 # Event instantané (avant persistance) : liens externes détectés par UnifiedScraper.
@@ -2795,7 +3178,7 @@ def register_websocket_handlers(socketio, app):
                                                     'domain_host': (ev.get('domain_host') or '')[:255],
                                                 },
                                             },
-                                            room=session_id,
+                                            room=notify_rooms,
                                         )
 
                                 # Streaming "un par un" des liens externes nouvellement persistés.
@@ -2826,7 +3209,7 @@ def register_websocket_handlers(socketio, app):
                                                 'entreprise_id': eid_int,
                                                 'link': lk,
                                             },
-                                            room=session_id,
+                                            room=notify_rooms,
                                         )
 
                                 # Streaming du mini-scrape externe : domaines enrichis (titre/desc/thumbnail/group).
@@ -2855,7 +3238,7 @@ def register_websocket_handlers(socketio, app):
                                                 'entreprise_id': int(meta.get('entreprise_id') or 0),
                                                 'domain': d,
                                             },
-                                            room=session_id,
+                                            room=notify_rooms,
                                         )
                             elif current_state == 'SUCCESS':
                                 result = _celery_success_result_as_dict(task.result)
@@ -2863,7 +3246,7 @@ def register_websocket_handlers(socketio, app):
                                     socketio,
                                     'full_website_analysis_complete',
                                     {'task_id': task_id, 'result': result or {}},
-                                    room=session_id,
+                                    room=notify_rooms,
                                 )
                                 with tasks_lock:
                                     if session_id in active_tasks:
@@ -2877,7 +3260,7 @@ def register_websocket_handlers(socketio, app):
                                         'task_id': task_id,
                                         'error': _failure_message(task_info),
                                     },
-                                    room=session_id,
+                                    room=notify_rooms,
                                 )
                                 with tasks_lock:
                                     if session_id in active_tasks:
@@ -2891,7 +3274,7 @@ def register_websocket_handlers(socketio, app):
                                         'task_id': task_id,
                                         'error': f'Tâche {current_state.lower()}',
                                     },
-                                    room=session_id,
+                                    room=notify_rooms,
                                 )
                                 with tasks_lock:
                                     if session_id in active_tasks:
@@ -2912,7 +3295,7 @@ def register_websocket_handlers(socketio, app):
                                     'task_id': task_id,
                                     'error': f'Erreur lors du suivi: {str(e)}',
                                 },
-                                room=session_id,
+                                room=notify_rooms,
                             )
                             with tasks_lock:
                                 if session_id in active_tasks:
@@ -2926,7 +3309,7 @@ def register_websocket_handlers(socketio, app):
                             'task_id': task_id,
                             'error': f'Erreur dans le monitoring: {str(e)}',
                         },
-                        room=session_id,
+                        room=notify_rooms,
                     )
 
             with tasks_lock:

@@ -1111,6 +1111,19 @@ class TemplateManager:
                     'total_social_count': len(social_list) if isinstance(social_list, list) else 0,
                     'total_technologies': scraper.get('total_technologies', 0),
                 })
+
+            # Rapport Gemini normalise (variables email)
+            try:
+                gemini_vars = db.get_entreprise_gemini_email_variables(int(entreprise_id))
+                if isinstance(gemini_vars, dict) and gemini_vars:
+                    data.update(gemini_vars)
+            except Exception as gem_exc:
+                import logging as _logging
+                _logging.getLogger(__name__).debug(
+                    'Variables Gemini email ignorees pour entreprise %s: %s',
+                    entreprise_id,
+                    gem_exc,
+                )
             
             return data
         except Exception as e:
@@ -1417,6 +1430,8 @@ class TemplateManager:
         variables['performance'] = variables.get('performance_score') is not None
         variables['risk'] = variables.get('risk_score') is not None
         variables['pentest'] = variables.get('risk_score') is not None
+        variables['gemini'] = bool(variables.get('gemini_has_report') or variables.get('gemini_score'))
+        variables['gemini_has_report'] = bool(variables.get('gemini_has_report') or variables.get('gemini'))
         
         # Remplacer les conditions {#if_xxx} ... {#endif}
         # Compat: certains templates utilisent {{var}} et {{#if_x}} ... {{#endif}}.

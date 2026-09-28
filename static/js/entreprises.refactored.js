@@ -24,9 +24,16 @@
         }
     };
     const Badges = window.Badges || {};
-    const Notifications = window.Notifications || {
-        show(message, type) {
-            // Fallback no-op si Notifications n'est pas défini
+    /** Toujours passer par window.Notifications (évite un fallback no-op figé au démarrage). */
+    const Notifications = {
+        show(message, type, icon) {
+            const api = window.Notifications;
+            if (api && typeof api.show === 'function' && api !== Notifications) {
+                return api.show(message, type, icon);
+            }
+            try {
+                console.warn('[entreprises] Notifications indisponible:', message);
+            } catch (e) {}
         }
     };
     
@@ -73,23 +80,49 @@
     
     function setScoreRelaunchLoading(entrepriseId, analysisType, isLoading) {
         if (!entrepriseId || !analysisType) return;
+        const eid = Number(entrepriseId);
+        if (!eid) return;
 
         // Mémoriser l'état pour qu'il survive aux rechargements/rafraîchissements de la liste.
         // Exemple: l'utilisateur relance une analyse, puis change les filtres => les cartes sont re-renderées
         // et on doit ré-afficher les loaders tant que l'analyse n'est pas terminée.
         if (isLoading) {
-            if (!relaunchLoadingState[entrepriseId]) relaunchLoadingState[entrepriseId] = {};
-            relaunchLoadingState[entrepriseId][analysisType] = true;
-        } else {
-            if (relaunchLoadingState[entrepriseId] && relaunchLoadingState[entrepriseId][analysisType]) {
-                delete relaunchLoadingState[entrepriseId][analysisType];
+            if (!relaunchLoadingState[eid]) relaunchLoadingState[eid] = {};
+            relaunchLoadingState[eid][analysisType] = true;
+            // Timeout de sécurité : si complete/error ne revient jamais (WS perdu, Celery collé),
+            // on coupe le spinner et on prévient — sinon ça tourne en rond sans notif.
+            if (!relaunchLoadingTimeouts[eid]) relaunchLoadingTimeouts[eid] = {};
+            if (relaunchLoadingTimeouts[eid][analysisType]) {
+                clearTimeout(relaunchLoadingTimeouts[eid][analysisType]);
             }
-            if (relaunchLoadingState[entrepriseId] && Object.keys(relaunchLoadingState[entrepriseId]).length === 0) {
-                delete relaunchLoadingState[entrepriseId];
+            relaunchLoadingTimeouts[eid][analysisType] = setTimeout(() => {
+                if (!(relaunchLoadingState[eid] && relaunchLoadingState[eid][analysisType])) return;
+                setScoreRelaunchLoading(eid, analysisType, false);
+                const nom = getEntrepriseNom(eid);
+                const labels = { technique: 'technique', seo: 'SEO', osint: 'OSINT', pentest: 'Pentest' };
+                Notifications.show(
+                    nom + ' — Analyse ' + (labels[analysisType] || analysisType) + ' : pas de retour serveur (timeout). Réessaie ou recharge la page.',
+                    'warning',
+                    'fa-hourglass-end'
+                );
+            }, 8 * 60 * 1000);
+        } else {
+            if (relaunchLoadingTimeouts[eid] && relaunchLoadingTimeouts[eid][analysisType]) {
+                clearTimeout(relaunchLoadingTimeouts[eid][analysisType]);
+                delete relaunchLoadingTimeouts[eid][analysisType];
+            }
+            if (relaunchLoadingTimeouts[eid] && Object.keys(relaunchLoadingTimeouts[eid]).length === 0) {
+                delete relaunchLoadingTimeouts[eid];
+            }
+            if (relaunchLoadingState[eid] && relaunchLoadingState[eid][analysisType]) {
+                delete relaunchLoadingState[eid][analysisType];
+            }
+            if (relaunchLoadingState[eid] && Object.keys(relaunchLoadingState[eid]).length === 0) {
+                delete relaunchLoadingState[eid];
             }
         }
 
-        const items = document.querySelectorAll(`.score-chart-item[data-entreprise-id="${entrepriseId}"][data-analysis-type="${analysisType}"]`);
+        const items = document.querySelectorAll(`.score-chart-item[data-entreprise-id="${eid}"][data-analysis-type="${analysisType}"]`);
         if (!items.length) return;
         items.forEach(item => {
             const btn = item.querySelector('.score-relaunch-btn');
@@ -210,6 +243,15 @@
     let modalLoadAbortController = null;
     const entrepriseGroupsCache = {};
     const selectedEntreprises = new Set();
+    /** Chips photo / IA en cours (survit au re-render de la liste). */
+    const chipLoadingState = {
+        screenshots: new Set(),
+        gemini: new Set(),
+    };
+    /** @type {Record<number, ReturnType<typeof setTimeout>>} */
+    const geminiChipTimeouts = {};
+    /** Evite double toast quota (event dedie + complete). */
+    const geminiQuotaToastSeen = new Set();
     let tagsSuggestions = [];
     let activeTagFilters = [];
     let initialAnalyseId = null;
@@ -435,7 +477,9 @@
     }
     // Etat des relances en cours (technique/seo/pentest) pour conserver l'affichage après rechargement des filtres.
     // Structure: { [entrepriseId]: { technique: true, seo: true, pentest: true } }
-    const relaunchLoadingState = {};
+        const relaunchLoadingState = {};
+        /** @type {Record<number, Record<string, ReturnType<typeof setTimeout>>>} */
+        const relaunchLoadingTimeouts = {};
     let currentInfoScreenshotItems = [];
     let currentInfoBrandingItems = [];
     let currentImagesItems = [];
@@ -447,11 +491,12 @@
         const types = ['technique', 'seo', 'pentest'];
         entreprises.forEach(e => {
             if (!e || e.id == null) return;
-            const state = relaunchLoadingState[e.id];
+            const eid = Number(e.id);
+            const state = relaunchLoadingState[eid] || relaunchLoadingState[e.id];
             if (!state) return;
             types.forEach(t => {
                 if (state[t]) {
-                    setScoreRelaunchLoading(e.id, t, true);
+                    setScoreRelaunchLoading(eid, t, true);
                 }
             });
         });
@@ -1963,11 +2008,11 @@
                         <div class="row-meta">
                             ${entreprise.secteur ? `<span class="row-chip row-chip-sector" title="Secteur (groupe)"><i class="fas fa-industry" aria-hidden="true"></i> ${Formatters.escapeHtml(entreprise.secteur)}</span>` : ''}
                             ${entreprise.categorie ? `<span class="row-chip row-chip-category" title="Catégorie (métier)"><i class="fas fa-folder" aria-hidden="true"></i> ${Formatters.escapeHtml(entreprise.categorie)}</span>` : ''}
-                            <span class="row-chip row-chip-screenshots ${entreprise.has_screenshots ? 'is-ready' : 'is-missing'}" data-action="launch-screenshots" data-entreprise-id="${entreprise.id}" title="${entreprise.has_screenshots ? 'Screenshots OK (cliquer pour relancer)' : 'Pas de screenshots / 404 — cliquer pour capturer'}" role="button" tabindex="0">
-                                <i class="fas fa-camera" aria-hidden="true"></i>
+                            <span class="row-chip row-chip-screenshots ${entreprise.has_screenshots ? 'is-ready' : 'is-missing'}${isRowChipLoading('screenshots', entreprise.id) ? ' is-loading' : ''}" data-action="launch-screenshots" data-entreprise-id="${entreprise.id}" title="${isRowChipLoading('screenshots', entreprise.id) ? 'Capture en cours…' : (entreprise.has_screenshots ? 'Screenshots OK (cliquer pour relancer)' : 'Pas de screenshots / 404 — cliquer pour capturer')}" role="button" tabindex="${isRowChipLoading('screenshots', entreprise.id) ? '-1' : '0'}" aria-busy="${isRowChipLoading('screenshots', entreprise.id) ? 'true' : 'false'}" aria-disabled="${isRowChipLoading('screenshots', entreprise.id) ? 'true' : 'false'}">
+                                <i class="fas ${isRowChipLoading('screenshots', entreprise.id) ? 'fa-spinner fa-spin' : 'fa-camera'}" aria-hidden="true"></i>
                             </span>
-                            <span class="row-chip row-chip-gemini ${entreprise.has_gemini_report ? 'is-ready' : 'is-missing'}" data-action="launch-gemini" data-entreprise-id="${entreprise.id}" title="${entreprise.has_gemini_report ? 'Rapport Gemini OK (cliquer pour relancer)' : 'Pas de rapport Gemini — cliquer pour lancer'}" role="button" tabindex="0">
-                                <i class="fas fa-robot" aria-hidden="true"></i>
+                            <span class="row-chip row-chip-gemini ${!entreprise.has_gemini_report ? 'is-missing' : ((String(entreprise.gemini_report_source || '').toLowerCase() === 'heuristic') ? 'is-heuristic' : 'is-ready')}${isRowChipLoading('gemini', entreprise.id) ? ' is-loading' : ''}" data-action="launch-gemini" data-entreprise-id="${entreprise.id}" title="${isRowChipLoading('gemini', entreprise.id) ? 'Rapport Gemini en cours…' : (!entreprise.has_gemini_report ? 'Pas de rapport Gemini — cliquer pour lancer' : ((String(entreprise.gemini_report_source || '').toLowerCase() === 'heuristic') ? 'Rapport heuristique (quota / Vision KO) — recliquer pour un vrai Gemini' : 'Rapport Gemini OK (cliquer pour relancer)'))}" role="button" tabindex="${isRowChipLoading('gemini', entreprise.id) ? '-1' : '0'}" aria-busy="${isRowChipLoading('gemini', entreprise.id) ? 'true' : 'false'}" aria-disabled="${isRowChipLoading('gemini', entreprise.id) ? 'true' : 'false'}">
+                                <i class="fas ${isRowChipLoading('gemini', entreprise.id) ? 'fa-spinner fa-spin' : ((String(entreprise.gemini_report_source || '').toLowerCase() === 'heuristic') ? 'fa-exclamation-triangle' : 'fa-robot')}" aria-hidden="true"></i>
                             </span>
                             ${langChipLabel ? `<span class="row-chip row-chip-lang" title="Langue principale"><i class="fas fa-language" aria-hidden="true"></i> ${Formatters.escapeHtml(langChipLabel)}</span>` : ''}
                             ${commercialTopMode && entreprise.priority_score != null ? `
@@ -2271,6 +2316,9 @@
             shotChip.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
+                if (isRowChipLoading('screenshots', entrepriseId) || shotChip.classList.contains('is-loading')) {
+                    return;
+                }
                 triggerScreenshotsCaptureFromList(entrepriseId);
             });
         }
@@ -2279,9 +2327,144 @@
             geminiChip.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
+                if (isRowChipLoading('gemini', entrepriseId) || geminiChip.classList.contains('is-loading')) {
+                    return;
+                }
                 triggerGeminiFullReport(entrepriseId);
             });
         }
+    }
+
+    /**
+     * Detecte un message de progression / erreur de type quota Gemini (429).
+     * @param {string} text
+     * @returns {boolean}
+     */
+    function isGeminiQuotaText(text) {
+        const t = String(text || '');
+        if (!t) return false;
+        return /429|quota|resource.?exhausted|rate.?limit|toutes les cles en 429|aucune cle active/i.test(t);
+    }
+
+    /**
+     * Toast warning + arret spinner chip + bouton modal (quota Gemini).
+     * @param {number} entrepriseId
+     * @param {string} [message]
+     */
+    function applyGeminiQuotaUi(entrepriseId, message) {
+        const eid = Number(entrepriseId);
+        if (!eid) return;
+        const nom = getEntrepriseNom(eid);
+        const msg = String(message || 'Quota Gemini atteint — réessaie plus tard (RPM / RPD).').trim();
+        if (!geminiQuotaToastSeen.has(eid)) {
+            geminiQuotaToastSeen.add(eid);
+            Notifications.show(nom + ' — ' + msg, 'warning', 'fa-hourglass-half');
+        }
+        setRowChipLoading('gemini', eid, false);
+        document.querySelectorAll(`.row-chip-gemini[data-entreprise-id="${eid}"]`).forEach((el) => {
+            el.classList.remove('is-missing', 'is-ready', 'is-loading');
+            el.classList.add('is-heuristic');
+            el.title = 'Rapport heuristique (quota / Vision KO) — recliquer pour un vrai Gemini';
+            el.setAttribute('aria-busy', 'false');
+            el.setAttribute('aria-disabled', 'false');
+            el.setAttribute('tabindex', '0');
+            const icon = el.querySelector('i');
+            if (icon) icon.className = 'fas fa-exclamation-triangle';
+        });
+        const btn = document.getElementById('gemini-report-start-btn');
+        if (btn && Number(eid) === Number(currentModalEntrepriseId)) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-robot"></i> Lancer l\'analyse complete';
+            setGeminiReportStatus('Quota Gemini atteint', true);
+        }
+    }
+
+    /**
+     * Active / desactive l'etat "attente" sur les chips photo ou Gemini.
+     * @param {'screenshots'|'gemini'} kind
+     * @param {number} entrepriseId
+     * @param {boolean} isLoading
+     */
+    function setRowChipLoading(kind, entrepriseId, isLoading) {
+        const eid = Number(entrepriseId);
+        if (!eid || (kind !== 'screenshots' && kind !== 'gemini')) return;
+        const bucket = chipLoadingState[kind];
+        if (isLoading) bucket.add(eid);
+        else bucket.delete(eid);
+
+        if (kind === 'gemini') {
+            if (geminiChipTimeouts[eid]) {
+                clearTimeout(geminiChipTimeouts[eid]);
+                delete geminiChipTimeouts[eid];
+            }
+            if (isLoading) {
+                // Nouveau run : autorise un nouveau toast quota
+                geminiQuotaToastSeen.delete(eid);
+                geminiChipTimeouts[eid] = setTimeout(() => {
+                    if (!chipLoadingState.gemini.has(eid)) return;
+                    setRowChipLoading('gemini', eid, false);
+                    const nom = getEntrepriseNom(eid);
+                    Notifications.show(
+                        nom + ' — Rapport Gemini : pas de retour serveur (timeout). Réessaie ou recharge la page.',
+                        'warning',
+                        'fa-hourglass-end'
+                    );
+                    const btn = document.getElementById('gemini-report-start-btn');
+                    if (btn && Number(currentModalEntrepriseId) === eid) {
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="fas fa-robot"></i> Lancer l\'analyse complete';
+                    }
+                }, 8 * 60 * 1000);
+            }
+        }
+
+        const sel = kind === 'screenshots'
+            ? `.row-chip-screenshots[data-entreprise-id="${eid}"]`
+            : `.row-chip-gemini[data-entreprise-id="${eid}"]`;
+        document.querySelectorAll(sel).forEach((el) => {
+            el.classList.toggle('is-loading', !!isLoading);
+            el.setAttribute('aria-busy', isLoading ? 'true' : 'false');
+            el.setAttribute('aria-disabled', isLoading ? 'true' : 'false');
+            if (isLoading) {
+                el.setAttribute('tabindex', '-1');
+                el.title = kind === 'screenshots'
+                    ? 'Capture en cours…'
+                    : 'Rapport Gemini en cours…';
+                const icon = el.querySelector('i');
+                if (icon) {
+                    icon.className = 'fas fa-spinner fa-spin';
+                }
+            } else {
+                el.setAttribute('tabindex', '0');
+                const icon = el.querySelector('i');
+                if (icon) {
+                    icon.className = kind === 'screenshots' ? 'fas fa-camera' : 'fas fa-robot';
+                }
+                // Restaurer le titre selon l'etat ready/missing
+                if (el.classList.contains('is-ready')) {
+                    el.title = kind === 'screenshots'
+                        ? 'Screenshots OK (cliquer pour relancer)'
+                        : 'Rapport Gemini OK (cliquer pour relancer)';
+                } else if (el.classList.contains('is-heuristic')) {
+                    el.title = 'Rapport heuristique (quota / Vision KO) — recliquer pour un vrai Gemini';
+                    if (icon) icon.className = 'fas fa-exclamation-triangle';
+                } else {
+                    el.title = kind === 'screenshots'
+                        ? 'Pas de screenshots / 404 — cliquer pour capturer'
+                        : 'Pas de rapport Gemini — cliquer pour lancer';
+                }
+            }
+        });
+    }
+
+    /**
+     * @param {'screenshots'|'gemini'} kind
+     * @param {number} entrepriseId
+     * @returns {boolean}
+     */
+    function isRowChipLoading(kind, entrepriseId) {
+        const bucket = chipLoadingState[kind];
+        return !!(bucket && bucket.has(Number(entrepriseId)));
     }
 
     function setEntrepriseSelected(entrepriseId, selected) {
@@ -3078,7 +3261,8 @@
                         }
                         jobs.forEach((job, i) => {
                             setTimeout(() => {
-                                triggerAnalysisRelaunch(job.id, job.t, { notify: true });
+                                // Une notif globale au-dessus si > 3 ; sinon une notif par lancement.
+                                triggerAnalysisRelaunch(job.id, job.t, { notify: jobs.length <= 3 });
                             }, i * staggerMs);
                         });
                     } else if (action === 'launch-scraping') {
@@ -3531,17 +3715,15 @@
             modalBody.innerHTML = createModalContent(currentModalEntrepriseData);
             
             setupModalInteractions();
+            // Info tab seulement au premier paint (évite 10 requetes PG lourdes d'un coup)
             loadEntrepriseInfoScreenshots(requestedId);
-            loadEntrepriseImages(requestedId);
             loadEntreprisePages(currentModalEntrepriseData);
-            loadGeminiFullReport(requestedId);
-            loadScrapingResults(requestedId);
-            loadTechnicalAnalysis(requestedId);
-            loadOSINTAnalysis(requestedId);
-            loadPentestAnalysis(requestedId);
-            loadProspectionTab(requestedId);
-            loadMetricEvolutionTab(requestedId);
-            refreshOpportunityScore(requestedId);
+            // Opportunité en différé (POST potentiellement lent)
+            setTimeout(() => {
+                if (Number(currentModalEntrepriseId) === requestedId) {
+                    refreshOpportunityScore(requestedId);
+                }
+            }, 400);
         } catch (error) {
             if (loadSignal.aborted || Number(currentModalEntrepriseId) !== requestedId) {
                 return;
@@ -3768,13 +3950,277 @@
     }
 
     /**
-     * Affiche le rapport Gemini complet dans l'onglet dedie.
+     * Active / desactive l'onglet Maquettes selon presence d'un rapport.
+     * @param {boolean} hasReport
+     */
+    function updateGeminiMockupsTabGate(hasReport) {
+        const btn = document.querySelector('.tab-btn[data-tab="gemini-mockups"]');
+        if (!btn) return;
+        const ok = !!hasReport;
+        btn.classList.toggle('is-disabled-gate', !ok);
+        btn.title = ok
+            ? 'Maquettes Gemini du site modernise'
+            : 'Disponible apres un rapport Gemini';
+        btn.setAttribute('aria-disabled', ok ? 'false' : 'true');
+    }
+
+    /**
+     * Affiche le bundle maquettes Gemini.
+     * @param {Object} data
+     */
+    function renderGeminiMockups(data) {
+        const container = document.getElementById('gemini-mockups-content');
+        if (!container) return;
+        const escape = (txt) => (Formatters && Formatters.escapeHtml ? Formatters.escapeHtml(String(txt || '')) : String(txt || ''));
+        if (!data || !data.has_report) {
+            container.innerHTML = `
+                <div class="gemini-report-empty">
+                    <p>Maquettes indisponibles</p>
+                    <span>Lance d'abord le rapport Gemini — ensuite tu pourras generer les visuals.</span>
+                </div>`;
+            return;
+        }
+        const by = (data.by_device && typeof data.by_device === 'object') ? data.by_device : {};
+        const devices = ['desktop', 'mobile', 'tablet'];
+        const cards = devices
+            .filter((d) => by[d] && by[d].public_url)
+            .map((d) => {
+                const it = by[d];
+                const url = escape(it.public_url);
+                return `<figure class="gemini-mockup-card">
+                    <a href="${url}" target="_blank" rel="noopener">
+                        <img src="${url}" alt="Maquette ${escape(d)}" loading="lazy" />
+                    </a>
+                    <figcaption>${escape(d)}</figcaption>
+                </figure>`;
+            })
+            .join('');
+        if (!cards) {
+            container.innerHTML = `
+                <div class="gemini-report-empty">
+                    <p>Pas encore de maquette</p>
+                    <span>Clique sur “Generer les maquettes” pour visualiser le site refondu.</span>
+                </div>`;
+            return;
+        }
+        container.innerHTML = `<div class="gemini-mockups-grid">${cards}</div>`;
+    }
+
+    /**
+     * Charge les maquettes Gemini pour l'entreprise.
+     * @param {number} entrepriseId
+     */
+    async function loadGeminiMockups(entrepriseId) {
+        const container = document.getElementById('gemini-mockups-content');
+        if (!container) return;
+        container.innerHTML = '<p class="loading">Chargement des maquettes…</p>';
+        try {
+            const res = await fetch(`/api/entreprise/${entrepriseId}/gemini-mockups`, { credentials: 'same-origin' });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+            updateGeminiMockupsTabGate(!!data.has_report);
+            renderGeminiMockups(data);
+        } catch (e) {
+            console.error('loadGeminiMockups:', e);
+            container.innerHTML = '<p class="empty-state">Impossible de charger les maquettes.</p>';
+        }
+    }
+
+    /**
+     * Lance la generation maquettes via WebSocket.
+     * @param {number} entrepriseId
+     */
+    function triggerGeminiMockups(entrepriseId) {
+        const btn = document.getElementById('gemini-mockups-start-btn');
+        const status = document.getElementById('gemini-mockups-status');
+        const socket = window.wsManager && window.wsManager.socket;
+        if (!socket) {
+            Notifications.show('Connexion temps réel non disponible. Rechargez la page.', 'warning');
+            return;
+        }
+        ensureModalWebSocketListeners();
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generation…';
+        }
+        if (status) {
+            status.style.display = 'block';
+            status.textContent = 'Lancement de la generation maquettes…';
+            status.classList.remove('is-error');
+        }
+        socket.emit('start_gemini_mockups', { entreprise_id: Number(entrepriseId) });
+    }
+
+    /**
+     * Scroll le journal d'analyse Gemini toujours en bas.
+     */
+    function scrollGeminiReportLogToBottom() {
+        const status = document.getElementById('gemini-report-status');
+        const list = document.getElementById('gemini-report-log-list');
+        if (!status) return;
+        const go = () => {
+            status.scrollTop = status.scrollHeight;
+            const last = list && list.lastElementChild;
+            if (last && typeof last.scrollIntoView === 'function') {
+                try {
+                    last.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+                } catch (_) {
+                    /* ignore */
+                }
+            }
+            status.scrollTop = status.scrollHeight;
+        };
+        go();
+        if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(() => {
+                go();
+                requestAnimationFrame(go);
+            });
+        } else {
+            setTimeout(go, 0);
+        }
+    }
+
+    /**
+     * Convertit un Markdown leger (titres, listes, gras) en HTML safe.
+     * @param {string} md
+     * @param {function(string): string} escape
+     * @returns {string}
+     */
+    function renderGeminiMarkdown(md, escape) {
+        const esc = typeof escape === 'function'
+            ? escape
+            : (t) => String(t || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        const inline = (txt) => {
+            let s = esc(txt);
+            s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            s = s.replace(/__(.+?)__/g, '<strong>$1</strong>');
+            s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+            s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+            return s;
+        };
+        const lines = String(md || '').replace(/\r\n/g, '\n').split('\n');
+        const out = [];
+        let inUl = false;
+        let inOl = false;
+        let para = [];
+
+        const closeLists = () => {
+            if (inUl) { out.push('</ul>'); inUl = false; }
+            if (inOl) { out.push('</ol>'); inOl = false; }
+        };
+        const flushPara = () => {
+            if (!para.length) return;
+            out.push(`<p>${para.join(' ')}</p>`);
+            para = [];
+        };
+
+        lines.forEach((rawLine) => {
+            const line = String(rawLine || '');
+            const trimmed = line.trim();
+            if (!trimmed) {
+                flushPara();
+                closeLists();
+                return;
+            }
+            const h = trimmed.match(/^(#{1,3})\s+(.+)$/);
+            if (h) {
+                flushPara();
+                closeLists();
+                const level = Math.min(4, h[1].length + 1);
+                out.push(`<h${level}>${inline(h[2])}</h${level}>`);
+                return;
+            }
+            const ul = trimmed.match(/^[-*+]\s+(.+)$/);
+            if (ul) {
+                flushPara();
+                if (inOl) { out.push('</ol>'); inOl = false; }
+                if (!inUl) { out.push('<ul>'); inUl = true; }
+                out.push(`<li>${inline(ul[1])}</li>`);
+                return;
+            }
+            const ol = trimmed.match(/^\d+[.)]\s+(.+)$/);
+            if (ol) {
+                flushPara();
+                if (inUl) { out.push('</ul>'); inUl = false; }
+                if (!inOl) { out.push('<ol>'); inOl = true; }
+                out.push(`<li>${inline(ol[1])}</li>`);
+                return;
+            }
+            closeLists();
+            para.push(inline(trimmed));
+        });
+        flushPara();
+        closeLists();
+        return out.join('\n');
+    }
+
+    /**
+     * Surligne des mots-cles techniques dans un texte deja echappe.
+     * @param {string} escapedHtml
+     * @returns {string}
+     */
+    function highlightGeminiKeywords(escapedHtml) {
+        const keys = [
+            'HTTPS?', 'SSL', 'TLS', 'HTTP\\s*\\d{3}', 'CTA', 'UX\\/?UI', 'UI', 'UX',
+            'SEO', 'CMS', 'WordPress', 'Drupal', 'Prestashop', 'Shopify',
+            'responsive', 'mobile', 'desktop', 'performance', 'Core Web Vitals',
+            'LCP', 'CLS', 'FID', 'INP', 'CSP', 'CORS', 'XSS', 'CSRF', 'SQL',
+            'robots\\.txt', 'sitemap', 'Open Graph', 'schema\\.org', 'RGPD',
+            'cookie', 'CDN', 'DNS', 'PHP', 'Laravel', 'Symfony', 'React',
+            'Vue(?:\\.js)?', 'Angular', 'Next\\.js', 'Nuxt', 'refonte', 'accessibilite'
+        ];
+        let out = String(escapedHtml || '');
+        keys.forEach((k) => {
+            try {
+                const re = new RegExp('\\b(' + k + ')\\b', 'gi');
+                out = out.replace(re, '<mark class="gemini-kw">$1</mark>');
+            } catch (_) { /* ignore */ }
+        });
+        return out;
+    }
+
+    /**
+     * Label FR d'un module Gemini.
+     * @param {string} key
+     * @returns {string}
+     */
+    function geminiModuleLabel(key) {
+        const map = {
+            design: 'Design',
+            technical: 'Technique',
+            seo: 'SEO',
+            osint: 'OSINT',
+            pentest: 'Pentest',
+        };
+        return map[key] || String(key || '');
+    }
+
+    /**
+     * Classe CSS selon score 0-100.
+     * @param {number} score
+     * @returns {string}
+     */
+    function geminiScoreTone(score) {
+        if (Number.isNaN(score)) return 'is-mid';
+        if (score < 40) return 'is-low';
+        if (score >= 70) return 'is-high';
+        return 'is-mid';
+    }
+
+    /**
+     * Affiche le rapport Gemini complet dans l'onglet dedie (cards Material).
      * @param {Object|null} latest
      */
     function renderGeminiFullReport(latest) {
         const container = document.getElementById('gemini-report-content');
         if (!container) return;
         const escape = (txt) => (Formatters && Formatters.escapeHtml ? Formatters.escapeHtml(String(txt || '')) : String(txt || ''));
+        const hl = (txt) => highlightGeminiKeywords(escape(txt));
         if (!latest || !latest.report) {
             container.innerHTML = `
                 <div class="gemini-report-empty">
@@ -3782,24 +4228,37 @@
                     <span>Clique sur “Lancer l'analyse complete” — screenshots + tech / SEO / OSINT / pentest.</span>
                 </div>
             `;
+            updateGeminiMockupsTabGate(false);
             return;
         }
+        updateGeminiMockupsTabGate(true);
         const report = latest.report || {};
         const score = latest.overall_score != null ? Number(latest.overall_score) : Number(report.overall_score);
-        let scoreClass = 'is-mid';
-        if (!Number.isNaN(score)) {
-            if (score < 40) scoreClass = 'is-low';
-            else if (score >= 70) scoreClass = 'is-high';
-        }
+        const scoreClass = geminiScoreTone(score);
         const refonte = latest.refonte_recommendation || report.refonte_recommendation || '—';
         const source = latest.source || report.source || '—';
         const analyzedAt = latest.analyzed_at || report.analyzed_at || '';
+        // Reaffiche le journal de la derniere analyse (sinon on croit que rien ne s'est passe)
+        const savedLogs = Array.isArray(report.analysis_logs) ? report.analysis_logs : [];
+        const fallbackErr = report.fallback_error || latest.fallback_error || '';
+        if (savedLogs.length || fallbackErr) {
+            const status = document.getElementById('gemini-report-status');
+            if (status) status.style.display = 'block';
+            syncGeminiReportLogs({
+                logs: savedLogs.length ? savedLogs : [String(fallbackErr)],
+                progress: 100,
+                message: fallbackErr
+                    ? ('Derniere analyse - ' + String(fallbackErr).slice(0, 160))
+                    : 'Derniere analyse (journal)',
+            });
+        }
         const works = Array.isArray(report.what_works) ? report.what_works : [];
         const wrongs = Array.isArray(report.whats_wrong) ? report.whats_wrong : [];
         const actions = Array.isArray(report.priority_actions) ? report.priority_actions : [];
         const improvements = Array.isArray(report.improvements) ? report.improvements : [];
         const pitch = report.commercial_pitch || '';
         const summary = report.executive_summary || '';
+        const docMd = String(report.report_document || '').trim();
         const design = (report.design_analysis && typeof report.design_analysis === 'object')
             ? report.design_analysis
             : null;
@@ -3809,12 +4268,17 @@
             .filter((k) => modules[k] && (modules[k].score != null || modules[k].notes))
             .map((k) => {
                 const m = modules[k] || {};
-                const sc = m.score != null && !Number.isNaN(Number(m.score))
-                    ? `${escape(String(m.score))}/100`
-                    : '—';
-                const notes = m.notes ? `<div class="gemini-module-notes">${escape(m.notes)}</div>` : '';
-                return `<div class="gemini-module-card"><strong>${escape(k)}</strong>`
-                    + `<span class="gemini-module-score">${sc}</span>${notes}</div>`;
+                const scNum = m.score != null ? Number(m.score) : NaN;
+                const sc = !Number.isNaN(scNum) ? Math.max(0, Math.min(100, scNum)) : null;
+                const tone = sc == null ? 'is-mid' : geminiScoreTone(sc);
+                const notes = m.notes ? `<div class="gemini-module-notes">${hl(m.notes)}</div>` : '';
+                const bar = sc != null
+                    ? `<div class="gemini-module-bar" aria-hidden="true"><span class="${tone}" style="width:${sc}%"></span></div>`
+                    : '';
+                return `<div class="gemini-module-card ${tone}">`
+                    + `<div class="gemini-module-card-top"><strong>${escape(geminiModuleLabel(k))}</strong>`
+                    + `<span class="gemini-module-score">${sc != null ? escape(String(sc)) + '/100' : '—'}</span></div>`
+                    + bar + notes + `</div>`;
             })
             .join('');
 
@@ -3823,69 +4287,87 @@
             || (design.to_keep && design.to_keep.length)
             || (design.to_redo && design.to_redo.length))) {
             const dScore = design.score != null && !Number.isNaN(Number(design.score))
-                ? ` · Score design ${escape(String(design.score))}/100`
+                ? ` · ${escape(String(design.score))}/100`
                 : '';
             const keep = Array.isArray(design.to_keep) ? design.to_keep : [];
             const redo = Array.isArray(design.to_redo) ? design.to_redo : [];
             designHtml = `
-                <div class="gemini-report-design">
-                    <h4>Design / UX / UI${dScore}</h4>
-                    ${design.summary ? `<p>${escape(design.summary)}</p>` : ''}
-                    ${design.ux_notes ? `<p><em>UX :</em> ${escape(design.ux_notes)}</p>` : ''}
-                    ${design.ui_notes ? `<p><em>UI :</em> ${escape(design.ui_notes)}</p>` : ''}
-                    ${keep.length ? `<p><strong>A garder</strong></p><ul>${keep.map((x) => `<li>${escape(x)}</li>`).join('')}</ul>` : ''}
-                    ${redo.length ? `<p><strong>A refaire</strong></p><ul>${redo.map((x) => `<li>${escape(x)}</li>`).join('')}</ul>` : ''}
+                <div class="gemini-report-design md-surface">
+                    <h4><i class="fas fa-palette"></i> Design / UX / UI${dScore}</h4>
+                    ${design.summary ? `<p>${hl(design.summary)}</p>` : ''}
+                    ${design.ux_notes ? `<p><span class="gemini-chip">UX</span> ${hl(design.ux_notes)}</p>` : ''}
+                    ${design.ui_notes ? `<p><span class="gemini-chip">UI</span> ${hl(design.ui_notes)}</p>` : ''}
+                    ${keep.length ? `<p><strong>A garder</strong></p><ul>${keep.map((x) => `<li>${hl(x)}</li>`).join('')}</ul>` : ''}
+                    ${redo.length ? `<p><strong>A refaire</strong></p><ul>${redo.map((x) => `<li>${hl(x)}</li>`).join('')}</ul>` : ''}
                 </div>`;
         }
 
+        const prioClass = (p) => {
+            const s = String(p || '').toLowerCase();
+            if (s.includes('haut') || s.includes('high') || s.includes('critique')) return 'gemini-chip--prio-high';
+            if (s.includes('bas') || s.includes('low')) return 'gemini-chip--prio-low';
+            return 'gemini-chip--prio';
+        };
+
+        const docHtml = docMd
+            ? `<details class="gemini-report-doc-fold">
+                    <summary>Document detaille (Markdown)</summary>
+                    <article class="gemini-report-doc">${renderGeminiMarkdown(docMd, escape)}</article>
+               </details>`
+            : '';
+
         container.innerHTML = `
-            <div class="gemini-report-card">
+            <div class="gemini-report-card md-elevated">
                 <div class="gemini-report-head">
                     <div>
-                        <strong><i class="fas fa-robot"></i> Rapport d'audit Gemini</strong>
+                        <strong class="gemini-report-title"><i class="fas fa-robot"></i> Rapport d'audit Gemini</strong>
                         <div class="gemini-report-meta">
                             Source : ${escape(source)}
-                            · Refonte : <em>${escape(refonte)}</em>
+                            · Refonte : <span class="gemini-chip gemini-chip--refonte">${escape(refonte)}</span>
                             ${analyzedAt ? ` · ${escape(String(analyzedAt).slice(0, 19))}` : ''}
                         </div>
                     </div>
-                    <span class="gemini-report-score ${scoreClass}">${!Number.isNaN(score) ? escape(String(score)) + '/100' : '—'}</span>
+                    <div class="gemini-report-score-wrap">
+                        <span class="gemini-report-score ${scoreClass}">${!Number.isNaN(score) ? escape(String(score)) : '—'}</span>
+                        <span class="gemini-report-score-label">/ 100</span>
+                    </div>
                 </div>
-                ${summary ? `<p class="gemini-report-summary">${escape(summary)}</p>` : ''}
-                ${pitch ? `<p class="gemini-report-pitch"><i class="fas fa-bullhorn"></i> ${escape(pitch)}</p>` : ''}
-                ${designHtml}
+                ${summary ? `<p class="gemini-report-summary">${hl(summary)}</p>` : ''}
+                ${pitch ? `<p class="gemini-report-pitch"><i class="fas fa-bullhorn"></i> ${hl(pitch)}</p>` : ''}
                 ${modulesHtml ? `
                 <div class="gemini-report-modules">
                     <h4>Modules</h4>
                     <div class="gemini-modules-grid">${modulesHtml}</div>
                 </div>` : ''}
+                ${designHtml}
                 <div class="gemini-report-lists">
-                    <div class="gemini-report-list gemini-report-list--plus">
+                    <div class="gemini-report-list gemini-report-list--plus md-surface">
                         <h4>Ce qui va</h4>
-                        <ul>${works.length ? works.map((w) => `<li>${escape(w)}</li>`).join('') : '<li class="muted">—</li>'}</ul>
+                        <ul>${works.length ? works.map((w) => `<li>${hl(w)}</li>`).join('') : '<li class="muted">—</li>'}</ul>
                     </div>
-                    <div class="gemini-report-list gemini-report-list--minus">
+                    <div class="gemini-report-list gemini-report-list--minus md-surface">
                         <h4>Ce qui cloche</h4>
-                        <ul>${wrongs.length ? wrongs.map((w) => `<li>${escape(w)}</li>`).join('') : '<li class="muted">—</li>'}</ul>
+                        <ul>${wrongs.length ? wrongs.map((w) => `<li>${hl(w)}</li>`).join('') : '<li class="muted">—</li>'}</ul>
                     </div>
                 </div>
                 ${actions.length ? `
-                <div class="gemini-report-actions">
+                <div class="gemini-report-actions md-surface">
                     <h4>Actions prioritaires</h4>
-                    <ol>${actions.map((a) => `<li>${escape(a)}</li>`).join('')}</ol>
+                    <ol>${actions.map((a) => `<li>${hl(a)}</li>`).join('')}</ol>
                 </div>` : ''}
                 ${improvements.length ? `
-                <div class="gemini-report-improvements">
+                <div class="gemini-report-improvements md-surface">
                     <h4>Ameliorations</h4>
-                    <ul>
+                    <ul class="gemini-improvements-list">
                         ${improvements.map((it) => {
                             const area = escape((it && it.area) || '');
                             const prio = escape((it && it.priority) || '');
-                            const action = escape((it && it.action) || '');
-                            return `<li><span class="gemini-chip">${area}</span> <span class="gemini-chip gemini-chip--prio">${prio}</span> ${action}</li>`;
+                            const action = hl((it && it.action) || '');
+                            return `<li><span class="gemini-chip">${area}</span> <span class="gemini-chip ${prioClass(prio)}">${prio}</span> <span class="gemini-imp-text">${action}</span></li>`;
                         }).join('')}
                     </ul>
                 </div>` : ''}
+                ${docHtml}
             </div>
         `;
     }
@@ -3909,6 +4391,7 @@
         const escape = (txt) => (Formatters && Formatters.escapeHtml ? Formatters.escapeHtml(String(txt || '')) : String(txt || ''));
         const last = list.lastElementChild;
         if (last && last.getAttribute('data-msg') === String(message)) {
+            scrollGeminiReportLogToBottom();
             return;
         }
         const li = document.createElement('li');
@@ -3920,12 +4403,10 @@
         li.innerHTML = `<span class="gemini-log-time">${hh}:${mm}:${ss}</span> ${escape(message)}`;
         if (isError) li.classList.add('is-error');
         list.appendChild(li);
-        // garder max 80 lignes visibles
         while (list.children.length > 80) {
             list.removeChild(list.firstChild);
         }
-        status.scrollTop = status.scrollHeight;
-        list.scrollTop = list.scrollHeight;
+        scrollGeminiReportLogToBottom();
         if (pctEl && !pctEl.textContent) {
             // laisse syncGeminiReportLogs gerer le %
         }
@@ -3961,12 +4442,14 @@
         while (list.children.length > 80) {
             list.removeChild(list.firstChild);
         }
-        list.scrollTop = list.scrollHeight;
         if (pctEl && meta && meta.progress != null) {
             pctEl.textContent = `${Math.max(0, Math.min(100, Number(meta.progress) || 0))} %`;
         }
+        scrollGeminiReportLogToBottom();
         if (meta && meta.message) {
             setGeminiReportStatus(String(meta.message), false);
+        } else {
+            scrollGeminiReportLogToBottom();
         }
     }
 
@@ -4003,6 +4486,12 @@
      */
     async function triggerGeminiFullReport(entrepriseId, options = {}) {
         const notify = options.notify !== false;
+        if (isRowChipLoading('gemini', entrepriseId)) {
+            if (notify) {
+                Notifications.show('Rapport Gemini déjà en cours…', 'info', 'fa-spinner');
+            }
+            return;
+        }
         const btn = document.getElementById('gemini-report-start-btn');
         const socket = window.wsManager && window.wsManager.socket;
         if (!socket) {
@@ -4016,9 +4505,7 @@
             btn.disabled = true;
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyse…';
         }
-        document.querySelectorAll(`.row-chip-gemini[data-entreprise-id="${entrepriseId}"]`).forEach((el) => {
-            el.classList.add('is-loading');
-        });
+        setRowChipLoading('gemini', entrepriseId, true);
         if (Number(entrepriseId) === Number(currentModalEntrepriseId)) {
             resetGeminiReportLogs();
             setGeminiReportStatus('Lancement du rapport complet…', false);
@@ -4040,6 +4527,12 @@
      */
     function triggerScreenshotsCaptureFromList(entrepriseId, options = {}) {
         const notify = options.notify !== false;
+        if (isRowChipLoading('screenshots', entrepriseId)) {
+            if (notify) {
+                Notifications.show('Capture screenshots déjà en cours…', 'info', 'fa-spinner');
+            }
+            return;
+        }
         const entreprise = allEntreprises.find(e => e && e.id === entrepriseId)
             || filteredEntreprises.find(e => e && e.id === entrepriseId);
         const url = entreprise && entreprise.website ? String(entreprise.website).trim() : '';
@@ -4054,9 +4547,7 @@
             return;
         }
         ensureModalWebSocketListeners();
-        document.querySelectorAll(`.row-chip-screenshots[data-entreprise-id="${entrepriseId}"]`).forEach((el) => {
-            el.classList.add('is-loading');
-        });
+        setRowChipLoading('screenshots', entrepriseId, true);
         // Pas de notif ici : screenshot_capture_started s'en charge (evite le double toast)
         socket.emit('start_screenshot_capture', {
             entreprise_id: Number(entrepriseId),
@@ -4122,6 +4613,11 @@
             Notifications.show('Connexion temps réel non disponible. Rechargez la page.', 'warning');
             return;
         }
+        if (isRowChipLoading('screenshots', entrepriseId)) {
+            Notifications.show('Capture screenshots déjà en cours…', 'info', 'fa-spinner');
+            return;
+        }
+        setRowChipLoading('screenshots', entrepriseId, true);
         setInfoScreenshotsLoading(true, 'Lancement de la capture screenshots...');
         socket.emit('start_screenshot_capture', { entreprise_id: entrepriseId });
     }
@@ -4545,6 +5041,7 @@
                         <button class="tab-btn" data-tab="pages">Pages (${nbPages})</button>
                         <button class="tab-btn" data-tab="scraping">Résultats scraping</button>
                         <button class="tab-btn" data-tab="gemini-report">Rapport Gemini</button>
+                        <button class="tab-btn is-disabled-gate" data-tab="gemini-mockups" title="Disponible apres un rapport Gemini" aria-disabled="true">Maquettes Gemini</button>
                         <button class="tab-btn" data-tab="evolution-metrics">Évolution</button>
                         <button class="tab-btn" data-tab="technique">Analyse technique</button>
                         <button class="tab-btn" data-tab="seo">Analyse SEO</button>
@@ -4728,6 +5225,21 @@
                         </div>
                     </div>
                     
+                    <div class="tab-panel" id="tab-gemini-mockups">
+                        <div class="gemini-mockups-toolbar">
+                            <button type="button" class="btn btn-primary btn-small" id="gemini-mockups-start-btn" title="Genere desktop + mobile a partir du rapport">
+                                <i class="fas fa-magic"></i> Generer les maquettes
+                            </button>
+                            <button type="button" class="btn btn-outline btn-small" id="gemini-mockups-refresh-btn" title="Recharger">
+                                <i class="fas fa-sync-alt"></i> Actualiser
+                            </button>
+                        </div>
+                        <div id="gemini-mockups-status" class="info-screenshots-status" style="display:none;"></div>
+                        <div id="gemini-mockups-content" class="gemini-mockups-content">
+                            <p class="loading">Chargement…</p>
+                        </div>
+                    </div>
+
                     <div class="tab-panel" id="tab-prospection" style="display:none;">
                         <div id="entreprise-prospection-container" class="prospection-tab-content">
                             <p class="empty-state">Chargement de la prospection...</p>
@@ -4867,97 +5379,139 @@
     }
     
     function ensureModalWebSocketListeners() {
-        if (window._entrepriseModalWsListenersSetup || !window.wsManager || !window.wsManager.socket) return;
-        const s = window.wsManager.socket;
+        const s = window.wsManager && window.wsManager.socket;
+        if (!s) return;
+        // Rebind si le socket a été recréé (force polling / reconnect) — sinon complete/error
+        // n'arrivent plus et les spinners tournent sans notif.
+        if (window._entrepriseModalWsListenersSetup && window._entrepriseModalWsBoundSocket === s) return;
+        window._entrepriseModalWsBoundSocket = s;
+
+        const eidOf = (data) => {
+            if (!data || data.entreprise_id == null || data.entreprise_id === '') return null;
+            const n = Number(data.entreprise_id);
+            return Number.isFinite(n) && n > 0 ? n : null;
+        };
+
+        s.on('technical_analysis_started', function(data) {
+            const eid = eidOf(data);
+            if (eid == null) return;
+            setScoreRelaunchLoading(eid, 'technique', true);
+        });
         s.on('technical_analysis_complete', function(data) {
-            if (!data || data.entreprise_id == null) return;
-            setScoreRelaunchLoading(data.entreprise_id, 'technique', false);
-            refreshEntrepriseFromServer(data.entreprise_id, { animateOnlyMetric: 'technique' });
-            if (isEntrepriseCurrentlyRendered(data.entreprise_id)) {
+            const eid = eidOf(data);
+            if (eid == null) return;
+            setScoreRelaunchLoading(eid, 'technique', false);
+            refreshEntrepriseFromServer(eid, { animateOnlyMetric: 'technique' });
+            if (isEntrepriseCurrentlyRendered(eid)) {
                 scheduleApplyFilters();
             }
-            const nom = getEntrepriseNom(data.entreprise_id);
+            const nom = getEntrepriseNom(eid);
             Notifications.show(nom + ' — Analyse technique terminée', 'success', 'fa-check-circle');
-            if (data.entreprise_id === currentModalEntrepriseId) {
+            if (eid === currentModalEntrepriseId) {
                 setTimeout(() => loadTechnicalAnalysis(currentModalEntrepriseId, { skipClear: true }), 400);
                 setTimeout(() => loadMetricEvolutionTab(currentModalEntrepriseId), 650);
             }
         });
         s.on('technical_analysis_error', function(data) {
-            if (data && data.entreprise_id != null) {
-                setScoreRelaunchLoading(data.entreprise_id, 'technique', false);
-                const nom = getEntrepriseNom(data.entreprise_id);
+            const eid = eidOf(data);
+            if (eid != null) {
+                setScoreRelaunchLoading(eid, 'technique', false);
+                const nom = getEntrepriseNom(eid);
                 Notifications.show(nom + ' — ' + (data.error || 'Erreur analyse technique'), 'error', 'fa-exclamation-circle');
+            } else if (data && data.error) {
+                Notifications.show(data.error, 'error', 'fa-exclamation-circle');
             }
-            if (data && data.entreprise_id != null && data.entreprise_id === currentModalEntrepriseId) {
+            if (eid != null && eid === currentModalEntrepriseId) {
                 loadTechnicalAnalysis(currentModalEntrepriseId);
             }
         });
+        s.on('seo_analysis_started', function(data) {
+            const eid = eidOf(data);
+            if (eid == null) return;
+            setScoreRelaunchLoading(eid, 'seo', true);
+        });
         s.on('seo_analysis_complete', function(data) {
-            if (!data || data.entreprise_id == null) return;
-            setScoreRelaunchLoading(data.entreprise_id, 'seo', false);
-            refreshEntrepriseFromServer(data.entreprise_id, { animateOnlyMetric: 'seo' });
-            if (isEntrepriseCurrentlyRendered(data.entreprise_id)) {
+            const eid = eidOf(data);
+            if (eid == null) return;
+            setScoreRelaunchLoading(eid, 'seo', false);
+            refreshEntrepriseFromServer(eid, { animateOnlyMetric: 'seo' });
+            if (isEntrepriseCurrentlyRendered(eid)) {
                 scheduleApplyFilters();
             }
-            const nom = getEntrepriseNom(data.entreprise_id);
+            const nom = getEntrepriseNom(eid);
             Notifications.show(nom + ' — Analyse SEO terminée', 'success', 'fa-check-circle');
-            if (data.entreprise_id === currentModalEntrepriseId) {
+            if (eid === currentModalEntrepriseId) {
                 setTimeout(() => loadSEOAnalysis(currentModalEntrepriseId, { skipClear: true }), 400);
                 setTimeout(() => loadMetricEvolutionTab(currentModalEntrepriseId), 650);
             }
         });
         s.on('seo_analysis_error', function(data) {
-            if (data && data.entreprise_id != null) {
-                setScoreRelaunchLoading(data.entreprise_id, 'seo', false);
-                const nom = getEntrepriseNom(data.entreprise_id);
+            const eid = eidOf(data);
+            if (eid != null) {
+                setScoreRelaunchLoading(eid, 'seo', false);
+                const nom = getEntrepriseNom(eid);
                 Notifications.show(nom + ' — ' + (data.error || 'Erreur analyse SEO'), 'error', 'fa-exclamation-circle');
+            } else if (data && data.error) {
+                Notifications.show(data.error, 'error', 'fa-exclamation-circle');
             }
-            if (data && data.entreprise_id != null && data.entreprise_id === currentModalEntrepriseId) {
+            if (eid != null && eid === currentModalEntrepriseId) {
                 loadSEOAnalysis(currentModalEntrepriseId);
             }
         });
         s.on('osint_analysis_complete', function(data) {
-            if (data && data.entreprise_id != null) {
-                const nom = getEntrepriseNom(data.entreprise_id);
+            const eid = eidOf(data);
+            if (eid != null) {
+                const nom = getEntrepriseNom(eid);
                 Notifications.show(nom + ' — Analyse OSINT terminée', 'success', 'fa-check-circle');
-                if (isEntrepriseCurrentlyRendered(data.entreprise_id)) {
+                if (isEntrepriseCurrentlyRendered(eid)) {
                     scheduleApplyFilters();
                 }
             }
-            if (data && data.entreprise_id === currentModalEntrepriseId) {
+            if (eid != null && eid === currentModalEntrepriseId) {
                 loadOSINTAnalysis(currentModalEntrepriseId);
             }
         });
         s.on('osint_analysis_error', function(data) {
-            if (data && data.entreprise_id != null) {
-                const nom = getEntrepriseNom(data.entreprise_id);
+            const eid = eidOf(data);
+            if (eid != null) {
+                const nom = getEntrepriseNom(eid);
                 Notifications.show(nom + ' — ' + (data.error || 'Erreur analyse OSINT'), 'error', 'fa-exclamation-circle');
+            } else if (data && data.error) {
+                Notifications.show(data.error, 'error', 'fa-exclamation-circle');
             }
-            if (data && data.entreprise_id === currentModalEntrepriseId) {
+            if (eid != null && eid === currentModalEntrepriseId) {
                 loadOSINTAnalysis(currentModalEntrepriseId);
             }
         });
+        s.on('pentest_analysis_started', function(data) {
+            const eid = eidOf(data);
+            if (eid == null) return;
+            setScoreRelaunchLoading(eid, 'pentest', true);
+        });
         s.on('pentest_analysis_complete', function(data) {
-            if (!data || data.entreprise_id == null) return;
-            setScoreRelaunchLoading(data.entreprise_id, 'pentest', false);
-            refreshEntrepriseFromServer(data.entreprise_id);
-            if (isEntrepriseCurrentlyRendered(data.entreprise_id)) {
+            const eid = eidOf(data);
+            if (eid == null) return;
+            setScoreRelaunchLoading(eid, 'pentest', false);
+            refreshEntrepriseFromServer(eid);
+            if (isEntrepriseCurrentlyRendered(eid)) {
                 scheduleApplyFilters();
             }
-            const nom = getEntrepriseNom(data.entreprise_id);
+            const nom = getEntrepriseNom(eid);
             Notifications.show(nom + ' — Analyse Pentest terminée', 'success', 'fa-check-circle');
-            if (data.entreprise_id === currentModalEntrepriseId) {
+            if (eid === currentModalEntrepriseId) {
                 setTimeout(() => loadPentestAnalysis(currentModalEntrepriseId, { skipClear: true }), 400);
             }
         });
         s.on('pentest_analysis_error', function(data) {
-            if (data && data.entreprise_id != null) {
-                setScoreRelaunchLoading(data.entreprise_id, 'pentest', false);
-                const nom = getEntrepriseNom(data.entreprise_id);
+            const eid = eidOf(data);
+            if (eid != null) {
+                setScoreRelaunchLoading(eid, 'pentest', false);
+                const nom = getEntrepriseNom(eid);
                 Notifications.show(nom + ' — ' + (data.error || 'Erreur analyse Pentest'), 'error', 'fa-exclamation-circle');
+            } else if (data && data.error) {
+                Notifications.show(data.error, 'error', 'fa-exclamation-circle');
             }
-            if (data && data.entreprise_id === currentModalEntrepriseId) {
+            if (eid != null && eid === currentModalEntrepriseId) {
                 loadPentestAnalysis(currentModalEntrepriseId);
             }
         });
@@ -5003,6 +5557,7 @@
         s.on('screenshot_capture_started', function(data) {
             const entrepriseId = data && data.entreprise_id != null ? data.entreprise_id : currentModalEntrepriseId;
             if (entrepriseId == null) return;
+            setRowChipLoading('screenshots', entrepriseId, true);
             if (entrepriseId === currentModalEntrepriseId) {
                 setInfoScreenshotsLoading(true, (data && data.message) || 'Capture screenshots démarrée...');
             }
@@ -5024,10 +5579,13 @@
             if (entrepriseId == null) return;
             const nom = getEntrepriseNom(entrepriseId);
             Notifications.show(nom + ' — Screenshots mis à jour', 'success', 'fa-check-circle');
+            setRowChipLoading('screenshots', entrepriseId, false);
             document.querySelectorAll(`.row-chip-screenshots[data-entreprise-id="${entrepriseId}"]`).forEach((el) => {
-                el.classList.remove('is-loading', 'is-missing');
+                el.classList.remove('is-missing');
                 el.classList.add('is-ready');
                 el.title = 'Screenshots OK (cliquer pour relancer)';
+                const icon = el.querySelector('i');
+                if (icon) icon.className = 'fas fa-camera';
             });
             refreshEntrepriseFromServer(entrepriseId);
             if (entrepriseId === currentModalEntrepriseId) {
@@ -5042,9 +5600,7 @@
             if (entrepriseId != null) {
                 const nom = getEntrepriseNom(entrepriseId);
                 Notifications.show(nom + ' — ' + err, 'error', 'fa-exclamation-circle');
-                document.querySelectorAll(`.row-chip-screenshots[data-entreprise-id="${entrepriseId}"]`).forEach((el) => {
-                    el.classList.remove('is-loading');
-                });
+                setRowChipLoading('screenshots', entrepriseId, false);
             } else {
                 Notifications.show(err, 'error', 'fa-exclamation-circle');
             }
@@ -5062,16 +5618,54 @@
         s.on('gemini_report_started', function(data) {
             if (!data || data.entreprise_id == null) return;
             const eid = data.entreprise_id;
-            if (Number(eid) === Number(currentModalEntrepriseId)) {
-                setGeminiReportStatus('Rapport Gemini démarré…', false);
+            setRowChipLoading('gemini', eid, true);
+            const nom = getEntrepriseNom(eid);
+            const msg = (data && data.message) || 'Rapport Gemini démarré…';
+            const pos = data.queue_position != null ? Number(data.queue_position) : 1;
+            const eta = data.queue_eta_sec != null ? Number(data.queue_eta_sec) : 0;
+            if (data.already_pending) {
+                Notifications.show(nom + ' — ' + msg, 'info', 'fa-hourglass-half');
+            } else if (pos > 1 || eta >= 30) {
+                Notifications.show(nom + ' — ' + msg, 'info', 'fa-list-ol');
             }
+            if (Number(eid) === Number(currentModalEntrepriseId)) {
+                // Force le journal visible des le demarrage (sinon display:none)
+                resetGeminiReportLogs();
+                setGeminiReportStatus(msg, false);
+                const status = document.getElementById('gemini-report-status');
+                if (status) {
+                    status.style.display = 'block';
+                    status.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                }
+            }
+        });
+
+        s.on('gemini_report_quota', function(data) {
+            if (!data || data.entreprise_id == null) return;
+            const eid = Number(data.entreprise_id);
+            const msg = (data && data.message)
+                || 'Quota Gemini atteint — rapport heuristique / réessaie plus tard.';
+            applyGeminiQuotaUi(eid, msg);
         });
 
         s.on('gemini_report_progress', function(data) {
             if (!data || data.entreprise_id == null) return;
-            if (Number(data.entreprise_id) !== Number(currentModalEntrepriseId)) return;
+            const eid = Number(data.entreprise_id);
+            const msg = String((data && data.message) || '');
+            const logs = Array.isArray(data.logs) ? data.logs : [];
+            // Des que le journal annonce le 429 global : toast warning + stop spinner
+            // (ne pas attendre la fin du fallback heuristique)
+            const quotaNow = isGeminiQuotaText(msg)
+                || logs.some((line) => isGeminiQuotaText(line));
+            if (quotaNow) {
+                applyGeminiQuotaUi(
+                    eid,
+                    msg || 'Quota Gemini atteint — toutes les cles en 429. Reessaie plus tard.'
+                );
+            }
+            if (eid !== Number(currentModalEntrepriseId)) return;
             syncGeminiReportLogs({
-                logs: data.logs || [],
+                logs: logs,
                 progress: data.progress,
                 message: data.message,
             });
@@ -5083,11 +5677,39 @@
             const nom = getEntrepriseNom(eid);
             const result = data.result || {};
             const sc = result.overall_score != null ? `Score ${result.overall_score}/100` : 'OK';
-            Notifications.show(nom + ' — Rapport Gemini terminé (' + sc + ')', 'success', 'fa-robot');
+            const src = String((result && result.source) || '').toLowerCase();
+            const quotaHit = !!(result && (result.quota_exceeded
+                || (result.fallback_error && /429|quota|resource.?exhausted|rate.?limit/i.test(String(result.fallback_error)))
+                || (src === 'heuristic' && result.fallback_error && /429|quota/i.test(String(result.fallback_error)))));
+            if (quotaHit) {
+                applyGeminiQuotaUi(
+                    eid,
+                    'Quota Gemini atteint. Rapport heuristique local (pas de Vision). Réessaie dans quelques minutes.'
+                );
+            } else if (src === 'heuristic') {
+                setRowChipLoading('gemini', eid, false);
+                Notifications.show(
+                    nom + ' — Gemini indisponible, rapport heuristique (' + sc + ')',
+                    'warning',
+                    'fa-exclamation-triangle'
+                );
+            } else {
+                setRowChipLoading('gemini', eid, false);
+                Notifications.show(nom + ' — Rapport Gemini terminé (' + sc + ')', 'success', 'fa-robot');
+            }
             document.querySelectorAll(`.row-chip-gemini[data-entreprise-id="${eid}"]`).forEach((el) => {
-                el.classList.remove('is-loading', 'is-missing');
-                el.classList.add('is-ready');
-                el.title = 'Rapport Gemini OK (cliquer pour relancer)';
+                el.classList.remove('is-missing', 'is-ready', 'is-heuristic');
+                if (src === 'heuristic' || quotaHit) {
+                    el.classList.add('is-heuristic');
+                    el.title = 'Rapport heuristique (quota / Vision KO) — recliquer pour un vrai Gemini';
+                    const icon = el.querySelector('i');
+                    if (icon) icon.className = 'fas fa-exclamation-triangle';
+                } else {
+                    el.classList.add('is-ready');
+                    el.title = 'Rapport Gemini OK (cliquer pour relancer)';
+                    const icon = el.querySelector('i');
+                    if (icon) icon.className = 'fas fa-robot';
+                }
             });
             const btn = document.getElementById('gemini-report-start-btn');
             if (btn) {
@@ -5096,23 +5718,113 @@
             }
             refreshEntrepriseFromServer(eid);
             if (Number(eid) === Number(currentModalEntrepriseId)) {
-                if (Array.isArray(result.logs)) {
-                    syncGeminiReportLogs({ logs: result.logs, progress: 100, message: 'Termine' });
+                const status = document.getElementById('gemini-report-status');
+                if (status) status.style.display = 'block';
+                const logsFromResult = Array.isArray(result.logs) ? result.logs : [];
+                const logsFromReport = (result.report && Array.isArray(result.report.analysis_logs))
+                    ? result.report.analysis_logs
+                    : [];
+                const logs = logsFromResult.length ? logsFromResult : logsFromReport;
+                if (logs.length) {
+                    syncGeminiReportLogs({ logs: logs, progress: 100, message: 'Termine' });
                 }
                 setGeminiReportStatus(`Rapport terminé — ${sc} (${result.source || '—'})`, false);
+                updateGeminiMockupsTabGate(true);
                 loadGeminiFullReport(eid);
             }
+        });
+
+        s.on('gemini_mockups_started', function(data) {
+            if (!data) return;
+            const status = document.getElementById('gemini-mockups-status');
+            if (status) {
+                status.style.display = 'block';
+                status.classList.remove('is-error');
+                status.textContent = data.message || 'Generation en cours…';
+            }
+        });
+
+        s.on('gemini_mockups_progress', function(data) {
+            if (!data || data.entreprise_id == null) return;
+            if (Number(data.entreprise_id) !== Number(currentModalEntrepriseId)) return;
+            const status = document.getElementById('gemini-mockups-status');
+            if (status) {
+                status.style.display = 'block';
+                const pct = data.progress != null ? ` (${data.progress}%)` : '';
+                status.textContent = (data.message || 'Progression…') + pct;
+            }
+        });
+
+        s.on('gemini_mockups_complete', function(data) {
+            const btn = document.getElementById('gemini-mockups-start-btn');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-magic"></i> Generer les maquettes';
+            }
+            if (!data || data.entreprise_id == null) return;
+            if (Number(data.entreprise_id) !== Number(currentModalEntrepriseId)) return;
+            const status = document.getElementById('gemini-mockups-status');
+            if (data.success === false) {
+                if (status) {
+                    status.style.display = 'block';
+                    status.classList.add('is-error');
+                    status.textContent = data.error || 'Echec generation';
+                }
+                const errTxt = String(data.error || '');
+                if (/429|quota|resource.?exhausted|rate.?limit/i.test(errTxt) || data.quota_exceeded) {
+                    Notifications.show(
+                        'Quota Gemini atteint pour les maquettes. Réessaie plus tard.',
+                        'warning',
+                        'fa-hourglass-half'
+                    );
+                } else {
+                    Notifications.show(data.error || 'Echec maquettes Gemini', 'error');
+                }
+                return;
+            }
+            if (status) {
+                status.style.display = 'block';
+                status.classList.remove('is-error');
+                status.textContent = 'Maquettes pretes';
+            }
+            Notifications.show('Maquettes Gemini generees', 'success', 'fa-magic');
+            loadGeminiMockups(currentModalEntrepriseId);
+        });
+
+        s.on('gemini_mockups_error', function(data) {
+            const btn = document.getElementById('gemini-mockups-start-btn');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-magic"></i> Generer les maquettes';
+            }
+            const status = document.getElementById('gemini-mockups-status');
+            const err = (data && data.error) || 'Erreur maquettes';
+            if (status) {
+                status.style.display = 'block';
+                status.classList.add('is-error');
+                status.textContent = err;
+            }
+            Notifications.show(err, 'error');
         });
 
         s.on('gemini_report_error', function(data) {
             const eid = data && data.entreprise_id != null ? data.entreprise_id : null;
             const err = data && data.error ? data.error : 'Erreur rapport Gemini';
+            const isQuota = !!(data && data.quota_exceeded) || isGeminiQuotaText(err);
+            if (eid != null && isQuota) {
+                applyGeminiQuotaUi(eid, err);
+                return;
+            }
             if (eid != null) {
                 const nom = getEntrepriseNom(eid);
                 Notifications.show(nom + ' — ' + err, 'error', 'fa-exclamation-circle');
-                document.querySelectorAll(`.row-chip-gemini[data-entreprise-id="${eid}"]`).forEach((el) => {
-                    el.classList.remove('is-loading');
-                });
+                setRowChipLoading('gemini', eid, false);
+            } else if (isQuota) {
+                Notifications.show(
+                    'Quota Gemini atteint. Réessaie plus tard.',
+                    'warning',
+                    'fa-hourglass-half'
+                );
             } else {
                 Notifications.show(err, 'error', 'fa-exclamation-circle');
             }
@@ -5122,10 +5834,21 @@
                 btn.innerHTML = '<i class="fas fa-robot"></i> Lancer l\'analyse complete';
             }
             if (eid != null && Number(eid) === Number(currentModalEntrepriseId)) {
-                setGeminiReportStatus(err, true);
+                setGeminiReportStatus(isQuota ? 'Quota Gemini atteint' : err, true);
             }
         });
         window._entrepriseModalWsListenersSetup = true;
+        if (!window._entrepriseModalWsReconnectHook) {
+            window._entrepriseModalWsReconnectHook = true;
+            document.addEventListener('websocket:connected', function() {
+                try {
+                    if (window.wsManager && typeof window.wsManager.joinNotifyRoom === 'function') {
+                        window.wsManager.joinNotifyRoom();
+                    }
+                    ensureModalWebSocketListeners();
+                } catch (e) {}
+            });
+        }
     }
     
     function setupModalInteractions() {
@@ -5134,9 +5857,9 @@
         const modal = document.getElementById('entreprise-modal');
         const modalBody = document.getElementById('modal-entreprise-body');
         
-        if (!window._entrepriseModalWsListenersSetup && window.wsManager && window.wsManager.socket) {
+        try {
             ensureModalWebSocketListeners();
-        }
+        } catch (e) {}
         if (!window._entrepriseLandingVariantDomListenersSetup) {
             window._entrepriseLandingVariantDomListenersSetup = true;
             document.addEventListener('landing_variants:progress', (ev) => {
@@ -5689,6 +6412,29 @@
             });
         }
 
+        const geminiMockupsTab = document.querySelector('.tab-btn[data-tab="gemini-mockups"]');
+        if (geminiMockupsTab) {
+            geminiMockupsTab.addEventListener('click', () => {
+                if (geminiMockupsTab.classList.contains('is-disabled-gate')) return;
+                if (currentModalEntrepriseId) {
+                    loadGeminiMockups(currentModalEntrepriseId);
+                }
+            });
+        }
+
+        const geminiMockupsStartBtn = document.getElementById('gemini-mockups-start-btn');
+        if (geminiMockupsStartBtn) {
+            geminiMockupsStartBtn.addEventListener('click', () => {
+                if (currentModalEntrepriseId) triggerGeminiMockups(currentModalEntrepriseId);
+            });
+        }
+        const geminiMockupsRefreshBtn = document.getElementById('gemini-mockups-refresh-btn');
+        if (geminiMockupsRefreshBtn) {
+            geminiMockupsRefreshBtn.addEventListener('click', () => {
+                if (currentModalEntrepriseId) loadGeminiMockups(currentModalEntrepriseId);
+            });
+        }
+
         const evolutionTab = document.querySelector('.tab-btn[data-tab="evolution-metrics"]');
         if (evolutionTab) {
             evolutionTab.addEventListener('click', () => {
@@ -6194,7 +6940,7 @@
                 } else {
                     console.error('Module ScrapingAnalysisDisplay non disponible');
                 }
-                loadEntrepriseImages(entrepriseId);
+                // Images : onglet dedie uniquement (pas de double fetch ici)
             }
         } catch (error) {
             console.error('Erreur lors du chargement des résultats:', error);

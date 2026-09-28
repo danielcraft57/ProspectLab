@@ -762,22 +762,34 @@ def entreprise_audit_pipeline(entreprise_id):
 @login_required
 def get_scrapers(entreprise_id):
     """
-    API: Récupère tous les scrapers d'une entreprise
-    
-    Args:
-        entreprise_id (int): ID de l'entreprise
-        
-    Returns:
-        JSON: Liste des scrapers
+    API: Récupère les scrapers d'une entreprise.
+
+    Query params:
+      - latest=1 : uniquement le scraper le plus recent
+      - include_images=0 : omet les images (recommandé pour l'onglet scraping UI)
+
+    @param entreprise_id: ID de l'entreprise
+    @returns: JSON liste des scrapers
     """
     try:
-        scrapers = database.get_scrapers_by_entreprise(entreprise_id)
-        # S'assurer que toutes les valeurs sont sérialisables en JSON
+        from flask import request as _req
+        latest_only = str(_req.args.get('latest') or '').strip().lower() in ('1', 'true', 'yes')
+        include_images_raw = str(_req.args.get('include_images') or '1').strip().lower()
+        include_images = include_images_raw not in ('0', 'false', 'no')
+        # Defaut leger pour l'UI : latest + sans images (gros payload sinon)
+        if 'latest' not in _req.args and 'include_images' not in _req.args:
+            latest_only = True
+            include_images = False
+
+        scrapers = database.get_scrapers_by_entreprise(
+            entreprise_id,
+            latest_only=latest_only,
+            include_images=include_images,
+        )
         for scraper in scrapers:
             for key, value in list(scraper.items()):
                 if value is None:
                     continue
-                # Convertir les types non sérialisables
                 if isinstance(value, (bytes, bytearray)):
                     scraper[key] = value.decode('utf-8', errors='ignore')
         return jsonify(scrapers)
@@ -1811,23 +1823,33 @@ def entreprise_gemini_report_get(entreprise_id):
     @param entreprise_id: ID de l'entreprise
     """
     try:
-        entreprise = database.get_entreprise(int(entreprise_id))
-        if not entreprise:
+        eid = int(entreprise_id)
+        # Existence legere (evite get_entreprise + OG + images)
+        conn = database.get_connection()
+        cursor = conn.cursor()
+        database.execute_sql(cursor, 'SELECT id FROM entreprises WHERE id = ? LIMIT 1', (eid,))
+        exists = cursor.fetchone()
+        conn.close()
+        if not exists:
             return jsonify({'success': False, 'error': 'Entreprise introuvable'}), 404
 
-        latest = database.get_latest_entreprise_gemini_report(int(entreprise_id))
-        history = database.list_entreprise_gemini_reports(int(entreprise_id), limit=5)
+        latest = database.get_latest_entreprise_gemini_report(eid)
+        history = database.list_entreprise_gemini_reports(
+            eid,
+            limit=5,
+            include_report_json=False,
+        )
         if not latest:
             return jsonify({
                 'success': True,
-                'entreprise_id': int(entreprise_id),
+                'entreprise_id': eid,
                 'status': 'never',
                 'latest': None,
                 'history': [],
             })
         return jsonify({
             'success': True,
-            'entreprise_id': int(entreprise_id),
+            'entreprise_id': eid,
             'status': latest.get('status') or 'done',
             'latest': latest,
             'history': history,
@@ -1873,6 +1895,62 @@ def entreprise_gemini_report_post(entreprise_id):
             'task_id': task.id,
             'status': 'pending',
             'message': 'Rapport Gemini enfile. Relisez GET .../gemini-report apres quelques secondes.',
+        }), 202
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@api_extended_bp.route('/entreprise/<int:entreprise_id>/gemini-mockups', methods=['GET'])
+@login_required
+def entreprise_gemini_mockups_get(entreprise_id):
+    """
+    API: Liste / bundle des maquettes Gemini pour une entreprise.
+
+    @param entreprise_id: ID entreprise
+    """
+    try:
+        eid = int(entreprise_id)
+        has_report = bool(database.get_latest_entreprise_gemini_report(eid))
+        bundle = database.get_latest_entreprise_gemini_mockup_bundle(eid)
+        return jsonify({
+            'success': True,
+            'entreprise_id': eid,
+            'has_report': has_report,
+            'items': bundle.get('items') or [],
+            'by_device': bundle.get('by_device') or {},
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@api_extended_bp.route('/entreprise/<int:entreprise_id>/gemini-mockups', methods=['POST'])
+@login_required
+def entreprise_gemini_mockups_post(entreprise_id):
+    """
+    API: Lance la generation de maquettes (Celery). Rapport Gemini requis.
+
+    @param entreprise_id: ID entreprise
+    """
+    try:
+        eid = int(entreprise_id)
+        latest = database.get_latest_entreprise_gemini_report(eid)
+        if not latest or not latest.get('report'):
+            return jsonify({
+                'success': False,
+                'error': 'Rapport Gemini requis avant de generer des maquettes',
+            }), 400
+
+        from tasks.gemini_mockup_tasks import generate_entreprise_gemini_mockups_task
+
+        task = generate_entreprise_gemini_mockups_task.apply_async(
+            kwargs=dict(entreprise_id=eid),
+            queue='screenshot',
+        )
+        return jsonify({
+            'success': True,
+            'entreprise_id': eid,
+            'task_id': task.id,
+            'status': 'pending',
         }), 202
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

@@ -399,6 +399,11 @@ def _apply_scrape_to_entreprise(database: Database, entreprise_id: int, flat: di
     database.execute_sql(cursor, sql, tuple(params))
     conn.commit()
     conn.close()
+    if email and any(u.startswith('email_principal') for u in updates):
+        try:
+            database.refresh_has_known_email(entreprise_id)
+        except Exception:
+            pass
 
 
 def _collect_scores(database: Database, entreprise_id: int) -> Dict[str, Any]:

@@ -1234,10 +1234,52 @@ body[data-theme="dark"] .tag-suggestion.active {
     color: #94a3b8;
 }
 
+/* Fallback heuristique (quota / Vision KO) : forme carree + ambre */
+.row-chip-gemini.is-heuristic {
+    border-radius: 4px;
+    border-style: dashed;
+    border-color: #f59e0b;
+    background: #fffbeb;
+    color: #b45309;
+}
+
+.row-chip-gemini.is-heuristic i {
+    color: #d97706;
+}
+
 .row-chip-gemini.is-loading,
 .row-chip-screenshots.is-loading {
-    opacity: 0.7;
-    pointer-events: none;
+    opacity: 1;
+    pointer-events: none !important;
+    cursor: wait !important;
+    border-color: #f59e0b !important;
+    background: #fff7ed !important;
+    color: #c2410c !important;
+    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.28);
+    animation: row-chip-wait-pulse 1.2s ease-in-out infinite;
+}
+
+.row-chip-gemini.is-loading i,
+.row-chip-screenshots.is-loading i {
+    color: #ea580c;
+}
+
+@keyframes row-chip-wait-pulse {
+    0%, 100% { box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.22); }
+    50% { box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.45); }
+}
+
+body[data-theme="dark"] .row-chip-gemini.is-loading,
+body[data-theme="dark"] .row-chip-screenshots.is-loading {
+    border-color: #f59e0b !important;
+    background: rgba(245, 158, 11, 0.18) !important;
+    color: #fdba74 !important;
+    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.35);
+}
+
+body[data-theme="dark"] .row-chip-gemini.is-loading i,
+body[data-theme="dark"] .row-chip-screenshots.is-loading i {
+    color: #fb923c;
 }
 
 .row-chip-lang {
@@ -1662,6 +1704,18 @@ body[data-theme="dark"] .row-chip-gemini.is-missing {
     background: rgba(15, 23, 42, 0.5);
     border-color: #475569;
     color: #64748b;
+}
+
+body[data-theme="dark"] .row-chip-gemini.is-heuristic {
+    border-radius: 4px;
+    border-style: dashed;
+    background: rgba(245, 158, 11, 0.18);
+    border-color: #f59e0b;
+    color: #fcd34d;
+}
+
+body[data-theme="dark"] .row-chip-gemini.is-heuristic i {
+    color: #fbbf24;
 }
 
 body[data-theme="dark"] .row-chip-lang {
@@ -2481,8 +2535,10 @@ body[data-theme="dark"] .entreprise-modal-tabs .info-design-review-meta {
     background: #0f172a;
     color: #e2e8f0;
     font-size: 0.8rem;
-    max-height: 220px;
+    max-height: 320px;
+    min-height: 96px;
     overflow: auto;
+    scroll-behavior: auto;
 }
 
 .entreprise-modal-tabs .gemini-report-status.is-error {
@@ -2600,6 +2656,64 @@ body[data-theme="dark"] .entreprise-modal-tabs .info-design-review-meta {
     font-size: 0.92rem;
     line-height: 1.45;
     color: #334155;
+}
+
+.entreprise-modal-tabs .gemini-report-doc {
+    margin: 0 0 1rem;
+    padding: 0.15rem 0 0.35rem;
+    color: #1e293b;
+    font-size: 0.95rem;
+    line-height: 1.65;
+}
+
+.entreprise-modal-tabs .gemini-report-doc h2,
+.entreprise-modal-tabs .gemini-report-doc h3,
+.entreprise-modal-tabs .gemini-report-doc h4 {
+    margin: 1.1rem 0 0.45rem;
+    line-height: 1.3;
+    color: #0f172a;
+    font-weight: 700;
+}
+
+.entreprise-modal-tabs .gemini-report-doc h2 {
+    font-size: 1.2rem;
+    padding-bottom: 0.3rem;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.entreprise-modal-tabs .gemini-report-doc h3 {
+    font-size: 1.05rem;
+}
+
+.entreprise-modal-tabs .gemini-report-doc h4 {
+    font-size: 0.95rem;
+    color: #334155;
+}
+
+.entreprise-modal-tabs .gemini-report-doc p {
+    margin: 0 0 0.75rem;
+}
+
+.entreprise-modal-tabs .gemini-report-doc ul,
+.entreprise-modal-tabs .gemini-report-doc ol {
+    margin: 0 0 0.85rem;
+    padding-left: 1.25rem;
+}
+
+.entreprise-modal-tabs .gemini-report-doc li {
+    margin: 0.2rem 0;
+}
+
+.entreprise-modal-tabs .gemini-report-doc code {
+    font-size: 0.85em;
+    padding: 0.1rem 0.3rem;
+    border-radius: 4px;
+    background: #e2e8f0;
+    color: #0f172a;
+}
+
+.entreprise-modal-tabs .gemini-report-doc strong {
+    color: #0f172a;
 }
 
 .entreprise-modal-tabs .gemini-report-pitch {
@@ -2723,26 +2837,71 @@ body[data-theme="dark"] .entreprise-modal-tabs .info-design-review-meta {
 }
 
 .entreprise-modal-tabs .gemini-module-card {
-    padding: 0.45rem 0.55rem;
-    border-radius: 6px;
+    padding: 0.65rem 0.7rem;
+    border-radius: 12px;
     border: 1px solid #e2e8f0;
     background: #fff;
     font-size: 0.8rem;
     color: #334155;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.entreprise-modal-tabs .gemini-module-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.35rem;
+    margin-bottom: 0.35rem;
 }
 
 .entreprise-modal-tabs .gemini-module-card strong {
     display: block;
     text-transform: uppercase;
     font-size: 0.68rem;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.04em;
     color: #64748b;
-    margin-bottom: 0.15rem;
+    margin-bottom: 0;
 }
 
 .entreprise-modal-tabs .gemini-module-card .gemini-module-score {
     font-weight: 700;
     color: #0f172a;
+    font-size: 0.85rem;
+}
+
+.entreprise-modal-tabs .gemini-module-bar {
+    height: 4px;
+    border-radius: 999px;
+    background: #e2e8f0;
+    overflow: hidden;
+    margin-bottom: 0.35rem;
+}
+
+.entreprise-modal-tabs .gemini-module-bar > span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: #6366f1;
+}
+
+.entreprise-modal-tabs .gemini-module-bar > span.is-low {
+    background: #ef4444;
+}
+
+.entreprise-modal-tabs .gemini-module-bar > span.is-mid {
+    background: #f59e0b;
+}
+
+.entreprise-modal-tabs .gemini-module-bar > span.is-high {
+    background: #22c55e;
+}
+
+.entreprise-modal-tabs .gemini-module-card.is-low {
+    border-color: rgba(239, 68, 68, 0.35);
+}
+
+.entreprise-modal-tabs .gemini-module-card.is-high {
+    border-color: rgba(34, 197, 94, 0.35);
 }
 
 .entreprise-modal-tabs .gemini-module-card .gemini-module-notes {
@@ -2750,6 +2909,156 @@ body[data-theme="dark"] .entreprise-modal-tabs .info-design-review-meta {
     font-size: 0.72rem;
     color: #64748b;
     line-height: 1.35;
+}
+
+.entreprise-modal-tabs .gemini-kw {
+    background: rgba(99, 102, 241, 0.18);
+    color: inherit;
+    padding: 0 0.15rem;
+    border-radius: 3px;
+    font-weight: 600;
+}
+
+.entreprise-modal-tabs .gemini-report-score-wrap {
+    display: flex;
+    align-items: baseline;
+    gap: 0.2rem;
+}
+
+.entreprise-modal-tabs .gemini-report-score-label {
+    font-size: 0.75rem;
+    color: #94a3b8;
+    font-weight: 600;
+}
+
+.entreprise-modal-tabs .gemini-report-title {
+    font-size: 1.05rem;
+}
+
+.entreprise-modal-tabs .md-surface {
+    border-radius: 12px;
+    padding: 0.75rem 0.85rem;
+    background: rgba(248, 250, 252, 0.9);
+    border: 1px solid #e2e8f0;
+}
+
+.entreprise-modal-tabs .md-elevated {
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+}
+
+.entreprise-modal-tabs .gemini-chip--prio-high {
+    background: #f97316;
+    color: #fff;
+}
+
+.entreprise-modal-tabs .gemini-chip--prio-low {
+    background: #e2e8f0;
+    color: #475569;
+}
+
+.entreprise-modal-tabs .gemini-chip--refonte {
+    background: #dbeafe;
+    color: #1d4ed8;
+    text-transform: none;
+}
+
+.entreprise-modal-tabs .gemini-improvements-list {
+    list-style: none;
+    padding-left: 0 !important;
+}
+
+.entreprise-modal-tabs .gemini-improvements-list li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.35rem;
+    padding: 0.45rem 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.entreprise-modal-tabs .gemini-imp-text {
+    flex: 1 1 12rem;
+}
+
+.entreprise-modal-tabs .gemini-report-doc-fold {
+    margin-top: 1rem;
+    border-top: 1px dashed #cbd5e1;
+    padding-top: 0.65rem;
+}
+
+.entreprise-modal-tabs .gemini-report-doc-fold > summary {
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #64748b;
+    user-select: none;
+}
+
+.entreprise-modal-tabs .gemini-mockups-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.75rem;
+}
+
+.entreprise-modal-tabs .gemini-mockups-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 0.85rem;
+}
+
+.entreprise-modal-tabs .gemini-mockup-card {
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+    background: #0f172a;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
+}
+
+.entreprise-modal-tabs .gemini-mockup-card img {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 420px;
+    object-fit: contain;
+    background: #020617;
+}
+
+.entreprise-modal-tabs .gemini-mockup-card figcaption {
+    padding: 0.45rem 0.65rem;
+    font-size: 0.78rem;
+    color: #cbd5e1;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.entreprise-modal-tabs .tab-btn.is-disabled-gate {
+    opacity: 0.45;
+    pointer-events: none;
+}
+
+body[data-theme="dark"] .entreprise-modal-tabs .md-surface {
+    background: rgba(15, 23, 42, 0.65);
+    border-color: rgba(148, 163, 184, 0.22);
+}
+
+body[data-theme="dark"] .entreprise-modal-tabs .gemini-module-card {
+    background: rgba(15, 23, 42, 0.7);
+    border-color: rgba(148, 163, 184, 0.22);
+}
+
+body[data-theme="dark"] .entreprise-modal-tabs .gemini-module-bar {
+    background: #334155;
+}
+
+body[data-theme="dark"] .entreprise-modal-tabs .gemini-kw {
+    background: rgba(129, 140, 248, 0.28);
+}
+
+body[data-theme="dark"] .entreprise-modal-tabs .gemini-chip--refonte {
+    background: rgba(59, 130, 246, 0.25);
+    color: #93c5fd;
 }
 
 body[data-theme="dark"] .entreprise-modal-tabs .gemini-report-card {
@@ -2787,6 +3096,26 @@ body[data-theme="dark"] .entreprise-modal-tabs .gemini-report-improvements ul,
 body[data-theme="dark"] .entreprise-modal-tabs .gemini-report-actions ol,
 body[data-theme="dark"] .entreprise-modal-tabs .gemini-report-design {
     color: #cbd5e1;
+}
+
+body[data-theme="dark"] .entreprise-modal-tabs .gemini-report-doc {
+    color: #e2e8f0;
+}
+
+body[data-theme="dark"] .entreprise-modal-tabs .gemini-report-doc h2,
+body[data-theme="dark"] .entreprise-modal-tabs .gemini-report-doc h3,
+body[data-theme="dark"] .entreprise-modal-tabs .gemini-report-doc h4,
+body[data-theme="dark"] .entreprise-modal-tabs .gemini-report-doc strong {
+    color: #f8fafc;
+}
+
+body[data-theme="dark"] .entreprise-modal-tabs .gemini-report-doc h2 {
+    border-bottom-color: #334155;
+}
+
+body[data-theme="dark"] .entreprise-modal-tabs .gemini-report-doc code {
+    background: #1e293b;
+    color: #e2e8f0;
 }
 
 body[data-theme="dark"] .entreprise-modal-tabs .gemini-report-list h4,

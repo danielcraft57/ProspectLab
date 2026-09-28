@@ -132,35 +132,29 @@ def compose_periodic_report_header(
     """
     Construit titre, sujet et impression globale pour les rapports matin/soir.
 
-    @param report_type: 'evening' (campagnes du matin) ou 'morning' (PM veille)
-    @param period_date: Date de la période couverte
+    Le rapport regroupe toutes les campagnes en cours (running / scheduled)
+    plus les terminees recentes, dans un seul email.
+
+    @param report_type: 'evening' ou 'morning'
+    @param period_date: Date du snapshot
     @param campagnes_stats: Stats des campagnes incluses
     @returns: (title, subject, global_impression_text)
     """
     date_label = period_date.strftime('%d/%m/%Y')
     count = len(campagnes_stats) if campagnes_stats else 0
     impression = global_impression(campagnes_stats)
+    hook = short_impression(campagnes_stats)
+    slot = 'soir' if report_type == 'evening' else 'matin'
 
-    if report_type == 'evening':
-        if count == 0:
-            title = f'Relevé du matin — {date_label}'
-            subject = f'[ProspectLab] Matinée tranquille · {date_label}'
-        elif count == 1:
-            title = f'Point chaud du matin — {date_label}'
-            subject = f'[ProspectLab] Bilan matinal · {date_label} — {short_impression(campagnes_stats)}'
-        else:
-            title = f'Radiographie du matin — {date_label}'
-            subject = f'[ProspectLab] {count} campagnes ce matin · {date_label} — {short_impression(campagnes_stats)}'
+    if count == 0:
+        title = f'Point campagnes ({slot}) - {date_label}'
+        subject = f'[ProspectLab] Aucune campagne active · {date_label}'
+    elif count == 1:
+        title = f'Point campagnes ({slot}) - {date_label}'
+        subject = f'[ProspectLab] 1 campagne en cours · {date_label} — {hook}'
     else:
-        if count == 0:
-            title = f'Écho de l\'après-midi — {date_label}'
-            subject = f'[ProspectLab] Soirée calme · {date_label}'
-        elif count == 1:
-            title = f'Flash de fin de journée — {date_label}'
-            subject = f'[ProspectLab] Retour du créneau PM · {date_label} — {short_impression(campagnes_stats)}'
-        else:
-            title = f'Carnet de l\'après-midi — {date_label}'
-            subject = f'[ProspectLab] {count} envois hier PM · {date_label} — {short_impression(campagnes_stats)}'
+        title = f'Point campagnes ({slot}) - {date_label}'
+        subject = f'[ProspectLab] {count} campagnes en cours · {date_label} — {hook}'
 
     return title, subject, impression
 
