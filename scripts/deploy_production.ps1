@@ -364,7 +364,9 @@ if (Test-Path -LiteralPath $envProdLocal -PathType Leaf) {
         Write-Host "❌ Erreur lors de l'envoi de .env.prod" -ForegroundColor Red
         exit 1
     }
-    ssh "$User@$Server" "cd $RemotePath && cp -f .env.prod .env && chmod 600 .env .env.prod && bash scripts/linux/fix_env_crlf.sh $RemotePath/.env 2>/dev/null || sed -i 's/\r`$//' .env" 2>&1 | Out-Null
+    # Pas de fallback sed 's/\r$//' depuis PowerShell: si le \ est mangé, sed coupe le r de .fr
+    # (BASE_URL=...danielcraft.fr → ...danielcraft.f). Uniquement fix_env_crlf.sh (Python).
+    ssh "$User@$Server" "cd $RemotePath; cp -f .env.prod .env; chmod 600 .env .env.prod; bash scripts/linux/fix_env_crlf.sh $RemotePath/.env" 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Host "❌ Erreur lors de la copie .env.prod → .env sur le serveur" -ForegroundColor Red
         exit 1

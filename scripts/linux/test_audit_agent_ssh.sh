@@ -7,7 +7,7 @@ cd /opt/prospectlab
 # Retire les CR Windows (sinon ssh: « hostname contains invalid characters »)
 if [ -f .env ] && grep -q $'\r' .env 2>/dev/null; then
   echo "Correction des fins de ligne CRLF dans .env..."
-  sed -i 's/\r$//' .env
+  bash scripts/linux/fix_env_crlf.sh .env
 fi
 
 set -a

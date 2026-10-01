@@ -454,8 +454,8 @@ class TemplateManager:
     def _get_app_base_url() -> str:
         """URL publique de l'app (images static/email/, tracking)."""
         try:
-            from config import BASE_URL
-            return (BASE_URL or '').rstrip('/') or 'http://localhost:5000'
+            from config import BASE_URL, normalize_public_base_url
+            return normalize_public_base_url(BASE_URL or '', source='TemplateManager') or 'http://localhost:5000'
         except Exception:
             return 'http://localhost:5000'
 
@@ -485,13 +485,13 @@ class TemplateManager:
             # Analyse (fallback "exemple.com" pour que le lien soit valide en UI)
             content = content.replace(
                 'href="{analysis_url}"',
-                f'href="{brand_base_url}/analyse?website=https%3A%2F%2Fexemple.com&full=1"',
+                f'href="{brand_base_url}/analyse?website=https%3A%2F%2Fexemple.fr&full=1"',
             )
 
-            # Désabonnement (fallback "exemple.com")
+            # Désabonnement (fallback "exemple.fr")
             content = content.replace(
                 'href="{unsubscribe_url}"',
-                f'href="{brand_base_url}/desabonnement?website=https%3A%2F%2Fexemple.com"',
+                f'href="{brand_base_url}/desabonnement?website=https%3A%2F%2Fexemple.fr"',
             )
 
         try:
@@ -1347,15 +1347,24 @@ class TemplateManager:
         
         # Base URL pour les images (hero.webp, etc.) et liens
         try:
-            from config import BASE_URL
-            base_url = (BASE_URL or '').rstrip('/') or 'http://localhost:5000'
+            from config import BASE_URL, normalize_public_base_url
+            base_url = normalize_public_base_url(BASE_URL or '', source='TemplateManager.render') or 'http://localhost:5000'
         except Exception:
             base_url = 'http://localhost:5000'
 
         # Domaine "marque" pour générer des URLs analyse / désabonnement / contact.
-        brand_host = (brand_domain or 'danielcraft.fr').strip().lower()
-        brand_host = re.sub(r'^https?://', '', brand_host).rstrip('/')
-        brand_base_url = f'https://{brand_host}'.rstrip('/')
+        try:
+            from config import normalize_brand_host, normalize_website_url_for_query
+        except Exception:
+            normalize_brand_host = None
+            normalize_website_url_for_query = None
+
+        if normalize_brand_host:
+            brand_host = normalize_brand_host(brand_domain or 'danielcraft.fr')
+        else:
+            brand_host = (brand_domain or 'danielcraft.fr').strip().lower()
+            brand_host = re.sub(r'^https?://', '', brand_host).rstrip('/')
+        brand_base_url = f'https://{brand_host}'
         
         # Préparer toutes les variables (total_social_count pour condition scraping)
         extended_flat = dict(extended_data)
@@ -1364,16 +1373,28 @@ class TemplateManager:
 
         # Lien direct vers l'analyse en ligne du site (danielcraft.fr/analyse)
         # Params utiles pour prefill CTA : website, full=1, email, name
-        website_val = extended_flat.get('website') or ''
+        website_raw = extended_flat.get('website') or ''
+        if normalize_website_url_for_query and isinstance(website_raw, str):
+            website_val = normalize_website_url_for_query(website_raw)
+        elif isinstance(website_raw, str) and website_raw.strip():
+            website_val = website_raw.strip()
+            if not website_val.lower().startswith('http'):
+                website_val = f'https://{website_val.lstrip("/")}'
+            elif website_val.lower().startswith('http://'):
+                website_val = f'https://{website_val[7:]}'
+        else:
+            website_val = ''
+        if website_val:
+            extended_flat['website'] = website_val
         encoded_email = quote((email or '').strip(), safe='') if isinstance(email, str) and email.strip() else ''
         name_for_cta = (formatted_nom or '').strip()
         if name_for_cta.lower() in {'', 'cher prospect', 'bonjour', 'monsieur/madame'}:
             name_for_cta = ''
         encoded_name = quote(name_for_cta, safe='') if name_for_cta else ''
         analysis_url = ''
-        if isinstance(website_val, str) and website_val.strip():
+        if website_val:
             # URL-encode du website pour l'inclure dans la query string
-            encoded_website = quote(website_val.strip(), safe='')
+            encoded_website = quote(website_val, safe='')
             analysis_parts = [
                 f'website={encoded_website}',
                 'full=1',
@@ -1387,8 +1408,8 @@ class TemplateManager:
 
         # Lien de désabonnement
         unsubscribe_url = ''
-        if isinstance(website_val, str) and website_val.strip():
-            encoded_website = quote(website_val.strip(), safe='')
+        if website_val:
+            encoded_website = quote(website_val, safe='')
             if encoded_email:
                 unsubscribe_url = f"{brand_base_url}/desabonnement?website={encoded_website}&email={encoded_email}"
             else:
@@ -1526,14 +1547,25 @@ class TemplateManager:
             if isinstance(content, str) and analysis_url:
                 # Version non-encodée
                 content = content.replace(
-                    f"{brand_base_url}/analyse?website=https://exemple.com&full=1",
+                    f"{brand_base_url}/analyse?website=https://exemple.fr&full=1",
                     analysis_url,
                 )
                 # Version encodée dans une query de tracking éventuelle
-                legacy_encoded = quote("https://exemple.com", safe='')
+                legacy_encoded = quote("https://exemple.fr", safe='')
                 if legacy_encoded in content:
                     content = content.replace(
                         f"{brand_base_url}/analyse?website={legacy_encoded}&full=1",
+                        analysis_url,
+                    )
+                # Ancien fallback .com (rétrocompat preview)
+                content = content.replace(
+                    f"{brand_base_url}/analyse?website=https://exemple.com&full=1",
+                    analysis_url,
+                )
+                legacy_com = quote("https://exemple.com", safe='')
+                if legacy_com in content:
+                    content = content.replace(
+                        f"{brand_base_url}/analyse?website={legacy_com}&full=1",
                         analysis_url,
                     )
         except Exception:
@@ -1712,9 +1744,14 @@ class TemplateManager:
         extended = dict(enrich_secteur_template_vars(secteur or '') or {})
         website_raw = (website or '').strip()
         if website_raw:
-            extended['website'] = (
-                website_raw if website_raw.startswith('http') else f'https://{website_raw.lstrip("/")}'
-            )
+            try:
+                from config import normalize_website_url_for_query
+
+                extended['website'] = normalize_website_url_for_query(website_raw)
+            except Exception:
+                extended['website'] = (
+                    website_raw if website_raw.startswith('http') else f'https://{website_raw.lstrip("/")}'
+                )
 
         content_rendered, is_html = self.render_template(
             template_id or '__preview__',

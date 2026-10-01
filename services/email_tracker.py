@@ -11,6 +11,31 @@ from html.parser import HTMLParser
 from typing import Dict, List, Optional
 
 
+def _normalize_tracker_base_url(base_url: str) -> str:
+    """
+    Normalise l'URL de base du tracker (slash final + réparation .f → .fr).
+
+    @param base_url: URL publique de l'app (tracking)
+    @returns: URL sans slash final, hôtes danielcraft réparés si besoin
+    """
+    try:
+        from config import normalize_public_base_url
+
+        return normalize_public_base_url(base_url or '', source='EmailTracker')
+    except Exception:
+        url = (base_url or '').strip().replace('\r', '').replace('\n', '')
+        while url.endswith('/'):
+            url = url[:-1]
+        # Filet de sécurité si config indisponible
+        url = re.sub(
+            r'\.f(?!r)(?=/|$|\?|#|"|\'|\s)',
+            '.fr',
+            url,
+            flags=re.IGNORECASE,
+        )
+        return url or 'http://localhost:5000'
+
+
 class EmailTracker:
     """
     Service pour tracker les emails envoyés
@@ -23,7 +48,7 @@ class EmailTracker:
         Args:
             base_url: URL de base de l'application (pour les liens de tracking)
         """
-        self.base_url = base_url.rstrip('/')
+        self.base_url = _normalize_tracker_base_url(base_url)
 
     def generate_tracking_token(self) -> str:
         """
@@ -120,15 +145,26 @@ class EmailTracker:
 
     def process_email_content(self, html_content: str, tracking_token: str) -> str:
         """
-        Traite le contenu HTML d'un email pour ajouter le tracking complet
+        Traite le contenu HTML d'un email pour ajouter le tracking complet.
 
-        Args:
-            html_content: Contenu HTML de l'email
-            tracking_token: Token de tracking unique
+        Répare aussi d'éventuels hôtes ``danielcraft.f`` tronqués avant injection.
 
-        Returns:
-            str: HTML modifié avec tracking
+        @param html_content: Contenu HTML de l'email
+        @param tracking_token: Token de tracking unique
+        @returns: HTML modifié avec tracking
         """
+        try:
+            from config import repair_truncated_danielcraft_urls
+
+            html_content = repair_truncated_danielcraft_urls(html_content or '')
+        except Exception:
+            html_content = re.sub(
+                r'\.f(?!r)(?=/|$|\?|#|"|\'|\s)',
+                '.fr',
+                html_content or '',
+                flags=re.IGNORECASE,
+            )
+
         # D'abord tracker les liens
         html_content = self.track_links(html_content, tracking_token)
 

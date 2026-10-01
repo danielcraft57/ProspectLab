@@ -345,8 +345,8 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
 
     # URL de base pour les liens de tracking
     try:
-        from config import BASE_URL
-        base_url = BASE_URL if BASE_URL else 'http://localhost:5000'
+        from config import BASE_URL, normalize_public_base_url
+        base_url = normalize_public_base_url(BASE_URL or '', source='email_tasks') or 'http://localhost:5000'
     except Exception:
         base_url = 'http://localhost:5000'
 
@@ -364,6 +364,12 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
             acc = mam.get_mail_account(int(mid_for_brand))
             if acc and acc.get('domain_name'):
                 brand_domain = acc.get('domain_name') or brand_domain
+    except Exception:
+        pass
+    try:
+        from config import normalize_brand_host
+
+        brand_domain = normalize_brand_host(brand_domain)
     except Exception:
         pass
 

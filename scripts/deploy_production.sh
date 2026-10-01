@@ -219,7 +219,8 @@ if [ -f "$ENV_PROD_LOCAL" ]; then
         echo "❌ Erreur lors de l'envoi de .env.prod"
         exit 1
     fi
-    ssh "$USER@$SERVER" "cd $REMOTE_PATH && cp -f .env.prod .env && chmod 600 .env .env.prod && bash scripts/linux/fix_env_crlf.sh \"$REMOTE_PATH/.env\" 2>/dev/null || sed -i 's/\r\$//' .env"
+    # Pas de fallback sed: un \r mangé devient s/r$// et tronque BASE_URL (...fr → ...f).
+    ssh "$USER@$SERVER" "cd $REMOTE_PATH; cp -f .env.prod .env; chmod 600 .env .env.prod; bash scripts/linux/fix_env_crlf.sh \"$REMOTE_PATH/.env\""
     if [ $? -ne 0 ]; then
         echo "❌ Erreur lors de la copie .env.prod → .env sur le serveur"
         exit 1

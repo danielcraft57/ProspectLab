@@ -2,8 +2,11 @@
 Configuration de l'application ProspectLab
 """
 
+import logging
 import os
+import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 # Charger les variables d'environnement depuis .env si disponible
 try:
@@ -12,6 +15,17 @@ try:
 except ImportError:
     # python-dotenv n'est pas installé, on continue sans
     pass
+
+_config_logger = logging.getLogger(__name__)
+
+# Troncature classique *.f (sans le r de .fr) — sed 's/r$//' ou rstrip('/r')
+# Ex: campaigns.danielcraft.f → .fr, cimeria.f → .fr, pastele.f → .fr
+_TRUNCATED_FR_TLD_RE = re.compile(
+    r'\.f(?!r)(?=/|$|\?|#|"|\'|\s)',
+    re.IGNORECASE,
+)
+# Alias historique (mêmes règles, tous hôtes .f)
+_TRUNCATED_DANIELCRAFT_RE = _TRUNCATED_FR_TLD_RE
 
 # Chemins de base
 BASE_DIR = Path(__file__).parent.parent
@@ -395,6 +409,134 @@ CELERY_FULL_ANALYSIS_QUEUE = (
 # Pas de variable « nombre de workers » côté app : chaque nœud définit CELERY_WORKERS localement.
 # Surveiller Redis (mémoire) et PostgreSQL max_connections — voir docs/configuration/DEPLOIEMENT_PRODUCTION.md.
 
+def normalize_public_base_url(raw: str, *, source: str = 'BASE_URL') -> str:
+    """
+    Nettoie et répare une URL publique (tracking emails, images, reprise audit).
+
+    - retire espaces / CR / LF / quotes
+    - retire uniquement les slashs finaux (jamais ``rstrip('/r')``)
+    - répare ``*.f`` → ``*.fr`` (troncature connue)
+
+    @param raw: URL brute (variable d'env, fichier .env, etc.)
+    @param source: Libellé pour les logs d'alerte
+    @returns: URL normalisée sans slash final
+    @example
+        normalize_public_base_url('https://campaigns.danielcraft.f/')
+        # -> 'https://campaigns.danielcraft.fr'
+    """
+    url = (raw or '').strip().strip('"').strip("'")
+    url = url.replace('\r', '').replace('\n', '').strip()
+    if not url:
+        return 'http://localhost:5000'
+
+    # Éviter str.rstrip('/r') qui mange le « r » de .fr
+    while url.endswith('/'):
+        url = url[:-1]
+
+    repaired = _TRUNCATED_FR_TLD_RE.sub('.fr', url)
+    if repaired != url:
+        _config_logger.warning(
+            '%s tronquée détectée et réparée: %r -> %r',
+            source,
+            url,
+            repaired,
+        )
+        url = repaired
+
+    try:
+        parsed = urlparse(url if '://' in url else f'https://{url}')
+        host = (parsed.hostname or '').lower()
+        if host and '.' in host:
+            tld = host.rsplit('.', 1)[-1]
+            if len(tld) < 2:
+                _config_logger.error(
+                    '%s host suspect (TLD trop court): %r',
+                    source,
+                    url,
+                )
+    except Exception:
+        pass
+
+    return url
+
+
+def repair_truncated_danielcraft_urls(text: str) -> str:
+    """
+    Répare dans un HTML/texte les hôtes ``*.f`` tronqués en ``*.fr``.
+
+    @param text: Contenu HTML ou texte pouvant contenir des URLs
+    @returns: Contenu avec les TLD ``.f`` réparés en ``.fr``
+    """
+    if not text:
+        return text
+    return _TRUNCATED_FR_TLD_RE.sub('.fr', text)
+
+
+def normalize_brand_host(raw: str, *, default: str = 'danielcraft.fr') -> str:
+    """
+    Normalise un domaine marque pour les CTA (analyse, contact, désabo).
+
+    @param raw: Domaine ou URL (ex. ``cimeria.fr``, ``https://pastele.fr/``)
+    @param default: Domaine de repli si vide
+    @returns: Hostname sans schéma ni slash (ex. ``danielcraft.fr``)
+    @example
+        normalize_brand_host('https://cimeria.f/')
+        # -> 'cimeria.fr'
+    """
+    host = (raw or '').strip().lower()
+    host = re.sub(r'^https?://', '', host, flags=re.IGNORECASE)
+    host = host.split('/')[0].split('?')[0].split('#')[0].strip()
+    host = host.lstrip('www.')
+    while host.endswith('.'):
+        host = host[:-1]
+    host = repair_truncated_danielcraft_urls(host)
+    if host.endswith('.f') and not host.endswith('.fr'):
+        host = f'{host}r'
+    return host or default
+
+
+def normalize_website_url_for_query(website: str) -> str:
+    """
+    Canonicalise l'URL du site prospect pour les query ``website=``.
+
+    - ajoute ``https://`` si schéma absent
+    - remonte ``http://`` vers ``https://``
+    - répare un TLD ``.f`` tronqué en ``.fr``
+
+    @param website: Site stocké en base ou passé au rendu
+    @returns: URL absolue https, ou chaîne vide
+    @example
+        normalize_website_url_for_query('http://capaxion.fr/')
+        # -> 'https://capaxion.fr/'
+    """
+    raw = (website or '').strip()
+    if not raw:
+        return ''
+    if not re.match(r'^https?://', raw, flags=re.IGNORECASE):
+        raw = f'https://{raw.lstrip("/")}'
+    if raw.lower().startswith('http://'):
+        raw = f'https://{raw[7:]}'
+    raw = repair_truncated_danielcraft_urls(raw)
+
+    try:
+        parsed = urlparse(raw)
+        host = (parsed.hostname or '').lower()
+        if not host:
+            return raw
+        host = repair_truncated_danielcraft_urls(host)
+        if host.endswith('.f') and not host.endswith('.fr'):
+            host = f'{host}r'
+        path = parsed.path if parsed.path else '/'
+        query = f'?{parsed.query}' if parsed.query else ''
+        fragment = f'#{parsed.fragment}' if parsed.fragment else ''
+        netloc = host
+        if parsed.port and parsed.port not in (80, 443):
+            netloc = f'{host}:{parsed.port}'
+        return f'https://{netloc}{path}{query}{fragment}'
+    except Exception:
+        return raw
+
+
 def _resolve_public_base_url() -> str:
     """
     URL publique pour liens email / API (tracking, reprise audit agent).
@@ -402,11 +544,13 @@ def _resolve_public_base_url() -> str:
     Si BASE_URL est déclaré plusieurs fois dans .env, python-dotenv ne garde que la
     première entrée : on relit le fichier pour prendre la dernière valeur non commentée.
     Priorité : WEBSITE_AUDIT_PUBLIC_BASE_URL > dernière BASE_URL dans .env > os.environ.
+
+    @returns: URL de base normalisée (sans slash final)
     """
     for key in ('WEBSITE_AUDIT_PUBLIC_BASE_URL', 'WEBSITE_AUDIT_RESUME_BASE_URL'):
         val = (os.environ.get(key) or '').strip()
         if val:
-            return val.rstrip('/')
+            return normalize_public_base_url(val, source=key)
 
     env_file = APP_DIR / '.env'
     last_from_file = ''
@@ -420,13 +564,17 @@ def _resolve_public_base_url() -> str:
             if line.startswith('BASE_URL='):
                 last_from_file = line.split('=', 1)[1].strip().strip('"').strip("'")
     if last_from_file:
-        return last_from_file.rstrip('/')
+        return normalize_public_base_url(last_from_file, source='.env BASE_URL')
 
-    return (os.environ.get('BASE_URL') or 'http://localhost:5000').strip().rstrip('/')
+    return normalize_public_base_url(
+        (os.environ.get('BASE_URL') or 'http://localhost:5000'),
+        source='os.environ BASE_URL',
+    )
 
 
 # URL de base pour le tracking des emails et liens publics (doit être accessible publiquement)
 BASE_URL = _resolve_public_base_url()
+_config_logger.info('BASE_URL effective: %s', BASE_URL)
 
 # Scan automatique des bounces (IMAP -> tags/statuts)
 BOUNCE_SCAN_ENABLED = os.environ.get('BOUNCE_SCAN_ENABLED', 'true').lower() in ('1', 'true', 'yes', 'on')
