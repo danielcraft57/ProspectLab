@@ -91,22 +91,13 @@ Write-Host ""
 $deployDir = Join-Path $PROJECT_DIR "deploy"
 if ($UseRemoteGitClone) {
     Write-Host "[2/9] Reset complet + clone git ($RemoteGitBranch) sur le serveur..." -ForegroundColor Yellow
-    # Preserve assets non versionnes (screenshots, landing_variants, .env)
-    Write-Host "   Preservation des assets locaux (screenshots / generated / .env)..." -ForegroundColor Gray
-    $preserveCmd = @"
-set -e
-PRESERVE=/tmp/prospectlab_preserve_assets
-rm -rf "`$PRESERVE"
-mkdir -p "`$PRESERVE"
-if [ -d "$RemotePath/static/screenshots" ]; then cp -a "$RemotePath/static/screenshots" "`$PRESERVE/screenshots"; fi
-if [ -d "$RemotePath/static/generated" ]; then cp -a "$RemotePath/static/generated" "`$PRESERVE/generated"; fi
-if [ -f "$RemotePath/.env" ]; then cp -a "$RemotePath/.env" "`$PRESERVE/.env"; fi
-if [ -d "$RemotePath/env" ]; then
-  echo "KEEP_ENV=1" > "`$PRESERVE/keep_env.flag"
-  mv "$RemotePath/env" "`$PRESERVE/env"
-fi
-"@
+    # Preserve assets non versionnes (screenshots, landing_variants, env) - commandes one-liner (evite CRLF)
+    Write-Host "   Preservation des assets locaux (screenshots / generated / env)..." -ForegroundColor Gray
+    $preserveCmd = "PRESERVE=/tmp/prospectlab_preserve_assets; rm -rf `$PRESERVE; mkdir -p `$PRESERVE; if [ -d $RemotePath/static/screenshots ]; then cp -a $RemotePath/static/screenshots `$PRESERVE/screenshots; fi; if [ -d $RemotePath/static/generated ]; then cp -a $RemotePath/static/generated `$PRESERVE/generated; fi; if [ -f $RemotePath/.env ]; then cp -a $RemotePath/.env `$PRESERVE/.env; fi; if [ -d $RemotePath/env ]; then echo KEEP_ENV=1 > `$PRESERVE/keep_env.flag; mv $RemotePath/env `$PRESERVE/env; fi"
     ssh "$User@$Server" $preserveCmd | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "⚠️  Preservation partielle (continue quand meme)" -ForegroundColor Yellow
+    }
 
     $resetOutput = ssh "$User@$Server" "sudo rm -rf $RemotePath; sudo mkdir -p $RemotePath; sudo chown -R $User`:$User $RemotePath" 2>&1
     if ($LASTEXITCODE -ne 0) {
@@ -128,19 +119,7 @@ fi
     }
 
     # Restore preserved assets
-    $restoreCmd = @"
-set -e
-PRESERVE=/tmp/prospectlab_preserve_assets
-mkdir -p "$RemotePath/static"
-if [ -d "`$PRESERVE/screenshots" ]; then rm -rf "$RemotePath/static/screenshots"; cp -a "`$PRESERVE/screenshots" "$RemotePath/static/screenshots"; fi
-if [ -d "`$PRESERVE/generated" ]; then rm -rf "$RemotePath/static/generated"; cp -a "`$PRESERVE/generated" "$RemotePath/static/generated"; fi
-if [ -f "`$PRESERVE/.env" ] && [ ! -f "$RemotePath/.env" ]; then cp -a "`$PRESERVE/.env" "$RemotePath/.env"; fi
-if [ -f "`$PRESERVE/keep_env.flag" ] && [ -d "`$PRESERVE/env" ]; then
-  rm -rf "$RemotePath/env"
-  mv "`$PRESERVE/env" "$RemotePath/env"
-fi
-rm -rf "`$PRESERVE"
-"@
+    $restoreCmd = "PRESERVE=/tmp/prospectlab_preserve_assets; mkdir -p $RemotePath/static; if [ -d `$PRESERVE/screenshots ]; then rm -rf $RemotePath/static/screenshots; cp -a `$PRESERVE/screenshots $RemotePath/static/screenshots; fi; if [ -d `$PRESERVE/generated ]; then rm -rf $RemotePath/static/generated; cp -a `$PRESERVE/generated $RemotePath/static/generated; fi; if [ -f `$PRESERVE/.env ] && [ ! -f $RemotePath/.env ]; then cp -a `$PRESERVE/.env $RemotePath/.env; fi; if [ -f `$PRESERVE/keep_env.flag ] && [ -d `$PRESERVE/env ]; then rm -rf $RemotePath/env; mv `$PRESERVE/env $RemotePath/env; fi; rm -rf `$PRESERVE"
     ssh "$User@$Server" $restoreCmd | Out-Null
     Write-Host "✅ Clone $RemoteGitBranch effectué depuis $RepoUrl (assets preserves)" -ForegroundColor Green
     Write-Host ""
@@ -487,11 +466,16 @@ Write-Host ""
 # Rechargement Nginx optionnel sur le serveur proxy
 if ($ProxyServer) {
     Write-Host "[8.6/9] Rechargement Nginx sur le serveur proxy $ProxyServer..." -ForegroundColor Yellow
-    $nginxReload = ssh -o ConnectTimeout=5 "$ProxyUser@$ProxyServer" "sudo nginx -t && sudo systemctl reload nginx" 2>&1
-    if ($LASTEXITCODE -eq 0) {
+    $prevEapNginx = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $nginxReload = ssh -o ConnectTimeout=5 "$ProxyUser@$ProxyServer" "sudo nginx -t; sudo systemctl reload nginx; systemctl is-active nginx" 2>&1
+    $nginxExit = $LASTEXITCODE
+    $ErrorActionPreference = $prevEapNginx
+    if ($nginxExit -eq 0 -and ("$nginxReload" -match 'active')) {
         Write-Host "✅ Nginx rechargé sur $ProxyServer" -ForegroundColor Green
     } else {
         Write-Host "⚠️  Impossible de recharger Nginx sur $ProxyServer (vérifiez SSH et sudo)" -ForegroundColor Yellow
+        Write-Host ($nginxReload | Out-String) -ForegroundColor Gray
     }
     Write-Host ""
 }
