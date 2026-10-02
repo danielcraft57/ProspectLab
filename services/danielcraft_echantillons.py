@@ -158,7 +158,7 @@ def get_echantillon_by_slug(slug: str) -> Optional[Dict[str, Any]]:
 def match_echantillons_for_secteur(
     secteur: Optional[str],
     *,
-    limit_related: int = 8,
+    limit_related: int = 40,
 ) -> Dict[str, Any]:
     """
     Associe un secteur entreprise a un echantillon principal + proches.
