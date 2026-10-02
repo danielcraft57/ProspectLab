@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Etats vides | ProspectLab maquette</title>
+  <link rel="stylesheet" href="../assets/md3.css" /><link rel="stylesheet" href="../assets/md3-extra.css" /><link rel="stylesheet" href="../assets/charts.css" />
+</head>
+<body>
+<div class="md-app">
+
+<aside class="md-nav">
+  <div class="md-brand">
+    <div class="md-brand-mark">P</div>
+    <div><strong>ProspectLab</strong><span>Daniel Craft</span></div>
+  </div>
+  <a class="item md-nav-ctv " href="dashboard.html">Commencer ici</a>
+  <a class="item " href="onboarding.html">Premiere victoire</a>
+  <div class="md-nav-section">Par intention · Hick ≤7</div>
+  <a class="item " href="entreprises.html">Prospection</a>
+  <a class="item " href="analyse-site.html">Analyses</a>
+  <a class="item " href="campagnes.html">Envois email</a>
+  <a class="item " href="bounces.html">Hygiene listes</a>
+  <a class="item " href="domaines.html">Delivrabilite</a>
+  <a class="item " href="upload.html">Importer</a>
+  <a class="item " href="settings.html">Reglages</a>
+  <div class="md-nav-section">Sous-pages (maquettes)</div>
+  <a class="item " href="entreprise-detail.html">Fiche entreprise</a>
+  <a class="item " href="carte.html">Carte</a>
+  <a class="item " href="graph.html">Graphe</a>
+  <a class="item " href="concurrence.html">Concurrence</a>
+  <a class="item " href="analyses-tech.html">Tech</a>
+  <a class="item " href="analyses-osint.html">OSINT</a>
+  <a class="item " href="analyses-pentest.html">Pentest</a>
+  <a class="item " href="analyses-seo.html">SEO</a>
+  <a class="item " href="scrapers.html">Scrapers</a>
+  <a class="item " href="campagne-detail.html">Campagne detail</a>
+  <a class="item " href="envoyer.html">Envoi rapide</a>
+  <a class="item " href="modeles.html">Modeles</a>
+  <a class="item " href="victoire.html">Ecran victoire</a>
+  <a class="item " href="api.html">API</a>
+  <a class="item is-active" href="composants.html">Kit MD3</a>
+  <a class="item " href="recherche-vide.html">Recherche 0 resultat</a>
+</aside>
+
+<main class="md-main">
+  <div class="md-topbar">
+    <div><h1>Etats vides</h1><p>Empty states avec CTA (@clea_ux Ch.9)</p></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"></div>
+  </div>
+  
+<div class="md-clea-quote">« No Data Yet sans CTA = abandon des la premiere seconde. » — @clea_ux</div>
+<div class="md-grid md-grid-3">
+  <div class="md-card"><div class="md-empty"><div class="ico">&#9993;</div><div>Aucune campagne</div>
+    <p style="font-size:.85rem;margin:8px 0 0">La valeur arrive au 1er envoi delivre.</p>
+    <a class="md-btn md-btn-filled" style="margin-top:14px" href="onboarding.html">Recevoir ma 1ere preuve</a></div></div>
+  <div class="md-card md-card-pad" style="display:grid;place-items:center;min-height:200px">
+    <div style="text-align:center"><div class="md-spinner" style="margin:0 auto 12px"></div>Chargement...</div>
+  </div>
+  <div class="md-card md-card-pad">
+    <div class="md-error-guide">
+      <strong>Sync Brevo impossible</strong>
+      <p>Timeout API — pas un mur : on explique + on propose une action.</p>
+      <button class="md-btn md-btn-filled" style="padding:8px 14px;font-size:.8rem">Reessayer maintenant</button>
+    </div>
+    <div class="md-skeleton lg" style="margin:16px 0 8px"></div>
+    <div class="md-skeleton" style="width:80%;margin-bottom:8px"></div>
+  </div>
+</div>
+
+</main>
+</div>
+<button class="md-fab" title="Action">+</button>
+</body>
+</html>

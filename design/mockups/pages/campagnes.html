@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Campagnes email | ProspectLab maquette</title>
+  <link rel="stylesheet" href="../assets/md3.css" /><link rel="stylesheet" href="../assets/md3-extra.css" /><link rel="stylesheet" href="../assets/charts.css" />
+</head>
+<body>
+<div class="md-app">
+
+<aside class="md-nav">
+  <div class="md-brand">
+    <div class="md-brand-mark">P</div>
+    <div><strong>ProspectLab</strong><span>Daniel Craft</span></div>
+  </div>
+  <a class="item md-nav-ctv " href="dashboard.html">Commencer ici</a>
+  <a class="item " href="onboarding.html">Premiere victoire</a>
+  <div class="md-nav-section">Par intention · Hick ≤7</div>
+  <a class="item " href="entreprises.html">Prospection</a>
+  <a class="item " href="analyse-site.html">Analyses</a>
+  <a class="item is-active" href="campagnes.html">Envois email</a>
+  <a class="item " href="bounces.html">Hygiene listes</a>
+  <a class="item " href="domaines.html">Delivrabilite</a>
+  <a class="item " href="upload.html">Importer</a>
+  <a class="item " href="settings.html">Reglages</a>
+  <div class="md-nav-section">Sous-pages (maquettes)</div>
+  <a class="item " href="entreprise-detail.html">Fiche entreprise</a>
+  <a class="item " href="carte.html">Carte</a>
+  <a class="item " href="graph.html">Graphe</a>
+  <a class="item " href="concurrence.html">Concurrence</a>
+  <a class="item " href="analyses-tech.html">Tech</a>
+  <a class="item " href="analyses-osint.html">OSINT</a>
+  <a class="item " href="analyses-pentest.html">Pentest</a>
+  <a class="item " href="analyses-seo.html">SEO</a>
+  <a class="item " href="scrapers.html">Scrapers</a>
+  <a class="item " href="campagne-detail.html">Campagne detail</a>
+  <a class="item " href="envoyer.html">Envoi rapide</a>
+  <a class="item " href="modeles.html">Modeles</a>
+  <a class="item " href="victoire.html">Ecran victoire</a>
+  <a class="item " href="api.html">API</a>
+  <a class="item " href="composants.html">Kit MD3</a>
+  <a class="item " href="recherche-vide.html">Recherche 0 resultat</a>
+</aside>
+
+<main class="md-main">
+  <div class="md-topbar">
+    <div><h1>Campagnes email</h1><p>Brevo, quota, funnel, board kanban</p></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="md-btn md-btn-filled">+ Nouvelle campagne</button></div>
+  </div>
+  
+<div class="md-card" style="margin-bottom:18px;border-color:rgba(61,214,140,.35)">
+  <div style="display:flex;justify-content:space-between;padding:20px 22px 8px;align-items:center">
+    <div style="display:flex;gap:14px;align-items:center">
+      <div class="md-brand-mark">B</div>
+      <div><strong style="font-size:1.1rem">Brevo</strong> <span class="md-chip ok">OK</span>
+        <div style="color:var(--md-sys-color-on-surface-variant);font-size:.88rem;margin-top:4px">contact@danielcraft.fr</div></div>
+    </div>
+    <button class="md-icon-btn">&#8635;</button>
+  </div>
+  <div style="padding:8px 22px 20px">
+    <div style="background:var(--md-sys-color-surface-container-high);border-radius:12px;padding:16px;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:10px"><span>Credits</span><strong>294 / ~300</strong></div>
+      <div class="md-linear"><i style="width:2%"></i></div>
+    </div>
+    <div class="md-grid md-grid-4">
+      <div class="md-card md-stat" style="background:var(--md-sys-color-surface)"><div class="label">Delivres</div><div class="value" style="color:var(--md-sys-color-primary)">103</div></div>
+      <div class="md-card md-stat" style="background:var(--md-sys-color-surface)"><div class="label">Hard</div><div class="value">1</div></div>
+      <div class="md-card md-stat" style="background:var(--md-sys-color-surface)"><div class="label">Soft</div><div class="value">14</div></div>
+      <div class="md-card md-stat" style="background:var(--md-sys-color-surface)"><div class="label">Spam</div><div class="value">0</div></div>
+    </div>
+  </div>
+</div>
+<div class="md-tabs"><button class="is-active">Cartes</button><button>Kanban</button><button>Stats</button></div>
+<div class="md-grid md-grid-2" style="margin-bottom:16px">
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Funnel</h3></div>
+    <div class="md-funnel">
+      <div class="step"><span>Cibles</span><strong>120</strong></div>
+      <div class="step"><span>Envoyes</span><strong>42</strong></div>
+      <div class="step"><span>Ouverts</span><strong>13</strong></div>
+      <div class="step"><span>Clics</span><strong>4</strong></div>
+    </div></div>
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>PL vs Brevo</h3></div>
+    <div class="md-bars" style="height:130px">
+      <div class="bar"><i style="height:90%"></i><span class="lbl">Env</span></div>
+      <div class="bar alt"><i style="height:85%"></i><span class="lbl">Deliv</span></div>
+      <div class="bar"><i style="height:45%"></i><span class="lbl">Open</span></div>
+      <div class="bar warn"><i style="height:12%"></i><span class="lbl">Bounce</span></div>
+    </div></div>
+</div>
+<div class="md-kanban">
+  <div class="col"><h4>Brouillon</h4><div class="card">Securite<small>0 destinataire</small></div></div>
+  <div class="col"><h4>Planifiee</h4><div class="card">Modernisation<small>Demain 9h · 28</small></div></div>
+  <div class="col"><h4>En cours</h4></div>
+  <div class="col"><h4>Terminee</h4><div class="card">Presence digitale<small>42 · 31% open</small></div></div>
+</div>
+
+</main>
+</div>
+<button class="md-fab" title="Action">+</button>
+</body>
+</html>

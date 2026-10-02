@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Import donnees | ProspectLab maquette</title>
+  <link rel="stylesheet" href="../assets/md3.css" /><link rel="stylesheet" href="../assets/md3-extra.css" /><link rel="stylesheet" href="../assets/charts.css" />
+</head>
+<body>
+<div class="md-app">
+
+<aside class="md-nav">
+  <div class="md-brand">
+    <div class="md-brand-mark">P</div>
+    <div><strong>ProspectLab</strong><span>Daniel Craft</span></div>
+  </div>
+  <a class="item md-nav-ctv " href="dashboard.html">Commencer ici</a>
+  <a class="item " href="onboarding.html">Premiere victoire</a>
+  <div class="md-nav-section">Par intention · Hick ≤7</div>
+  <a class="item " href="entreprises.html">Prospection</a>
+  <a class="item " href="analyse-site.html">Analyses</a>
+  <a class="item " href="campagnes.html">Envois email</a>
+  <a class="item " href="bounces.html">Hygiene listes</a>
+  <a class="item " href="domaines.html">Delivrabilite</a>
+  <a class="item is-active" href="upload.html">Importer</a>
+  <a class="item " href="settings.html">Reglages</a>
+  <div class="md-nav-section">Sous-pages (maquettes)</div>
+  <a class="item " href="entreprise-detail.html">Fiche entreprise</a>
+  <a class="item " href="carte.html">Carte</a>
+  <a class="item " href="graph.html">Graphe</a>
+  <a class="item " href="concurrence.html">Concurrence</a>
+  <a class="item " href="analyses-tech.html">Tech</a>
+  <a class="item " href="analyses-osint.html">OSINT</a>
+  <a class="item " href="analyses-pentest.html">Pentest</a>
+  <a class="item " href="analyses-seo.html">SEO</a>
+  <a class="item " href="scrapers.html">Scrapers</a>
+  <a class="item " href="campagne-detail.html">Campagne detail</a>
+  <a class="item " href="envoyer.html">Envoi rapide</a>
+  <a class="item " href="modeles.html">Modeles</a>
+  <a class="item " href="victoire.html">Ecran victoire</a>
+  <a class="item " href="api.html">API</a>
+  <a class="item " href="composants.html">Kit MD3</a>
+  <a class="item " href="recherche-vide.html">Recherche 0 resultat</a>
+</aside>
+
+<main class="md-main">
+  <div class="md-topbar">
+    <div><h1>Import donnees</h1><p>CSV entreprises, mapping colonnes, validation</p></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="md-btn md-btn-filled">Importer</button></div>
+  </div>
+  
+<div class="md-stepper">
+  <div class="md-step done" data-n="1">Fichier</div>
+  <div class="md-step active" data-n="2">Mapping</div>
+  <div class="md-step" data-n="3">Validation</div>
+  <div class="md-step" data-n="4">Import</div>
+</div>
+<div class="md-grid md-grid-2">
+  <div class="md-card md-card-pad">
+    <div style="border:2px dashed var(--md-sys-color-outline);border-radius:16px;padding:40px;text-align:center;margin-bottom:16px">
+      <div style="font-size:2rem;margin-bottom:8px">&#128194;</div>
+      <strong>entreprises_metz.csv</strong>
+      <p style="color:var(--md-sys-color-on-surface-variant);font-size:.85rem">248 lignes · 12 colonnes</p>
+    </div>
+    <div class="md-field"><label>Separateur</label><select><option>;</option><option>,</option></select></div>
+  </div>
+  <div class="md-card md-card-pad">
+    <h3 style="margin-top:0;font-size:1rem">Mapping</h3>
+    <table class="md-table dense"><thead><tr><th>CSV</th><th>Champ PL</th></tr></thead>
+    <tbody>
+      <tr><td>raison_sociale</td><td><select><option>nom</option></select></td></tr>
+      <tr><td>mail</td><td><select><option>email_principal</option></select></td></tr>
+      <tr><td>ville</td><td><select><option>ville</option></select></td></tr>
+    </tbody></table>
+    <div class="md-divider"></div>
+    <div class="md-hbar">
+      <div class="row"><span>Valides</span><div class="track"><i style="width:92%"></i></div><span class="val">228</span></div>
+      <div class="row"><span>Doublons</span><div class="track amber"><i style="width:6%"></i></div><span class="val">14</span></div>
+      <div class="row"><span>Erreurs</span><div class="track red"><i style="width:2%"></i></div><span class="val">6</span></div>
+    </div>
+  </div>
+</div>
+
+</main>
+</div>
+<button class="md-fab" title="Action">+</button>
+</body>
+</html>

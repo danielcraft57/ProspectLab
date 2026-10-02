@@ -232,6 +232,14 @@ Ces outils peuvent être intégrés dans ProspectLab pour enrichir les analyses 
 4. **SSLscan / SSLyze** : Pour une analyse SSL plus approfondie
 5. **Shodan / Censys** : Pour des informations sur l'infrastructure
 
+### Rapport Gemini (complément, pas un remplacement)
+
+L'audit Gemini Vision lit les résultats OSINT / technique / SEO / pentest **déjà stockés** et commente les screenshots. Il ne lance pas theHarvester ni dnsrecon à ta place.
+
+- Guide : [GEMINI_AUDIT.md](../guides/GEMINI_AUDIT.md)
+- Clés : `GEMINI_API_KEY` (+ `_2`… ou `GEMINI_API_KEYS`) dans `.env` uniquement
+- Les 503 "high demand" viennent souvent de Google, pas d'un outil OSINT manquant
+
 ## Notes importantes
 
 - Certains outils nécessitent des privilèges root (sudo)

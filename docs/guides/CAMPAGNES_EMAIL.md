@@ -48,11 +48,13 @@ Maquettes locales : `design/mockups/emails-audit/`.
 #### Configuration du tracking
 - Variable d'environnement `BASE_URL` dans `.env` :
   ```env
-  BASE_URL=https://votre-domaine.com
+  BASE_URL=https://campaigns.danielcraft.fr
   ```
-  - En production : URL publique accessible
+  - En production : URL publique HTTPS du reverse proxy (Nginx), **sans** slash final
   - En développement : Utiliser ngrok ou IP publique
   - **Important** : Ne pas utiliser `localhost:5000` car inaccessible depuis l'extérieur
+  - **Piège `.f`** : une valeur tronquée (`…danielcraft.f`) casse tous les pixels/clics. Éviter les `sed 's/r$//'` / `rstrip('/r')` sur `.env` ; utiliser `scripts/linux/fix_env_crlf.sh` (Python) et la normalisation dans `config.py`
+  - Réparation BDD si besoin : `scripts/linux/repair_truncated_tracking_urls.py`
 
 ### 3. Suivi en temps réel
 
@@ -251,8 +253,8 @@ Le système utilise `utils/name_formatter.py` pour formater les noms de contacts
 ### Variables d'environnement
 
 ```env
-# Tracking des emails (IMPORTANT)
-BASE_URL=https://votre-domaine.com
+# Tracking des emails (IMPORTANT) — HTTPS, domaine complet (.fr), pas de slash final
+BASE_URL=https://campaigns.danielcraft.fr
 
 # Configuration SMTP
 MAIL_SERVER=smtp.gmail.com
@@ -274,10 +276,11 @@ Les logs des campagnes sont enregistrés dans `logs/email_tasks.log` avec :
 
 ### Le tracking ne fonctionne pas
 
-1. Vérifier que `BASE_URL` est configuré avec une URL publique (pas `localhost`)
+1. Vérifier que `BASE_URL` est une URL publique HTTPS complète (pas `localhost`, pas `…danielcraft.f`)
 2. Vérifier que la table `email_tracking_events` existe
 3. Vérifier les logs dans `logs/email_tasks.log`
 4. Vérifier que le pixel est bien injecté dans les emails HTML
+5. Si d'anciens emails ont des liens tronqués : lancer `scripts/linux/repair_truncated_tracking_urls.py` sur le serveur app
 
 ### Toutes les campagnes passent en FAILED / tous les emails sont en Échec
 

@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kit composants MD3 | ProspectLab maquette</title>
+  <link rel="stylesheet" href="../assets/md3.css" /><link rel="stylesheet" href="../assets/md3-extra.css" /><link rel="stylesheet" href="../assets/charts.css" />
+</head>
+<body>
+<div class="md-app">
+
+<aside class="md-nav">
+  <div class="md-brand">
+    <div class="md-brand-mark">P</div>
+    <div><strong>ProspectLab</strong><span>Daniel Craft</span></div>
+  </div>
+  <a class="item md-nav-ctv " href="dashboard.html">Commencer ici</a>
+  <a class="item " href="onboarding.html">Premiere victoire</a>
+  <div class="md-nav-section">Par intention · Hick ≤7</div>
+  <a class="item " href="entreprises.html">Prospection</a>
+  <a class="item " href="analyse-site.html">Analyses</a>
+  <a class="item " href="campagnes.html">Envois email</a>
+  <a class="item " href="bounces.html">Hygiene listes</a>
+  <a class="item " href="domaines.html">Delivrabilite</a>
+  <a class="item " href="upload.html">Importer</a>
+  <a class="item " href="settings.html">Reglages</a>
+  <div class="md-nav-section">Sous-pages (maquettes)</div>
+  <a class="item " href="entreprise-detail.html">Fiche entreprise</a>
+  <a class="item " href="carte.html">Carte</a>
+  <a class="item " href="graph.html">Graphe</a>
+  <a class="item " href="concurrence.html">Concurrence</a>
+  <a class="item " href="analyses-tech.html">Tech</a>
+  <a class="item " href="analyses-osint.html">OSINT</a>
+  <a class="item " href="analyses-pentest.html">Pentest</a>
+  <a class="item " href="analyses-seo.html">SEO</a>
+  <a class="item " href="scrapers.html">Scrapers</a>
+  <a class="item " href="campagne-detail.html">Campagne detail</a>
+  <a class="item " href="envoyer.html">Envoi rapide</a>
+  <a class="item " href="modeles.html">Modeles</a>
+  <a class="item " href="victoire.html">Ecran victoire</a>
+  <a class="item " href="api.html">API</a>
+  <a class="item is-active" href="composants.html">Kit MD3</a>
+  <a class="item " href="recherche-vide.html">Recherche 0 resultat</a>
+</aside>
+
+<main class="md-main">
+  <div class="md-topbar">
+    <div><h1>Kit composants MD3</h1><p>Bibliotheque complete patterns + charts</p></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><span class="md-chip ok">Offline</span><span class="md-chip warn">Charts</span><span class="md-chip neutral">Extra</span></div>
+  </div>
+  
+<div class="md-section-label">Actions</div>
+<div class="md-card md-card-pad" style="margin-bottom:14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+  <button class="md-btn md-btn-filled">Filled</button>
+  <button class="md-btn md-btn-tonal">Tonal</button>
+  <button class="md-btn md-btn-outlined">Outlined</button>
+  <button class="md-icon-btn">&#8635;</button>
+  <span class="md-chip ok">OK</span><span class="md-chip warn">Warn</span><span class="md-chip err">Err</span>
+  <button class="md-filter-chip on">Filter</button>
+  <div class="md-segmented"><button class="is-active">A</button><button>B</button></div>
+  <button class="md-switch on"></button>
+  <span class="md-badge">3</span>
+  <span class="md-dot-live"></span><span class="md-dot-live warn"></span><span class="md-dot-live err"></span>
+  <div class="md-spinner"></div>
+</div>
+<div class="md-section-label">Feedback & overlays</div>
+<div class="md-comp-grid" style="margin-bottom:14px">
+  <div class="md-card md-card-pad"><div class="md-snackbar" style="width:100%"><span>Enregistre</span><button class="act">Undo</button></div>
+    <div class="md-divider"></div><div class="md-tooltip">Tooltip</div>
+    <div class="md-divider"></div>
+    <div class="md-skeleton lg" style="margin-bottom:8px"></div>
+    <div class="md-skeleton" style="width:70%"></div>
+  </div>
+  <div class="md-dialog"><h3>Dialog</h3><p>Confirmation Material.</p>
+    <div class="actions"><button class="md-btn md-btn-outlined">Non</button><button class="md-btn md-btn-filled">Oui</button></div></div>
+  <div class="md-sheet-backdrop"><div class="md-sheet"><div class="handle"></div><strong>Bottom sheet</strong>
+    <p style="font-size:.85rem;color:var(--md-sys-color-on-surface-variant)">Actions contextuelles</p></div></div>
+  <div class="md-menu"><button>Modifier</button><button>Dupliquer</button><button>Archiver</button></div>
+</div>
+<div class="md-section-label">Charts pack</div>
+<div class="md-grid md-grid-2" style="margin-bottom:14px">
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Line</h3></div>
+<svg class="md-line-chart" viewBox="0 0 520 180" preserveAspectRatio="none">
+  <g class="grid">
+    <line x1="40" y1="20" x2="500" y2="20"/><line x1="40" y1="60" x2="500" y2="60"/>
+    <line x1="40" y1="100" x2="500" y2="100"/><line x1="40" y1="140" x2="500" y2="140"/>
+  </g>
+  <path class="area" d="M40,120 L100,100 L160,110 L220,70 L280,85 L340,50 L400,60 L460,35 L500,45 L500,160 L40,160 Z"/>
+  <path class="line" d="M40,120 L100,100 L160,110 L220,70 L280,85 L340,50 L400,60 L460,35 L500,45"/>
+  <path class="line2" d="M40,130 L100,125 L160,118 L220,105 L280,100 L340,90 L400,88 L460,80 L500,78"/>
+  <circle class="dot" cx="500" cy="45" r="4"/>
+  <text class="axis-lbl" x="40" y="175">Lun</text>
+  <text class="axis-lbl" x="220" y="175">Mer</text>
+  <text class="axis-lbl" x="400" y="175">Ven</text>
+</svg>
+</div>
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Bars + donut</h3></div>
+    <div class="md-bars" style="height:90px"><div class="bar"><i style="height:70%"></i><span class="lbl">A</span></div>
+      <div class="bar alt"><i style="height:90%"></i><span class="lbl">B</span></div>
+      <div class="bar warn"><i style="height:45%"></i><span class="lbl">C</span></div></div>
+    <div class="md-donut" data-center="72%" style="background:conic-gradient(#3dd68c 0 72%,rgba(255,255,255,.08) 72%);width:90px;height:90px;margin-top:10px"></div>
+  </div>
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Treemap + funnel</h3></div>
+    <div class="md-treemap" style="height:120px;margin-bottom:10px">
+      <div class="a">A</div><div class="b">B</div><div class="c">C</div><div class="d">D</div><div class="e">E</div>
+    </div>
+    <div class="md-funnel"><div class="step"><span>In</span><strong>100</strong></div>
+      <div class="step"><span>Mid</span><strong>40</strong></div>
+      <div class="step"><span>Out</span><strong>12</strong></div></div>
+  </div>
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Radar / slope / bullet / lollipop</h3></div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start">
+      <div>
+<svg class="md-radar" viewBox="0 0 200 200">
+  <polygon fill="none" stroke="rgba(255,255,255,.08)" points="100,20 168,60 168,140 100,180 32,140 32,60"/>
+  <polygon fill="none" stroke="rgba(255,255,255,.08)" points="100,50 145,75 145,125 100,150 55,125 55,75"/>
+  <polygon fill="rgba(61,214,140,.25)" stroke="#3dd68c" stroke-width="2" points="100,40 155,70 150,130 100,155 50,120 55,70"/>
+</svg>
+</div>
+      <div style="flex:1;min-width:160px">
+<div class="md-slope">
+  <div class="side"><span>1. Atelier</span><span>2. Forge</span><span>3. Lumen</span><span>4. Metz H.</span></div>
+  <svg viewBox="0 0 200 120" preserveAspectRatio="none">
+    <line x1="10" y1="15" x2="190" y2="40" stroke="#3dd68c" stroke-width="2"/>
+    <line x1="10" y1="40" x2="190" y2="20" stroke="#7eb8ff" stroke-width="2"/>
+    <line x1="10" y1="70" x2="190" y2="85" stroke="#ffb74d" stroke-width="2"/>
+    <line x1="10" y1="95" x2="190" y2="70" stroke="#ff8a80" stroke-width="2"/>
+    <circle cx="10" cy="15" r="4" fill="#3dd68c"/><circle cx="190" cy="40" r="4" fill="#3dd68c"/>
+    <circle cx="10" cy="40" r="4" fill="#7eb8ff"/><circle cx="190" cy="20" r="4" fill="#7eb8ff"/>
+  </svg>
+  <div class="side" style="text-align:right"><span>2. Atelier</span><span>1. Forge</span><span>4. Lumen</span><span>3. Metz H.</span></div>
+</div>
+
+        <div class="md-bullet" style="margin-top:10px">
+          <div class="row"><span>KPI</span><div class="track"><div class="range" style="width:80%"></div><div class="fill" style="width:60%"></div><div class="marker" style="left:75%"></div></div></div>
+        </div>
+        <div class="md-lollipop" style="margin-top:10px">
+          <div class="row"><span>X</span><div class="line" style="--p:70%"><i style="width:70%"></i></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="md-section-label">Kanban + pagination</div>
+<div class="md-kanban" style="margin-bottom:14px">
+  <div class="col"><h4>Todo</h4><div class="card">Item A</div></div>
+  <div class="col"><h4>Doing</h4><div class="card">Item B</div></div>
+  <div class="col"><h4>Done</h4><div class="card">Item C</div></div>
+  <div class="col"><h4>Blocked</h4><div class="card">Item D</div></div>
+</div>
+<div class="md-card"><div class="md-pagination"><span>Demo</span><div class="md-page-btns">
+  <button>‹</button><button class="is-active">1</button><button>2</button><button>3</button><button>›</button>
+</div></div></div>
+
+</main>
+</div>
+<button class="md-fab-ext">+ Nouveau</button>
+</body>
+</html>

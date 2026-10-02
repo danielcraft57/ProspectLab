@@ -151,6 +151,19 @@ Ces outils et bibliothèques sont utilisés pour extraire et **valider de vrais 
 
 ---
 
+## Gemini (audit Vision / synthèse)
+
+Pas un outil CLI OSINT : API Google Gemini pour le rapport complet et l'analyse design des screenshots.
+
+- **Client** : `services/gemini_client.py` (rotation multi-clés)
+- **File Redis** : `services/gemini_queue.py` (`GEMINI_JOB_SPACING_SEC`)
+- **Rapport** : `services/gemini_full_report_service.py` + tâche Celery `gemini_full_report.analyze_entreprise`
+- **Doc** : [guides/GEMINI_AUDIT.md](guides/GEMINI_AUDIT.md)
+
+Variables : `GEMINI_API_KEY` (+ `_2`…), `GEMINI_MODEL`, `GEMINI_FULL_REPORT_MAX_CONCURRENT`, etc. (voir `env.example`).
+
+---
+
 ## 📦 Installation
 
 ### Scripts d'installation disponibles

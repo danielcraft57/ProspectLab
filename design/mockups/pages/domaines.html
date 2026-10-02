@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Domaines et SMTP | ProspectLab maquette</title>
+  <link rel="stylesheet" href="../assets/md3.css" /><link rel="stylesheet" href="../assets/md3-extra.css" /><link rel="stylesheet" href="../assets/charts.css" />
+</head>
+<body>
+<div class="md-app">
+
+<aside class="md-nav">
+  <div class="md-brand">
+    <div class="md-brand-mark">P</div>
+    <div><strong>ProspectLab</strong><span>Daniel Craft</span></div>
+  </div>
+  <a class="item md-nav-ctv " href="dashboard.html">Commencer ici</a>
+  <a class="item " href="onboarding.html">Premiere victoire</a>
+  <div class="md-nav-section">Par intention · Hick ≤7</div>
+  <a class="item " href="entreprises.html">Prospection</a>
+  <a class="item " href="analyse-site.html">Analyses</a>
+  <a class="item " href="campagnes.html">Envois email</a>
+  <a class="item " href="bounces.html">Hygiene listes</a>
+  <a class="item is-active" href="domaines.html">Delivrabilite</a>
+  <a class="item " href="upload.html">Importer</a>
+  <a class="item " href="settings.html">Reglages</a>
+  <div class="md-nav-section">Sous-pages (maquettes)</div>
+  <a class="item " href="entreprise-detail.html">Fiche entreprise</a>
+  <a class="item " href="carte.html">Carte</a>
+  <a class="item " href="graph.html">Graphe</a>
+  <a class="item " href="concurrence.html">Concurrence</a>
+  <a class="item " href="analyses-tech.html">Tech</a>
+  <a class="item " href="analyses-osint.html">OSINT</a>
+  <a class="item " href="analyses-pentest.html">Pentest</a>
+  <a class="item " href="analyses-seo.html">SEO</a>
+  <a class="item " href="scrapers.html">Scrapers</a>
+  <a class="item " href="campagne-detail.html">Campagne detail</a>
+  <a class="item " href="envoyer.html">Envoi rapide</a>
+  <a class="item " href="modeles.html">Modeles</a>
+  <a class="item " href="victoire.html">Ecran victoire</a>
+  <a class="item " href="api.html">API</a>
+  <a class="item " href="composants.html">Kit MD3</a>
+  <a class="item " href="recherche-vide.html">Recherche 0 resultat</a>
+</aside>
+
+<main class="md-main">
+  <div class="md-topbar">
+    <div><h1>Domaines et SMTP</h1><p>Multi-domaines, DNS, sante</p></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="md-btn md-btn-filled">+ Domaine</button></div>
+  </div>
+  
+<div class="md-grid md-grid-2" style="margin-bottom:16px">
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Volume</h3></div>
+    <div class="md-donut-wrap">
+      <div class="md-donut" data-center="412" style="background:conic-gradient(#3dd68c 0 78%,#7eb8ff 78% 95%,#ffb74d 95% 100%)"></div>
+      <div class="md-legend">
+        <div class="item"><span class="dot" style="background:#3dd68c"></span> danielcraft.fr</div>
+        <div class="item"><span class="dot" style="background:#7eb8ff"></span> jammy.fr</div>
+      </div>
+    </div></div>
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>DNS</h3></div>
+    <div class="md-list">
+      <div class="md-list-item"><div class="md-avatar">SP</div><div class="meta"><strong>SPF</strong><span>include:sendinblue.com</span></div><span class="md-chip ok">OK</span></div>
+      <div class="md-list-item"><div class="md-avatar blue">DK</div><div class="meta"><strong>DKIM</strong><span>brevo</span></div><span class="md-chip ok">OK</span></div>
+      <div class="md-list-item"><div class="md-avatar">DM</div><div class="meta"><strong>DMARC</strong><span>p=none</span></div><span class="md-chip warn">A renforcer</span></div>
+    </div></div>
+</div>
+<div class="md-card"><table class="md-table dense"><thead><tr><th>Domaine</th><th>SMTP</th><th>DNS</th><th>Quota</th><th>Statut</th></tr></thead>
+<tbody>
+<tr><td>danielcraft.fr</td><td>Brevo</td><td><span class="md-chip ok">OK</span></td><td><div class="md-linear" style="width:80px"><i style="width:2%"></i></div></td><td>Actif</td></tr>
+<tr><td>jammy.fr</td><td>node12</td><td><span class="md-chip warn">?</span></td><td><div class="md-linear" style="width:80px"><i style="width:0%"></i></div></td><td>Inactif</td></tr>
+</tbody></table></div>
+
+</main>
+</div>
+<button class="md-fab" title="Action">+</button>
+</body>
+</html>

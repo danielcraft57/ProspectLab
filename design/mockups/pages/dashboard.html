@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dashboard | ProspectLab maquette</title>
+  <link rel="stylesheet" href="../assets/md3.css" /><link rel="stylesheet" href="../assets/md3-extra.css" /><link rel="stylesheet" href="../assets/charts.css" />
+</head>
+<body>
+<div class="md-app">
+
+<aside class="md-nav">
+  <div class="md-brand">
+    <div class="md-brand-mark">P</div>
+    <div><strong>ProspectLab</strong><span>Daniel Craft</span></div>
+  </div>
+  <a class="item md-nav-ctv is-active" href="dashboard.html">Commencer ici</a>
+  <a class="item " href="onboarding.html">Premiere victoire</a>
+  <div class="md-nav-section">Par intention · Hick ≤7</div>
+  <a class="item " href="entreprises.html">Prospection</a>
+  <a class="item " href="analyse-site.html">Analyses</a>
+  <a class="item " href="campagnes.html">Envois email</a>
+  <a class="item " href="bounces.html">Hygiene listes</a>
+  <a class="item " href="domaines.html">Delivrabilite</a>
+  <a class="item " href="upload.html">Importer</a>
+  <a class="item " href="settings.html">Reglages</a>
+  <div class="md-nav-section">Sous-pages (maquettes)</div>
+  <a class="item " href="entreprise-detail.html">Fiche entreprise</a>
+  <a class="item " href="carte.html">Carte</a>
+  <a class="item " href="graph.html">Graphe</a>
+  <a class="item " href="concurrence.html">Concurrence</a>
+  <a class="item " href="analyses-tech.html">Tech</a>
+  <a class="item " href="analyses-osint.html">OSINT</a>
+  <a class="item " href="analyses-pentest.html">Pentest</a>
+  <a class="item " href="analyses-seo.html">SEO</a>
+  <a class="item " href="scrapers.html">Scrapers</a>
+  <a class="item " href="campagne-detail.html">Campagne detail</a>
+  <a class="item " href="envoyer.html">Envoi rapide</a>
+  <a class="item " href="modeles.html">Modeles</a>
+  <a class="item " href="victoire.html">Ecran victoire</a>
+  <a class="item " href="api.html">API</a>
+  <a class="item " href="composants.html">Kit MD3</a>
+  <a class="item " href="recherche-vide.html">Recherche 0 resultat</a>
+</aside>
+
+<main class="md-main">
+  <div class="md-topbar">
+    <div><h1>Dashboard</h1><p>Vue d'ensemble · preuve de valeur avant config (@clea_ux TTV)</p></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><div class="md-segmented"><button class="is-active">7 j</button><button>30 j</button><button>90 j</button></div><button class="md-btn md-btn-filled">Voir mon 1er envoi reussi</button></div>
+  </div>
+  
+<div class="md-ctv-block md-anim-in">
+  <h2>Voir ce que Brevo a delivre aujourd'hui</h2>
+  <p>CTV (@clea_ux) : on parle du resultat, pas du bouton. Action cle ProspectLab = premier email delivre + ouvert.</p>
+  <div class="actions">
+    <a class="md-btn md-btn-filled" href="campagne-detail.html">Ouvrir Presence digitale</a>
+    <a class="md-btn md-btn-outlined" href="onboarding.html">Premiere victoire (~2 min)</a>
+    <span class="hint">1 CTV + 1 secondaire · loi de Hick</span>
+  </div>
+</div>
+<div class="md-zeigarnik">
+  <span><strong>Effet Zeigarnik</strong> — checklist activation 2/4</span>
+  <a class="md-btn md-btn-tonal" style="padding:6px 12px;font-size:.75rem" href="onboarding.html">Continuer</a>
+</div>
+<div class="md-banner md-anim-in" style="margin-bottom:16px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">
+  <span><span class="md-dot-live"></span> Sync Brevo OK · 294 credits · SMTP relay actif</span>
+  <button class="md-btn md-btn-outlined" style="padding:6px 12px;font-size:.75rem">Voir quota</button>
+</div>
+<div class="md-grid md-grid-4" style="margin-bottom:16px">
+  <div class="md-card md-card-pad md-kpi-spark md-anim-in"><div style="font-size:.72rem;text-transform:uppercase;color:var(--md-sys-color-on-surface-variant)">Entreprises</div>
+    <div style="font-size:1.55rem;font-weight:650">1 248</div><div class="delta up">+12 cette semaine</div><svg class="md-spark " viewBox="0 0 120 40" preserveAspectRatio="none">
+  <path class="fill" d="M0,32 L10,28 L20,30 L30,18 L40,22 L50,12 L60,16 L70,8 L80,14 L90,10 L100,6 L110,12 L120,8 L120,40 L0,40 Z"/>
+  <path class="line" d="M0,32 L10,28 L20,30 L30,18 L40,22 L50,12 L60,16 L70,8 L80,14 L90,10 L100,6 L110,12 L120,8"/>
+</svg></div>
+  <div class="md-card md-card-pad md-kpi-spark md-anim-in-2"><div style="font-size:.72rem;text-transform:uppercase;color:var(--md-sys-color-on-surface-variant)">Emails</div>
+    <div style="font-size:1.55rem;font-weight:650">412</div><div class="delta up">+6 aujourd'hui</div><svg class="md-spark blue" viewBox="0 0 120 40" preserveAspectRatio="none">
+  <path class="fill" d="M0,32 L10,28 L20,30 L30,18 L40,22 L50,12 L60,16 L70,8 L80,14 L90,10 L100,6 L110,12 L120,8 L120,40 L0,40 Z"/>
+  <path class="line" d="M0,32 L10,28 L20,30 L30,18 L40,22 L50,12 L60,16 L70,8 L80,14 L90,10 L100,6 L110,12 L120,8"/>
+</svg></div>
+  <div class="md-card md-card-pad md-kpi-spark md-anim-in-2"><div style="font-size:.72rem;text-transform:uppercase;color:var(--md-sys-color-on-surface-variant)">Ouverture</div>
+    <div style="font-size:1.55rem;font-weight:650;color:var(--md-sys-color-primary)">34%</div><div class="delta up">+2,1 pts</div><svg class="md-spark " viewBox="0 0 120 40" preserveAspectRatio="none">
+  <path class="fill" d="M0,32 L10,28 L20,30 L30,18 L40,22 L50,12 L60,16 L70,8 L80,14 L90,10 L100,6 L110,12 L120,8 L120,40 L0,40 Z"/>
+  <path class="line" d="M0,32 L10,28 L20,30 L30,18 L40,22 L50,12 L60,16 L70,8 L80,14 L90,10 L100,6 L110,12 L120,8"/>
+</svg></div>
+  <div class="md-card md-card-pad md-kpi-spark md-anim-in-3"><div style="font-size:.72rem;text-transform:uppercase;color:var(--md-sys-color-on-surface-variant)">Credits</div>
+    <div style="font-size:1.55rem;font-weight:650">294</div><div class="delta down">-6 aujourd'hui</div><svg class="md-spark amber" viewBox="0 0 120 40" preserveAspectRatio="none">
+  <path class="fill" d="M0,32 L10,28 L20,30 L30,18 L40,22 L50,12 L60,16 L70,8 L80,14 L90,10 L100,6 L110,12 L120,8 L120,40 L0,40 Z"/>
+  <path class="line" d="M0,32 L10,28 L20,30 L30,18 L40,22 L50,12 L60,16 L70,8 L80,14 L90,10 L100,6 L110,12 L120,8"/>
+</svg></div>
+</div>
+<div class="md-metric-row" style="margin-bottom:16px">
+  <div class="md-metric-pill">Campagnes actives<strong>2</strong></div>
+  <div class="md-metric-pill">Analyses en cours<strong>3</strong></div>
+  <div class="md-metric-pill">Bounces a traiter<strong style="color:var(--md-sys-color-error)">15</strong></div>
+  <div class="md-metric-pill">Scrapers OK<strong>6/7</strong></div>
+</div>
+<div class="md-grid md-grid-2" style="margin-bottom:16px">
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Volume d'envoi</h3><span class="hint">PL vs Brevo</span></div>
+<svg class="md-line-chart" viewBox="0 0 520 180" preserveAspectRatio="none">
+  <g class="grid">
+    <line x1="40" y1="20" x2="500" y2="20"/><line x1="40" y1="60" x2="500" y2="60"/>
+    <line x1="40" y1="100" x2="500" y2="100"/><line x1="40" y1="140" x2="500" y2="140"/>
+  </g>
+  <path class="area" d="M40,120 L100,100 L160,110 L220,70 L280,85 L340,50 L400,60 L460,35 L500,45 L500,160 L40,160 Z"/>
+  <path class="line" d="M40,120 L100,100 L160,110 L220,70 L280,85 L340,50 L400,60 L460,35 L500,45"/>
+  <path class="line2" d="M40,130 L100,125 L160,118 L220,105 L280,100 L340,90 L400,88 L460,80 L500,78"/>
+  <circle class="dot" cx="500" cy="45" r="4"/>
+  <text class="axis-lbl" x="40" y="175">Lun</text>
+  <text class="axis-lbl" x="220" y="175">Mer</text>
+  <text class="axis-lbl" x="400" y="175">Ven</text>
+</svg>
+
+    <div class="md-chart-legend"><span><i style="background:#3dd68c"></i>Envoyes</span><span><i style="background:#7eb8ff"></i>Delivres</span></div></div>
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Evenements</h3></div>
+    <div class="md-donut-wrap">
+      <div class="md-donut" data-center="412" style="background:conic-gradient(#3dd68c 0 55%,#7eb8ff 55% 78%,#ffb74d 78% 92%,#ff8a80 92% 100%)"></div>
+      <div class="md-legend">
+        <div class="item"><span class="dot" style="background:#3dd68c"></span> Delivres</div>
+        <div class="item"><span class="dot" style="background:#7eb8ff"></span> Ouverts</div>
+        <div class="item"><span class="dot" style="background:#ffb74d"></span> Soft</div>
+        <div class="item"><span class="dot" style="background:#ff8a80"></span> Hard</div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="md-grid md-grid-3" style="margin-bottom:16px">
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Pipeline</h3></div>
+    <div class="md-funnel">
+      <div class="step"><span>Leads</span><strong>1248</strong></div>
+      <div class="step"><span>Qualifies</span><strong>214</strong></div>
+      <div class="step"><span>Contactes</span><strong>86</strong></div>
+      <div class="step"><span>Reponses</span><strong>11</strong></div>
+    </div>
+  </div>
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Activite carte</h3></div>
+    <div class="md-heat">
+      <div class="lbl"></div><div class="lbl">L</div><div class="lbl">M</div><div class="lbl">M</div><div class="lbl">J</div><div class="lbl">V</div><div class="lbl">S</div><div class="lbl">D</div>
+      <div class="lbl">S1</div><div class="cell c1"></div><div class="cell c2"></div><div class="cell c3"></div><div class="cell c2"></div><div class="cell c4"></div><div class="cell"></div><div class="cell"></div>
+      <div class="lbl">S2</div><div class="cell c2"></div><div class="cell c3"></div><div class="cell c4"></div><div class="cell c3"></div><div class="cell c2"></div><div class="cell c1"></div><div class="cell"></div>
+      <div class="lbl">S3</div><div class="cell c1"></div><div class="cell c2"></div><div class="cell c2"></div><div class="cell c4"></div><div class="cell c3"></div><div class="cell"></div><div class="cell c1"></div>
+    </div>
+  </div>
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Calendrier envois</h3></div>
+    <div class="md-cal">
+      <div class="hd">L</div><div class="hd">M</div><div class="hd">M</div><div class="hd">J</div><div class="hd">V</div><div class="hd">S</div><div class="hd">D</div>
+      <div class="d"></div><div class="d"></div><div class="d">1</div><div class="d dot">2</div><div class="d">3</div><div class="d">4</div><div class="d">5</div>
+      <div class="d">6</div><div class="d">7</div><div class="d">8</div><div class="d">9</div><div class="d">10</div><div class="d">11</div><div class="d">12</div>
+      <div class="d">13</div><div class="d">14</div><div class="d on">15</div><div class="d dot">16</div><div class="d">17</div><div class="d">18</div><div class="d">19</div>
+    </div>
+  </div>
+</div>
+<div class="md-grid md-grid-2">
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Activite</h3></div>
+    <div class="md-timeline">
+      <div class="ev"><strong>Campagne Presence digitale terminee</strong><span>il y a 2 h</span></div>
+      <div class="ev"><strong>Hard bounce sync Brevo</strong><span>il y a 3 h</span></div>
+      <div class="ev"><strong>12 entreprises importees</strong><span>hier</span></div>
+      <div class="ev"><strong>Analyse SEO atelier-nord.fr</strong><span>hier · 78</span></div>
+    </div>
+  </div>
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Sante</h3><span class="md-chip ok">OK</span></div>
+    <div class="md-hbar">
+      <div class="row"><span>Open</span><div class="track"><i style="width:34%"></i></div><span class="val">34%</span></div>
+      <div class="row"><span>Click</span><div class="track blue"><i style="width:9%"></i></div><span class="val">9%</span></div>
+      <div class="row"><span>Bounce</span><div class="track amber"><i style="width:4%"></i></div><span class="val">4%</span></div>
+      <div class="row"><span>Spam</span><div class="track red"><i style="width:1%"></i></div><span class="val">0%</span></div>
+    </div>
+    <div class="md-divider"></div>
+    <div class="md-waterfall">
+      <div class="w"><span style="width:70px">Quota</span><div class="bar" style="width:8%">6/300</div></div>
+      <div class="w"><span style="width:70px">IMAP</span><div class="bar" style="width:100%;background:linear-gradient(90deg,#3b82c4,#7eb8ff)">OK</div></div>
+    </div>
+  </div>
+</div>
+
+</main>
+</div>
+<button class="md-fab-ext">Nouvelle campagne</button>
+</body>
+</html>

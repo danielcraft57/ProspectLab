@@ -298,6 +298,24 @@ Les scripts de déploiement copient le code (routes, services, tasks, templates,
 
 Le dossier `scripts/` est inclus dans le déploiement ; les permissions d'exécution des `.sh` sont appliquées côté serveur après transfert.
 
+### Tracking emails / `.env`
+
+- **`scripts/linux/fix_env_crlf.sh`** : normalise CRLF du `.env` en Python (évite de tronquer `.fr` en `.f`).
+- **`scripts/linux/repair_truncated_tracking_urls.py`** : répare en BDD les URLs de tracking tronquées (`danielcraft.f` → `.fr`). Voir [CAMPAGNES_EMAIL.md](../guides/CAMPAGNES_EMAIL.md).
+
+### PostgreSQL (dump / restore / cutover)
+
+Scripts d'ops pour migrer ou sauver la base (ex. node15 → node6). À lancer depuis le LAN/VPN, jamais committer les dumps (`production_data/`, `*.dump` sont ignorés).
+
+- `scripts/linux/dump_prospectlab_*.sh` / `restore_prospectlab_*.sh`
+- `scripts/linux/cutover_node15_to_node6_db.sh`, `prep_node6_postgres_prospectlab.sh`
+- `scripts/linux/smoke_db_count.py`
+
+### Gemini / Playwright
+
+- Doc clés et file d'attente : [GEMINI_AUDIT.md](../guides/GEMINI_AUDIT.md)
+- `scripts/linux/install_playwright_chromium.sh` : Chromium Playwright côté serveur (screenshots / Vision)
+
 ## Configuration
 
 Les scripts utilisent les variables de configuration depuis `config.py` :

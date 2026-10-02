@@ -762,11 +762,11 @@ Pour vérifier l’app après déploiement et recharger Nginx sur le proxy en un
 
 ## Notes importantes
 
-1. **BASE_URL** : Doit être configurée en HTTPS dans `.env` pour le tracking des emails
+1. **BASE_URL** : Doit être configurée en HTTPS dans `.env` pour le tracking des emails (ex. `https://campaigns.danielcraft.fr`), **sans** slash final. Vérifier qu'elle n'est pas tronquée en `.f` (souvent après un mauvais nettoyage CRLF). La copie `.env.prod` → `.env` utilise `scripts/linux/fix_env_crlf.sh` (Python), pas un `sed`/`rstrip` destructif.
 2. **Timeouts** : Nginx est configuré avec des timeouts de 300s pour les longues opérations
 3. **Workers Celery** : Ajuster `CELERY_WORKERS` selon les ressources disponibles
 4. **Sauvegardes** : Mettre en place des sauvegardes régulières de PostgreSQL
 5. **Monitoring** : Surveiller les logs et l'espace disque régulièrement
 6. **Restriction réseau** : Avec `RESTRICT_TO_LOCAL_NETWORK=true`, l'interface complète de ProspectLab (pages HTML, routes API internes) n'est accessible que depuis le LAN/VPN.  
    Seules les routes `/track/...` et `/api/public/...` restent exposées à Internet (pour le tracking d'emails et les intégrations externes via token).
-
+7. **Gemini** : clés dans `.env` uniquement ; voir [GEMINI_AUDIT.md](../guides/GEMINI_AUDIT.md). Un 503 Google n'indique pas forcément une clé morte.

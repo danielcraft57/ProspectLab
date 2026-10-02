@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bounces & hygiene | ProspectLab maquette</title>
+  <link rel="stylesheet" href="../assets/md3.css" /><link rel="stylesheet" href="../assets/md3-extra.css" /><link rel="stylesheet" href="../assets/charts.css" />
+</head>
+<body>
+<div class="md-app">
+
+<aside class="md-nav">
+  <div class="md-brand">
+    <div class="md-brand-mark">P</div>
+    <div><strong>ProspectLab</strong><span>Daniel Craft</span></div>
+  </div>
+  <a class="item md-nav-ctv " href="dashboard.html">Commencer ici</a>
+  <a class="item " href="onboarding.html">Premiere victoire</a>
+  <div class="md-nav-section">Par intention · Hick ≤7</div>
+  <a class="item " href="entreprises.html">Prospection</a>
+  <a class="item " href="analyse-site.html">Analyses</a>
+  <a class="item " href="campagnes.html">Envois email</a>
+  <a class="item is-active" href="bounces.html">Hygiene listes</a>
+  <a class="item " href="domaines.html">Delivrabilite</a>
+  <a class="item " href="upload.html">Importer</a>
+  <a class="item " href="settings.html">Reglages</a>
+  <div class="md-nav-section">Sous-pages (maquettes)</div>
+  <a class="item " href="entreprise-detail.html">Fiche entreprise</a>
+  <a class="item " href="carte.html">Carte</a>
+  <a class="item " href="graph.html">Graphe</a>
+  <a class="item " href="concurrence.html">Concurrence</a>
+  <a class="item " href="analyses-tech.html">Tech</a>
+  <a class="item " href="analyses-osint.html">OSINT</a>
+  <a class="item " href="analyses-pentest.html">Pentest</a>
+  <a class="item " href="analyses-seo.html">SEO</a>
+  <a class="item " href="scrapers.html">Scrapers</a>
+  <a class="item " href="campagne-detail.html">Campagne detail</a>
+  <a class="item " href="envoyer.html">Envoi rapide</a>
+  <a class="item " href="modeles.html">Modeles</a>
+  <a class="item " href="victoire.html">Ecran victoire</a>
+  <a class="item " href="api.html">API</a>
+  <a class="item " href="composants.html">Kit MD3</a>
+  <a class="item " href="recherche-vide.html">Recherche 0 resultat</a>
+</aside>
+
+<main class="md-main">
+  <div class="md-topbar">
+    <div><h1>Bounces & hygiene</h1><p>Hard/soft, sync Brevo, nettoyage base</p></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="md-btn md-btn-outlined">Exporter</button><button class="md-btn md-btn-filled">Nettoyer selection</button></div>
+  </div>
+  
+<div class="md-grid md-grid-4" style="margin-bottom:16px">
+  <div class="md-card md-stat"><div class="label">Hard</div><div class="value" style="color:var(--md-sys-color-error)">12</div></div>
+  <div class="md-card md-stat"><div class="label">Soft</div><div class="value" style="color:var(--md-sys-color-tertiary)">41</div></div>
+  <div class="md-card md-stat"><div class="label">Spam</div><div class="value">2</div></div>
+  <div class="md-card md-stat"><div class="label">A purger</div><div class="value">15</div></div>
+</div>
+<div class="md-grid md-grid-2" style="margin-bottom:16px">
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Evolution bounces</h3></div>
+<svg class="md-line-chart" viewBox="0 0 520 180" preserveAspectRatio="none">
+  <g class="grid">
+    <line x1="40" y1="20" x2="500" y2="20"/><line x1="40" y1="60" x2="500" y2="60"/>
+    <line x1="40" y1="100" x2="500" y2="100"/><line x1="40" y1="140" x2="500" y2="140"/>
+  </g>
+  <path class="area" d="M40,120 L100,100 L160,110 L220,70 L280,85 L340,50 L400,60 L460,35 L500,45 L500,160 L40,160 Z"/>
+  <path class="line" d="M40,120 L100,100 L160,110 L220,70 L280,85 L340,50 L400,60 L460,35 L500,45"/>
+  <path class="line2" d="M40,130 L100,125 L160,118 L220,105 L280,100 L340,90 L400,88 L460,80 L500,78"/>
+  <circle class="dot" cx="500" cy="45" r="4"/>
+  <text class="axis-lbl" x="40" y="175">Lun</text>
+  <text class="axis-lbl" x="220" y="175">Mer</text>
+  <text class="axis-lbl" x="400" y="175">Ven</text>
+</svg>
+</div>
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Causes</h3></div>
+    <div class="md-donut-wrap">
+      <div class="md-donut" data-center="55" style="background:conic-gradient(#ff8a80 0 40%,#ffb74d 40% 75%,#7eb8ff 75% 100%)"></div>
+      <div class="md-legend">
+        <div class="item"><span class="dot" style="background:#ff8a80"></span> Inexistant</div>
+        <div class="item"><span class="dot" style="background:#ffb74d"></span> Boite pleine</div>
+        <div class="item"><span class="dot" style="background:#7eb8ff"></span> Bloque</div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="md-banner err" style="margin-bottom:14px">15 adresses hard bounce candidates a suppression de la base.</div>
+<div class="md-card"><table class="md-table dense"><thead><tr><th></th><th>Email</th><th>Type</th><th>Source</th><th>Date</th></tr></thead>
+<tbody>
+<tr><td><span class="md-check on">&#10003;</span></td><td>bad@exemple.fr</td><td><span class="md-chip err">Hard</span></td><td>Brevo</td><td>16/08</td></tr>
+<tr><td><span class="md-check"></span></td><td>full@boite.fr</td><td><span class="md-chip warn">Soft</span></td><td>IMAP</td><td>15/08</td></tr>
+</tbody></table>
+<div class="md-pagination"><span>1-50 sur 55</span><div class="md-page-btns"><button class="is-active">1</button><button>2</button></div></div>
+</div>
+
+</main>
+</div>
+<button class="md-fab" title="Action">+</button>
+</body>
+</html>

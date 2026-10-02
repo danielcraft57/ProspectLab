@@ -2,6 +2,12 @@
 
 Ce document résume les changements techniques importants pour la maintenance et le déploiement.
 
+## Emails tracking BASE_URL + Gemini multi-clés (octobre 2026)
+
+- **BASE_URL / CTA** : normalisation HTTPS + réparation des hôtes tronqués (`*.danielcraft.f` → `.fr`) dans `config.py` ; domaines marque / sites nettoyés dans les query params des templates ; script `scripts/linux/repair_truncated_tracking_urls.py` ; `fix_env_crlf.sh` en Python (plus de `sed`/`rstrip` qui mangeait le `r` de `.fr`).
+- **Gemini** : rotation multi-comptes (429 RPM / 503 → clé suivante, 401/403 → révocation process, RPD réel → blacklist jusqu'au reset Pacific) ; file Redis `GEMINI_JOB_SPACING_SEC` + slots `GEMINI_FULL_REPORT_MAX_CONCURRENT` ; journal / toasts quota sur fiche.
+- **Doc** : [guides/GEMINI_AUDIT.md](guides/GEMINI_AUDIT.md), sections Gemini / BASE_URL dans CONFIGURATION, CAMPAGNES_EMAIL, DEPLOIEMENT_PRODUCTION, OSINT_TOOLS, OUTILS_UTILISES, INDEX, `env.example`.
+
 ## Docs, env pentest formulaires, touchpoints BDD, cluster (avril 2026)
 
 - **Documentation** : variables `PENTEST_FORM_*` / `PENTEST_SQLMAP_FORM_TIMEOUT` dans `docs/configuration/CONFIGURATION.md`, `ENVIRONNEMENTS_ET_DEPLOIEMENT.md` (exemples `.env`, sections 1.3–1.6 réordonnées), `docs/CELERY.md`, `docs/techniques/PENTEST_TOOLS.md` ; `env.example` complété ; `docs/INDEX.md` (ménage doublon, table `entreprise_touchpoints`).

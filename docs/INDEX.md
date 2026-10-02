@@ -28,6 +28,7 @@ Bienvenue dans la documentation de ProspectLab. Cette documentation est organis�
 - [**Graph entreprises (liens externes)**](guides/GRAPH_ENTREPRISES.md) - Vue graphe fiches ↔ domaines tiers, API, mini-scrape, BDD
 - [Authentification](guides/AUTHENTIFICATION.md) - Guide du système d'authentification et de sécurité
 - [Campagnes Email](guides/CAMPAGNES_EMAIL.md) - Guide complet du système de campagnes email avec tracking
+- [Audit Gemini (Vision)](guides/GEMINI_AUDIT.md) - Clés multi-comptes, file d'attente, 503 vs quota, lien OSINT
 - [Voix & palette DanielCraft (emails)](guides/DANIELCRAFT_EMAIL_VOICE.md) - Ton Grand Est, vocabulaire client, couleurs main.css
 - [Profil de pondération (priorité commerciale)](guides/PROFIL_PONDERATION_PRIORITE_COMMERCIALE.md) - À quoi sert le profil de pondération et la vue Top commercial
 - [Évolution des métriques (snapshots)](guides/EVOLUTION_METRIQUES_SNAPSHOTS.md) - Historique technique/SEO, comparaison et alertes (API)

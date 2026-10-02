@@ -54,6 +54,25 @@ Utilisées par `tasks/pentest_tasks.py` et `services/pentest_analyzer.py` pour l
 
 Les modèles locaux **`.env.prod`** / **`.env.cluster`** (souvent ignorés par Git, voir `.gitignore`) peuvent fixer des valeurs conservatrices selon le matériel (ex. Pi 5 en prod seule, worker 2 vCPU en cluster) ; à recopier en `.env` sur chaque machine et à ajuster.
 
+#### Gemini (audit Vision + rapport complet)
+
+Clés et modèle : voir le guide dédié [GEMINI_AUDIT.md](../guides/GEMINI_AUDIT.md).
+
+- **GEMINI_API_KEY** / **GEMINI_API_KEY_2** … **_9** ou **GEMINI_API_KEYS** (CSV) : rotation multi-comptes (429 RPM / 503 → clé suivante ; 401/403 → clé ignorée jusqu'au redémarrage).
+- **GEMINI_MODEL** / **GEMINI_DESIGN_MODEL** : modèle texte/Vision (défaut `gemini-3.8-flash`).
+- **GEMINI_FULL_REPORT_MAX_CONCURRENT** : slots Vision simultanés (défaut **1**).
+- **GEMINI_JOB_SPACING_SEC** : délai Redis entre démarrages de rapports (défaut **90**).
+- **GEMINI_QUOTA_RETRY_MS** / **GEMINI_QUOTA_RETRY_ROUNDS** : pause quand toutes les clés sont en pause.
+
+Tester une clé avant de la mettre en prod : une clé 401 fausse le décompte et est immédiatement blacklistée process.
+
+#### BASE_URL (tracking emails)
+
+- **BASE_URL** : URL publique HTTPS du reverse proxy (ex. `https://campaigns.danielcraft.fr`), sans slash final.
+- Ne jamais laisser une valeur tronquée type `https://campaigns.danielcraft.f` (souvent issue d'un `sed` / `rstrip` trop agressif sur `.env`).
+- Au chargement, `config.normalize_public_base_url` force `https://` et répare les hôtes `*.danielcraft.f` → `*.danielcraft.fr`.
+- Les CTA templates normalisent aussi les domaines marque / sites (http→https, `.f`→`.fr` quand pertinent).
+
 ## Configuration Email
 
 Pour pouvoir envoyer des emails, configurez les paramètres SMTP dans `config.py` ou via les variables d'environnement.

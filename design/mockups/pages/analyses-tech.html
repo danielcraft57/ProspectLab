@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Analyses techniques | ProspectLab maquette</title>
+  <link rel="stylesheet" href="../assets/md3.css" /><link rel="stylesheet" href="../assets/md3-extra.css" /><link rel="stylesheet" href="../assets/charts.css" />
+</head>
+<body>
+<div class="md-app">
+
+<aside class="md-nav">
+  <div class="md-brand">
+    <div class="md-brand-mark">P</div>
+    <div><strong>ProspectLab</strong><span>Daniel Craft</span></div>
+  </div>
+  <a class="item md-nav-ctv " href="dashboard.html">Commencer ici</a>
+  <a class="item " href="onboarding.html">Premiere victoire</a>
+  <div class="md-nav-section">Par intention · Hick ≤7</div>
+  <a class="item " href="entreprises.html">Prospection</a>
+  <a class="item " href="analyse-site.html">Analyses</a>
+  <a class="item " href="campagnes.html">Envois email</a>
+  <a class="item " href="bounces.html">Hygiene listes</a>
+  <a class="item " href="domaines.html">Delivrabilite</a>
+  <a class="item " href="upload.html">Importer</a>
+  <a class="item " href="settings.html">Reglages</a>
+  <div class="md-nav-section">Sous-pages (maquettes)</div>
+  <a class="item " href="entreprise-detail.html">Fiche entreprise</a>
+  <a class="item " href="carte.html">Carte</a>
+  <a class="item " href="graph.html">Graphe</a>
+  <a class="item " href="concurrence.html">Concurrence</a>
+  <a class="item is-active" href="analyses-tech.html">Tech</a>
+  <a class="item " href="analyses-osint.html">OSINT</a>
+  <a class="item " href="analyses-pentest.html">Pentest</a>
+  <a class="item " href="analyses-seo.html">SEO</a>
+  <a class="item " href="scrapers.html">Scrapers</a>
+  <a class="item " href="campagne-detail.html">Campagne detail</a>
+  <a class="item " href="envoyer.html">Envoi rapide</a>
+  <a class="item " href="modeles.html">Modeles</a>
+  <a class="item " href="victoire.html">Ecran victoire</a>
+  <a class="item " href="api.html">API</a>
+  <a class="item " href="composants.html">Kit MD3</a>
+  <a class="item " href="recherche-vide.html">Recherche 0 resultat</a>
+</aside>
+
+<main class="md-main">
+  <div class="md-topbar">
+    <div><h1>Analyses techniques</h1><p>Stack, perf, surface</p></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="md-btn md-btn-filled">Nouvelle analyse</button></div>
+  </div>
+  
+<div class="md-tabs">
+  <button class="is-active">Historique</button><button>Comparaison</button>
+  <button>Timeline</button><button>Export</button>
+</div>
+<div class="md-grid md-grid-4 md-anim-in" style="margin-bottom:16px">
+  <div class="md-card md-stat"><div class="label">En cours</div><div class="value">3</div></div>
+  <div class="md-card md-stat"><div class="label">Terminees</div><div class="value">47</div></div>
+  <div class="md-card md-stat"><div class="label">Score moyen</div><div class="value" style="color:var(--md-sys-color-primary)">72</div></div>
+  <div class="md-card md-stat"><div class="label">Echecs</div><div class="value" style="color:var(--md-sys-color-error)">2</div></div>
+</div>
+<div class="md-grid md-grid-2" style="margin-bottom:16px">
+  <div class="md-card md-card-pad md-anim-in-2">
+    <div class="md-chart-title"><h3>Scores tech</h3><span class="hint">derniere vague</span></div>
+    <div class="md-bars"><div class="bar "><i style="height:84%"></i><span class="lbl">Stack</span></div><div class="bar alt"><i style="height:71%"></i><span class="lbl">Perf</span></div><div class="bar "><i style="height:90%"></i><span class="lbl">TLS</span></div><div class="bar alt"><i style="height:62%"></i><span class="lbl">Headers</span></div><div class="bar "><i style="height:55%"></i><span class="lbl">CMS</span></div></div>
+  </div>
+  <div class="md-card md-card-pad md-anim-in-2">
+    <div class="md-chart-title"><h3>Tendance 30 j</h3></div>
+<svg class="md-line-chart" viewBox="0 0 520 180" preserveAspectRatio="none">
+  <g class="grid">
+    <line x1="40" y1="20" x2="500" y2="20"/><line x1="40" y1="60" x2="500" y2="60"/>
+    <line x1="40" y1="100" x2="500" y2="100"/><line x1="40" y1="140" x2="500" y2="140"/>
+  </g>
+  <path class="area" d="M40,120 L100,100 L160,110 L220,70 L280,85 L340,50 L400,60 L460,35 L500,45 L500,160 L40,160 Z"/>
+  <path class="line" d="M40,120 L100,100 L160,110 L220,70 L280,85 L340,50 L400,60 L460,35 L500,45"/>
+  <path class="line2" d="M40,130 L100,125 L160,118 L220,105 L280,100 L340,90 L400,88 L460,80 L500,78"/>
+  <circle class="dot" cx="500" cy="45" r="4"/>
+  <text class="axis-lbl" x="40" y="175">Lun</text>
+  <text class="axis-lbl" x="220" y="175">Mer</text>
+  <text class="axis-lbl" x="400" y="175">Ven</text>
+</svg>
+
+  </div>
+</div>
+<div class="md-grid md-grid-2" style="margin-bottom:16px">
+  <div class="md-card md-card-pad">
+    <div class="md-chart-title"><h3>Bullet cibles</h3></div>
+    <div class="md-bullet">
+      <div class="row"><span>Perf</span><div class="track"><div class="range" style="width:80%"></div><div class="fill" style="width:65%"></div><div class="marker" style="left:75%"></div></div></div>
+      <div class="row"><span>Secu</span><div class="track"><div class="range" style="width:90%"></div><div class="fill" style="width:82%"></div><div class="marker" style="left:85%"></div></div></div>
+      <div class="row"><span>SEO</span><div class="track"><div class="range" style="width:70%"></div><div class="fill" style="width:58%"></div><div class="marker" style="left:70%"></div></div></div>
+    </div>
+  </div>
+  <div class="md-card md-card-pad">
+    <div class="md-chart-title"><h3>Repartition enjeux</h3></div>
+    <div class="md-treemap">
+      <div class="a">Critique<span>12 findings</span></div>
+      <div class="b">Haut<span>18</span></div>
+      <div class="c">Moyen<span>31</span></div>
+      <div class="d">Faible<span>44</span></div>
+      <div class="e">Info<span>9</span></div>
+    </div>
+  </div>
+</div>
+<div class="md-card">
+  <table class="md-table dense"><thead><tr><th>Cible</th><th>Statut</th><th>Score</th><th>Detail</th><th>Date</th></tr></thead>
+  <tbody>
+  <tr><td>exemple-pro.fr</td><td><span class="md-chip ok">OK</span></td><td class="num">78</td>
+    <td><div class="md-stack-bar"><i style="width:40%;background:#3dd68c"></i><i style="width:25%;background:#7eb8ff"></i><i style="width:20%;background:#ffb74d"></i><i style="width:15%;background:#ff8a80"></i></div></td><td>16/08</td></tr>
+  <tr><td>site-demo.com</td><td><span class="md-chip warn">En cours</span></td><td class="num">-</td>
+    <td><div class="md-linear"><i style="width:45%"></i></div></td><td>16/08</td></tr>
+  <tr><td>atelier-nord.fr</td><td><span class="md-chip ok">OK</span></td><td class="num">82</td>
+    <td><div class="md-stack-bar"><i style="width:50%;background:#3dd68c"></i><i style="width:30%;background:#7eb8ff"></i><i style="width:15%;background:#ffb74d"></i><i style="width:5%;background:#ff8a80"></i></div></td><td>15/08</td></tr>
+  </tbody></table>
+  <div class="md-pagination"><span>1-50 sur 47</span><div class="md-page-btns">
+    <button>‹</button><button class="is-active">1</button><button>2</button><button>›</button>
+  </div></div>
+</div>
+
+</main>
+</div>
+<button class="md-fab" title="Action">+</button>
+</body>
+</html>

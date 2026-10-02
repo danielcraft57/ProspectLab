@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Concurrence et marche | ProspectLab maquette</title>
+  <link rel="stylesheet" href="../assets/md3.css" /><link rel="stylesheet" href="../assets/md3-extra.css" /><link rel="stylesheet" href="../assets/charts.css" />
+</head>
+<body>
+<div class="md-app">
+
+<aside class="md-nav">
+  <div class="md-brand">
+    <div class="md-brand-mark">P</div>
+    <div><strong>ProspectLab</strong><span>Daniel Craft</span></div>
+  </div>
+  <a class="item md-nav-ctv " href="dashboard.html">Commencer ici</a>
+  <a class="item " href="onboarding.html">Premiere victoire</a>
+  <div class="md-nav-section">Par intention · Hick ≤7</div>
+  <a class="item " href="entreprises.html">Prospection</a>
+  <a class="item " href="analyse-site.html">Analyses</a>
+  <a class="item " href="campagnes.html">Envois email</a>
+  <a class="item " href="bounces.html">Hygiene listes</a>
+  <a class="item " href="domaines.html">Delivrabilite</a>
+  <a class="item " href="upload.html">Importer</a>
+  <a class="item " href="settings.html">Reglages</a>
+  <div class="md-nav-section">Sous-pages (maquettes)</div>
+  <a class="item " href="entreprise-detail.html">Fiche entreprise</a>
+  <a class="item " href="carte.html">Carte</a>
+  <a class="item " href="graph.html">Graphe</a>
+  <a class="item is-active" href="concurrence.html">Concurrence</a>
+  <a class="item " href="analyses-tech.html">Tech</a>
+  <a class="item " href="analyses-osint.html">OSINT</a>
+  <a class="item " href="analyses-pentest.html">Pentest</a>
+  <a class="item " href="analyses-seo.html">SEO</a>
+  <a class="item " href="scrapers.html">Scrapers</a>
+  <a class="item " href="campagne-detail.html">Campagne detail</a>
+  <a class="item " href="envoyer.html">Envoi rapide</a>
+  <a class="item " href="modeles.html">Modeles</a>
+  <a class="item " href="victoire.html">Ecran victoire</a>
+  <a class="item " href="api.html">API</a>
+  <a class="item " href="composants.html">Kit MD3</a>
+  <a class="item " href="recherche-vide.html">Recherche 0 resultat</a>
+</aside>
+
+<main class="md-main">
+  <div class="md-topbar">
+    <div><h1>Concurrence et marche</h1><p>Veille, part de voix, matrice, opportunites</p></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="md-btn md-btn-filled">Lancer analyse</button></div>
+  </div>
+  
+<div class="md-grid md-grid-3" style="margin-bottom:16px">
+  <div class="md-card md-stat"><div class="label">Segments</div><div class="value">8</div></div>
+  <div class="md-card md-stat"><div class="label">Concurrents</div><div class="value">23</div></div>
+  <div class="md-card md-stat"><div class="label">Opportunites</div><div class="value" style="color:var(--md-sys-color-primary)">11</div></div>
+</div>
+<div class="md-grid md-grid-2" style="margin-bottom:16px">
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Part de voix</h3></div>
+    <div class="md-bars"><div class="bar"><i style="height:70%"></i><span class="lbl">DC</span></div>
+      <div class="bar alt"><i style="height:92%"></i><span class="lbl">A</span></div>
+      <div class="bar warn"><i style="height:55%"></i><span class="lbl">B</span></div>
+      <div class="bar"><i style="height:40%"></i><span class="lbl">C</span></div></div></div>
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Positionnement</h3></div>
+<svg class="md-radar" viewBox="0 0 200 200">
+  <polygon fill="none" stroke="rgba(255,255,255,.08)" points="100,20 168,60 168,140 100,180 32,140 32,60"/>
+  <polygon fill="none" stroke="rgba(255,255,255,.08)" points="100,50 145,75 145,125 100,150 55,125 55,75"/>
+  <polygon fill="rgba(61,214,140,.25)" stroke="#3dd68c" stroke-width="2" points="100,40 155,70 150,130 100,155 50,120 55,70"/>
+</svg>
+</div>
+</div>
+<div class="md-card md-card-pad" style="margin-bottom:16px"><div class="md-chart-title"><h3>Treemap segments</h3></div>
+  <div class="md-treemap">
+    <div class="a">Web agency<span>38%</span></div><div class="b">Dev<span>22%</span></div>
+    <div class="c">SEO<span>18%</span></div><div class="d">Design<span>12%</span></div><div class="e">Autre<span>10%</span></div>
+  </div>
+</div>
+<div class="md-card"><table class="md-table dense"><thead><tr><th>Concurrent</th><th>Segment</th><th>Visibilite</th><th>Menace</th></tr></thead>
+<tbody>
+<tr><td>Agence Pulse</td><td>Web</td><td><div class="md-linear" style="width:100px"><i style="width:78%"></i></div></td><td><span class="md-chip warn">Moyenne</span></td></tr>
+<tr><td>Blue Peak</td><td>SEO</td><td><div class="md-linear" style="width:100px"><i style="width:91%"></i></div></td><td><span class="md-chip err">Haute</span></td></tr>
+</tbody></table></div>
+
+</main>
+</div>
+<button class="md-fab" title="Action">+</button>
+</body>
+</html>

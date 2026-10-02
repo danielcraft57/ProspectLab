@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Carte des entreprises | ProspectLab maquette</title>
+  <link rel="stylesheet" href="../assets/md3.css" /><link rel="stylesheet" href="../assets/md3-extra.css" /><link rel="stylesheet" href="../assets/charts.css" />
+</head>
+<body>
+<div class="md-app">
+
+<aside class="md-nav">
+  <div class="md-brand">
+    <div class="md-brand-mark">P</div>
+    <div><strong>ProspectLab</strong><span>Daniel Craft</span></div>
+  </div>
+  <a class="item md-nav-ctv " href="dashboard.html">Commencer ici</a>
+  <a class="item " href="onboarding.html">Premiere victoire</a>
+  <div class="md-nav-section">Par intention · Hick ≤7</div>
+  <a class="item " href="entreprises.html">Prospection</a>
+  <a class="item " href="analyse-site.html">Analyses</a>
+  <a class="item " href="campagnes.html">Envois email</a>
+  <a class="item " href="bounces.html">Hygiene listes</a>
+  <a class="item " href="domaines.html">Delivrabilite</a>
+  <a class="item " href="upload.html">Importer</a>
+  <a class="item " href="settings.html">Reglages</a>
+  <div class="md-nav-section">Sous-pages (maquettes)</div>
+  <a class="item " href="entreprise-detail.html">Fiche entreprise</a>
+  <a class="item is-active" href="carte.html">Carte</a>
+  <a class="item " href="graph.html">Graphe</a>
+  <a class="item " href="concurrence.html">Concurrence</a>
+  <a class="item " href="analyses-tech.html">Tech</a>
+  <a class="item " href="analyses-osint.html">OSINT</a>
+  <a class="item " href="analyses-pentest.html">Pentest</a>
+  <a class="item " href="analyses-seo.html">SEO</a>
+  <a class="item " href="scrapers.html">Scrapers</a>
+  <a class="item " href="campagne-detail.html">Campagne detail</a>
+  <a class="item " href="envoyer.html">Envoi rapide</a>
+  <a class="item " href="modeles.html">Modeles</a>
+  <a class="item " href="victoire.html">Ecran victoire</a>
+  <a class="item " href="api.html">API</a>
+  <a class="item " href="composants.html">Kit MD3</a>
+  <a class="item " href="recherche-vide.html">Recherche 0 resultat</a>
+</aside>
+
+<main class="md-main">
+  <div class="md-topbar">
+    <div><h1>Carte des entreprises</h1><p>Geo, clusters, densite et drawer fiche</p></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><div class="md-segmented"><button class="is-active">Carte</button><button>Liste</button></div><button class="md-btn md-btn-tonal">Filtres</button></div>
+  </div>
+  
+<div class="md-grid md-grid-4" style="margin-bottom:16px">
+  <div class="md-card md-stat"><div class="label">Pins</div><div class="value">186</div></div>
+  <div class="md-card md-stat"><div class="label">Clusters</div><div class="value">12</div></div>
+  <div class="md-card md-stat"><div class="label">Grand Est</div><div class="value" style="color:var(--md-sys-color-primary)">94</div></div>
+  <div class="md-card md-stat"><div class="label">Rayon</div><div class="value">80 km</div></div>
+</div>
+<div class="md-split">
+  <div class="md-card md-map-fake">
+    <div class="md-cluster" style="left:28%;top:36%">42</div>
+    <div class="md-cluster" style="left:52%;top:48%;background:var(--md-sys-color-primary-container);color:var(--md-sys-color-primary)">18</div>
+    <div class="md-pin" style="left:35%;top:42%"></div>
+    <div class="md-pin" style="left:48%;top:55%;background:#7eb8ff;box-shadow:0 0 0 4px rgba(126,184,255,.25)"></div>
+    <div class="md-pin" style="left:62%;top:38%;background:#ffb74d;box-shadow:0 0 0 4px rgba(255,183,77,.25)"></div>
+    <div style="position:absolute;bottom:16px;left:16px;display:flex;gap:8px"><span class="md-chip ok">Industrie</span><span class="md-chip neutral">Agence</span></div>
+  </div>
+  <div>
+    <div class="md-card md-card-pad" style="margin-bottom:14px"><div class="md-chart-title"><h3>Densite</h3></div>
+      <div class="md-heat">
+        <div class="lbl"></div><div class="lbl">L</div><div class="lbl">M</div><div class="lbl">M</div><div class="lbl">J</div><div class="lbl">V</div><div class="lbl">S</div><div class="lbl">D</div>
+        <div class="lbl">S1</div><div class="cell c1"></div><div class="cell c2"></div><div class="cell c3"></div><div class="cell c2"></div><div class="cell c4"></div><div class="cell"></div><div class="cell"></div>
+        <div class="lbl">S2</div><div class="cell c2"></div><div class="cell c4"></div><div class="cell c3"></div><div class="cell c3"></div><div class="cell c2"></div><div class="cell c1"></div><div class="cell"></div>
+      </div>
+    </div>
+    <div class="md-sheet-backdrop">
+      <div class="md-sheet"><div class="handle"></div>
+        <strong>Atelier Nord</strong>
+        <p style="margin:6px 0 12px;font-size:.85rem;color:var(--md-sys-color-on-surface-variant)">3,2 km · score 82</p>
+        <button class="md-btn md-btn-filled" style="width:100%">Ouvrir fiche</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+</main>
+</div>
+<button class="md-fab" title="Action">+</button>
+</body>
+</html>

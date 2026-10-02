@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Acces restreint | ProspectLab maquette</title><link rel="stylesheet" href="../assets/md3.css" /><link rel="stylesheet" href="../assets/md3-extra.css" /><link rel="stylesheet" href="../assets/charts.css" /></head>
+<body>
+<div class="md-error-page">
+  <div style="max-width:480px">
+    <p class="code" style="font-size:3rem">VPN</p>
+    <h1 style="margin:0 0 8px">Reseau non autorise</h1>
+    <div class="md-error-guide" style="text-align:left">
+      <strong>Pourquoi ca bloque</strong>
+      <p>RESTRICT_TO_LOCAL_NETWORK n'accepte que des IP privees. Sans VPN, Flask voit l'IP box publique.</p>
+      <ol style="margin:0 0 12px;padding-left:18px;font-size:.88rem;color:#ffc9c4;line-height:1.45;text-align:left">
+        <li>Connecte-toi au VPN node13</li>
+        <li>Flush DNS : ipconfig /flushdns</li>
+        <li>campaigns.danielcraft.fr → 192.168.1.209</li>
+      </ol>
+      <button class="md-btn md-btn-filled">Reessayer maintenant</button>
+    </div>
+  </div>
+</div>
+</body></html>

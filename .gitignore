@@ -118,6 +118,12 @@ Thumbs.db
 # Déploiement local (non versionné)
 deploy/
 
+# Dumps / données prod locales (jamais dans Git)
+production_data/
+*.dump
+scripts/_tmp_*
+deploy/scripts/_tmp_*
+
 # Données templates (JSON générés/local) - la référence peut être regénérée
 templates_local/
 

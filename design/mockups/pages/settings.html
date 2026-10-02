@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Reglages | ProspectLab maquette</title>
+  <link rel="stylesheet" href="../assets/md3.css" /><link rel="stylesheet" href="../assets/md3-extra.css" /><link rel="stylesheet" href="../assets/charts.css" />
+</head>
+<body>
+<div class="md-app">
+
+<aside class="md-nav">
+  <div class="md-brand">
+    <div class="md-brand-mark">P</div>
+    <div><strong>ProspectLab</strong><span>Daniel Craft</span></div>
+  </div>
+  <a class="item md-nav-ctv " href="dashboard.html">Commencer ici</a>
+  <a class="item " href="onboarding.html">Premiere victoire</a>
+  <div class="md-nav-section">Par intention · Hick ≤7</div>
+  <a class="item " href="entreprises.html">Prospection</a>
+  <a class="item " href="analyse-site.html">Analyses</a>
+  <a class="item " href="campagnes.html">Envois email</a>
+  <a class="item " href="bounces.html">Hygiene listes</a>
+  <a class="item " href="domaines.html">Delivrabilite</a>
+  <a class="item " href="upload.html">Importer</a>
+  <a class="item is-active" href="settings.html">Reglages</a>
+  <div class="md-nav-section">Sous-pages (maquettes)</div>
+  <a class="item " href="entreprise-detail.html">Fiche entreprise</a>
+  <a class="item " href="carte.html">Carte</a>
+  <a class="item " href="graph.html">Graphe</a>
+  <a class="item " href="concurrence.html">Concurrence</a>
+  <a class="item " href="analyses-tech.html">Tech</a>
+  <a class="item " href="analyses-osint.html">OSINT</a>
+  <a class="item " href="analyses-pentest.html">Pentest</a>
+  <a class="item " href="analyses-seo.html">SEO</a>
+  <a class="item " href="scrapers.html">Scrapers</a>
+  <a class="item " href="campagne-detail.html">Campagne detail</a>
+  <a class="item " href="envoyer.html">Envoi rapide</a>
+  <a class="item " href="modeles.html">Modeles</a>
+  <a class="item " href="victoire.html">Ecran victoire</a>
+  <a class="item " href="api.html">API</a>
+  <a class="item " href="composants.html">Kit MD3</a>
+  <a class="item " href="recherche-vide.html">Recherche 0 resultat</a>
+</aside>
+
+<main class="md-main">
+  <div class="md-topbar">
+    <div><h1>Reglages</h1><p>Theme, Brevo, restrictions, notifications</p></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="md-btn md-btn-filled">Enregistrer</button></div>
+  </div>
+  
+<div class="md-tabs"><button class="is-active">General</button><button>Brevo</button><button>Securite</button><button>Notifs</button></div>
+<div class="md-grid md-grid-2">
+  <div class="md-card md-card-pad">
+    <h3 style="margin-top:0">Apparence</h3>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <span>Theme sombre</span><button class="md-switch on"></button>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <span>Animations</span><button class="md-switch on"></button>
+    </div>
+    <div class="md-field"><label>Densite tableaux</label><select><option>Confortable</option><option>Dense</option></select></div>
+    <div class="md-divider"></div>
+    <a class="md-btn md-btn-tonal" href="dashboard-light.html">Voir variante light</a>
+  </div>
+  <div class="md-card md-card-pad">
+    <h3 style="margin-top:0">Brevo</h3>
+    <div class="md-field"><label>Limite journaliere</label><input value="300" /></div>
+    <div class="md-field" style="margin-top:10px"><label>Pause auto si quota 0</label>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:8px"><button class="md-switch"></button><span style="font-size:.85rem">Bientot</span></div>
+    </div>
+    <div class="md-divider"></div>
+    <div class="md-field"><label>Restriction reseau</label>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:8px"><button class="md-switch on"></button><span style="font-size:.85rem">RESTRICT_TO_LOCAL_NETWORK</span></div>
+    </div>
+  </div>
+</div>
+
+</main>
+</div>
+<button class="md-fab" title="Action">+</button>
+</body>
+</html>

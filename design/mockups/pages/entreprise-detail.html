@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fiche entreprise | ProspectLab maquette</title>
+  <link rel="stylesheet" href="../assets/md3.css" /><link rel="stylesheet" href="../assets/md3-extra.css" /><link rel="stylesheet" href="../assets/charts.css" />
+</head>
+<body>
+<div class="md-app">
+
+<aside class="md-nav">
+  <div class="md-brand">
+    <div class="md-brand-mark">P</div>
+    <div><strong>ProspectLab</strong><span>Daniel Craft</span></div>
+  </div>
+  <a class="item md-nav-ctv " href="dashboard.html">Commencer ici</a>
+  <a class="item " href="onboarding.html">Premiere victoire</a>
+  <div class="md-nav-section">Par intention · Hick ≤7</div>
+  <a class="item " href="entreprises.html">Prospection</a>
+  <a class="item " href="analyse-site.html">Analyses</a>
+  <a class="item " href="campagnes.html">Envois email</a>
+  <a class="item " href="bounces.html">Hygiene listes</a>
+  <a class="item " href="domaines.html">Delivrabilite</a>
+  <a class="item " href="upload.html">Importer</a>
+  <a class="item " href="settings.html">Reglages</a>
+  <div class="md-nav-section">Sous-pages (maquettes)</div>
+  <a class="item is-active" href="entreprise-detail.html">Fiche entreprise</a>
+  <a class="item " href="carte.html">Carte</a>
+  <a class="item " href="graph.html">Graphe</a>
+  <a class="item " href="concurrence.html">Concurrence</a>
+  <a class="item " href="analyses-tech.html">Tech</a>
+  <a class="item " href="analyses-osint.html">OSINT</a>
+  <a class="item " href="analyses-pentest.html">Pentest</a>
+  <a class="item " href="analyses-seo.html">SEO</a>
+  <a class="item " href="scrapers.html">Scrapers</a>
+  <a class="item " href="campagne-detail.html">Campagne detail</a>
+  <a class="item " href="envoyer.html">Envoi rapide</a>
+  <a class="item " href="modeles.html">Modeles</a>
+  <a class="item " href="victoire.html">Ecran victoire</a>
+  <a class="item " href="api.html">API</a>
+  <a class="item " href="composants.html">Kit MD3</a>
+  <a class="item " href="recherche-vide.html">Recherche 0 resultat</a>
+</aside>
+
+<main class="md-main">
+  <div class="md-topbar">
+    <div><h1>Fiche entreprise</h1><p>Atelier Nord · vue 360° contacts, analyses, emails</p></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="md-btn md-btn-outlined">Editer</button><button class="md-btn md-btn-filled">Ajouter a campagne</button></div>
+  </div>
+  
+<div class="md-hero-detail md-anim-in">
+  <div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap">
+    <div>
+      <h2>Atelier Nord</h2>
+      <p class="sub">atelier-nord.fr · Metz · Industrie · Priorite 82</p>
+      <div class="md-tags"><span class="md-tag">B2B</span><span class="md-tag">Grand Est</span><span class="md-tag">A qualifier</span></div>
+    </div>
+    <div class="md-metric-row">
+      <div class="md-metric-pill">Score global<strong>82</strong></div>
+      <div class="md-metric-pill">Emails<strong>3</strong></div>
+      <div class="md-metric-pill">Analyses<strong>5</strong></div>
+    </div>
+  </div>
+</div>
+<div class="md-tabs"><button class="is-active">Vue</button><button>Contacts</button><button>Analyses</button><button>Emails</button><button>Notes</button></div>
+<div class="md-split">
+  <div>
+    <div class="md-grid md-grid-2" style="margin-bottom:14px">
+      <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Radar qualite</h3></div>
+<svg class="md-radar" viewBox="0 0 200 200">
+  <polygon fill="none" stroke="rgba(255,255,255,.08)" points="100,20 168,60 168,140 100,180 32,140 32,60"/>
+  <polygon fill="none" stroke="rgba(255,255,255,.08)" points="100,50 145,75 145,125 100,150 55,125 55,75"/>
+  <polygon fill="rgba(61,214,140,.25)" stroke="#3dd68c" stroke-width="2" points="100,40 155,70 150,130 100,155 50,120 55,70"/>
+</svg>
+</div>
+      <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Historique scores</h3></div>
+<svg class="md-line-chart" viewBox="0 0 520 180" preserveAspectRatio="none">
+  <g class="grid">
+    <line x1="40" y1="20" x2="500" y2="20"/><line x1="40" y1="60" x2="500" y2="60"/>
+    <line x1="40" y1="100" x2="500" y2="100"/><line x1="40" y1="140" x2="500" y2="140"/>
+  </g>
+  <path class="area" d="M40,120 L100,100 L160,110 L220,70 L280,85 L340,50 L400,60 L460,35 L500,45 L500,160 L40,160 Z"/>
+  <path class="line" d="M40,120 L100,100 L160,110 L220,70 L280,85 L340,50 L400,60 L460,35 L500,45"/>
+  <path class="line2" d="M40,130 L100,125 L160,118 L220,105 L280,100 L340,90 L400,88 L460,80 L500,78"/>
+  <circle class="dot" cx="500" cy="45" r="4"/>
+  <text class="axis-lbl" x="40" y="175">Lun</text>
+  <text class="axis-lbl" x="220" y="175">Mer</text>
+  <text class="axis-lbl" x="400" y="175">Ven</text>
+</svg>
+</div>
+    </div>
+    <div class="md-card"><table class="md-table dense"><thead><tr><th>Analyse</th><th>Score</th><th>Date</th></tr></thead>
+      <tbody>
+        <tr><td>SEO</td><td class="num">78</td><td>15/08</td></tr>
+        <tr><td>Tech</td><td class="num">84</td><td>14/08</td></tr>
+        <tr><td>OSINT</td><td class="num">71</td><td>12/08</td></tr>
+      </tbody></table></div>
+  </div>
+  <div>
+    <div class="md-card" style="margin-bottom:14px">
+      <div class="md-list">
+        <div class="md-list-item"><div class="md-avatar">C</div><div class="meta"><strong>contact@atelier-nord.fr</strong><span>Principal · verifie</span></div><span class="md-chip ok">OK</span></div>
+        <div class="md-list-item"><div class="md-avatar blue">I</div><div class="meta"><strong>info@atelier-nord.fr</strong><span>Secondaire</span></div><span class="md-chip neutral">?</span></div>
+      </div>
+    </div>
+    <div class="md-card md-card-pad">
+      <h3 style="margin:0 0 10px;font-size:1rem">Timeline</h3>
+      <div class="md-timeline">
+        <div class="ev"><strong>Email campagne Presence</strong><span>il y a 2 j · ouvert</span></div>
+        <div class="ev"><strong>Import CSV</strong><span>il y a 1 sem</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</main>
+</div>
+<button class="md-fab" title="Action">+</button>
+</body>
+</html>

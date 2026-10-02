@@ -102,6 +102,8 @@ dig +short @192.168.1.191 campaigns.danielcraft.fr A
 - La conf Nginx doit proxyfier vers `http://node15.lan:5000`.
 - Les certificats SSL sont geres sur le noeud proxy `node12.lan` (vhost `prospectlab.danielcraft.fr`).
 - Le fichier `.env.prod` local est copie sur le serveur app en `.env` pendant le deploiement si present.
+- **BASE_URL** tracking : `https://campaigns.danielcraft.fr` (HTTPS, `.fr` complet, pas de slash final). Ne pas nettoyer `.env` avec un `sed`/`rstrip` qui coupe le `r`. Voir `docs/guides/CAMPAGNES_EMAIL.md`.
+- **Gemini** : plusieurs cles free-tier dans `.env` ; un 503 "high demand" n'est pas une cle morte. Voir `docs/guides/GEMINI_AUDIT.md`.
 - Attention aux assets screenshots:
   - ne pas supprimer `static/screenshots/` ni `static/generated/landing_variants/` en prod;
   - conserver une sync non destructive (pas de `git reset --hard`, pas de `git clean -fdx`).

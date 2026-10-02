@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Campagne détail | ProspectLab maquette</title>
+  <link rel="stylesheet" href="../assets/md3.css" /><link rel="stylesheet" href="../assets/md3-extra.css" /><link rel="stylesheet" href="../assets/charts.css" />
+</head>
+<body>
+<div class="md-app">
+
+<aside class="md-nav">
+  <div class="md-brand">
+    <div class="md-brand-mark">P</div>
+    <div><strong>ProspectLab</strong><span>Daniel Craft</span></div>
+  </div>
+  <a class="item md-nav-ctv " href="dashboard.html">Commencer ici</a>
+  <a class="item " href="onboarding.html">Premiere victoire</a>
+  <div class="md-nav-section">Par intention · Hick ≤7</div>
+  <a class="item " href="entreprises.html">Prospection</a>
+  <a class="item " href="analyse-site.html">Analyses</a>
+  <a class="item " href="campagnes.html">Envois email</a>
+  <a class="item " href="bounces.html">Hygiene listes</a>
+  <a class="item " href="domaines.html">Delivrabilite</a>
+  <a class="item " href="upload.html">Importer</a>
+  <a class="item " href="settings.html">Reglages</a>
+  <div class="md-nav-section">Sous-pages (maquettes)</div>
+  <a class="item " href="entreprise-detail.html">Fiche entreprise</a>
+  <a class="item " href="carte.html">Carte</a>
+  <a class="item " href="graph.html">Graphe</a>
+  <a class="item " href="concurrence.html">Concurrence</a>
+  <a class="item " href="analyses-tech.html">Tech</a>
+  <a class="item " href="analyses-osint.html">OSINT</a>
+  <a class="item " href="analyses-pentest.html">Pentest</a>
+  <a class="item " href="analyses-seo.html">SEO</a>
+  <a class="item " href="scrapers.html">Scrapers</a>
+  <a class="item is-active" href="campagne-detail.html">Campagne detail</a>
+  <a class="item " href="envoyer.html">Envoi rapide</a>
+  <a class="item " href="modeles.html">Modeles</a>
+  <a class="item " href="victoire.html">Ecran victoire</a>
+  <a class="item " href="api.html">API</a>
+  <a class="item " href="composants.html">Kit MD3</a>
+  <a class="item " href="recherche-vide.html">Recherche 0 resultat</a>
+</aside>
+
+<main class="md-main">
+  <div class="md-topbar">
+    <div><h1>Campagne détail</h1><p>Presence digitale · comparaison PL / Brevo</p></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="md-btn md-btn-outlined">Pause</button><button class="md-btn md-btn-tonal">Sync Brevo</button></div>
+  </div>
+  
+<div class="md-hero-detail">
+  <h2>Presence digitale</h2>
+  <p class="sub">Terminee · 42 destinataires · expediteur contact@danielcraft.fr</p>
+  <div class="md-metric-row">
+    <div class="md-metric-pill">Envoyes<strong>42</strong></div>
+    <div class="md-metric-pill">Ouverts PL<strong>13</strong></div>
+    <div class="md-metric-pill">Delivres Brevo<strong>41</strong></div>
+    <div class="md-metric-pill">Hard bounce<strong style="color:var(--md-sys-color-error)">1</strong></div>
+  </div>
+</div>
+<div class="md-compare" style="margin-bottom:16px">
+  <div class="col"><h4>ProspectLab trackers</h4>
+    <div class="md-hbar">
+      <div class="row"><span>Open</span><div class="track"><i style="width:31%"></i></div><span class="val">31%</span></div>
+      <div class="row"><span>Click</span><div class="track blue"><i style="width:10%"></i></div><span class="val">10%</span></div>
+    </div>
+  </div>
+  <div class="col"><h4>Brevo events</h4>
+    <div class="md-hbar">
+      <div class="row"><span>Open</span><div class="track"><i style="width:28%"></i></div><span class="val">28%</span></div>
+      <div class="row"><span>Click</span><div class="track blue"><i style="width:9%"></i></div><span class="val">9%</span></div>
+      <div class="row"><span>Bounce</span><div class="track amber"><i style="width:4%"></i></div><span class="val">1</span></div>
+    </div>
+  </div>
+</div>
+<div class="md-grid md-grid-2" style="margin-bottom:16px">
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Courbe d'ouverture</h3></div>
+<svg class="md-line-chart" viewBox="0 0 520 180" preserveAspectRatio="none">
+  <g class="grid">
+    <line x1="40" y1="20" x2="500" y2="20"/><line x1="40" y1="60" x2="500" y2="60"/>
+    <line x1="40" y1="100" x2="500" y2="100"/><line x1="40" y1="140" x2="500" y2="140"/>
+  </g>
+  <path class="area" d="M40,120 L100,100 L160,110 L220,70 L280,85 L340,50 L400,60 L460,35 L500,45 L500,160 L40,160 Z"/>
+  <path class="line" d="M40,120 L100,100 L160,110 L220,70 L280,85 L340,50 L400,60 L460,35 L500,45"/>
+  <path class="line2" d="M40,130 L100,125 L160,118 L220,105 L280,100 L340,90 L400,88 L460,80 L500,78"/>
+  <circle class="dot" cx="500" cy="45" r="4"/>
+  <text class="axis-lbl" x="40" y="175">Lun</text>
+  <text class="axis-lbl" x="220" y="175">Mer</text>
+  <text class="axis-lbl" x="400" y="175">Ven</text>
+</svg>
+</div>
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Candles journaliers</h3></div>
+    <div class="md-candles">
+      <div class="c"><div class="wick" style="height:60%;bottom:20%"></div><div class="body" style="height:35%"></div></div>
+      <div class="c"><div class="wick" style="height:70%;bottom:10%"></div><div class="body down" style="height:40%"></div></div>
+      <div class="c"><div class="wick" style="height:50%;bottom:25%"></div><div class="body" style="height:30%"></div></div>
+      <div class="c"><div class="wick" style="height:80%;bottom:5%"></div><div class="body" style="height:55%"></div></div>
+      <div class="c"><div class="wick" style="height:45%;bottom:30%"></div><div class="body down" style="height:25%"></div></div>
+      <div class="c"><div class="wick" style="height:65%;bottom:15%"></div><div class="body" style="height:45%"></div></div>
+    </div>
+  </div>
+</div>
+<div class="md-card"><table class="md-table dense"><thead><tr><th>Destinataire</th><th>PL</th><th>Brevo</th><th>Statut</th></tr></thead>
+<tbody>
+<tr><td>contact@atelier-nord.fr</td><td>ouvert</td><td>delivered+open</td><td><span class="md-chip ok">OK</span></td></tr>
+<tr><td>hello@studio-lumen.com</td><td>-</td><td>softBounce</td><td><span class="md-chip warn">Soft</span></td></tr>
+<tr><td>bad@exemple.fr</td><td>-</td><td>hardBounce</td><td><span class="md-chip err">Hard</span></td></tr>
+</tbody></table></div>
+
+</main>
+</div>
+<button class="md-fab" title="Action">+</button>
+</body>
+</html>

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Scrapers | ProspectLab maquette</title>
+  <link rel="stylesheet" href="../assets/md3.css" /><link rel="stylesheet" href="../assets/md3-extra.css" /><link rel="stylesheet" href="../assets/charts.css" />
+</head>
+<body>
+<div class="md-app">
+
+<aside class="md-nav">
+  <div class="md-brand">
+    <div class="md-brand-mark">P</div>
+    <div><strong>ProspectLab</strong><span>Daniel Craft</span></div>
+  </div>
+  <a class="item md-nav-ctv " href="dashboard.html">Commencer ici</a>
+  <a class="item " href="onboarding.html">Premiere victoire</a>
+  <div class="md-nav-section">Par intention · Hick ≤7</div>
+  <a class="item " href="entreprises.html">Prospection</a>
+  <a class="item " href="analyse-site.html">Analyses</a>
+  <a class="item " href="campagnes.html">Envois email</a>
+  <a class="item " href="bounces.html">Hygiene listes</a>
+  <a class="item " href="domaines.html">Delivrabilite</a>
+  <a class="item " href="upload.html">Importer</a>
+  <a class="item " href="settings.html">Reglages</a>
+  <div class="md-nav-section">Sous-pages (maquettes)</div>
+  <a class="item " href="entreprise-detail.html">Fiche entreprise</a>
+  <a class="item " href="carte.html">Carte</a>
+  <a class="item " href="graph.html">Graphe</a>
+  <a class="item " href="concurrence.html">Concurrence</a>
+  <a class="item " href="analyses-tech.html">Tech</a>
+  <a class="item " href="analyses-osint.html">OSINT</a>
+  <a class="item " href="analyses-pentest.html">Pentest</a>
+  <a class="item " href="analyses-seo.html">SEO</a>
+  <a class="item is-active" href="scrapers.html">Scrapers</a>
+  <a class="item " href="campagne-detail.html">Campagne detail</a>
+  <a class="item " href="envoyer.html">Envoi rapide</a>
+  <a class="item " href="modeles.html">Modeles</a>
+  <a class="item " href="victoire.html">Ecran victoire</a>
+  <a class="item " href="api.html">API</a>
+  <a class="item " href="composants.html">Kit MD3</a>
+  <a class="item " href="recherche-vide.html">Recherche 0 resultat</a>
+</aside>
+
+<main class="md-main">
+  <div class="md-topbar">
+    <div><h1>Scrapers</h1><p>Orchestration emails, phones, social, tech, people</p></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="md-btn md-btn-filled">Lancer tout</button></div>
+  </div>
+  
+<div class="md-grid md-grid-4" style="margin-bottom:16px">
+  <div class="md-card md-stat"><div class="label">Workers</div><div class="value">7</div></div>
+  <div class="md-card md-stat"><div class="label">Files</div><div class="value">3</div></div>
+  <div class="md-card md-stat"><div class="label">OK 24h</div><div class="value" style="color:var(--md-sys-color-primary)">128</div></div>
+  <div class="md-card md-stat"><div class="label">Erreurs</div><div class="value" style="color:var(--md-sys-color-error)">4</div></div>
+</div>
+<div class="md-card md-card-pad" style="margin-bottom:16px"><div class="md-chart-title"><h3>Throughput</h3></div>
+<svg class="md-line-chart" viewBox="0 0 520 180" preserveAspectRatio="none">
+  <g class="grid">
+    <line x1="40" y1="20" x2="500" y2="20"/><line x1="40" y1="60" x2="500" y2="60"/>
+    <line x1="40" y1="100" x2="500" y2="100"/><line x1="40" y1="140" x2="500" y2="140"/>
+  </g>
+  <path class="area" d="M40,120 L100,100 L160,110 L220,70 L280,85 L340,50 L400,60 L460,35 L500,45 L500,160 L40,160 Z"/>
+  <path class="line" d="M40,120 L100,100 L160,110 L220,70 L280,85 L340,50 L400,60 L460,35 L500,45"/>
+  <path class="line2" d="M40,130 L100,125 L160,118 L220,105 L280,100 L340,90 L400,88 L460,80 L500,78"/>
+  <circle class="dot" cx="500" cy="45" r="4"/>
+  <text class="axis-lbl" x="40" y="175">Lun</text>
+  <text class="axis-lbl" x="220" y="175">Mer</text>
+  <text class="axis-lbl" x="400" y="175">Ven</text>
+</svg>
+</div>
+<div class="md-kanban">
+  <div class="col"><h4>Idle <span>2</span></h4>
+    <div class="card">Phones<small>Dernier: il y a 2 h</small></div>
+    <div class="card">Metadata<small>Pret</small></div>
+  </div>
+  <div class="col"><h4>Running <span>3</span></h4>
+    <div class="card">Emails<small><div class="md-linear" style="margin-top:6px"><i style="width:62%"></i></div></small></div>
+    <div class="card">Social<small><div class="md-linear" style="margin-top:6px"><i style="width:28%"></i></div></small></div>
+    <div class="card">Technologies<small><div class="md-spinner" style="margin-top:8px;width:20px;height:20px;border-width:2px"></div></small></div>
+  </div>
+  <div class="col"><h4>Done <span>1</span></h4>
+    <div class="card">People<small>42 profils</small></div>
+  </div>
+  <div class="col"><h4>Failed <span>1</span></h4>
+    <div class="card">Maps scrape<small><span class="md-chip err">timeout</span></small></div>
+  </div>
+</div>
+
+</main>
+</div>
+<button class="md-fab" title="Action">+</button>
+</body>
+</html>

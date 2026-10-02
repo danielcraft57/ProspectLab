@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rapport audit | ProspectLab maquette</title>
+  <link rel="stylesheet" href="../assets/md3.css" /><link rel="stylesheet" href="../assets/md3-extra.css" /><link rel="stylesheet" href="../assets/charts.css" />
+</head>
+<body>
+<div class="md-app">
+
+<aside class="md-nav">
+  <div class="md-brand">
+    <div class="md-brand-mark">P</div>
+    <div><strong>ProspectLab</strong><span>Daniel Craft</span></div>
+  </div>
+  <a class="item md-nav-ctv " href="dashboard.html">Commencer ici</a>
+  <a class="item " href="onboarding.html">Premiere victoire</a>
+  <div class="md-nav-section">Par intention · Hick ≤7</div>
+  <a class="item " href="entreprises.html">Prospection</a>
+  <a class="item is-active" href="analyse-site.html">Analyses</a>
+  <a class="item " href="campagnes.html">Envois email</a>
+  <a class="item " href="bounces.html">Hygiene listes</a>
+  <a class="item " href="domaines.html">Delivrabilite</a>
+  <a class="item " href="upload.html">Importer</a>
+  <a class="item " href="settings.html">Reglages</a>
+  <div class="md-nav-section">Sous-pages (maquettes)</div>
+  <a class="item " href="entreprise-detail.html">Fiche entreprise</a>
+  <a class="item " href="carte.html">Carte</a>
+  <a class="item " href="graph.html">Graphe</a>
+  <a class="item " href="concurrence.html">Concurrence</a>
+  <a class="item " href="analyses-tech.html">Tech</a>
+  <a class="item " href="analyses-osint.html">OSINT</a>
+  <a class="item " href="analyses-pentest.html">Pentest</a>
+  <a class="item " href="analyses-seo.html">SEO</a>
+  <a class="item " href="scrapers.html">Scrapers</a>
+  <a class="item " href="campagne-detail.html">Campagne detail</a>
+  <a class="item " href="envoyer.html">Envoi rapide</a>
+  <a class="item " href="modeles.html">Modeles</a>
+  <a class="item " href="victoire.html">Ecran victoire</a>
+  <a class="item " href="api.html">API</a>
+  <a class="item " href="composants.html">Kit MD3</a>
+  <a class="item " href="recherche-vide.html">Recherche 0 resultat</a>
+</aside>
+
+<main class="md-main">
+  <div class="md-topbar">
+    <div><h1>Rapport audit</h1><p>Entreprise · export PDF-like</p></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="md-btn md-btn-filled">Exporter PDF</button></div>
+  </div>
+  
+<div class="md-hero-detail">
+  <h2>Rapport · Atelier Nord</h2>
+  <p class="sub">Genere le 16/08/2026 · score global 78</p>
+</div>
+<div class="md-grid md-grid-2" style="margin-bottom:16px">
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Scores</h3></div>
+<svg class="md-radar" viewBox="0 0 200 200">
+  <polygon fill="none" stroke="rgba(255,255,255,.08)" points="100,20 168,60 168,140 100,180 32,140 32,60"/>
+  <polygon fill="none" stroke="rgba(255,255,255,.08)" points="100,50 145,75 145,125 100,150 55,125 55,75"/>
+  <polygon fill="rgba(61,214,140,.25)" stroke="#3dd68c" stroke-width="2" points="100,40 155,70 150,130 100,155 50,120 55,70"/>
+</svg>
+</div>
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Findings</h3></div>
+    <div class="md-treemap">
+      <div class="a">Crit.<span>3</span></div><div class="b">Haut<span>7</span></div>
+      <div class="c">Moy.<span>12</span></div><div class="d">Bas<span>20</span></div><div class="e">Info<span>5</span></div>
+    </div>
+  </div>
+</div>
+<div class="md-card md-card-pad">
+  <div class="md-tree">
+    <details open><summary>Technique</summary>
+      <div class="leaf">TLS 1.2+ OK</div>
+      <div class="leaf">Headers incomplets (CSP manquant)</div>
+    </details>
+    <details open><summary>SEO</summary>
+      <div class="leaf">Title OK · Meta description courte</div>
+    </details>
+    <details><summary>OSINT</summary>
+      <div class="leaf">2 emails publics trouves</div>
+    </details>
+  </div>
+</div>
+
+</main>
+</div>
+<button class="md-fab" title="Action">+</button>
+</body>
+</html>

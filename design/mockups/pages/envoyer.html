@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Envoyer des emails | ProspectLab maquette</title>
+  <link rel="stylesheet" href="../assets/md3.css" /><link rel="stylesheet" href="../assets/md3-extra.css" /><link rel="stylesheet" href="../assets/charts.css" />
+</head>
+<body>
+<div class="md-app">
+
+<aside class="md-nav">
+  <div class="md-brand">
+    <div class="md-brand-mark">P</div>
+    <div><strong>ProspectLab</strong><span>Daniel Craft</span></div>
+  </div>
+  <a class="item md-nav-ctv " href="dashboard.html">Commencer ici</a>
+  <a class="item " href="onboarding.html">Premiere victoire</a>
+  <div class="md-nav-section">Par intention · Hick ≤7</div>
+  <a class="item " href="entreprises.html">Prospection</a>
+  <a class="item " href="analyse-site.html">Analyses</a>
+  <a class="item " href="campagnes.html">Envois email</a>
+  <a class="item " href="bounces.html">Hygiene listes</a>
+  <a class="item " href="domaines.html">Delivrabilite</a>
+  <a class="item " href="upload.html">Importer</a>
+  <a class="item " href="settings.html">Reglages</a>
+  <div class="md-nav-section">Sous-pages (maquettes)</div>
+  <a class="item " href="entreprise-detail.html">Fiche entreprise</a>
+  <a class="item " href="carte.html">Carte</a>
+  <a class="item " href="graph.html">Graphe</a>
+  <a class="item " href="concurrence.html">Concurrence</a>
+  <a class="item " href="analyses-tech.html">Tech</a>
+  <a class="item " href="analyses-osint.html">OSINT</a>
+  <a class="item " href="analyses-pentest.html">Pentest</a>
+  <a class="item " href="analyses-seo.html">SEO</a>
+  <a class="item " href="scrapers.html">Scrapers</a>
+  <a class="item " href="campagne-detail.html">Campagne detail</a>
+  <a class="item is-active" href="envoyer.html">Envoi rapide</a>
+  <a class="item " href="modeles.html">Modeles</a>
+  <a class="item " href="victoire.html">Ecran victoire</a>
+  <a class="item " href="api.html">API</a>
+  <a class="item " href="composants.html">Kit MD3</a>
+  <a class="item " href="recherche-vide.html">Recherche 0 resultat</a>
+</aside>
+
+<main class="md-main">
+  <div class="md-topbar">
+    <div><h1>Envoyer des emails</h1><p>Envoi rapide, stepper, quota, confirmation</p></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="md-btn md-btn-outlined">Apercu</button><button class="md-btn md-btn-filled">Envoyer</button></div>
+  </div>
+  
+<div class="md-stepper">
+  <div class="md-step done" data-n="1">Destinataire</div>
+  <div class="md-step active" data-n="2">Message</div>
+  <div class="md-step" data-n="3">Confirmer</div>
+</div>
+<div class="md-grid md-grid-2">
+  <div class="md-card md-card-pad">
+    <div class="md-grid md-grid-2">
+      <div class="md-field"><label>Destinataire</label><input value="paulisanberg@gmail.com" /></div>
+      <div class="md-field"><label>Expediteur</label><select><option>contact@danielcraft.fr</option></select></div>
+    </div>
+    <div class="md-field" style="margin-top:12px"><label>Sujet</label><input value="Presence digitale" /></div>
+    <div class="md-field" style="margin-top:12px"><label>Message</label><textarea>Bonjour,\n\nJe vous contacte...</textarea></div>
+    <div style="display:flex;align-items:center;gap:12px;margin-top:14px">
+      <button class="md-switch on"></button><span style="font-size:.88rem">Tracking</span>
+    </div>
+  </div>
+  <div>
+    <div class="md-card md-card-pad" style="margin-bottom:14px"><div class="md-chart-title"><h3>Quota</h3></div>
+      <div style="display:flex;gap:20px;align-items:center">
+        <div class="md-gauge" style="--pct:8deg"><div class="arc"></div><div class="val">6</div></div>
+        <div><strong>6 / 300</strong><p style="font-size:.82rem;color:var(--md-sys-color-on-surface-variant);margin:6px 0 0">1 credit Brevo</p></div>
+      </div>
+    </div>
+    <div class="md-dialog"><h3>Pret a envoyer ?</h3>
+      <p>1 destinataire · Brevo SMTP · tracking ON</p>
+      <div class="actions"><button class="md-btn md-btn-outlined">Annuler</button><button class="md-btn md-btn-filled">Confirmer</button></div>
+    </div>
+  </div>
+</div>
+
+</main>
+</div>
+<button class="md-fab" title="Action">+</button>
+</body>
+</html>

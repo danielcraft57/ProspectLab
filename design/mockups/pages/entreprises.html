@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Entreprises | ProspectLab maquette</title>
+  <link rel="stylesheet" href="../assets/md3.css" /><link rel="stylesheet" href="../assets/md3-extra.css" /><link rel="stylesheet" href="../assets/charts.css" />
+</head>
+<body>
+<div class="md-app">
+
+<aside class="md-nav">
+  <div class="md-brand">
+    <div class="md-brand-mark">P</div>
+    <div><strong>ProspectLab</strong><span>Daniel Craft</span></div>
+  </div>
+  <a class="item md-nav-ctv " href="dashboard.html">Commencer ici</a>
+  <a class="item " href="onboarding.html">Premiere victoire</a>
+  <div class="md-nav-section">Par intention · Hick ≤7</div>
+  <a class="item is-active" href="entreprises.html">Prospection</a>
+  <a class="item " href="analyse-site.html">Analyses</a>
+  <a class="item " href="campagnes.html">Envois email</a>
+  <a class="item " href="bounces.html">Hygiene listes</a>
+  <a class="item " href="domaines.html">Delivrabilite</a>
+  <a class="item " href="upload.html">Importer</a>
+  <a class="item " href="settings.html">Reglages</a>
+  <div class="md-nav-section">Sous-pages (maquettes)</div>
+  <a class="item " href="entreprise-detail.html">Fiche entreprise</a>
+  <a class="item " href="carte.html">Carte</a>
+  <a class="item " href="graph.html">Graphe</a>
+  <a class="item " href="concurrence.html">Concurrence</a>
+  <a class="item " href="analyses-tech.html">Tech</a>
+  <a class="item " href="analyses-osint.html">OSINT</a>
+  <a class="item " href="analyses-pentest.html">Pentest</a>
+  <a class="item " href="analyses-seo.html">SEO</a>
+  <a class="item " href="scrapers.html">Scrapers</a>
+  <a class="item " href="campagne-detail.html">Campagne detail</a>
+  <a class="item " href="envoyer.html">Envoi rapide</a>
+  <a class="item " href="modeles.html">Modeles</a>
+  <a class="item " href="victoire.html">Ecran victoire</a>
+  <a class="item " href="api.html">API</a>
+  <a class="item " href="composants.html">Kit MD3</a>
+  <a class="item " href="recherche-vide.html">Recherche 0 resultat</a>
+</aside>
+
+<main class="md-main">
+  <div class="md-topbar">
+    <div><h1>Entreprises</h1><p>Liste densifiee, filtres, selection et scores</p></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><button class="md-btn md-btn-outlined">Importer</button><button class="md-btn md-btn-filled">+ Entreprise</button></div>
+  </div>
+  
+<div class="md-toolbar">
+  <div class="md-search" style="flex:1;min-width:200px"><span>&#128269;</span><input placeholder="Nom, secteur, email..." /></div>
+  <button class="md-filter-chip on">Principaux</button>
+  <button class="md-filter-chip">Exclure fictifs</button>
+  <button class="md-filter-chip">Priorite &gt; 60</button>
+  <button class="md-btn md-btn-tonal">Filtres</button>
+</div>
+<div class="md-tabs"><button class="is-active">Toutes</button><button>A qualifier</button><button>En campagne</button><button>Archives</button></div>
+<div class="md-grid md-grid-3" style="margin-bottom:16px">
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Priorites</h3></div>
+    <div class="md-bars" style="height:110px">
+      <div class="bar"><i style="height:82%"></i><span class="lbl">80+</span></div>
+      <div class="bar alt"><i style="height:55%"></i><span class="lbl">60</span></div>
+      <div class="bar warn"><i style="height:38%"></i><span class="lbl">40</span></div>
+      <div class="bar"><i style="height:22%;opacity:.5"></i><span class="lbl">&lt;40</span></div>
+    </div></div>
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Secteurs</h3></div>
+    <div class="md-lollipop">
+      <div class="row"><span>Industrie</span><div class="line" style="--p:72%"><i style="width:72%"></i></div></div>
+      <div class="row"><span>Agence</span><div class="line" style="--p:48%"><i style="width:48%"></i></div></div>
+      <div class="row"><span>Immo</span><div class="line" style="--p:35%"><i style="width:35%"></i></div></div>
+    </div></div>
+  <div class="md-card md-card-pad"><div class="md-chart-title"><h3>Selection</h3><span class="md-chip ok">3</span></div>
+    <button class="md-btn md-btn-filled" style="width:100%;margin-bottom:10px">Ajouter a campagne</button>
+    <div class="md-snackbar" style="width:100%"><span>Filtres actifs</span><button class="act">Reset</button></div>
+  </div>
+</div>
+<div class="md-card">
+  <table class="md-table dense"><thead><tr><th></th><th>Entreprise</th><th>Secteur</th><th>Priorite</th><th>Email</th><th>Score</th></tr></thead>
+  <tbody>
+  <tr><td><span class="md-check on">&#10003;</span></td><td><strong>Atelier Nord</strong><div style="font-size:.75rem;color:var(--md-sys-color-on-surface-variant)">atelier-nord.fr</div></td><td>Industrie</td><td><span class="md-chip ok">82</span></td><td>contact@atelier-nord.fr</td><td><div class="md-progress-circ" style="--p:.82" data-label="82"></div></td></tr>
+  <tr><td><span class="md-check"></span></td><td><strong>Studio Lumen</strong></td><td>Agence</td><td><span class="md-chip warn">61</span></td><td>hello@studio-lumen.com</td><td><div class="md-progress-circ" style="--p:.61" data-label="61"></div></td></tr>
+  <tr><td><span class="md-check"></span></td><td><strong>Metz Habitat</strong></td><td>Immo</td><td><span class="md-chip neutral">44</span></td><td>info@metz-habitat.fr</td><td><div class="md-progress-circ" style="--p:.44" data-label="44"></div></td></tr>
+  <tr><td><span class="md-check on">&#10003;</span></td><td><strong>Forge Digitale</strong></td><td>Tech</td><td><span class="md-chip ok">77</span></td><td>bonjour@forge.digital</td><td><div class="md-progress-circ" style="--p:.77" data-label="77"></div></td></tr>
+  </tbody></table>
+  <div class="md-pagination"><span>1-50 sur 1248</span><div class="md-page-btns"><button>‹</button><button class="is-active">1</button><button>2</button><button>3</button><button>›</button></div></div>
+</div>
+
+</main>
+</div>
+<button class="md-fab" title="Action">+</button>
+</body>
+</html>
