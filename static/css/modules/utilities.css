@@ -598,11 +598,12 @@
     width: 1200px;
 }
 
-/* Modale entreprise */
-.modal-large {
-    max-width: 90%;
-    width: 1000px;
-    max-height: 90vh;
+/* Modale entreprise (plus large que .modal-content 800px) */
+.modal-content.modal-large,
+#entreprise-modal .modal-content.modal-large {
+    max-width: min(1280px, 96vw);
+    width: min(1280px, 96vw);
+    max-height: 92vh;
 }
 
 .entreprise-modal-tabs {

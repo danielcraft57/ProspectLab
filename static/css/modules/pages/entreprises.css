@@ -3151,17 +3151,40 @@ body[data-theme="dark"] .entreprise-modal-tabs .info-design-review-meta {
 
 .entreprise-modal-tabs .echantillons-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 0.9rem;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 1rem;
 }
 
 .entreprise-modal-tabs .echantillons-grid--featured {
-    grid-template-columns: minmax(280px, 1fr);
+    grid-template-columns: 1fr;
 }
 
 @media (min-width: 900px) {
     .entreprise-modal-tabs .echantillons-grid--featured {
-        grid-template-columns: minmax(320px, 520px);
+        grid-template-columns: minmax(420px, 1fr);
+        max-width: 100%;
+    }
+
+    .entreprise-modal-tabs .echantillon-card--featured {
+        display: grid;
+        grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.85fr);
+        align-items: stretch;
+    }
+
+    .entreprise-modal-tabs .echantillon-card--featured .echantillon-card-media {
+        min-height: 100%;
+        aspect-ratio: auto;
+    }
+
+    .entreprise-modal-tabs .echantillon-card--featured .echantillon-card-media img {
+        height: 100%;
+        object-fit: cover;
+        object-position: top center;
+    }
+
+    .entreprise-modal-tabs .echantillon-card--featured .echantillon-card-body {
+        justify-content: center;
+        padding: 1.1rem 1.15rem;
     }
 }
 
