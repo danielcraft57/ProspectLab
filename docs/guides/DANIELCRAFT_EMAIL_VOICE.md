@@ -9,6 +9,8 @@ Sources :
 
 Maquettes locales : `design/mockups/emails-audit/`.
 
+Playbook commercial (sequence semaine, methode PAS) : [SEQUENCE_EMAIL_PAS_SEMAINE.md](SEQUENCE_EMAIL_PAS_SEMAINE.md).
+
 ---
 
 ## Palette (pastel nature bleu)
@@ -66,18 +68,18 @@ Formulations preferes :
 
 | Dire | Exemple mail |
 |------|----------------|
-| `autour de midi` | « On peut se parler autour de midi si t'es au magasin. » |
-| `dis-moi` / `jette un oeil` | « Jette un oeil, c'est pret. » / « Dis-moi ce qui bloque. » |
-| `tatillon` / `pas terrible` | « Pas pour faire le tatillon. » / « Cette note est pas terrible. » |
-| `porte` / `fermer` | « La porte web est un peu ouverte. » |
-| `coup de vieux` | « Ton site a pris un coup de vieux. » |
+| `autour de midi` | « On peut se parler autour de midi si vous etes au magasin. » |
+| `dites-moi` / `jetez un oeil` | « Jetez un oeil, c'est pret. » / « Dites-moi ce qui bloque. » |
+| `tatillon` / `pas terrible` | « Pas pour faire le tatillon. » / « Cette note n'est pas terrible. » |
+| `porte` / `fermer` | « Votre porte web est un peu ouverte. » |
+| `coup de vieux` | « Votre site a pris un coup de vieux. » |
 
-**Exemples de ton (avec accents)** :
+**Exemples de ton (avec accents, vouvoiement)** :
 
-- « On peut se parler autour de midi si t'es au magasin. »
+- « On peut se parler autour de midi si vous etes au magasin. »
 - « Pas la peine de faire le tatillon avec le devis : prix affiche, PDF direct. »
-- « Dis-moi ce qui bloque - on demele ca ensemble. »
-- « Jette un oeil, le rapport est pret. »
+- « Dites-moi ce qui bloque - on demele ca ensemble. »
+- « Jetez un oeil, le rapport est pret. »
 
 #### Accents (obligatoire)
 
@@ -89,13 +91,13 @@ Pas de francais « sans accents » dans les maquettes ni les modeles envoyes.
 
 Garder le ton oral, mais corriger le socle :
 
-- Tutoiement coherent partout (CTA inclus : « Regarde… », pas « Regarder… »)
+- Vouvoiement coherent partout (CTA inclus : « Regardez… », pas « Regarder… »)
 - Ne pas avaler le `ne` : `ce n'est pas`, `il faut`, `qui n'a pas`, `Il y a`
-- Phrase complete : `Tu preferes en parler…` (pas `Preferes en parler…`)
+- Phrase complete : `Vous preferez en parler…` (pas `Preferez en parler…`)
 - Accords : `priorites`, `Loic`
 - Virgules utiles : `Moi, c'est Loic`
 
-OK a l'oral leger : `t'es`, `A plus`, `Dis-moi`, `Jette un oeil`.
+OK a l'oral leger : `A plus`, `Dites-moi`, `Jetez un oeil`.
 
 ### Public client (prioritaire)
 
@@ -140,23 +142,25 @@ https://danielcraft.fr/analyse?website=...&full=1&email=...&name=...
 
 Params : `website`, `full=1`, `email`, `name`.
 
-Libelles CTA preferes (francais simple, oriente click) :
+Libelles CTA preferes (francais simple, oriente click, vouvoiement) :
 - « Ouvrir mon rapport (30 sec) »
-- « Jette un oeil au rapport »
+- « Jetez un oeil au rapport »
 - « Voir ou ca laisse entrer »
 - « Allez, je regarde »
+- « Voir la demo »
+- « Le style vous interesse-t-il ? »
 
 Eviter : « Lancer le pentest », « Voir les CVE », « Audit Lighthouse ».
 
 ### Sujets d'email (max clicks)
 
-Formules qui marchent bien avec le ton DanielCraft :
-- curiosite : « 30 secondes - jette un oeil a ce que j'ai vu »
-- metaphore : « Ta porte web est un peu ouverte »
-- contraste : « 3 notes… une est pas terrible »
-- social : « Le commerce d'a cote est plus facile a trouver »
-- age : « Ton site a pris un coup de vieux »
+Formules qui marchent bien avec le ton DanielCraft (vouvoiement) :
+- curiosite : « 30 secondes - jetez un oeil a ce que j'ai vu »
+- metaphore : « Votre porte web est un peu ouverte »
+- echantillon : « Un modele {secteur_label} pour {entreprise} ? »
+- style custom : « Des echantillons specifiques pour {entreprise} ? »
 - friction : « Les gens arrivent - puis ca coince »
+- breakup : « Je ferme le dossier {entreprise} »
 
 Toujours : prenom ou nom de site dans l'objet quand possible, preheader qui complete (pas qui repete).
 
@@ -206,6 +210,22 @@ En prod ProspectLab : images sous `static/email/` + `services/email_inline_image
 | `{entreprise}` | Raison sociale |
 | `{website}` | Site du prospect |
 | `{email}` | Email du destinataire |
+| `{ville}` | Ville (BDD) |
+| `{code_postal}` | Code postal |
+| `{telephone}` | Telephone entreprise |
+| `{metier}` / `{categorie}` | Metier fin (ex. osteopathie) |
+| `{secteur_label}` | Groupe secteur FR (ex. Sante) |
+| `{secteur_accroche}` | Phrase metier (vouvoiement) |
+| `{secteur_raw}` | Brut BDD / type Google |
+| `{ville_ou_secteur}` | `à Metz` ou `dans le sante` (fallback) |
+| `{echantillon_slug}` | Slug demo (ex. osteo) |
+| `{echantillon_titre}` | Nom demo catalogue (ex. Cabinet des Ponts) |
+| `{echantillon_metier}` | Tagline demo (ex. Osteopathie) |
+| `{echantillon_pitch}` | Excerpt catalogue / accroche |
+| `{echantillon_style_cta}` | « Le style vous interesse-t-il ? » |
+| `{echantillon_url}` / `{echantillon_fiche_url}` | Fiche echantillon |
+| `{echantillon_demo_url}` | Demo live |
+| `{echantillon_screenshot_url}` | Hero email (crop) |
 | `{analysis_url}` | Lien `/analyse` (website, full=1, email, name) |
 | `{dc_contact_url}` | Ancre contact DanielCraft |
 | `{unsubscribe_url}` | Desinscription |
@@ -213,14 +233,15 @@ En prod ProspectLab : images sous `static/email/` + `services/email_inline_image
 | `{security_score}` / `{score_securite}` | Jauge **technique** UI (plus haut = mieux) |
 | `{risk_score}` / `{score_pentest}` | Jauge **Pentest** UI = risque brut (plus haut = pire) - **pas** `100 - risk` |
 | `{performance_score}` | Score perf (si dispo) |
-| `{pentest_surface_score}` | Optionnel : `100 - risk` (évité dans les mails urgence) |
-| `{performance_score}` | Score perf (si dispo) |
+| `{pentest_surface_score}` | Optionnel : `100 - risk` (evite dans les mails urgence) |
 
-Conditionnels : `{#if_website}...{#endif}`, `{#if_security}...{#endif}`, `{#if_risk}...{#endif}`, `{#if_performance}...{#endif}`.
+Conditionnels utiles : `{#if_website}`, `{#if_ville}`, `{#if_metier}`, `{#if_echantillon}`, `{#if_echantillon_titre}`, `{#if_echantillon_pitch}`, `{#if_security}`, `{#if_risk}`, `{#if_performance}`.
 
 Includes utiles : `{#include:dc_signature_a_plus}`, `{#include:dc_footer_audit}`, `{#include:dc_pastilles_scores}`.
 
 Images audit : `{base_url}/static/email/danielcraft/audit/...`
+
+Ton des modeles : **vouvoiement** (pas de tutoiement dans les mails clients).
 
 IDs campagnes audit : `html_dc_audit_rapport`, `html_dc_clanche`, `html_dc_scores_nareuse`, `html_dc_relance`, `html_dc_franchement`, `html_dc_secu_clanche`, `html_dc_anciennete_rincee`, `html_dc_voisin_google`, `html_dc_ca_coince`, `html_dc_30_sec`.
 

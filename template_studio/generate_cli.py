@@ -80,6 +80,17 @@ def _build_generator(repo_root: Path, brand: str | None = None) -> HtmlTemplates
             return "echantillons"
         if "_bouquins_" in tid or tid.startswith("html_dc_bouquins"):
             return "bouquins"
+        # Sequence PAS semaine (playbook SEQUENCE_EMAIL_PAS_SEMAINE.md)
+        if tid in {
+            "html_dc_pas_echantillon",
+            "html_dc_pas_style_custom",
+            "html_dc_pas_projection",
+        }:
+            return "echantillons"
+        if tid == "html_dc_pas_midi":
+            return "offres"
+        if tid in {"html_dc_pas_constat_site", "html_dc_pas_breakup"}:
+            return "audit"
         if tid.startswith("html_dc_"):
             return "audit"
         return "html_email"

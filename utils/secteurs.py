@@ -199,28 +199,75 @@ SECTEUR_TO_ECHANTILLON: Dict[str, str] = {
 }
 
 
-# Accroches courtes pour emails (ton simple)
+# Accroches courtes pour emails (ton simple, vouvoiement)
 SECTEUR_ACCROCHES: Dict[str, str] = {
-    "Technologie": "un site produit clair, qui rassure avant la demo",
-    "Services": "un site qui explique ton offre sans jargon",
-    "Restauration": "carte, photos et reservation visibles sur telephone",
+    "Technologie": "un site produit clair, qui rassure avant la démo",
+    "Services": "un site qui explique votre offre sans jargon",
+    "Restauration": "carte, photos et réservation visibles sur téléphone",
     "Commerce": "rayons, horaires et click & collect lisibles",
     "Éducation": "parcours, inscriptions et contact simples",
     "Automobile": "atelier, RDV et devis qui rassurent",
     "Beauté": "soins, tarifs et prise de RDV sans friction",
-    "Immobilier": "biens, estimation et contact vendeur / acquereur",
+    "Immobilier": "biens, estimation et contact vendeur / acquéreur",
     "BTP": "chantiers, devis express et preuves terrain",
     "Communication": "portfolio et demande de devis en un clic",
-    "Santé": "tarifs, creneaux et rappel telephonique",
-    "Industrie": "machines, qualite et devis B2B",
+    "Santé": "tarifs, créneaux et rappel téléphonique",
+    "Industrie": "machines, qualité et devis B2B",
     "Finance": "forfaits, bilan flash et contact dirigeant",
-    "Hôtellerie": "chambres, spa et reservation bien visibles",
+    "Hôtellerie": "chambres, spa et réservation bien visibles",
     "Juridique": "expertises, forfaits et prise de contact",
-    "Transport": "zones, delais et demande de devis",
-    "Artisanat": "depannage, zones d'intervention et devis rapide",
-    "Loisirs": "horaires, tarifs et reservation visibles sur telephone",
-    "Tourisme": "offres, disponibilites et demande de devis simples",
+    "Transport": "zones, délais et demande de devis",
+    "Artisanat": "dépannage, zones d'intervention et devis rapide",
+    "Loisirs": "horaires, tarifs et réservation visibles sur téléphone",
+    "Tourisme": "offres, disponibilités et demande de devis simples",
 }
+
+# CTA style fixe (vouvoiement) pour la sequence echantillons
+ECHANTILLON_STYLE_CTA = "Le style vous intéresse-t-il ?"
+
+
+def _slug_to_label(slug: str) -> str:
+    """
+    Transforme un slug echantillon en libelle lisible (fallback catalogue).
+
+    @param slug: Slug (ex: saas-landing, osteo)
+    @returns: Libelle simple (ex: Saas landing, Osteo)
+    """
+    raw = (slug or "").strip().replace("-", " ").replace("_", " ")
+    if not raw:
+        return ""
+    return raw[:1].upper() + raw[1:]
+
+
+def _echantillon_catalog_meta(slug: str) -> Dict[str, str]:
+    """
+    Lit titre / metier / pitch depuis le catalogue vitrines.json si dispo.
+
+    @param slug: Slug echantillon DanielCraft
+    @returns: Dict partiel titre, metier, pitch (cles absentes si echec)
+    """
+    needle = (slug or "").strip().lower()
+    if not needle:
+        return {}
+    try:
+        from services.danielcraft_echantillons import get_echantillon_by_slug
+
+        item = get_echantillon_by_slug(needle)
+    except Exception:
+        return {}
+    if not item:
+        return {}
+    out: Dict[str, str] = {}
+    title = str(item.get("title") or "").strip()
+    tagline = str(item.get("tagline") or "").strip()
+    excerpt = str(item.get("excerpt") or "").strip()
+    if title:
+        out["titre"] = title
+    if tagline:
+        out["metier"] = tagline
+    if excerpt:
+        out["pitch"] = excerpt
+    return out
 
 
 def resolve_secteur(raw: Optional[str], nom: Optional[str] = None) -> str:
@@ -325,11 +372,17 @@ def echantillon_slug_for_secteur(secteur: Optional[str]) -> str:
     return ""
 
 
-def enrich_secteur_template_vars(secteur_raw: Optional[str]) -> Dict[str, object]:
+def enrich_secteur_template_vars(
+    secteur_raw: Optional[str],
+    nom: Optional[str] = None,
+    categorie: Optional[str] = None,
+) -> Dict[str, object]:
     """
     Variables email liees au secteur / echantillon.
 
     @param secteur_raw: Champ entreprises.secteur
+    @param nom: Nom entreprise (affine le metier via la taxonomie)
+    @param categorie: Categorie BDD deja connue (optionnel)
     @returns: Dict de placeholders pour TemplateManager
     @example
         enrich_secteur_template_vars("car_repair")
@@ -340,7 +393,25 @@ def enrich_secteur_template_vars(secteur_raw: Optional[str]) -> Dict[str, object
     slug = echantillon_slug_for_secteur(brut or label)
     root = "https://danielcraft.fr/echantillons"
     catalog = f"{root}/"
-    accroche = SECTEUR_ACCROCHES.get(label, "un site clair, adapte a ton metier")
+    accroche = SECTEUR_ACCROCHES.get(label, "un site clair, adapté à votre métier")
+
+    # Metier fin (categorie) : BDD > taxonomie
+    metier = (categorie or "").strip()
+    if not metier:
+        try:
+            resolved = resolve_hierarchie(brut or label, nom=nom)
+            metier = str(resolved.get("categorie") or "").strip()
+            if not label:
+                label = str(resolved.get("secteur") or "").strip() or label
+        except Exception:
+            metier = ""
+
+    catalog_meta = _echantillon_catalog_meta(slug) if slug else {}
+    echantillon_titre = catalog_meta.get("titre") or (_slug_to_label(slug) if slug else "")
+    echantillon_metier = catalog_meta.get("metier") or metier or label or ""
+    echantillon_pitch = catalog_meta.get("pitch") or (
+        f"{accroche}." if slug and accroche else ""
+    )
 
     out: Dict[str, object] = {
         "secteur": label or brut,
@@ -350,14 +421,24 @@ def enrich_secteur_template_vars(secteur_raw: Optional[str]) -> Dict[str, object
         "has_secteur": bool(label or brut),
         "has_secteur_groupe": bool(label),
         "secteur_accroche": accroche,
+        "metier": metier,
+        "has_metier": bool(metier),
         "echantillon_slug": slug,
         "echantillon_catalog_url": catalog,
         "has_echantillon": bool(slug),
+        "echantillon_titre": echantillon_titre,
+        "echantillon_metier": echantillon_metier,
+        "echantillon_pitch": echantillon_pitch,
+        "echantillon_style_cta": ECHANTILLON_STYLE_CTA,
+        "has_echantillon_titre": bool(echantillon_titre),
+        "has_echantillon_pitch": bool(echantillon_pitch),
     }
     if slug:
+        fiche = f"{root}/{slug}/"
         out.update(
             {
-                "echantillon_url": f"{root}/{slug}/",
+                "echantillon_url": fiche,
+                "echantillon_fiche_url": fiche,
                 "echantillon_demo_url": f"{root}/{slug}/demo/index.html",
                 # Screenshot tablet brut (danielcraft) - fallback / preview full
                 "echantillon_screenshot_full_url": f"{root}/{slug}/screenshots/tablet_1024x2500.webp",
@@ -370,6 +451,7 @@ def enrich_secteur_template_vars(secteur_raw: Optional[str]) -> Dict[str, object
         out.update(
             {
                 "echantillon_url": catalog,
+                "echantillon_fiche_url": catalog,
                 "echantillon_demo_url": catalog,
                 "echantillon_screenshot_url": "",
                 "echantillon_screenshot_full_url": "",

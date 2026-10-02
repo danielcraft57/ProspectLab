@@ -41,14 +41,20 @@ def _append_email_query_before_fragment(url: str, encoded_email: str) -> str:
     return f'{url}{joiner}email={encoded_email}'
 
 
-def _vitrine_fields_from_secteur(secteur: str) -> Dict[str, str]:
+def _vitrine_fields_from_secteur(
+    secteur: str,
+    nom: Optional[str] = None,
+    categorie: Optional[str] = None,
+) -> Dict[str, str]:
     """
     Associe le libelle secteur a une demo catalogue DanielCraft.
 
     Priorite : echantillons (/echantillons/...) puis fallback vitrines.
-    Enrichit aussi secteur_label / secteur_accroche via utils.secteurs.
+    Enrichit aussi secteur_label / secteur_accroche / echantillon_* via utils.secteurs.
 
     @param secteur: Champ entreprises.secteur (FR ou type Google EN)
+    @param nom: Nom entreprise (affine le metier)
+    @param categorie: Categorie BDD (metier fin)
     @returns: Placeholders vitrine + echantillon + secteur_*
     """
     try:
@@ -59,7 +65,7 @@ def _vitrine_fields_from_secteur(secteur: str) -> Dict[str, str]:
 
     out: Dict[str, str] = {}
     if enrich_secteur_template_vars:
-        enriched = enrich_secteur_template_vars(secteur)
+        enriched = enrich_secteur_template_vars(secteur, nom=nom, categorie=categorie)
         # Cast soft pour rester Dict[str, str] cote templates
         for k, v in enriched.items():
             if isinstance(v, bool):
@@ -793,9 +799,24 @@ class TemplateManager:
                 entreprise = None
 
             if entreprise and isinstance(entreprise, dict):
+                ville = (entreprise.get('ville') or '').strip()
+                code_postal = (entreprise.get('code_postal') or '').strip()
+                telephone = (entreprise.get('telephone') or '').strip()
+                categorie = (entreprise.get('categorie') or '').strip()
+                secteur_raw = (entreprise.get('secteur_raw') or '').strip()
+                secteur_val = entreprise.get('secteur', '') or ''
+                nom_ent = (entreprise.get('nom') or '').strip()
                 data.update({
                     'website': entreprise.get('website', '') or '',
-                    'secteur': entreprise.get('secteur', '') or '',
+                    'secteur': secteur_val,
+                    'secteur_raw': secteur_raw,
+                    'categorie': categorie,
+                    'metier': categorie,
+                    'ville': ville,
+                    'code_postal': code_postal,
+                    'telephone': telephone,
+                    'has_ville': bool(ville),
+                    'has_telephone': bool(telephone),
                     'framework': entreprise.get('framework', '') or '',
                     'hosting_provider': entreprise.get('hosting_provider', '') or '',
                     'responsable': entreprise.get('responsable') or '',
@@ -803,7 +824,25 @@ class TemplateManager:
                     'opportunite': entreprise.get('opportunite') or '',
                     'statut': entreprise.get('statut') or '',
                 })
-                data.update(_vitrine_fields_from_secteur(data.get("secteur") or ""))
+                data.update(
+                    _vitrine_fields_from_secteur(
+                        secteur_val or secteur_raw or categorie,
+                        nom=nom_ent,
+                        categorie=categorie or None,
+                    )
+                )
+                # Enrich peut affiner le metier ; sinon on garde la categorie BDD
+                if not (data.get('metier') or '').strip() and categorie:
+                    data['metier'] = categorie
+                data['has_metier'] = bool((data.get('metier') or '').strip())
+                secteur_label = (data.get('secteur_label') or secteur_val or '').strip()
+                if ville:
+                    data['ville_ou_secteur'] = f'à {ville}'
+                elif secteur_label:
+                    data['ville_ou_secteur'] = f'dans le {secteur_label.lower()}'
+                else:
+                    data['ville_ou_secteur'] = ''
+                data['has_ville_ou_secteur'] = bool(data.get('ville_ou_secteur'))
 
             try:
                 latest_landing = db.get_latest_landing_variant_bundle(int(entreprise_id)) or {}
@@ -1741,7 +1780,9 @@ class TemplateManager:
         """
         from utils.secteurs import enrich_secteur_template_vars
 
-        extended = dict(enrich_secteur_template_vars(secteur or '') or {})
+        extended = dict(
+            enrich_secteur_template_vars(secteur or '', nom=nom or None) or {}
+        )
         website_raw = (website or '').strip()
         if website_raw:
             try:
@@ -1752,6 +1793,13 @@ class TemplateManager:
                 extended['website'] = (
                     website_raw if website_raw.startswith('http') else f'https://{website_raw.lstrip("/")}'
                 )
+        secteur_label = str(extended.get('secteur_label') or secteur or '').strip()
+        if secteur_label:
+            extended.setdefault('ville_ou_secteur', f'dans le {secteur_label.lower()}')
+            extended.setdefault('has_ville_ou_secteur', True)
+        else:
+            extended.setdefault('ville_ou_secteur', '')
+            extended.setdefault('has_ville_ou_secteur', False)
 
         content_rendered, is_html = self.render_template(
             template_id or '__preview__',

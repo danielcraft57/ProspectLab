@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Objet: Un modèle pour {entreprise} ?</title>
+</head>
+<body style="margin:0;padding:0;background:#dff8f8;font-family:Inter,'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;">
+  <!-- SUBJECT: Un modèle pour {entreprise} ? -->
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;mso-hide:all;">Exemple déjà en ligne dans votre métier. Sans engagement.</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#dff8f8;border-collapse:collapse;">
+    <tr>
+      <td style="padding:36px 16px;">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 10px 28px rgba(24,76,112,0.18);">
+          <tr>
+            <td style="padding:22px 28px 16px;background:linear-gradient(140deg,#9fd4ea 0%,#5faed8 28%,#2f78a6 62%,#184c70 100%);">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td>
+                    <span style="display:inline-block;width:38px;height:38px;line-height:38px;text-align:center;background:rgba(255,255,255,0.28);border-radius:11px;color:#0f3550;font-weight:800;font-size:13px;">DC</span>
+                    <span style="display:inline-block;margin-left:10px;color:#ffffff;font-size:17px;font-weight:700;vertical-align:middle;">DanielCraft</span>
+                  </td>
+                  <td style="text-align:right;">
+                    <span style="display:inline-block;background:rgba(255,255,255,0.22);color:#ffffff;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;padding:6px 10px;border-radius:999px;">Démo</span>
+                  </td>
+                </tr>
+              </table>
+              <h1 style="margin:18px 0 8px;color:#ffffff;font-size:25px;line-height:1.25;font-weight:700;">Un modèle déjà prêt</h1>
+              <p style="margin:0 0 8px;color:rgba(255,255,255,0.95);font-size:15px;">{#if_echantillon_titre}{echantillon_titre}{#endif}{#if_secteur_label} · {secteur_label}{#endif}</p>
+            </td>
+          </tr>
+          {#if_echantillon_screenshot_url}
+          <tr>
+            <td style="padding:0;line-height:0;font-size:0;">
+              <img src="{echantillon_screenshot_url}" alt="Aperçu du modèle" width="600" height="371" style="display:block;width:100%;max-width:600px;height:auto;border:0;background:#c9f4f2;aspect-ratio:1.618/1;" />
+            </td>
+          </tr>
+          {#endif}
+          <tr>
+            <td style="padding:28px 28px 8px;">
+              <p style="margin:0 0 16px;color:#1f2937;font-size:16px;line-height:1.65;">Bonjour <strong>{nom}</strong>,</p>
+              <p style="margin:0 0 16px;color:#1f2937;font-size:16px;line-height:1.65;">
+                J'ai regardé le site de <strong>{entreprise}</strong>{#if_ville}, à <strong>{ville}</strong>{#endif}.
+                {#if_secteur_label}Votre activité côté <strong>{secteur_label}</strong> m'a donné une idée.{#endif}
+              </p>
+              <p style="margin:0 0 16px;color:#1f2937;font-size:16px;line-height:1.65;">
+                Souvent, dans ce métier, le site ne montre pas assez clairement les créneaux, les tarifs ou la prise de rendez-vous. Les visiteurs hésitent, et une partie part chez un voisin plus lisible sur téléphone.
+              </p>
+              <p style="margin:0 0 16px;color:#1f2937;font-size:16px;line-height:1.65;">
+                {#if_echantillon_titre}J'ai déjà un exemple en ligne : <strong>{echantillon_titre}</strong>. {#endif}{#if_echantillon_metier}C'est un modèle {echantillon_metier}. {#endif}{#if_echantillon_pitch}{echantillon_pitch} {#endif}Ça donne une idée concrète du rendu, sans engagement.
+              </p>
+              <p style="margin:0 0 18px;color:#1f2937;font-size:16px;line-height:1.65;">
+                Est-ce que ce style de présentation vous intéresse pour <strong>{entreprise}</strong> en ce moment ?
+              </p>
+              {#if_echantillon_pitch}
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;background:#c9f4f2;border-radius:12px;border:1px solid #9fd4ea;">
+                <tr><td style="padding:16px 18px;">
+                  <p style="margin:0 0 8px;color:#0f3550;font-size:13px;font-weight:700;">L'idée</p>
+                  <p style="margin:0;color:#374151;font-size:14px;line-height:1.55;">{echantillon_pitch}</p>
+                </td></tr>
+              </table>
+              {#endif}
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0 10px;">
+                <tr>
+                  <td style="text-align:center;">
+                    <a href="{echantillon_demo_url}" style="display:inline-block;background:linear-gradient(140deg,#9fd4ea 0%,#5faed8 28%,#2f78a6 62%,#184c70 100%);color:#ffffff;text-decoration:none;font-size:16px;font-weight:700;padding:15px 28px;border-radius:12px;line-height:1.2;box-shadow:0 10px 28px rgba(24,76,112,0.35);">Voir la démo</a>
+                  </td>
+                </tr>
+              </table>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 10px;">
+                <tr>
+                  <td style="text-align:center;">
+                    <a href="{echantillon_fiche_url}" style="display:inline-block;color:#4da9d6;text-decoration:underline;font-size:14px;font-weight:600;padding:6px 12px;">Voir la fiche</a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:0 0 22px;text-align:center;color:#6b7280;font-size:13px;">Sans engagement - un clic, vous voyez le rendu</p>
+              <p style="margin:0;color:#1f2937;font-size:15px;line-height:1.6;">
+                À plus,<br /><strong>Loïc Daniel</strong><br />
+                <a href="https://danielcraft.fr" style="color:#4da9d6;text-decoration:none;font-weight:600;">danielcraft.fr</a> - Metz
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:20px 28px 26px;background:#f9fafb;text-align:center;border-top:1px solid #e5e7eb;">
+              <p style="margin:0;color:#6b7280;font-size:12px;line-height:1.5;">
+                Pas un robot -
+                <a href="mailto:contact@danielcraft.fr" style="color:#6b7280;text-decoration:none;font-weight:600;">contact@danielcraft.fr</a>
+                - <a href="{unsubscribe_url}" style="color:#6b7280;text-decoration:none;font-weight:600;">Ne plus recevoir d'email</a>
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

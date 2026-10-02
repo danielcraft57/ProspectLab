@@ -48,6 +48,8 @@ instance/
 *.sqlite3
 
 # Logs
+logs/*
+!logs/.gitkeep
 logs/*.log
 logs/*.log.*
 *.log
