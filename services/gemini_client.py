@@ -912,6 +912,21 @@ def gemini_generate_content(
     if tools:
         body['tools'] = tools
 
+    # Circuit ouvert (autre job a deja epuise toutes les cles) → stop immediat
+    try:
+        from services.gemini_queue import (
+            is_gemini_quota_circuit_open,
+            format_gemini_circuit_message,
+        )
+        if is_gemini_quota_circuit_open():
+            msg = format_gemini_circuit_message()
+            _notify_progress(progress_cb, msg, 70)
+            raise GeminiQuotaError(msg)
+    except GeminiQuotaError:
+        raise
+    except Exception:
+        pass
+
     last_error: Optional[Exception] = None
     for round_idx in range(rounds + 1):
         result = _try_all_keys(
@@ -925,6 +940,23 @@ def gemini_generate_content(
             return result['content']
 
         last_error = result.get('error')
+        # Toutes les cles en RPD memoire : pause inutile (reset demain seulement)
+        active_left = _active_api_keys(api_keys)
+        all_rpd = (
+            bool(result.get('saw_429'))
+            and bool(result.get('all_keys_exhausted'))
+            and not active_left
+        )
+        if all_rpd:
+            logger.warning(
+                '[Gemini] toutes les cles en RPD — skip pauses, circuit breaker'
+            )
+            _notify_progress(
+                progress_cb,
+                'Quota Gemini journalier epuise (toutes les cles) — arret des retries',
+                70,
+            )
+            break
         # 429 RPM/RPD OU 503 (y compris stop precoce apres N cles) : pause puis nouvel essai
         can_wait = (
             (result.get('saw_429') or result.get('saw_transient'))
@@ -975,6 +1007,21 @@ def gemini_generate_content(
     )
     # Dernier tour encore en 429 sur toutes les cles → erreur quota explicite
     if last_error and is_gemini_quota_error(last_error):
+        kind = 'rpd' if not _active_api_keys(api_keys) else 'rpm'
+        try:
+            from services.gemini_queue import (
+                arm_gemini_quota_circuit,
+                abort_pending_gemini_queue,
+            )
+            arm_gemini_quota_circuit(
+                f'Quota Gemini atteint — toutes les cles en 429{hint}',
+                kind=kind,
+            )
+            abort_pending_gemini_queue(
+                f'Quota Gemini atteint — toutes les cles en 429{hint}'
+            )
+        except Exception as circ_exc:
+            logger.debug('circuit breaker arm ignore: %s', circ_exc)
         raise GeminiQuotaError(
             f'Quota Gemini atteint — toutes les cles en 429{hint}. '
             f'Reessayer dans quelques minutes (reset RPM) ou demain (reset RPD Pacific). '

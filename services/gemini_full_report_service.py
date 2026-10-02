@@ -63,6 +63,19 @@ return 0
     last_emit = 0.0
     waited = 0
     while _time.time() < deadline:
+        # Circuit quota ouvert → inutile d'attendre un slot Vision
+        try:
+            from services.gemini_queue import is_gemini_quota_circuit_open
+            if is_gemini_quota_circuit_open():
+                if progress_cb:
+                    try:
+                        from services.gemini_queue import format_gemini_circuit_message
+                        progress_cb(format_gemini_circuit_message(), 63)
+                    except Exception:
+                        progress_cb('Quota Gemini epuise — sortie de file', 63)
+                return False
+        except Exception:
+            pass
         try:
             ok = _redis().eval(script, 1, _GEMINI_SLOT_KEY, max_c, _GEMINI_SLOT_TTL)
             if int(ok or 0) == 1:
@@ -871,6 +884,23 @@ def build_full_report_for_entreprise(
         or os.environ.get('GEMINI_API_KEY_2')
     )
 
+    # Circuit breaker : un job precedent a deja epuise toutes les cles → skip Vision
+    circuit_open = False
+    circuit_msg = ''
+    try:
+        from services.gemini_queue import (
+            get_gemini_quota_circuit,
+            format_gemini_circuit_message,
+        )
+        circuit = get_gemini_quota_circuit()
+        if circuit:
+            circuit_open = True
+            circuit_msg = format_gemini_circuit_message(circuit)
+            use_gemini = False
+            _emit(circuit_msg, 60)
+    except Exception:
+        pass
+
     report: Dict[str, Any]
     source = 'heuristic'
     if use_gemini:
@@ -998,6 +1028,30 @@ def build_full_report_for_entreprise(
             report['fallback_error'] = str(exc)[:300]
             report['quota_exceeded'] = bool(quota_hit)
             report['transient_overload'] = bool(overload)
+            if quota_hit:
+                try:
+                    from services.gemini_queue import (
+                        arm_gemini_quota_circuit,
+                        abort_pending_gemini_queue,
+                    )
+                    arm_gemini_quota_circuit(str(exc)[:300], kind='rpm')
+                    abort_info = abort_pending_gemini_queue(
+                        str(exc)[:300],
+                        exclude_entreprise_id=eid,
+                    )
+                    report['queue_aborted_ids'] = abort_info.get('aborted_ids') or []
+                except Exception as circ_exc:
+                    logger.debug('abort file apres quota ignore: %s', circ_exc)
+    elif circuit_open:
+        _emit(circuit_msg or 'Quota Gemini epuise — fallback heuristique (file skip)', 70)
+        report = _heuristic_full_report(
+            pipeline,
+            opportunity,
+            fallback_reason=circuit_msg or 'circuit quota ouvert',
+        )
+        report['quota_exceeded'] = True
+        report['fallback_error'] = (circuit_msg or 'circuit quota ouvert')[:300]
+        report['circuit_skipped'] = True
     else:
         _emit('Pas de cle Gemini — fallback heuristique local…', 70)
         report = _heuristic_full_report(
@@ -1022,6 +1076,8 @@ def build_full_report_for_entreprise(
         'source': source,
         'quota_exceeded': bool((report or {}).get('quota_exceeded')),
         'fallback_error': (report or {}).get('fallback_error'),
+        'queue_aborted_ids': list((report or {}).get('queue_aborted_ids') or []),
+        'circuit_skipped': bool((report or {}).get('circuit_skipped')),
         'screenshot_set_id': screenshot_set_id,
         'screenshots_ensured': screenshots_ensured,
         'modules_used': modules_used,

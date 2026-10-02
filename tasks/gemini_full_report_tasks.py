@@ -58,6 +58,17 @@ def analyze_entreprise_gemini_full_report_task(
 
     _progress('Demarrage rapport Gemini…', 3)
 
+    # Circuit deja ouvert : skip waits, le service basculera en heuristique tout de suite
+    try:
+        from services.gemini_queue import (
+            is_gemini_quota_circuit_open,
+            format_gemini_circuit_message,
+        )
+        if is_gemini_quota_circuit_open():
+            _progress(format_gemini_circuit_message(), 5)
+    except Exception:
+        pass
+
     try:
         result = build_full_report_for_entreprise(
             database,
@@ -165,6 +176,8 @@ def analyze_entreprise_gemini_full_report_task(
             'source': result.get('source'),
             'quota_exceeded': bool(result.get('quota_exceeded')),
             'fallback_error': result.get('fallback_error'),
+            'queue_aborted_ids': list(result.get('queue_aborted_ids') or []),
+            'circuit_skipped': bool(result.get('circuit_skipped')),
             'report': report,
             'screenshot_set_id': result.get('screenshot_set_id'),
             'modules_used': result.get('modules_used'),

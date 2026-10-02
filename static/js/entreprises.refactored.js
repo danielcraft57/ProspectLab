@@ -2380,6 +2380,54 @@
     }
 
     /**
+     * Coupe tous les spinners Gemini encore en file quand le quota global tombe.
+     * @param {string} [message]
+     * @param {number[]} [abortedIds]
+     */
+    function haltAllPendingGeminiUi(message, abortedIds) {
+        const msg = String(message || 'Quota Gemini epuise — file annulee.').trim();
+        const ids = Array.isArray(abortedIds)
+            ? abortedIds.map((x) => Number(x)).filter((n) => n > 0)
+            : [];
+        const loadingChips = document.querySelectorAll('.row-chip-gemini.is-loading');
+        const seen = new Set(ids);
+        loadingChips.forEach((el) => {
+            const eid = Number(el.getAttribute('data-entreprise-id'));
+            if (eid) seen.add(eid);
+        });
+        if (!geminiQuotaToastSeen.has(0)) {
+            geminiQuotaToastSeen.add(0);
+            Notifications.show(msg, 'warning', 'fa-ban');
+        }
+        if (!seen.size) return;
+        seen.forEach((eid) => {
+            setRowChipLoading('gemini', eid, false);
+            document.querySelectorAll(`.row-chip-gemini[data-entreprise-id="${eid}"]`).forEach((el) => {
+                el.classList.remove('is-loading');
+                el.setAttribute('aria-busy', 'false');
+                el.setAttribute('aria-disabled', 'false');
+                el.setAttribute('tabindex', '0');
+                if (!el.classList.contains('is-ready') && !el.classList.contains('is-heuristic')) {
+                    el.classList.add('is-missing');
+                }
+                el.title = 'File Gemini annulee (quota) — recliquer plus tard';
+                const icon = el.querySelector('i');
+                if (icon && icon.classList.contains('fa-spin')) {
+                    icon.className = 'fas fa-robot';
+                }
+            });
+            if (Number(eid) === Number(currentModalEntrepriseId)) {
+                const btn = document.getElementById('gemini-report-start-btn');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-robot"></i> Lancer l\'analyse complete';
+                }
+                setGeminiReportStatus(msg, true);
+            }
+        });
+    }
+
+    /**
      * Active / desactive l'etat "attente" sur les chips photo ou Gemini.
      * @param {'screenshots'|'gemini'} kind
      * @param {number} entrepriseId
@@ -5985,6 +6033,15 @@
             const msg = (data && data.message)
                 || 'Quota Gemini atteint — rapport heuristique / réessaie plus tard.';
             applyGeminiQuotaUi(eid, msg);
+            if (data.queue_halted) {
+                haltAllPendingGeminiUi(msg);
+            }
+        });
+
+        s.on('gemini_queue_halted', function(data) {
+            const msg = (data && (data.message || data.reason))
+                || 'Quota Gemini epuise — file annulee.';
+            haltAllPendingGeminiUi(msg, data && data.aborted_ids);
         });
 
         s.on('gemini_report_progress', function(data) {
@@ -6000,6 +6057,9 @@
                 applyGeminiQuotaUi(
                     eid,
                     msg || 'Quota Gemini atteint — toutes les cles en 429. Reessaie plus tard.'
+                );
+                haltAllPendingGeminiUi(
+                    msg || 'Quota Gemini epuise — file annulee.'
                 );
             }
             if (eid !== Number(currentModalEntrepriseId)) return;

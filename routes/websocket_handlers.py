@@ -2542,6 +2542,34 @@ def register_websocket_handlers(socketio, app):
             )
 
             queue_info = reserve_gemini_queue_slot(int(entreprise_id))
+            if queue_info.get('circuit_open'):
+                from services.gemini_queue import format_gemini_circuit_message
+                msg = format_gemini_circuit_message(queue_info.get('circuit'))
+                safe_emit(
+                    socketio,
+                    'gemini_report_quota',
+                    {
+                        'entreprise_id': entreprise_id,
+                        'message': msg,
+                        'quota_exceeded': True,
+                        'circuit_open': True,
+                        'queue_halted': True,
+                    },
+                    room=notify_rooms,
+                )
+                safe_emit(
+                    socketio,
+                    'gemini_queue_halted',
+                    {
+                        'message': msg,
+                        'reason': msg,
+                        'aborted_ids': [],
+                        'circuit': queue_info.get('circuit'),
+                    },
+                    room=notify_rooms,
+                )
+                return
+
             if queue_info.get('already_pending'):
                 safe_emit(
                     socketio,
@@ -2585,6 +2613,12 @@ def register_websocket_handlers(socketio, app):
                 )
                 return
 
+            try:
+                from services.gemini_queue import register_gemini_queue_task
+                register_gemini_queue_task(int(entreprise_id), task.id)
+            except Exception:
+                pass
+
             safe_emit(
                 socketio,
                 'gemini_report_started',
@@ -2626,20 +2660,41 @@ def register_websocket_handlers(socketio, app):
                                     # Toast warning + stop spinner des le 429 (avant fallback)
                                     if (not quota_emitted) and _gemini_progress_is_quota(meta):
                                         quota_emitted = True
+                                        qmsg = (
+                                            'Quota Gemini atteint — toutes les cles en 429. '
+                                            'File annulee — pas la peine d\'attendre.'
+                                        )
                                         safe_emit(
                                             socketio,
                                             'gemini_report_quota',
                                             {
                                                 'entreprise_id': entreprise_id,
-                                                'message': (
-                                                    'Quota Gemini atteint — toutes les cles en 429. '
-                                                    'Rapport heuristique en cours / réessaie plus tard.'
-                                                ),
+                                                'message': qmsg,
                                                 'quota_exceeded': True,
                                                 'early': True,
+                                                'queue_halted': True,
                                             },
                                             room=notify_rooms,
                                         )
+                                        try:
+                                            from services.gemini_queue import (
+                                                get_gemini_quota_circuit,
+                                                format_gemini_circuit_message,
+                                            )
+                                            circuit = get_gemini_quota_circuit()
+                                            safe_emit(
+                                                socketio,
+                                                'gemini_queue_halted',
+                                                {
+                                                    'message': format_gemini_circuit_message(circuit) if circuit else qmsg,
+                                                    'reason': qmsg,
+                                                    'trigger_entreprise_id': entreprise_id,
+                                                    'circuit': circuit,
+                                                },
+                                                room=notify_rooms,
+                                            )
+                                        except Exception:
+                                            pass
                                     last_meta = meta
                             elif current_state == 'SUCCESS':
                                 result = _celery_success_result_as_dict(task_result.result)
@@ -2653,14 +2708,37 @@ def register_websocket_handlers(socketio, app):
                                             'entreprise_id': entreprise_id,
                                             'message': (
                                                 'Quota Gemini atteint — rapport heuristique local '
-                                                '(pas de Vision). Réessaie plus tard ou demain (reset RPD).'
+                                                '(pas de Vision). File annulee — réessaie plus tard.'
                                             ),
                                             'result': result,
                                             'source': result.get('source'),
                                             'quota_exceeded': True,
+                                            'queue_halted': True,
                                         },
                                         room=notify_rooms,
                                     )
+                                    try:
+                                        from services.gemini_queue import (
+                                            get_gemini_quota_circuit,
+                                            format_gemini_circuit_message,
+                                        )
+                                        circuit = get_gemini_quota_circuit()
+                                        aborted = result.get('queue_aborted_ids') or []
+                                        safe_emit(
+                                            socketio,
+                                            'gemini_queue_halted',
+                                            {
+                                                'message': format_gemini_circuit_message(circuit) if circuit else (
+                                                    'Quota Gemini epuise — file annulee'
+                                                ),
+                                                'trigger_entreprise_id': entreprise_id,
+                                                'aborted_ids': aborted,
+                                                'circuit': circuit,
+                                            },
+                                            room=notify_rooms,
+                                        )
+                                    except Exception:
+                                        pass
                                 safe_emit(
                                     socketio,
                                     'gemini_report_complete',
