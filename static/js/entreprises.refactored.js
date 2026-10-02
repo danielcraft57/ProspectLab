@@ -3304,6 +3304,59 @@
                                 triggerScrapingRelaunch(job.id, { notify: true });
                             }, i * staggerMs);
                         });
+                    } else if (action === 'launch-screenshots') {
+                        const jobs = [];
+                        let skippedNoUrl = 0;
+                        let skippedBusy = 0;
+                        ids.forEach((id) => {
+                            const entreprise = allEntreprises.find(e => e && e.id === id)
+                                || filteredEntreprises.find(e => e && e.id === id);
+                            const hasUrl = !!(entreprise && entreprise.website && String(entreprise.website).trim());
+                            if (!hasUrl) {
+                                skippedNoUrl++;
+                                return;
+                            }
+                            if (isRowChipLoading('screenshots', id)) {
+                                skippedBusy++;
+                                return;
+                            }
+                            jobs.push({ id });
+                        });
+                        const staggerMs = jobs.length > 20 ? 1200 : 600;
+                        if (jobs.length === 0) {
+                            Notifications.show(
+                                skippedBusy > 0
+                                    ? 'Aucune capture à lancer (déjà en cours ou URL manquante).'
+                                    : 'Aucune entreprise valide à capturer (URL manquante).',
+                                'warning'
+                            );
+                            return;
+                        }
+                        if (jobs.length > 3) {
+                            Notifications.show(
+                                `${jobs.length} capture(s) screenshots planifiée(s) (lancement étalé ~${staggerMs} ms entre chaque).`,
+                                'info',
+                                'fa-camera'
+                            );
+                        }
+                        if (skippedNoUrl > 0) {
+                            Notifications.show(
+                                `${skippedNoUrl} entreprise${skippedNoUrl > 1 ? 's' : ''} ignorée${skippedNoUrl > 1 ? 's' : ''} (URL manquante).`,
+                                'warning'
+                            );
+                        }
+                        if (skippedBusy > 0) {
+                            Notifications.show(
+                                `${skippedBusy} capture${skippedBusy > 1 ? 's' : ''} déjà en cours, ignorée${skippedBusy > 1 ? 's' : ''}.`,
+                                'info',
+                                'fa-spinner'
+                            );
+                        }
+                        jobs.forEach((job, i) => {
+                            setTimeout(() => {
+                                triggerScreenshotsCaptureFromList(job.id, { notify: jobs.length <= 3 });
+                            }, i * staggerMs);
+                        });
                     } else if (action === 'delete-bulk') {
                         const count = ids.length;
                         if (!confirm(`Êtes-vous sûr de vouloir supprimer ${count} entreprise${count > 1 ? 's' : ''} ? Cette action est irréversible.`)) {
