@@ -4162,9 +4162,7 @@
                 <span>Verifie le catalogue DanielCraft local.</span>
             </div>`;
         } else {
-            html += `<div class="echantillons-scroll">
-                <div class="echantillons-grid">${cards.join('')}</div>
-            </div>`;
+            html += `<div class="echantillons-grid">${cards.join('')}</div>`;
         }
         container.innerHTML = html;
     }

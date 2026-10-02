@@ -3149,13 +3149,6 @@ body[data-theme="dark"] .entreprise-modal-tabs .info-design-review-meta {
     font-weight: 700;
 }
 
-.entreprise-modal-tabs .echantillons-scroll {
-    max-height: min(58vh, 640px);
-    overflow: auto;
-    padding: 0.1rem 0.25rem 0.4rem 0;
-    scrollbar-gutter: stable;
-}
-
 .entreprise-modal-tabs .echantillons-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
