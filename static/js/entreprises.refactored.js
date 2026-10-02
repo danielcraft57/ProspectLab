@@ -4124,11 +4124,8 @@
         const secteur = escape(data.secteur_label || data.secteur || 'Secteur inconnu');
         const primary = data.primary;
         const related = Array.isArray(data.related) ? data.related : [];
-        const catalog = Array.isArray(data.catalog) ? data.catalog : [];
-        const ready = Number(data.screenshots_ready || 0);
-        const total = Number(data.catalog_count || 0);
 
-        // Une seule liste : reco d'abord, puis meme categorie, puis le reste sans doublons
+        // Uniquement le match secteur + memes categories (pas tout le catalogue)
         const seen = new Set();
         const cards = [];
         const pushItem = (it, featured) => {
@@ -4138,7 +4135,15 @@
         };
         pushItem(primary, true);
         related.forEach((it) => pushItem(it, false));
-        catalog.forEach((it) => pushItem(it, false));
+
+        const readySeen = new Set();
+        let readyCount = 0;
+        [primary, ...related].forEach((it) => {
+            if (!it || !it.slug || readySeen.has(it.slug)) return;
+            readySeen.add(it.slug);
+            if (it.has_local_screenshot) readyCount += 1;
+        });
+        const sectorTotal = readySeen.size || cards.length;
 
         let html = `<div class="maquettes-summary md-surface">
             <div class="maquettes-summary-main">
@@ -4146,8 +4151,8 @@
                 <span class="echantillon-secteur-pill">${secteur}</span>
                 ${data.matched_slug ? `<span class="maquettes-summary-slug">slug <code>${escape(data.matched_slug)}</code></span>` : ''}
             </div>
-            <div class="maquettes-summary-meta" title="Screenshots locaux disponibles">
-                <i class="fas fa-images"></i> ${ready}/${total}
+            <div class="maquettes-summary-meta" title="Echantillons du meme secteur avec screenshot local">
+                <i class="fas fa-images"></i> ${readyCount}/${sectorTotal}
             </div>
         </div>`;
 
