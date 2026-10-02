@@ -106,11 +106,17 @@ def analyze_entreprise_gemini_full_report_task(
 
         _progress('Persistance du rapport en base…', 96)
         report = result.get('report') or {}
-        # Garde le journal dans le rapport pour le revoir a l'ouverture de la fiche
-        if logs:
-            report['analysis_logs'] = list(logs[-60:])
-        if result.get('fallback_error'):
-            report['fallback_error'] = result.get('fallback_error')
+        source = str(result.get('source') or '').strip().lower()
+        # Journal conserve seulement si echec / fallback heuristique.
+        # Un vrai rapport Gemini OK n'a plus besoin du log dans la fiche.
+        if source == 'gemini' and not result.get('fallback_error') and not result.get('quota_exceeded'):
+            report.pop('analysis_logs', None)
+            report.pop('fallback_error', None)
+        else:
+            if logs:
+                report['analysis_logs'] = list(logs[-60:])
+            if result.get('fallback_error'):
+                report['fallback_error'] = result.get('fallback_error')
         report_id = database.save_entreprise_gemini_report(
             entreprise_id=eid,
             report=report,

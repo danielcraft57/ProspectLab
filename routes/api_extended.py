@@ -1900,6 +1900,29 @@ def entreprise_gemini_report_post(entreprise_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@api_extended_bp.route('/entreprise/<int:entreprise_id>/maquettes-echantillons', methods=['GET'])
+@login_required
+def entreprise_maquettes_echantillons_get(entreprise_id):
+    """
+    API: Echantillons DanielCraft lies a la fiche (secteur + catalogue screenshots).
+
+    @param entreprise_id: ID entreprise
+    @returns: JSON primary/related/catalog avec URLs locales
+    """
+    try:
+        eid = int(entreprise_id)
+        entreprise = database.get_entreprise(eid)
+        if not entreprise:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable'}), 404
+
+        from services.danielcraft_echantillons import build_maquettes_payload_for_entreprise
+
+        payload = build_maquettes_payload_for_entreprise(entreprise)
+        return jsonify(payload)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @api_extended_bp.route('/entreprise/<int:entreprise_id>/gemini-mockups', methods=['GET'])
 @login_required
 def entreprise_gemini_mockups_get(entreprise_id):

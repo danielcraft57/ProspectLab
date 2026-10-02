@@ -18,8 +18,8 @@ if [ ! -x "${PYTHON_BIN}" ]; then
 fi
 
 echo "[*] Version Playwright Python..."
-"${PYTHON_BIN}" -c "import playwright; print(playwright.__version__)" || {
-  echo "[!] Module playwright manquant — pip install -r requirements.txt d'abord"
+"${PYTHON_BIN}" -c "from importlib.metadata import version; print(version('playwright'))" || {
+  echo "[!] Module playwright manquant - pip install -r requirements.txt d'abord"
   exit 1
 }
 

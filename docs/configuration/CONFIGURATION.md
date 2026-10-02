@@ -60,9 +60,12 @@ Clés et modèle : voir le guide dédié [GEMINI_AUDIT.md](../guides/GEMINI_AUDI
 
 - **GEMINI_API_KEY** / **GEMINI_API_KEY_2** … **_9** ou **GEMINI_API_KEYS** (CSV) : rotation multi-comptes (429 RPM / 503 → clé suivante ; 401/403 → clé ignorée jusqu'au redémarrage).
 - **GEMINI_MODEL** / **GEMINI_DESIGN_MODEL** : modèle texte/Vision (défaut `gemini-3.8-flash`).
-- **GEMINI_FULL_REPORT_MAX_CONCURRENT** : slots Vision simultanés (défaut **1**).
+- **GEMINI_FALLBACK_MODELS** : modèles de repli si 503 (défaut `gemini-flash-latest,gemini-3.5-flash`).
+- **GEMINI_503_MAX_CONSECUTIVE_KEYS** : stop précoce après N clés 503 d'affilée (défaut **2**).
+- **GEMINI_FULL_REPORT_MAX_CONCURRENT** : slots Vision simultanés (défaut **2**).
+- **GEMINI_VISION_MAX_IMAGES** : images jointes au rapport (défaut **1**, compressées).
 - **GEMINI_JOB_SPACING_SEC** : délai Redis entre démarrages de rapports (défaut **90**).
-- **GEMINI_QUOTA_RETRY_MS** / **GEMINI_QUOTA_RETRY_ROUNDS** : pause quand toutes les clés sont en pause.
+- **GEMINI_QUOTA_RETRY_MS** / **GEMINI_QUOTA_RETRY_ROUNDS** / **GEMINI_TRANSIENT_RETRY_MS** : pauses 429 / 503.
 
 Tester une clé avant de la mettre en prod : une clé 401 fausse le décompte et est immédiatement blacklistée process.
 

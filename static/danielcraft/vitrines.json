@@ -1,0 +1,753 @@
+{
+  "currency": "EUR",
+  "default_price_eur": 42,
+  "vitrines_hub_path": "/echantillons/hub-bulma.html",
+  "screenshots_base": "/echantillons",
+  "stripe_note": "Les échantillons ne se vendent plus - devis / contact uniquement.",
+  "items": [
+    {
+      "slug": "restauration",
+      "category": "hcr",
+      "title": "Brasserie Saint-Jacques",
+      "tagline": "Restaurant & réservations",
+      "excerpt": "Site restaurant qui donne faim : carte, photos et réservation - modèle HCR pour Metz, Nancy et Thionville.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Carte et menus mis en valeur pour donner envie avant la première réservation",
+        "Carrousel photo pour votre cuisine, votre salle ou vos événements",
+        "Bloc réservation / contact pour transformer les visites en tables réservées"
+      ],
+      "stack": [
+        "Bulma",
+        "Swiper",
+        "AOS"
+      ]
+    },
+    {
+      "slug": "beaute",
+      "category": "beaute",
+      "title": "Spa Thalie",
+      "tagline": "Institut & spa",
+      "excerpt": "Institut beauté et spa : soins, rendez-vous et engagements - page claire pour fidéliser votre clientèle locale.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Fiches soins et formules pour aider à choisir avant de prendre rendez-vous",
+        "Formulaire de demande de RDV intégré au design",
+        "Bloc « nos engagements » pour raconter votre démarche qualité ou RSE"
+      ],
+      "stack": [
+        "Bulma",
+        "GLightbox",
+        "AOS"
+      ]
+    },
+    {
+      "slug": "odontologie",
+      "category": "sante",
+      "title": "Centre dentaire Mosaïque",
+      "tagline": "Cabinet dentaire",
+      "excerpt": "Cabinet dentaire rassurant : tarifs, prévention et rappel téléphonique - site patient pour Moselle et Metz.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Grille tarifaire lisible pour lever le frein du « combien ça coûte ? »",
+        "Contenus prévention et parcours patient rassurants",
+        "Demande de rappel téléphonique prête à brancher sur votre secrétariat"
+      ],
+      "stack": [
+        "Bulma",
+        "AOS"
+      ]
+    },
+    {
+      "slug": "automobile",
+      "category": "mobilite",
+      "title": "Garage Central Plappeville",
+      "tagline": "Mécanique & carrosserie",
+      "excerpt": "Garage auto : entretien, pneus, carrosserie et RDV - site atelier qui rassure avant le devis.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Mise en avant expertise, pneus et services pour couvrir l'essentiel de l'atelier",
+        "Bandeau visuel pour montrer l'équipe et l'outil au travail",
+        "Prise de rendez-vous en ligne déjà cadrée"
+      ],
+      "stack": [
+        "DaisyUI 4",
+        "Tailwind CSS",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "commerce",
+      "category": "retail",
+      "title": "Halles Thionville",
+      "tagline": "Commerce & drive",
+      "excerpt": "Commerce de proximité et drive : rayons, click & collect et fidélité - maquette retail prête à l'emploi.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Mise en avant du click & collect et des horaires pratiques",
+        "Rayons et services présentés comme en magasin, version web",
+        "Espace fidélité / avantages pour fidéliser sans jargon technique"
+      ],
+      "stack": [
+        "Bootstrap 5",
+        "GLightbox",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "comptable",
+      "category": "finance",
+      "title": "Verlaine & Associés",
+      "tagline": "Expertise comptable",
+      "excerpt": "Cabinet comptable : forfaits, bilan flash et contact dirigeant - crédibilité pro en un clic.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Mise en avant de votre méthode et de votre accompagnement",
+        "Forfaits et packs présentés pour faciliter le choix du dirigeant",
+        "Offre bilan flash ou premier rendez-vous pour capter les leads"
+      ],
+      "stack": [
+        "Bootstrap 5",
+        "AOS",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "industrie",
+      "category": "industrie",
+      "title": "Précisite Usinage",
+      "tagline": "Usinage & qualité",
+      "excerpt": "Site usinage et industrie : machines, devis express et FAQ qualité - convertissez les appels d'offres.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Présentation des savoir-faire machines et contrôles qualité",
+        "Demande de devis rapide pour transformer la visite en opportunité",
+        "FAQ réponses aux questions fréquentes des donneurs d'ordre"
+      ],
+      "stack": [
+        "Bulma",
+        "AOS"
+      ]
+    },
+    {
+      "slug": "immobilier",
+      "category": "immobilier",
+      "title": "Patrimoine Lorraine",
+      "tagline": "Agence immobilière",
+      "excerpt": "Agence immobilière : biens, estimation gratuite et gestion - captez vendeurs et acquéreurs locaux.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Sélection de biens en cartes responsive pour valoriser mandats vente et location",
+        "Bloc services (transaction, gestion, investissement) et KPI agence",
+        "Formulaire d'estimation gratuit prêt à brancher sur votre CRM"
+      ],
+      "stack": [
+        "Bootstrap 5",
+        "HTML statique",
+        "CSS custom"
+      ]
+    },
+    {
+      "slug": "juridique",
+      "category": "juridique",
+      "title": "Rivière & Partenaires",
+      "tagline": "Cabinet d'avocats",
+      "excerpt": "Avocats affaires et social : expertises, forfaits et contact - cabinet crédible pour PME à Metz.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Parcours expertises avec cartes à bordure dorée et listes lisibles",
+        "Timeline méthode et forfait découverte pour capter les leads dirigeants",
+        "FAQ accordéon et formulaire contact sobre"
+      ],
+      "stack": [
+        "Tailwind CSS",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "architecture",
+      "category": "artisanat",
+      "title": "Atelier Nord-Est",
+      "tagline": "Architecture & urbanisme",
+      "excerpt": "Agence d'architecture : projets, méthode et brief - portfolio pro pour gagner vos consultations.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Grille projets pleine largeur avec hover inversé noir/blanc",
+        "Bandeau process en trois étapes (écoute, conception, suivi)",
+        "Formulaire brief projet intégré au style minimal Pico"
+      ],
+      "stack": [
+        "Pico CSS v2",
+        "HTML statique",
+        "CSS custom"
+      ]
+    },
+    {
+      "slug": "fitness",
+      "category": "sport",
+      "title": "Pulse Fitness Metz",
+      "tagline": "Salle de sport",
+      "excerpt": "Salle de sport : cours, tarifs et essai gratuit - site énergique qui remplit les créneaux.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Hero énergique et cartes cours collectifs (HIIT, cross, yoga, cycling)",
+        "Grille tarifs avec mise en avant formule populaire",
+        "Formulaire séance découverte et avatars coachs"
+      ],
+      "stack": [
+        "DaisyUI 4",
+        "Tailwind CSS",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "photographie",
+      "category": "communication",
+      "title": "Studio Lumière Grise",
+      "tagline": "Photographe",
+      "excerpt": "Photographe mariage et corporate : portfolio, prestations et devis - studio qui inspire confiance.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Accueil split-screen et galerie masonry CSS sans JS lourd",
+        "Liste prestations numérotée style éditorial",
+        "Bloc contact minimal sur fond sombre"
+      ],
+      "stack": [
+        "Open Props",
+        "CSS Grid",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "association",
+      "category": "services",
+      "title": "Solidarités Metz Métropole",
+      "tagline": "Association",
+      "excerpt": "Association et ESS : dons, bénévolat et projets - vitrine mobilisatrice pour le Grand Est.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Parcours dons et objectifs de campagne pour mobiliser",
+        "Bandeau d'actions et projets porteurs de sens",
+        "Formulaire bénévoles pour transformer l'intérêt en engagement concret"
+      ],
+      "stack": [
+        "Bulma",
+        "Swiper",
+        "AOS"
+      ]
+    },
+    {
+      "slug": "education",
+      "category": "formation",
+      "title": "Institut Mercure",
+      "tagline": "Formation pro",
+      "excerpt": "Centre de formation : parcours, inscriptions et alternance - rassurez apprenants et entreprises.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Vue d'ensemble des parcours et niveaux pour rassurer les futurs apprenants",
+        "Parcours d'inscription ou de pré-inscription clair et rassurant",
+        "Visuels pédagogiques prêts à être remplacés par vos campus et salles"
+      ],
+      "stack": [
+        "Tailwind CSS",
+        "GLightbox",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "services",
+      "category": "services",
+      "title": "Proprio Facility",
+      "tagline": "Facility & conciergerie",
+      "excerpt": "Facility et conciergerie : offres illustrées, devis et FAQ - pour immeubles tertiaires en Lorraine.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Indicateur de lecture pour guider le visiteur sur les pages longues",
+        "Grille d'offres illustrée pour valoriser vos prestations au premier coup d'œil",
+        "FAQ et formulaire de demande de devis déjà structurés"
+      ],
+      "stack": [
+        "Tailwind CSS",
+        "GLightbox",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "etablissement",
+      "category": "hotel",
+      "title": "Hôtel Stanislas Collection",
+      "tagline": "Hôtellerie",
+      "excerpt": "Hôtel 4 étoiles : chambres, spa et séminaires - réservation visible, design hôtellerie premium.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Présentation des gammes de chambres et de suites comme sur un site grand hôtel",
+        "Mise en avant spa, séminaires et événements pour diversifier les réservations",
+        "Bouton réservation / contact visible tout au long du parcours"
+      ],
+      "stack": [
+        "Pico CSS v2",
+        "GLightbox",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "technologie",
+      "category": "tech",
+      "title": "Synapse Lorraine",
+      "tagline": "Site produit B2B",
+      "excerpt": "Site éditeur logiciel : hero, preuves sociales, FAQ et formulaire démo - base crédible pour SaaS, API ou ESN en Grand Est.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Navigation complète façon site produit : offres, preuves, FAQ, prise de contact",
+        "Bloc d'accroche fort et boutons d'action pour pousser vers une démo ou un audit",
+        "Galerie visuelle prête à accueillir vos captures d'écran et témoignages clients",
+        "Formulaire de contact déjà mis en page (branchement e-mail ou outil sur devis)"
+      ],
+      "stack": [
+        "Bulma",
+        "AOS",
+        "Swiper",
+        "GLightbox",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "btp",
+      "category": "artisanat",
+      "title": "Chantiers Est Construction",
+      "tagline": "Entreprise generale BTP",
+      "excerpt": "BTP a Nancy : renovation, extension et ravalement - devis clair, suivi photo chaque semaine.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Hero plein cadre chantier + appel et devis visibles",
+        "Realisations avant/apres et methodes de suivi",
+        "Formulaire devis chantier pret a brancher"
+      ],
+      "stack": [
+        "Bootstrap 5",
+        "HTML statique",
+        "Kit Movento"
+      ]
+    },
+    {
+      "slug": "communication",
+      "category": "communication",
+      "title": "Studio Signal",
+      "tagline": "Agence de communication",
+      "excerpt": "Agence com a Metz : identite, site et campagnes locales - brief court, propositions nettes.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Hero split typo geante facon agence premium",
+        "Cases locales et offres starter / vitrine / campagne",
+        "Formulaire brief en quelques lignes"
+      ],
+      "stack": [
+        "Bootstrap 5",
+        "HTML statique",
+        "Kit Movento"
+      ]
+    },
+    {
+      "slug": "transport",
+      "category": "mobilite",
+      "title": "Navette Orne & Moselle",
+      "tagline": "VTC & navettes",
+      "excerpt": "VTC Metz-Thionville et aeroport : prix affiche, chauffeur local, reservation simple.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Hero flotte cinematic + CTA appeler / reserver",
+        "Zones, tarifs indicatifs et courses pro",
+        "Centrale joignable 7j/7"
+      ],
+      "stack": [
+        "Bootstrap 5",
+        "HTML statique",
+        "Kit Movento"
+      ]
+    },
+    {
+      "slug": "boulangerie",
+      "category": "hcr",
+      "title": "Maison Lemaire",
+      "tagline": "Boulangerie & fournil",
+      "excerpt": "Boulangerie a Nancy : pains au levain, viennoiseries et commande simple - modele HCR local.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Carte pains et patisseries avec prix visibles",
+        "Commande / retrait au fournil sans friction",
+        "Ambiance artisanale claire sur telephone"
+      ],
+      "stack": [
+        "Bootstrap 5",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "artisan",
+      "category": "artisanat",
+      "title": "Clanche & Cuivre",
+      "tagline": "Plomberie urgence",
+      "excerpt": "Plombier a Metz : depannage 24/7, devis rapide et zones d intervention claires.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "CTA appel et devis toujours visibles",
+        "Services depannage, SDB, chauffage",
+        "Zones Metz et alentours explicites"
+      ],
+      "stack": [
+        "Bootstrap 5",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "fleuriste",
+      "category": "retail",
+      "title": "Atelier Corolle",
+      "tagline": "Fleuriste & compositions",
+      "excerpt": "Fleuriste a Strasbourg : bouquets de saison, mariage et livraison quartier.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Collections et prix a partir de",
+        "Parcours mariage dedie",
+        "Livraison et retrait atelier"
+      ],
+      "stack": [
+        "Bootstrap 5",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "caviste",
+      "category": "retail",
+      "title": "Cave de la Gare",
+      "tagline": "Cave & conseils",
+      "excerpt": "Caviste a Thionville : selection soignee, conseils et panier demo.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Fiches vins lisibles",
+        "Ambiance cave premium sans usine",
+        "Conseil et degustation mis en avant"
+      ],
+      "stack": [
+        "Bootstrap 5",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "osteo",
+      "category": "sante",
+      "title": "Cabinet des Ponts",
+      "tagline": "Osteopathie",
+      "excerpt": "Osteopathe a Metz : creneaux visibles, tarifs clairs, prise de RDV simple.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Creneaux et demande de RDV en un geste",
+        "Tarifs et motifs de consultation explicites",
+        "Cabinet rassurant, facilement accessible"
+      ],
+      "stack": [
+        "Bootstrap 5",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "chocolaterie",
+      "category": "hcr",
+      "title": "Maison Mirabelle",
+      "tagline": "Chocolaterie artisanale",
+      "excerpt": "Chocolaterie à Metz : tablettes, bonbons et cadeaux - a goûter avant de remplir le cornet.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Hero boutique avec commande simple",
+        "Selection produits et prix visibles",
+        "Atelier et contact locaux"
+      ],
+      "stack": [
+        "Bootstrap 5",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "traiteur",
+      "category": "hcr",
+      "title": "Table & Cornet",
+      "tagline": "Traiteur & événements",
+      "excerpt": "Traiteur a Nancy : buffets, cocktails et mariages - devis clair, sans faire le nareux.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Menus et formules lisibles",
+        "Parcours événements dedie",
+        "Demande de devis en un geste"
+      ],
+      "stack": [
+        "Bootstrap 5",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "coiffure",
+      "category": "beaute",
+      "title": "Salon Rivage",
+      "tagline": "Coiffure & soins",
+      "excerpt": "Salon a Thionville : coupe, couleur et RDV simple - ambiance magazine, conseils sinceres.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Galerie looks et soins",
+        "Prise de RDV rapide",
+        "Avis clients mis en avant"
+      ],
+      "stack": [
+        "Bootstrap 5",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "kine",
+      "category": "sante",
+      "title": "Kinesia Metz",
+      "tagline": "Kinesitherapie",
+      "excerpt": "Cabinet de kinesitherapie a Metz : creneaux visibles, tarifs clairs, RDV sans friction.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Creneaux et demande de RDV",
+        "Soins et tarifs explicites",
+        "Cabinet rassurant, facile d'accès"
+      ],
+      "stack": [
+        "Bootstrap 5",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "banque",
+      "category": "finance",
+      "title": "Banque des Ponts",
+      "tagline": "Banque locale",
+      "excerpt": "Banque a Metz : un conseiller en face a face pour comptes, credits et projets pros.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Parcours particuliers et pros",
+        "Prise de RDV agence",
+        "Messages concrets sans jargon"
+      ],
+      "stack": [
+        "Bootstrap 5",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "assurance",
+      "category": "finance",
+      "title": "Couverture Est",
+      "tagline": "Assurance & conseil",
+      "excerpt": "Courtier a Strasbourg : auto, habitation, sante, pro - on compare, tu choisis.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Devis rapide",
+        "Offres particuliers et entreprises",
+        "Agence et contact clairs"
+      ],
+      "stack": [
+        "Bootstrap 5",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "logistique",
+      "category": "industrie",
+      "title": "Flux Lorraine",
+      "tagline": "Logistique B2B",
+      "excerpt": "Logistique a Epinal : stockage, picking et livraison Grand Est - un contact ops.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Services entrepot lisibles",
+        "Zones de livraison",
+        "Demande de devis B2B"
+      ],
+      "stack": [
+        "Bootstrap 5",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "promoteur",
+      "category": "immobilier",
+      "title": "Habitat Horizon",
+      "tagline": "Promoteur immobilier",
+      "excerpt": "Promoteur a Nancy : programmes neufs, plans lisibles, visite sans pression.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Cartes programmes",
+        "Accompagnement acheteur",
+        "Demande de visite"
+      ],
+      "stack": [
+        "Bootstrap 5",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "notaire",
+      "category": "juridique",
+      "title": "Etude Deschamps",
+      "tagline": "Etude notariale",
+      "excerpt": "Notaire a Metz : immobilier, famille, entreprise - actes clairs, echanges humains.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Domaines d'intervention",
+        "Équipe stable",
+        "Prise de RDV simple"
+      ],
+      "stack": [
+        "Bootstrap 5",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "yoga",
+      "category": "sport",
+      "title": "Studio Souffle",
+      "tagline": "Yoga & bien-etre",
+      "excerpt": "Studio de yoga a Metz : hatha, vinyasa, yin - essai simple, ambiance sans jugement.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Cours et planning",
+        "Essai en un clic",
+        "Ambiance studio accueillante"
+      ],
+      "stack": [
+        "Bootstrap 5",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "electricien",
+      "category": "artisanat",
+      "title": "Volt & Clanche",
+      "tagline": "Electricien urgence",
+      "excerpt": "Electricien a Metz : depannage 24/7, devis clair, zones d'intervention explicites.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "CTA appel et devis toujours visibles",
+        "Services depannage et normes",
+        "Zones Metz et alentours"
+      ],
+      "stack": [
+        "Bootstrap 5",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "gites",
+      "category": "hotel",
+      "title": "Les Lucioles",
+      "tagline": "Gites Vosges",
+      "excerpt": "Gites dans les Vosges : chalets et maisons - reservation simple, accueil chaleureux.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Hebergements avec photos",
+        "Idees sejours",
+        "Reservation et contact directs"
+      ],
+      "stack": [
+        "Bootstrap 5",
+        "HTML statique"
+      ]
+    },
+    {
+      "slug": "saas-landing",
+      "category": "tech",
+      "title": "FlowMetrics",
+      "tagline": "Landing SaaS & conversion",
+      "excerpt": "Landing produit : hero orienté bénéfice, features avant/après, pricing avec effet de contraste et tableau comparatif stratégique.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Section pricing avec plan recommandé et ancre haute pour guider le choix",
+        "Features en contraste avant/après - le produit devient désirable sans changer le code",
+        "Tableau comparatif où vous contrôlez les critères qui comptent",
+        "Hero et CTA calibrés pour la conversion fondateur / early-stage"
+      ],
+      "stack": [
+        "Tailwind CSS",
+        "HTML statique",
+        "CSS custom"
+      ]
+    },
+    {
+      "slug": "saas-onboarding",
+      "category": "tech",
+      "title": "TalentLoop",
+      "tagline": "Onboarding produit",
+      "excerpt": "Parcours onboarding RH en 4 étapes : barre de progression, copy orienté valeur et chemin balisé vers le aha moment.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Écran unique = une intention claire (réduction de l'effort cognitif)",
+        "Copy qui explique pourquoi chaque étape rapproche de la valeur",
+        "Barre de progression et fil d'Ariane pour limiter l'abandon",
+        "Preview du résultat final pour ancrer le aha moment"
+      ],
+      "stack": [
+        "Tailwind CSS",
+        "HTML statique",
+        "CSS custom"
+      ]
+    },
+    {
+      "slug": "saas-dashboard",
+      "category": "tech",
+      "title": "MetricPulse",
+      "tagline": "Dashboard & analytics",
+      "excerpt": "Dashboard produit : sidebar regroupée par intention, KPIs activation et funnel onboarding lisible en un coup d'œil.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Navigation latérale structurée par intention, pas par feature brute",
+        "KPIs activation, time-to-value et churn en cartes comparables",
+        "Funnel onboarding visualisé pour repérer les fuites du parcours",
+        "Tableau d'événements récents pour le suivi opérationnel"
+      ],
+      "stack": [
+        "Tailwind CSS",
+        "HTML statique",
+        "CSS custom"
+      ]
+    },
+    {
+      "slug": "saas-empty",
+      "category": "tech",
+      "title": "QueryBase",
+      "tagline": "Empty states & recherche",
+      "excerpt": "Recherche sans résultat : best-sellers alternatifs, vote roadmap et correcteur d'intention - zéro impasse pour l'utilisateur.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Suggestions de features populaires quand le résultat exact manque",
+        "Bouton « votez pour cette feature » - échec transformé en signal produit",
+        "Correcteur d'intention (synonymes, fautes de frappe)",
+        "États vides orientés action, jamais un mur blanc"
+      ],
+      "stack": [
+        "Tailwind CSS",
+        "HTML statique",
+        "CSS custom"
+      ]
+    },
+    {
+      "slug": "saas-notifications",
+      "category": "tech",
+      "title": "PingFlow",
+      "tagline": "Notifications in-app",
+      "excerpt": "Centre de notifications : hiérarchie claire, actions requises mises en avant et préférences granulaires anti-spam.",
+      "stripe_payment_link_url": "",
+      "features": [
+        "Filtres par type (produit, équipe, action requise)",
+        "Notifications actionnables avec CTA primaire et secondaire",
+        "Niveaux d'urgence visuels sans surcharger l'interface",
+        "Bloc préférences pour respecter le consentement utilisateur"
+      ],
+      "stack": [
+        "Tailwind CSS",
+        "HTML statique",
+        "CSS custom"
+      ]
+    }
+  ]
+}

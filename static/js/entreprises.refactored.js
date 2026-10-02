@@ -3950,56 +3950,199 @@
     }
 
     /**
-     * Active / desactive l'onglet Maquettes selon presence d'un rapport.
-     * @param {boolean} hasReport
+     * Garde l'onglet Maquettes toujours accessible (echantillons DanielCraft).
+     * @param {boolean} _hasReport - ignore (compat anciens appels)
      */
-    function updateGeminiMockupsTabGate(hasReport) {
+    function updateGeminiMockupsTabGate(_hasReport) {
         const btn = document.querySelector('.tab-btn[data-tab="gemini-mockups"]');
         if (!btn) return;
-        const ok = !!hasReport;
-        btn.classList.toggle('is-disabled-gate', !ok);
-        btn.title = ok
-            ? 'Maquettes Gemini du site modernise'
-            : 'Disponible apres un rapport Gemini';
-        btn.setAttribute('aria-disabled', ok ? 'false' : 'true');
+        btn.classList.remove('is-disabled-gate');
+        btn.title = 'Echantillons DanielCraft + generation IA';
+        btn.setAttribute('aria-disabled', 'false');
     }
 
     /**
-     * Affiche le bundle maquettes Gemini.
+     * Carte Material pour un echantillon DanielCraft.
+     * @param {Object} item
+     * @param {boolean} [featured=false]
+     * @returns {string}
+     */
+    function renderEchantillonCard(item, featured) {
+        const escape = (txt) => (Formatters && Formatters.escapeHtml ? Formatters.escapeHtml(String(txt || '')) : String(txt || ''));
+        if (!item || !item.slug) return '';
+        const img = escape(item.screenshot_url || '');
+        const title = escape(item.title || item.slug);
+        const tagline = escape(item.tagline || '');
+        const excerpt = escape(item.excerpt || '');
+        const demo = escape(item.demo_url || '');
+        const fiche = escape(item.fiche_url || '');
+        const category = escape(item.category || '');
+        const shots = (item.screenshots && typeof item.screenshots === 'object') ? item.screenshots : {};
+        const deviceChips = ['desktop', 'tablet', 'mobile']
+            .filter((d) => shots[d])
+            .map((d) => `<a class="gemini-chip echantillon-device-chip" href="${escape(shots[d])}" target="_blank" rel="noopener">${escape(d)}</a>`)
+            .join('');
+        const featClass = featured ? ' echantillon-card--featured md-elevated' : '';
+        const badge = featured
+            ? '<span class="gemini-chip gemini-chip--refonte echantillon-reco-badge">Recommandee</span>'
+            : (category ? `<span class="gemini-chip echantillon-cat-chip">${category}</span>` : '');
+        return `<article class="echantillon-card md-surface${featClass}">
+            <a class="echantillon-card-media" href="${demo || fiche || img}" target="_blank" rel="noopener" title="Ouvrir la demo">
+                ${img ? `<img src="${img}" alt="${title}" loading="lazy" />` : '<div class="echantillon-card-placeholder"><i class="fas fa-image"></i><span>Pas de screenshot</span></div>'}
+                ${badge ? `<div class="echantillon-card-overlay">${badge}</div>` : ''}
+            </a>
+            <div class="echantillon-card-body">
+                <h4 class="echantillon-card-title">${title}</h4>
+                ${tagline ? `<p class="echantillon-card-tagline">${tagline}</p>` : ''}
+                ${excerpt ? `<p class="echantillon-card-excerpt">${excerpt}</p>` : ''}
+                <div class="echantillon-card-actions">
+                    ${demo ? `<a class="btn btn-primary btn-small" href="${demo}" target="_blank" rel="noopener"><i class="fas fa-external-link-alt"></i> Demo</a>` : ''}
+                    ${fiche ? `<a class="btn btn-outline btn-small" href="${fiche}" target="_blank" rel="noopener"><i class="fas fa-info-circle"></i> Fiche</a>` : ''}
+                </div>
+                ${deviceChips ? `<div class="echantillon-card-shots">${deviceChips}</div>` : ''}
+            </div>
+        </article>`;
+    }
+
+    /**
+     * Affiche les echantillons DanielCraft lies au secteur (layout Material).
+     * @param {Object} data
+     */
+    function renderMaquettesEchantillons(data) {
+        const container = document.getElementById('maquettes-echantillons-content');
+        if (!container) return;
+        const escape = (txt) => (Formatters && Formatters.escapeHtml ? Formatters.escapeHtml(String(txt || '')) : String(txt || ''));
+        if (!data || !data.success) {
+            container.innerHTML = `
+                <div class="gemini-report-empty">
+                    <p>Impossible de charger les echantillons</p>
+                    <span>Reessaie avec Actualiser, ou verifie le catalogue local.</span>
+                </div>`;
+            return;
+        }
+        const secteur = escape(data.secteur_label || data.secteur || 'Secteur inconnu');
+        const primary = data.primary;
+        const related = Array.isArray(data.related) ? data.related : [];
+        const catalog = Array.isArray(data.catalog) ? data.catalog : [];
+        const ready = Number(data.screenshots_ready || 0);
+        const total = Number(data.catalog_count || 0);
+
+        let html = `<div class="maquettes-summary md-surface">
+            <div class="maquettes-summary-main">
+                <span class="maquettes-summary-label">Secteur</span>
+                <span class="echantillon-secteur-pill">${secteur}</span>
+                ${data.matched_slug ? `<span class="maquettes-summary-slug">slug <code>${escape(data.matched_slug)}</code></span>` : ''}
+            </div>
+            <div class="maquettes-summary-meta" title="Screenshots locaux disponibles">
+                <i class="fas fa-images"></i> ${ready}/${total}
+            </div>
+        </div>`;
+
+        if (primary) {
+            html += `<section class="maquettes-section">
+                <div class="maquettes-section-head">
+                    <h4 class="maquettes-section-title"><i class="fas fa-star"></i> Recommandee pour cette fiche</h4>
+                </div>
+                <div class="echantillons-grid echantillons-grid--featured">${renderEchantillonCard(primary, true)}</div>
+            </section>`;
+        } else {
+            html += `<div class="gemini-report-empty">
+                <p>Pas d'echantillon exact pour ce secteur</p>
+                <span>Parcours le catalogue ci-dessous pour proposer une vitrine proche.</span>
+            </div>`;
+        }
+
+        if (related.length) {
+            html += `<section class="maquettes-section">
+                <div class="maquettes-section-head">
+                    <h4 class="maquettes-section-title"><i class="fas fa-th-large"></i> Meme categorie</h4>
+                    <span class="maquettes-section-count">${related.length}</span>
+                </div>
+                <div class="echantillons-grid">${related.map((it) => renderEchantillonCard(it, false)).join('')}</div>
+            </section>`;
+        }
+
+        if (catalog.length) {
+            html += `<section class="maquettes-section">
+                <details class="maquettes-catalog-fold" ${primary ? '' : 'open'}>
+                    <summary>
+                        <span><i class="fas fa-layer-group"></i> Tout le catalogue DanielCraft</span>
+                        <span class="maquettes-section-count">${catalog.length}</span>
+                    </summary>
+                    <div class="echantillons-grid echantillons-grid--catalog">${catalog.map((it) => renderEchantillonCard(it, false)).join('')}</div>
+                </details>
+            </section>`;
+        }
+        container.innerHTML = html;
+    }
+
+    /**
+     * Charge les echantillons DanielCraft pour la fiche.
+     * @param {number} entrepriseId
+     */
+    async function loadMaquettesEchantillons(entrepriseId) {
+        const container = document.getElementById('maquettes-echantillons-content');
+        if (!container) return;
+        container.innerHTML = '<p class="loading">Chargement des echantillons DanielCraft…</p>';
+        try {
+            const res = await fetch(`/api/entreprise/${entrepriseId}/maquettes-echantillons`, { credentials: 'same-origin' });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+            renderMaquettesEchantillons(data);
+        } catch (e) {
+            console.error('loadMaquettesEchantillons:', e);
+            container.innerHTML = '<p class="empty-state">Impossible de charger les echantillons.</p>';
+        }
+    }
+
+    /**
+     * Affiche le bundle maquettes Gemini (cartes Material).
      * @param {Object} data
      */
     function renderGeminiMockups(data) {
         const container = document.getElementById('gemini-mockups-content');
         if (!container) return;
         const escape = (txt) => (Formatters && Formatters.escapeHtml ? Formatters.escapeHtml(String(txt || '')) : String(txt || ''));
-        if (!data || !data.has_report) {
+        const startBtn = document.getElementById('gemini-mockups-start-btn');
+        const hasReport = !!(data && data.has_report);
+        if (startBtn) {
+            startBtn.disabled = !hasReport;
+            startBtn.title = hasReport
+                ? 'Genere desktop + mobile a partir du rapport'
+                : 'Lance d\'abord le rapport Gemini';
+        }
+        if (!hasReport) {
             container.innerHTML = `
-                <div class="gemini-report-empty">
-                    <p>Maquettes indisponibles</p>
-                    <span>Lance d'abord le rapport Gemini — ensuite tu pourras generer les visuals.</span>
+                <div class="gemini-report-empty md-surface">
+                    <p><i class="fas fa-lock"></i> Generation IA pas encore dispo</p>
+                    <span>Lance d'abord le rapport Gemini, ensuite tu pourras generer des maquettes image.</span>
                 </div>`;
             return;
         }
         const by = (data.by_device && typeof data.by_device === 'object') ? data.by_device : {};
-        const devices = ['desktop', 'mobile', 'tablet'];
+        const devices = [
+            { key: 'desktop', label: 'Desktop', icon: 'fa-desktop' },
+            { key: 'tablet', label: 'Tablet', icon: 'fa-tablet-alt' },
+            { key: 'mobile', label: 'Mobile', icon: 'fa-mobile-alt' },
+        ];
         const cards = devices
-            .filter((d) => by[d] && by[d].public_url)
+            .filter((d) => by[d.key] && by[d.key].public_url)
             .map((d) => {
-                const it = by[d];
+                const it = by[d.key];
                 const url = escape(it.public_url);
-                return `<figure class="gemini-mockup-card">
-                    <a href="${url}" target="_blank" rel="noopener">
-                        <img src="${url}" alt="Maquette ${escape(d)}" loading="lazy" />
+                return `<figure class="gemini-mockup-card md-surface md-elevated">
+                    <a href="${url}" target="_blank" rel="noopener" title="Ouvrir ${escape(d.label)}">
+                        <img src="${url}" alt="Maquette ${escape(d.label)}" loading="lazy" />
                     </a>
-                    <figcaption>${escape(d)}</figcaption>
+                    <figcaption><i class="fas ${d.icon}"></i> ${escape(d.label)}</figcaption>
                 </figure>`;
             })
             .join('');
         if (!cards) {
             container.innerHTML = `
-                <div class="gemini-report-empty">
-                    <p>Pas encore de maquette</p>
-                    <span>Clique sur “Generer les maquettes” pour visualiser le site refondu.</span>
+                <div class="gemini-report-empty md-surface">
+                    <p><i class="fas fa-magic"></i> Pas encore de maquette generee</p>
+                    <span>Clique sur “Generer” pour visualiser le site refondu.</span>
                 </div>`;
             return;
         }
@@ -4007,22 +4150,23 @@
     }
 
     /**
-     * Charge les maquettes Gemini pour l'entreprise.
+     * Charge l'onglet Maquettes (echantillons + Gemini).
      * @param {number} entrepriseId
      */
     async function loadGeminiMockups(entrepriseId) {
+        updateGeminiMockupsTabGate(true);
+        loadMaquettesEchantillons(entrepriseId);
         const container = document.getElementById('gemini-mockups-content');
         if (!container) return;
-        container.innerHTML = '<p class="loading">Chargement des maquettes…</p>';
+        container.innerHTML = '<p class="loading">Chargement des maquettes IA…</p>';
         try {
             const res = await fetch(`/api/entreprise/${entrepriseId}/gemini-mockups`, { credentials: 'same-origin' });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
-            updateGeminiMockupsTabGate(!!data.has_report);
             renderGeminiMockups(data);
         } catch (e) {
             console.error('loadGeminiMockups:', e);
-            container.innerHTML = '<p class="empty-state">Impossible de charger les maquettes.</p>';
+            container.innerHTML = '<p class="empty-state">Impossible de charger les maquettes IA.</p>';
         }
     }
 
@@ -4032,7 +4176,6 @@
      */
     function triggerGeminiMockups(entrepriseId) {
         const btn = document.getElementById('gemini-mockups-start-btn');
-        const status = document.getElementById('gemini-mockups-status');
         const socket = window.wsManager && window.wsManager.socket;
         if (!socket) {
             Notifications.show('Connexion temps réel non disponible. Rechargez la page.', 'warning');
@@ -4043,11 +4186,12 @@
             btn.disabled = true;
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generation…';
         }
-        if (status) {
-            status.style.display = 'block';
-            status.textContent = 'Lancement de la generation maquettes…';
-            status.classList.remove('is-error');
-        }
+        resetGeminiMockupsLogs();
+        syncGeminiMockupsLogs({
+            logs: ['Lancement de la generation maquettes…'],
+            progress: 0,
+            message: 'Lancement…',
+        });
         socket.emit('start_gemini_mockups', { entreprise_id: Number(entrepriseId) });
     }
 
@@ -4229,6 +4373,7 @@
                 </div>
             `;
             updateGeminiMockupsTabGate(false);
+            clearAndHideGeminiReportLogs();
             return;
         }
         updateGeminiMockupsTabGate(true);
@@ -4238,19 +4383,23 @@
         const refonte = latest.refonte_recommendation || report.refonte_recommendation || '—';
         const source = latest.source || report.source || '—';
         const analyzedAt = latest.analyzed_at || report.analyzed_at || '';
-        // Reaffiche le journal de la derniere analyse (sinon on croit que rien ne s'est passe)
-        const savedLogs = Array.isArray(report.analysis_logs) ? report.analysis_logs : [];
-        const fallbackErr = report.fallback_error || latest.fallback_error || '';
-        if (savedLogs.length || fallbackErr) {
-            const status = document.getElementById('gemini-report-status');
-            if (status) status.style.display = 'block';
-            syncGeminiReportLogs({
-                logs: savedLogs.length ? savedLogs : [String(fallbackErr)],
-                progress: 100,
-                message: fallbackErr
-                    ? ('Derniere analyse - ' + String(fallbackErr).slice(0, 160))
-                    : 'Derniere analyse (journal)',
-            });
+        // Succes Gemini : on efface le journal. Sinon on le garde (heuristic / quota / erreur).
+        if (isSuccessfulGeminiReport(latest)) {
+            clearAndHideGeminiReportLogs();
+        } else {
+            const savedLogs = Array.isArray(report.analysis_logs) ? report.analysis_logs : [];
+            const fallbackErr = report.fallback_error || latest.fallback_error || '';
+            if (savedLogs.length || fallbackErr) {
+                const status = document.getElementById('gemini-report-status');
+                if (status) status.style.display = 'block';
+                syncGeminiReportLogs({
+                    logs: savedLogs.length ? savedLogs : [String(fallbackErr)],
+                    progress: 100,
+                    message: fallbackErr
+                        ? ('Derniere analyse - ' + String(fallbackErr).slice(0, 160))
+                        : 'Derniere analyse (journal)',
+                });
+            }
         }
         const works = Array.isArray(report.what_works) ? report.what_works : [];
         const wrongs = Array.isArray(report.whats_wrong) ? report.whats_wrong : [];
@@ -4463,6 +4612,125 @@
             status.style.display = 'block';
             status.classList.remove('is-error');
         }
+    }
+
+    /**
+     * Cache et vide le journal d'analyse Gemini (rapport OK).
+     */
+    function clearAndHideGeminiReportLogs() {
+        const status = document.getElementById('gemini-report-status');
+        const list = document.getElementById('gemini-report-log-list');
+        const pctEl = document.getElementById('gemini-report-log-pct');
+        if (list) list.innerHTML = '';
+        if (pctEl) pctEl.textContent = '';
+        if (status) {
+            status.style.display = 'none';
+            status.classList.remove('is-error');
+        }
+    }
+
+    /**
+     * Indique si le rapport est un vrai succes Gemini (pas heuristique / quota).
+     * @param {Object|null} latest
+     * @returns {boolean}
+     */
+    function isSuccessfulGeminiReport(latest) {
+        if (!latest) return false;
+        const report = latest.report || {};
+        const source = String(latest.source || report.source || '').toLowerCase();
+        if (source !== 'gemini') return false;
+        if (report.quota_exceeded || latest.quota_exceeded) return false;
+        if (report.fallback_error || latest.fallback_error) return false;
+        return true;
+    }
+
+    /**
+     * Scroll le journal maquettes Gemini en bas.
+     */
+    function scrollGeminiMockupsLogToBottom() {
+        const status = document.getElementById('gemini-mockups-status');
+        const list = document.getElementById('gemini-mockups-log-list');
+        if (!status) return;
+        status.scrollTop = status.scrollHeight;
+        const last = list && list.lastElementChild;
+        if (last && typeof last.scrollIntoView === 'function') {
+            try { last.scrollIntoView({ block: 'nearest', behavior: 'auto' }); } catch (_) { /* ignore */ }
+        }
+    }
+
+    /**
+     * Vide le journal maquettes et l'affiche (debut de generation).
+     */
+    function resetGeminiMockupsLogs() {
+        const status = document.getElementById('gemini-mockups-status');
+        const list = document.getElementById('gemini-mockups-log-list');
+        const pctEl = document.getElementById('gemini-mockups-log-pct');
+        if (list) list.innerHTML = '';
+        if (pctEl) pctEl.textContent = '0 %';
+        if (status) {
+            status.style.display = 'block';
+            status.classList.remove('is-error');
+        }
+    }
+
+    /**
+     * Cache et vide le journal maquettes (generation OK).
+     */
+    function clearAndHideGeminiMockupsLogs() {
+        const status = document.getElementById('gemini-mockups-status');
+        const list = document.getElementById('gemini-mockups-log-list');
+        const pctEl = document.getElementById('gemini-mockups-log-pct');
+        if (list) list.innerHTML = '';
+        if (pctEl) pctEl.textContent = '';
+        if (status) {
+            status.style.display = 'none';
+            status.classList.remove('is-error');
+        }
+    }
+
+    /**
+     * Synchronise le journal UI des maquettes avec les logs Celery.
+     * @param {Object} meta
+     */
+    function syncGeminiMockupsLogs(meta) {
+        const status = document.getElementById('gemini-mockups-status');
+        const list = document.getElementById('gemini-mockups-log-list');
+        const pctEl = document.getElementById('gemini-mockups-log-pct');
+        if (!status || !list) return;
+        status.style.display = 'block';
+        status.classList.remove('is-error');
+        const logs = (meta && Array.isArray(meta.logs)) ? meta.logs : [];
+        const escape = (txt) => (Formatters && Formatters.escapeHtml ? Formatters.escapeHtml(String(txt || '')) : String(txt || ''));
+        const existing = new Set(Array.from(list.querySelectorAll('li')).map((el) => el.getAttribute('data-msg') || ''));
+        logs.forEach((line) => {
+            const msg = String(line || '').trim();
+            if (!msg || existing.has(msg)) return;
+            existing.add(msg);
+            const li = document.createElement('li');
+            li.setAttribute('data-msg', msg);
+            const now = new Date();
+            const hh = String(now.getHours()).padStart(2, '0');
+            const mm = String(now.getMinutes()).padStart(2, '0');
+            const ss = String(now.getSeconds()).padStart(2, '0');
+            li.innerHTML = `<span class="gemini-log-time">${hh}:${mm}:${ss}</span> ${escape(msg)}`;
+            list.appendChild(li);
+        });
+        while (list.children.length > 80) {
+            list.removeChild(list.firstChild);
+        }
+        if (pctEl && meta && meta.progress != null) {
+            pctEl.textContent = `${Math.max(0, Math.min(100, Number(meta.progress) || 0))} %`;
+        }
+        if (meta && meta.message && !logs.length) {
+            const msg = String(meta.message).trim();
+            if (msg && !existing.has(msg)) {
+                const li = document.createElement('li');
+                li.setAttribute('data-msg', msg);
+                li.innerHTML = `<span class="gemini-log-time">--:--:--</span> ${escape(msg)}`;
+                list.appendChild(li);
+            }
+        }
+        scrollGeminiMockupsLogToBottom();
     }
 
     async function loadGeminiFullReport(entrepriseId) {
@@ -5041,7 +5309,7 @@
                         <button class="tab-btn" data-tab="pages">Pages (${nbPages})</button>
                         <button class="tab-btn" data-tab="scraping">Résultats scraping</button>
                         <button class="tab-btn" data-tab="gemini-report">Rapport Gemini</button>
-                        <button class="tab-btn is-disabled-gate" data-tab="gemini-mockups" title="Disponible apres un rapport Gemini" aria-disabled="true">Maquettes Gemini</button>
+                        <button class="tab-btn" data-tab="gemini-mockups" title="Echantillons DanielCraft + generation IA">Maquettes</button>
                         <button class="tab-btn" data-tab="evolution-metrics">Évolution</button>
                         <button class="tab-btn" data-tab="technique">Analyse technique</button>
                         <button class="tab-btn" data-tab="seo">Analyse SEO</button>
@@ -5226,17 +5494,48 @@
                     </div>
                     
                     <div class="tab-panel" id="tab-gemini-mockups">
-                        <div class="gemini-mockups-toolbar">
-                            <button type="button" class="btn btn-primary btn-small" id="gemini-mockups-start-btn" title="Genere desktop + mobile a partir du rapport">
-                                <i class="fas fa-magic"></i> Generer les maquettes
-                            </button>
-                            <button type="button" class="btn btn-outline btn-small" id="gemini-mockups-refresh-btn" title="Recharger">
-                                <i class="fas fa-sync-alt"></i> Actualiser
-                            </button>
-                        </div>
-                        <div id="gemini-mockups-status" class="info-screenshots-status" style="display:none;"></div>
-                        <div id="gemini-mockups-content" class="gemini-mockups-content">
-                            <p class="loading">Chargement…</p>
+                        <div class="maquettes-layout">
+                            <section class="maquettes-panel md-surface md-elevated" aria-labelledby="maquettes-echantillons-title">
+                                <header class="maquettes-panel-head">
+                                    <div class="maquettes-panel-titles">
+                                        <h3 id="maquettes-echantillons-title"><i class="fas fa-layer-group"></i> Echantillons DanielCraft</h3>
+                                        <p class="maquettes-panel-sub">Maquette secteur liee a la fiche, prete a montrer au prospect.</p>
+                                    </div>
+                                    <button type="button" class="btn btn-outline btn-small" id="maquettes-echantillons-refresh-btn" title="Recharger les echantillons">
+                                        <i class="fas fa-sync-alt"></i> Actualiser
+                                    </button>
+                                </header>
+                                <div id="maquettes-echantillons-content" class="maquettes-echantillons-content">
+                                    <p class="loading">Chargement des echantillons…</p>
+                                </div>
+                            </section>
+
+                            <section class="maquettes-panel md-surface md-elevated" aria-labelledby="maquettes-gemini-title">
+                                <header class="maquettes-panel-head">
+                                    <div class="maquettes-panel-titles">
+                                        <h3 id="maquettes-gemini-title"><i class="fas fa-magic"></i> Generation IA (Gemini)</h3>
+                                        <p class="maquettes-panel-sub">Visuals desktop / mobile du site refondu a partir du rapport.</p>
+                                    </div>
+                                    <div class="gemini-mockups-toolbar">
+                                        <button type="button" class="btn btn-primary btn-small" id="gemini-mockups-start-btn" title="Genere desktop + mobile a partir du rapport">
+                                            <i class="fas fa-magic"></i> Generer
+                                        </button>
+                                        <button type="button" class="btn btn-outline btn-small" id="gemini-mockups-refresh-btn" title="Recharger">
+                                            <i class="fas fa-sync-alt"></i>
+                                        </button>
+                                    </div>
+                                </header>
+                                <div id="gemini-mockups-status" class="gemini-report-status" style="display:none;">
+                                    <div class="gemini-report-log-head">
+                                        <strong><i class="fas fa-terminal"></i> Journal maquettes</strong>
+                                        <span id="gemini-mockups-log-pct" class="gemini-report-log-pct"></span>
+                                    </div>
+                                    <ul id="gemini-mockups-log-list" class="gemini-report-log-list"></ul>
+                                </div>
+                                <div id="gemini-mockups-content" class="gemini-mockups-content">
+                                    <p class="loading">Chargement…</p>
+                                </div>
+                            </section>
                         </div>
                     </div>
 
@@ -5719,16 +6018,20 @@
             refreshEntrepriseFromServer(eid);
             if (Number(eid) === Number(currentModalEntrepriseId)) {
                 const status = document.getElementById('gemini-report-status');
-                if (status) status.style.display = 'block';
-                const logsFromResult = Array.isArray(result.logs) ? result.logs : [];
-                const logsFromReport = (result.report && Array.isArray(result.report.analysis_logs))
-                    ? result.report.analysis_logs
-                    : [];
-                const logs = logsFromResult.length ? logsFromResult : logsFromReport;
-                if (logs.length) {
-                    syncGeminiReportLogs({ logs: logs, progress: 100, message: 'Termine' });
+                if (quotaHit || src === 'heuristic') {
+                    if (status) status.style.display = 'block';
+                    const logsFromResult = Array.isArray(result.logs) ? result.logs : [];
+                    const logsFromReport = (result.report && Array.isArray(result.report.analysis_logs))
+                        ? result.report.analysis_logs
+                        : [];
+                    const logs = logsFromResult.length ? logsFromResult : logsFromReport;
+                    if (logs.length) {
+                        syncGeminiReportLogs({ logs: logs, progress: 100, message: 'Termine' });
+                    }
+                    setGeminiReportStatus(`Rapport terminé — ${sc} (${result.source || '—'})`, false);
+                } else {
+                    clearAndHideGeminiReportLogs();
                 }
-                setGeminiReportStatus(`Rapport terminé — ${sc} (${result.source || '—'})`, false);
                 updateGeminiMockupsTabGate(true);
                 loadGeminiFullReport(eid);
             }
@@ -5736,23 +6039,26 @@
 
         s.on('gemini_mockups_started', function(data) {
             if (!data) return;
-            const status = document.getElementById('gemini-mockups-status');
-            if (status) {
-                status.style.display = 'block';
-                status.classList.remove('is-error');
-                status.textContent = data.message || 'Generation en cours…';
+            if (data.entreprise_id != null
+                && Number(data.entreprise_id) !== Number(currentModalEntrepriseId)) {
+                return;
             }
+            resetGeminiMockupsLogs();
+            syncGeminiMockupsLogs({
+                logs: [data.message || 'Generation en cours…'],
+                progress: 1,
+                message: data.message || 'Generation en cours…',
+            });
         });
 
         s.on('gemini_mockups_progress', function(data) {
             if (!data || data.entreprise_id == null) return;
             if (Number(data.entreprise_id) !== Number(currentModalEntrepriseId)) return;
-            const status = document.getElementById('gemini-mockups-status');
-            if (status) {
-                status.style.display = 'block';
-                const pct = data.progress != null ? ` (${data.progress}%)` : '';
-                status.textContent = (data.message || 'Progression…') + pct;
-            }
+            syncGeminiMockupsLogs({
+                logs: Array.isArray(data.logs) ? data.logs : [],
+                progress: data.progress,
+                message: data.message,
+            });
         });
 
         s.on('gemini_mockups_complete', function(data) {
@@ -5765,11 +6071,12 @@
             if (Number(data.entreprise_id) !== Number(currentModalEntrepriseId)) return;
             const status = document.getElementById('gemini-mockups-status');
             if (data.success === false) {
-                if (status) {
-                    status.style.display = 'block';
-                    status.classList.add('is-error');
-                    status.textContent = data.error || 'Echec generation';
-                }
+                syncGeminiMockupsLogs({
+                    logs: Array.isArray(data.logs) ? data.logs : [data.error || 'Echec generation'],
+                    progress: 100,
+                    message: data.error || 'Echec generation',
+                });
+                if (status) status.classList.add('is-error');
                 const errTxt = String(data.error || '');
                 if (/429|quota|resource.?exhausted|rate.?limit/i.test(errTxt) || data.quota_exceeded) {
                     Notifications.show(
@@ -5782,11 +6089,7 @@
                 }
                 return;
             }
-            if (status) {
-                status.style.display = 'block';
-                status.classList.remove('is-error');
-                status.textContent = 'Maquettes pretes';
-            }
+            clearAndHideGeminiMockupsLogs();
             Notifications.show('Maquettes Gemini generees', 'success', 'fa-magic');
             loadGeminiMockups(currentModalEntrepriseId);
         });
@@ -5799,10 +6102,14 @@
             }
             const status = document.getElementById('gemini-mockups-status');
             const err = (data && data.error) || 'Erreur maquettes';
-            if (status) {
-                status.style.display = 'block';
-                status.classList.add('is-error');
-                status.textContent = err;
+            if (!data || data.entreprise_id == null
+                || Number(data.entreprise_id) === Number(currentModalEntrepriseId)) {
+                syncGeminiMockupsLogs({
+                    logs: Array.isArray(data && data.logs) ? data.logs : [err],
+                    progress: 100,
+                    message: err,
+                });
+                if (status) status.classList.add('is-error');
             }
             Notifications.show(err, 'error');
         });
@@ -6415,7 +6722,6 @@
         const geminiMockupsTab = document.querySelector('.tab-btn[data-tab="gemini-mockups"]');
         if (geminiMockupsTab) {
             geminiMockupsTab.addEventListener('click', () => {
-                if (geminiMockupsTab.classList.contains('is-disabled-gate')) return;
                 if (currentModalEntrepriseId) {
                     loadGeminiMockups(currentModalEntrepriseId);
                 }
@@ -6432,6 +6738,12 @@
         if (geminiMockupsRefreshBtn) {
             geminiMockupsRefreshBtn.addEventListener('click', () => {
                 if (currentModalEntrepriseId) loadGeminiMockups(currentModalEntrepriseId);
+            });
+        }
+        const echantillonsRefreshBtn = document.getElementById('maquettes-echantillons-refresh-btn');
+        if (echantillonsRefreshBtn) {
+            echantillonsRefreshBtn.addEventListener('click', () => {
+                if (currentModalEntrepriseId) loadMaquettesEchantillons(currentModalEntrepriseId);
             });
         }
 

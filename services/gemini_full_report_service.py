@@ -175,6 +175,42 @@ def _mime_for_path(path: Path) -> str:
     return 'image/webp'
 
 
+def _compress_screenshot_bytes(
+    data: bytes,
+    *,
+    max_width: int = 1280,
+    jpeg_quality: int = 72,
+) -> Tuple[bytes, str]:
+    """
+    Redimensionne / recompresse une capture pour alleger l'appel Vision.
+
+    @param data: Octets image source
+    @param max_width: Largeur max (px)
+    @param jpeg_quality: Qualite JPEG 40-90
+    @returns: (octets, mime_type)
+    """
+    try:
+        from io import BytesIO
+        from PIL import Image
+
+        img = Image.open(BytesIO(data))
+        if img.mode not in ('RGB', 'L'):
+            img = img.convert('RGB')
+        elif img.mode == 'L':
+            img = img.convert('RGB')
+        w, h = img.size
+        if w > max_width and max_width > 0:
+            nh = max(1, int(h * (max_width / float(w))))
+            img = img.resize((max_width, nh), Image.Resampling.LANCZOS)
+        buf = BytesIO()
+        q = max(40, min(90, int(jpeg_quality)))
+        img.save(buf, format='JPEG', quality=q, optimize=True)
+        return buf.getvalue(), 'image/jpeg'
+    except Exception as exc:
+        logger.debug('Compression screenshot ignoree: %s', exc)
+        return data, 'image/webp'
+
+
 def _as_list(value: Any) -> List[str]:
     """Normalise une valeur en liste de strings courtes."""
     if isinstance(value, list):
@@ -622,8 +658,32 @@ def ensure_entreprise_screenshots(
     return latest
 
 
-def _load_screenshot_images(latest: Dict[str, Any], max_images: int = 3) -> List[Dict[str, Any]]:
-    """Charge jusqu'a max_images fichiers (desktop puis mobile puis tablette) pour Gemini."""
+def _load_screenshot_images(latest: Dict[str, Any], max_images: Optional[int] = None) -> List[Dict[str, Any]]:
+    """
+    Charge jusqu'a max_images fichiers (desktop puis mobile puis tablette) pour Gemini.
+
+    Compresse / redimensionne par defaut pour limiter les 503 (requetes plus legeres).
+    Variables : GEMINI_VISION_MAX_IMAGES (defaut 1), GEMINI_VISION_MAX_WIDTH (1280),
+    GEMINI_VISION_JPEG_QUALITY (72), GEMINI_VISION_COMPRESS (1/0).
+    """
+    if max_images is None:
+        try:
+            max_images = int(os.environ.get('GEMINI_VISION_MAX_IMAGES') or 1)
+        except (TypeError, ValueError):
+            max_images = 1
+    max_images = max(1, min(3, int(max_images)))
+    try:
+        max_width = int(os.environ.get('GEMINI_VISION_MAX_WIDTH') or 1280)
+    except (TypeError, ValueError):
+        max_width = 1280
+    try:
+        jpeg_q = int(os.environ.get('GEMINI_VISION_JPEG_QUALITY') or 72)
+    except (TypeError, ValueError):
+        jpeg_q = 72
+    do_compress = str(os.environ.get('GEMINI_VISION_COMPRESS') or '1').strip().lower() not in (
+        '0', 'false', 'no', 'off',
+    )
+
     images: List[Dict[str, Any]] = []
     for device in ('desktop', 'mobile', 'tablet'):
         if len(images) >= max_images:
@@ -637,12 +697,20 @@ def _load_screenshot_images(latest: Dict[str, Any], max_images: int = 3) -> List
             continue
         try:
             data = path.read_bytes()
-            # Limite taille ~4 Mo pour rester raisonnable
+            if len(data) > 4_500_000 and not do_compress:
+                continue
+            mime = _mime_for_path(path)
+            if do_compress:
+                data, mime = _compress_screenshot_bytes(
+                    data,
+                    max_width=max_width,
+                    jpeg_quality=jpeg_q,
+                )
             if len(data) > 4_500_000:
                 continue
             images.append({
                 'bytes': data,
-                'mime_type': _mime_for_path(path),
+                'mime_type': mime,
                 'device': device,
             })
         except Exception as exc:
@@ -779,8 +847,8 @@ def build_full_report_for_entreprise(
     _emit(f'Contexte pret (~{len(context_text)} caracteres)', 52)
 
     _emit('Chargement images screenshots pour Vision…', 55)
-    # Desktop + mobile suffisent pour UX/UI ; 3 images + url_context ralenti trop
-    images = _load_screenshot_images(latest, max_images=2)
+    # 1 image (desktop) + compression : moins de 503 qu'avec 2-3 captures brutes
+    images = _load_screenshot_images(latest)
     for img in images:
         _emit(f'  · Image {img.get("device")}: {len(img.get("bytes") or b"")} octets', 56)
     if not images:

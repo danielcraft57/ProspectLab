@@ -5,7 +5,9 @@ Pattern :
 - bascule sequentielle immediate de compte en compte (429/503 → suivant, 0s)
 - 429 RPM → saute au compte suivant (pas de blacklist)
 - 429 RPD reel (retry long) → cle ignoree jusqu'au reset Pacific
-- 503 / high demand → saute au compte suivant (pas d'attente 60s)
+- 503 / high demand → fallback modele sur la meme cle (GEMINI_FALLBACK_MODELS),
+  puis cle suivante ; apres N cles 503 d'affilee (GEMINI_503_MAX_CONSECUTIVE_KEYS),
+  stop precoce + pause courte au lieu de bruler tout le pool
 - 401/403 invalide → cle ignoree jusqu'au redemarrage process
 - toutes en quota → pause GEMINI_QUOTA_RETRY_MS puis nouvel essai
 """
@@ -320,11 +322,41 @@ def get_gemini_api_keys() -> List[str]:
     return keys
 
 
+def gemini_fallback_models(primary: Optional[str] = None) -> List[str]:
+    """
+    Chaine de modeles a essayer (primaire puis fallbacks) en cas de 503.
+
+    Ordre : modele demande, puis GEMINI_FALLBACK_MODELS
+    (defaut ``gemini-flash-latest,gemini-3.5-flash``).
+
+    @param primary: Modele principal (sinon config)
+    @returns: Liste ordonnee sans doublons
+    """
+    cfg_model = (
+        primary
+        or os.environ.get('GEMINI_DESIGN_MODEL')
+        or os.environ.get('GEMINI_MODEL')
+        or 'gemini-3.8-flash'
+    )
+    models: List[str] = []
+
+    def _push(value: Optional[str]) -> None:
+        name = (value or '').strip()
+        if name and name not in models:
+            models.append(name)
+
+    _push(cfg_model)
+    raw = (os.environ.get('GEMINI_FALLBACK_MODELS') or 'gemini-flash-latest,gemini-3.5-flash').strip()
+    for part in raw.replace(';', ',').replace('\n', ',').split(','):
+        _push(part)
+    return models
+
+
 def gemini_config() -> Dict[str, Any]:
     """
     Lit la configuration Gemini depuis l'environnement.
 
-    @returns: Dict model / quota_retry_ms / quota_retry_rounds
+    @returns: Dict model / quota_retry_ms / quota_retry_rounds / fallbacks / concurrent
     """
     return {
         'model': (
@@ -335,8 +367,13 @@ def gemini_config() -> Dict[str, Any]:
         # Pause seulement quand TOUS les comptes ont rate (pas entre chaque cle)
         'quota_retry_ms': int(os.environ.get('GEMINI_QUOTA_RETRY_MS') or 35_000),
         'quota_retry_rounds': int(os.environ.get('GEMINI_QUOTA_RETRY_ROUNDS') or 3),
-        # 1 seul Vision a la fois : sinon les comptes free-tier se crament mutuellement
-        'max_concurrent_full_reports': int(os.environ.get('GEMINI_FULL_REPORT_MAX_CONCURRENT') or 1),
+        # Pause courte sur pure surcharge 503 (defaut 25s, plus 90s)
+        'transient_retry_ms': int(os.environ.get('GEMINI_TRANSIENT_RETRY_MS') or 25_000),
+        # Apres N cles 503 d'affilee, stop precoce du tour
+        'max_consecutive_503_keys': int(os.environ.get('GEMINI_503_MAX_CONSECUTIVE_KEYS') or 2),
+        # 2 Vision en parallele : accelere sans cramer autant qu'avec 5
+        'max_concurrent_full_reports': int(os.environ.get('GEMINI_FULL_REPORT_MAX_CONCURRENT') or 2),
+        'fallback_models': gemini_fallback_models(),
     }
 
 
@@ -615,17 +652,22 @@ def _try_all_keys(
     """
     Bascule immediate de compte en compte (pas de parallele, pas d'attente 60s).
 
-    Une requete Vision = 1 cle a la fois. Si 429/503, on passe DIRECTEMENT
-    a la cle suivante. Le parallele brulait 5x le quota free-tier.
+    Une requete Vision = 1 cle a la fois. Sur 503 : essaie les modeles
+    de repli sur la meme cle, puis passe a la suivante. Apres N cles
+    503 d'affilee, stop precoce pour eviter de bruler tout le pool.
 
     @param api_keys: Cles configurees
-    @param model: Modele Gemini
+    @param model: Modele Gemini primaire
     @param body: Corps generateContent
     @param timeout_ms: Timeout HTTP par cle
     @param progress_cb: Callback journal UI (message, pct)
-    @returns: Dict avec content ou error / saw_429 / saw_transient / all_keys_exhausted
+    @returns: Dict avec content ou error / saw_429 / saw_transient / early_stop_503
     """
     global _preferred_key_index
+
+    cfg = gemini_config()
+    model_chain = gemini_fallback_models(model)
+    max_consec_503 = max(1, int(cfg.get('max_consecutive_503_keys') or 2))
 
     active = _active_api_keys(api_keys)
     if not active and _rpd_exhausted_until:
@@ -655,6 +697,7 @@ def _try_all_keys(
             'saw_429': bool(rpd_n),
             'saw_transient': False,
             'all_keys_exhausted': True,
+            'early_stop_503': False,
         }
 
     # Prefere la derniere cle OK, puis tourne sur les autres
@@ -662,14 +705,15 @@ def _try_all_keys(
     order = list(range(start, n)) + list(range(0, start))
 
     logger.warning(
-        '[Gemini] rotation sequentielle: %s compte(s) actif(s) / %s, debut=%s',
+        '[Gemini] rotation sequentielle: %s compte(s) actif(s) / %s, debut=%s, modeles=%s',
         n,
         len(api_keys),
         start + 1,
+        ' → '.join(model_chain),
     )
     _notify_progress(
         progress_cb,
-        f'Rotation multi-comptes : {n} actif(s) — bascule immediate si 429/503…',
+        f'Rotation multi-comptes : {n} actif(s) — fallback modele si 503…',
         66,
     )
 
@@ -677,6 +721,8 @@ def _try_all_keys(
     saw_429 = False
     saw_transient = False
     keys_attempted = 0
+    consecutive_503 = 0
+    early_stop_503 = False
     tried_tags: List[str] = []
 
     for pos, idx in enumerate(order):
@@ -691,54 +737,100 @@ def _try_all_keys(
             min(78, 66 + pos),
         )
 
-        outcome = _call_one_key(
-            api_key=api_key,
-            tag=tag,
-            idx=idx,
-            model=model,
-            body=body,
-            timeout_ms=timeout_ms,
-        )
-        if outcome.get('saw_429'):
-            saw_429 = True
-        if outcome.get('saw_transient'):
-            saw_transient = True
-        if outcome.get('error'):
-            last_error = outcome['error']
+        key_transient_only = False
+        outcome: Dict[str, Any] = {}
 
-        if outcome.get('ok'):
-            with _keys_lock:
-                _preferred_key_index = idx
-            if pos > 0:
+        for mid, try_model in enumerate(model_chain):
+            if mid > 0:
                 logger.warning(
-                    '[Gemini] OK avec %s (apres bascule depuis un autre compte)',
+                    '[Gemini] %s — fallback modele %s (apres 503)',
                     tag,
+                    try_model,
                 )
                 _notify_progress(
                     progress_cb,
-                    f'OK avec {tag} (bascule depuis un autre compte)',
-                    80,
+                    f'{tag} — fallback modele {try_model}…',
+                    min(78, 66 + pos),
                 )
-            else:
-                logger.warning('[Gemini] OK avec %s', tag)
-                _notify_progress(progress_cb, f'OK avec {tag}', 80)
-            return {'content': outcome['content']}
 
-        # Echec → message lisible dans la fiche
+            outcome = _call_one_key(
+                api_key=api_key,
+                tag=f'{tag}/{try_model}',
+                idx=idx,
+                model=try_model,
+                body=body,
+                timeout_ms=timeout_ms,
+            )
+            if outcome.get('saw_429'):
+                saw_429 = True
+            if outcome.get('saw_transient'):
+                saw_transient = True
+            if outcome.get('error'):
+                last_error = outcome['error']
+
+            if outcome.get('ok'):
+                with _keys_lock:
+                    _preferred_key_index = idx
+                if mid > 0 or pos > 0:
+                    logger.warning(
+                        '[Gemini] OK avec %s modele=%s (bascule)',
+                        tag,
+                        try_model,
+                    )
+                    _notify_progress(
+                        progress_cb,
+                        f'OK avec {tag} ({try_model})',
+                        80,
+                    )
+                else:
+                    logger.warning('[Gemini] OK avec %s', tag)
+                    _notify_progress(progress_cb, f'OK avec {tag}', 80)
+                return {
+                    'content': outcome['content'],
+                    'model_used': try_model,
+                }
+
+            # 429 / 401 / 403 / autre : pas de fallback modele, cle suivante
+            if not outcome.get('saw_transient'):
+                key_transient_only = False
+                break
+
+            # 503 : essaie le modele suivant sur la meme cle
+            key_transient_only = True
+            if mid + 1 < len(model_chain):
+                continue
+            break
+
         if outcome.get('saw_429'):
+            consecutive_503 = 0
             why = 'RPD' if outcome.get('is_rpd') else '429'
             _notify_progress(
                 progress_cb,
                 f'{tag} — {why}, saute au compte suivant…',
                 min(78, 66 + pos),
             )
-        elif outcome.get('saw_transient'):
+        elif key_transient_only:
+            consecutive_503 += 1
             _notify_progress(
                 progress_cb,
-                f'{tag} — surcharge 503, saute au compte suivant…',
+                f'{tag} — 503 sur tous les modeles ({consecutive_503}/{max_consec_503})…',
                 min(78, 66 + pos),
             )
+            if consecutive_503 >= max_consec_503:
+                early_stop_503 = True
+                logger.warning(
+                    '[Gemini] stop precoce apres %s cle(s) 503 d\'affilee (max=%s)',
+                    consecutive_503,
+                    max_consec_503,
+                )
+                _notify_progress(
+                    progress_cb,
+                    f'Stop precoce : {consecutive_503} comptes 503 d\'affilee — pause courte…',
+                    79,
+                )
+                break
         else:
+            consecutive_503 = 0
             _notify_progress(
                 progress_cb,
                 f'{tag} — echec, saute au compte suivant…',
@@ -746,20 +838,23 @@ def _try_all_keys(
             )
 
     logger.warning(
-        '[Gemini] tous les comptes ont echoue (%s) — %s',
+        '[Gemini] fin de tour (%s comptes, early_stop_503=%s) — %s',
         keys_attempted,
+        early_stop_503,
         ', '.join(tried_tags),
     )
-    _notify_progress(
-        progress_cb,
-        f'Tous les comptes ont echoue ({keys_attempted})',
-        79,
-    )
+    if not early_stop_503:
+        _notify_progress(
+            progress_cb,
+            f'Tous les comptes ont echoue ({keys_attempted})',
+            79,
+        )
     return {
         'error': last_error or GeminiClientError('Gemini — echec inconnu'),
         'saw_429': saw_429,
         'saw_transient': saw_transient,
-        'all_keys_exhausted': True,
+        'all_keys_exhausted': not early_stop_503,
+        'early_stop_503': early_stop_503,
     }
 
 
@@ -830,30 +925,45 @@ def gemini_generate_content(
             return result['content']
 
         last_error = result.get('error')
-        # 429 RPM/RPD OU 503 high demand : pause puis nouvel essai sur les cles
+        # 429 RPM/RPD OU 503 (y compris stop precoce apres N cles) : pause puis nouvel essai
         can_wait = (
             (result.get('saw_429') or result.get('saw_transient'))
-            and result.get('all_keys_exhausted')
+            and (result.get('all_keys_exhausted') or result.get('early_stop_503'))
             and round_idx < rounds
             and cfg['quota_retry_ms'] > 0
         )
         if not can_wait:
             break
-        # Surcharge modele : pause un peu plus longue que le RPM classique
+        # Surcharge modele : pause plus courte que l'ancien 90s
         wait_ms = int(cfg['quota_retry_ms'])
         if result.get('saw_transient') and not result.get('saw_429'):
-            wait_ms = max(wait_ms, int(os.environ.get('GEMINI_TRANSIENT_RETRY_MS') or 90_000))
+            wait_ms = int(cfg.get('transient_retry_ms') or 25_000)
         secs = round(wait_ms / 1000)
         why = 'surcharge 503' if result.get('saw_transient') and not result.get('saw_429') else 'quota 429'
+        # Prochain tour : demarrer sur le 1er fallback si stop precoce 503
+        if result.get('early_stop_503') or (
+            result.get('saw_transient') and not result.get('saw_429')
+        ):
+            chain = gemini_fallback_models(resolved_model)
+            if len(chain) > 1 and chain[1] != resolved_model:
+                resolved_model = chain[1]
+                logger.warning(
+                    '[Gemini] prochain tour commence par modele fallback %s',
+                    resolved_model,
+                )
+                _notify_progress(
+                    progress_cb,
+                    f'Prochain essai sur modele {resolved_model}…',
+                    70,
+                )
         logger.warning(
-            '[Gemini] pause %ss (%s) puis nouvel essai sur les %s cles…',
+            '[Gemini] pause %ss (%s) puis nouvel essai…',
             secs,
             why,
-            len(api_keys),
         )
         _notify_progress(
             progress_cb,
-            f'Pause {secs}s ({why}) puis nouvel essai sur les {len(api_keys)} comptes…',
+            f'Pause {secs}s ({why}) puis nouvel essai…',
             70,
         )
         time.sleep(wait_ms / 1000.0)
