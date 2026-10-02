@@ -4005,7 +4005,7 @@
     }
 
     /**
-     * Affiche les echantillons DanielCraft lies au secteur (layout Material).
+     * Affiche les echantillons DanielCraft (grille alignée + scroll, style Info).
      * @param {Object} data
      */
     function renderMaquettesEchantillons(data) {
@@ -4027,6 +4027,18 @@
         const ready = Number(data.screenshots_ready || 0);
         const total = Number(data.catalog_count || 0);
 
+        // Une seule liste : reco d'abord, puis meme categorie, puis le reste sans doublons
+        const seen = new Set();
+        const cards = [];
+        const pushItem = (it, featured) => {
+            if (!it || !it.slug || seen.has(it.slug)) return;
+            seen.add(it.slug);
+            cards.push(renderEchantillonCard(it, featured));
+        };
+        pushItem(primary, true);
+        related.forEach((it) => pushItem(it, false));
+        catalog.forEach((it) => pushItem(it, false));
+
         let html = `<div class="maquettes-summary md-surface">
             <div class="maquettes-summary-main">
                 <span class="maquettes-summary-label">Secteur</span>
@@ -4038,40 +4050,15 @@
             </div>
         </div>`;
 
-        if (primary) {
-            html += `<section class="maquettes-section">
-                <div class="maquettes-section-head">
-                    <h4 class="maquettes-section-title"><i class="fas fa-star"></i> Recommandee pour cette fiche</h4>
-                </div>
-                <div class="echantillons-grid echantillons-grid--featured">${renderEchantillonCard(primary, true)}</div>
-            </section>`;
-        } else {
+        if (!cards.length) {
             html += `<div class="gemini-report-empty">
-                <p>Pas d'echantillon exact pour ce secteur</p>
-                <span>Parcours le catalogue ci-dessous pour proposer une vitrine proche.</span>
+                <p>Pas d'echantillon pour ce secteur</p>
+                <span>Verifie le catalogue DanielCraft local.</span>
             </div>`;
-        }
-
-        if (related.length) {
-            html += `<section class="maquettes-section">
-                <div class="maquettes-section-head">
-                    <h4 class="maquettes-section-title"><i class="fas fa-th-large"></i> Meme categorie</h4>
-                    <span class="maquettes-section-count">${related.length}</span>
-                </div>
-                <div class="echantillons-grid">${related.map((it) => renderEchantillonCard(it, false)).join('')}</div>
-            </section>`;
-        }
-
-        if (catalog.length) {
-            html += `<section class="maquettes-section">
-                <details class="maquettes-catalog-fold" ${primary ? '' : 'open'}>
-                    <summary>
-                        <span><i class="fas fa-layer-group"></i> Tout le catalogue DanielCraft</span>
-                        <span class="maquettes-section-count">${catalog.length}</span>
-                    </summary>
-                    <div class="echantillons-grid echantillons-grid--catalog">${catalog.map((it) => renderEchantillonCard(it, false)).join('')}</div>
-                </details>
-            </section>`;
+        } else {
+            html += `<div class="echantillons-scroll">
+                <div class="echantillons-grid">${cards.join('')}</div>
+            </div>`;
         }
         container.innerHTML = html;
     }

@@ -91,6 +91,23 @@ Write-Host ""
 $deployDir = Join-Path $PROJECT_DIR "deploy"
 if ($UseRemoteGitClone) {
     Write-Host "[2/9] Reset complet + clone git ($RemoteGitBranch) sur le serveur..." -ForegroundColor Yellow
+    # Preserve assets non versionnes (screenshots, landing_variants, .env)
+    Write-Host "   Preservation des assets locaux (screenshots / generated / .env)..." -ForegroundColor Gray
+    $preserveCmd = @"
+set -e
+PRESERVE=/tmp/prospectlab_preserve_assets
+rm -rf "`$PRESERVE"
+mkdir -p "`$PRESERVE"
+if [ -d "$RemotePath/static/screenshots" ]; then cp -a "$RemotePath/static/screenshots" "`$PRESERVE/screenshots"; fi
+if [ -d "$RemotePath/static/generated" ]; then cp -a "$RemotePath/static/generated" "`$PRESERVE/generated"; fi
+if [ -f "$RemotePath/.env" ]; then cp -a "$RemotePath/.env" "`$PRESERVE/.env"; fi
+if [ -d "$RemotePath/env" ]; then
+  echo "KEEP_ENV=1" > "`$PRESERVE/keep_env.flag"
+  mv "$RemotePath/env" "`$PRESERVE/env"
+fi
+"@
+    ssh "$User@$Server" $preserveCmd | Out-Null
+
     $resetOutput = ssh "$User@$Server" "sudo rm -rf $RemotePath; sudo mkdir -p $RemotePath; sudo chown -R $User`:$User $RemotePath" 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Host "❌ Impossible de réinitialiser le dossier distant $RemotePath" -ForegroundColor Red
@@ -109,7 +126,23 @@ if ($UseRemoteGitClone) {
         Write-Host ($cloneOutput | Out-String) -ForegroundColor Gray
         exit 1
     }
-    Write-Host "✅ Clone $RemoteGitBranch effectué depuis $RepoUrl" -ForegroundColor Green
+
+    # Restore preserved assets
+    $restoreCmd = @"
+set -e
+PRESERVE=/tmp/prospectlab_preserve_assets
+mkdir -p "$RemotePath/static"
+if [ -d "`$PRESERVE/screenshots" ]; then rm -rf "$RemotePath/static/screenshots"; cp -a "`$PRESERVE/screenshots" "$RemotePath/static/screenshots"; fi
+if [ -d "`$PRESERVE/generated" ]; then rm -rf "$RemotePath/static/generated"; cp -a "`$PRESERVE/generated" "$RemotePath/static/generated"; fi
+if [ -f "`$PRESERVE/.env" ] && [ ! -f "$RemotePath/.env" ]; then cp -a "`$PRESERVE/.env" "$RemotePath/.env"; fi
+if [ -f "`$PRESERVE/keep_env.flag" ] && [ -d "`$PRESERVE/env" ]; then
+  rm -rf "$RemotePath/env"
+  mv "`$PRESERVE/env" "$RemotePath/env"
+fi
+rm -rf "`$PRESERVE"
+"@
+    ssh "$User@$Server" $restoreCmd | Out-Null
+    Write-Host "✅ Clone $RemoteGitBranch effectué depuis $RepoUrl (assets preserves)" -ForegroundColor Green
     Write-Host ""
 } else {
     # Créer le répertoire de déploiement local
@@ -380,10 +413,14 @@ Write-Host ""
 
 # Créer ou mettre à jour l'environnement Conda sur le serveur (prefix = env)
 Write-Host "[6/9] Configuration de l'environnement Conda..." -ForegroundColor Yellow
+$prevEapConda = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 $condaOutput = ssh "$User@$Server" "set -e; source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/anaconda3/etc/profile.d/conda.sh; cd $RemotePath; if [ ! -d env ]; then conda create --prefix $RemotePath/env python=3.11 -y --override-channels -c conda-forge; fi; $RemotePath/env/bin/pip install --upgrade pip setuptools wheel; $RemotePath/env/bin/pip install -r requirements.txt" 2>&1
-if ($LASTEXITCODE -ne 0) {
+$condaExit = $LASTEXITCODE
+$ErrorActionPreference = $prevEapConda
+if ($condaExit -ne 0) {
     Write-Host "❌ Erreur lors de l'installation des dépendances Conda/pip" -ForegroundColor Red
-    Write-Host $condaOutput -ForegroundColor Gray
+    Write-Host ($condaOutput | Out-String) -ForegroundColor Gray
     exit 1
 }
 Write-Host "✅ Environnement Conda configuré (prefix=$RemotePath/env)" -ForegroundColor Green
