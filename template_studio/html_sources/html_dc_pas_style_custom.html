@@ -29,45 +29,67 @@
               <p style="margin:0 0 8px;color:rgba(255,255,255,0.95);font-size:15px;">Adaptés à votre enseigne{#if_echantillon_titre} - base {echantillon_titre}{#endif}</p>
             </td>
           </tr>
-          {#if_echantillon_screenshot_url}
-          <tr>
-            <td style="padding:0;line-height:0;font-size:0;">
-              <img src="{echantillon_screenshot_url}" alt="Aperçu du style" width="600" height="371" style="display:block;width:100%;max-width:600px;height:auto;border:0;background:#c9f4f2;aspect-ratio:1.618/1;" />
-            </td>
-          </tr>
-          {#endif}
           <tr>
             <td style="padding:28px 28px 8px;">
               <p style="margin:0 0 16px;color:#1f2937;font-size:16px;line-height:1.65;">Bonjour <strong>{nom}</strong>,</p>
-              <p style="margin:0 0 16px;color:#1f2937;font-size:16px;line-height:1.65;">
-                Je reviens sur l'exemple{#if_echantillon_titre} <strong>{echantillon_titre}</strong>{#endif} que je vous ai transmis.
-              </p>
-              <p style="margin:0 0 16px;color:#1f2937;font-size:16px;line-height:1.65;">
-                Beaucoup de professionnels trouvent le modèle intéressant… mais peinent à se projeter tant que ce n'est pas leur enseigne, leurs services, leur ville. Du coup le sujet reste en suspens.
-              </p>
-              <p style="margin:0 0 16px;color:#1f2937;font-size:16px;line-height:1.65;">
-                Le style vous intéresse-t-il ? Si oui, je peux vous développer des échantillons spécifiques pour <strong>{entreprise}</strong>{#if_ville}, à <strong>{ville}</strong>{#endif}{#if_secteur_label}, à partir de ce qui existe déjà en {secteur_label}{#endif}.
-              </p>
-              <p style="margin:0 0 18px;color:#1f2937;font-size:16px;line-height:1.65;">
-                Est-ce un sujet pertinent pour vous ce mois-ci ?
-              </p>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin:0 0 16px 0;">
+                <tr>
+                  {#if_character_1_url}
+                  <td width="168" style="width:168px;vertical-align:bottom;padding:0 12px 0 0;text-align:center;">
+                    <img src="{character_1_url}" alt="" width="156" style="display:block;width:156px;max-width:156px;height:auto;border:0;margin:0 auto;" />
+                  </td>
+                  {#endif}
+                  <td style="vertical-align:middle;padding:0;">
+                    <p style="margin:0 0 12px;color:#1f2937;font-size:16px;line-height:1.65;">
+                      Je reviens sur l'exemple{#if_echantillon_titre} <strong>{echantillon_titre}</strong>{#endif} que je vous ai transmis.
+                    </p>
+                    <p style="margin:0;color:#1f2937;font-size:16px;line-height:1.65;">
+                      Beaucoup de professionnels trouvent le modèle intéressant… mais peinent à se projeter tant que ce n'est pas leur enseigne, leurs services, leur ville. Du coup le sujet reste en suspens.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin:0 0 18px 0;">
+                <tr>
+                  <td style="vertical-align:middle;padding:0;">
+                    <p style="margin:0 0 12px;color:#1f2937;font-size:16px;line-height:1.65;">
+                      Le style vous intéresse-t-il ? Si oui, je peux vous développer des échantillons spécifiques pour <strong>{entreprise}</strong>{#if_ville}, à <strong>{ville}</strong>{#endif}{#if_secteur_label}, à partir de ce qui existe déjà en {secteur_label}{#endif}.
+                    </p>
+                    <p style="margin:0;color:#1f2937;font-size:16px;line-height:1.65;">
+                      Est-ce un sujet pertinent pour vous ce mois-ci ?
+                    </p>
+                  </td>
+                  {#if_character_2_url}
+                  <td width="168" style="width:168px;vertical-align:bottom;padding:0 0 0 12px;text-align:center;">
+                    <img src="{character_2_url}" alt="" width="156" style="display:block;width:156px;max-width:156px;height:auto;border:0;margin:0 auto;" />
+                  </td>
+                  {#endif}
+                </tr>
+              </table>
+
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;background:#c9f4f2;border-radius:12px;border:1px solid #9fd4ea;">
                 <tr><td style="padding:16px 18px;">
                   <p style="margin:0 0 8px;color:#0f3550;font-size:13px;font-weight:700;">Proposition</p>
                   <p style="margin:0;color:#374151;font-size:14px;line-height:1.55;">Le style vous intéresse-t-il ? Je développe des échantillons spécifiques pour votre enseigne.</p>
                 </td></tr>
               </table>
+
+              {#if_has_echantillons_cards}
+              <p style="margin:0 0 10px;color:#0f3550;font-size:15px;font-weight:700;line-height:1.4;">
+                Les modèles de base
+              </p>
+              <p style="margin:0 0 12px;color:#6b7280;font-size:13px;line-height:1.5;">
+                Screenshot + démo - à partir de ces styles, je peux vous en faire un sur-mesure.
+              </p>
+              {echantillons_cards_html}
+              {#endif}
+
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0 10px;">
                 <tr>
                   <td style="text-align:center;">
                     <a href="{dc_contact_url}" style="display:inline-block;background:linear-gradient(140deg,#9fd4ea 0%,#5faed8 28%,#2f78a6 62%,#184c70 100%);color:#ffffff;text-decoration:none;font-size:16px;font-weight:700;padding:15px 28px;border-radius:12px;line-height:1.2;box-shadow:0 10px 28px rgba(24,76,112,0.35);">Répondre Oui</a>
-                  </td>
-                </tr>
-              </table>
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 10px;">
-                <tr>
-                  <td style="text-align:center;">
-                    <a href="{echantillon_demo_url}" style="display:inline-block;color:#4da9d6;text-decoration:underline;font-size:14px;font-weight:600;padding:6px 12px;">Revoir la démo</a>
                   </td>
                 </tr>
               </table>

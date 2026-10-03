@@ -32,18 +32,43 @@
           <tr>
             <td style="padding:28px 28px 8px;">
               <p style="margin:0 0 16px;color:#1f2937;font-size:16px;line-height:1.65;">Bonjour <strong>{nom}</strong>,</p>
-              <p style="margin:0 0 16px;color:#1f2937;font-size:16px;line-height:1.65;">
-                Je n'ai pas eu de retour de votre côté - et c'est tout à fait possible que le timing ne soit pas le bon.
-              </p>
-              <p style="margin:0 0 16px;color:#1f2937;font-size:16px;line-height:1.65;">
-                Je préfère ne pas vous relancer encore : trop de mails sans réponse, ça devient du bruit, et ce n'est pas mon objectif.
-              </p>
-              <p style="margin:0 0 16px;color:#1f2937;font-size:16px;line-height:1.65;">
-                Je ferme donc le dossier <strong>{entreprise}</strong> de mon côté. Je vous laisse les liens au cas où la situation évolue.
-              </p>
-              <p style="margin:0 0 18px;color:#1f2937;font-size:16px;line-height:1.65;">
-                Si le sujet redevient pertinent pour vous plus tard, vous pourrez me répondre sur ce fil.
-              </p>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin:0 0 16px 0;">
+                <tr>
+                  {#if_character_1_url}
+                  <td width="168" style="width:168px;vertical-align:bottom;padding:0 12px 0 0;text-align:center;">
+                    <img src="{character_1_url}" alt="" width="156" style="display:block;width:156px;max-width:156px;height:auto;border:0;margin:0 auto;" />
+                  </td>
+                  {#endif}
+                  <td style="vertical-align:middle;padding:0;">
+                    <p style="margin:0 0 12px;color:#1f2937;font-size:16px;line-height:1.65;">
+                      Je n'ai pas eu de retour de votre côté - et c'est tout à fait possible que le timing ne soit pas le bon.
+                    </p>
+                    <p style="margin:0;color:#1f2937;font-size:16px;line-height:1.65;">
+                      Je préfère ne pas vous relancer encore : trop de mails sans réponse, ça devient du bruit, et ce n'est pas mon objectif.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin:0 0 18px 0;">
+                <tr>
+                  <td style="vertical-align:middle;padding:0;">
+                    <p style="margin:0 0 12px;color:#1f2937;font-size:16px;line-height:1.65;">
+                      Je ferme donc le dossier <strong>{entreprise}</strong> de mon côté. Je vous laisse les liens au cas où la situation évolue.
+                    </p>
+                    <p style="margin:0;color:#1f2937;font-size:16px;line-height:1.65;">
+                      Si le sujet redevient pertinent pour vous plus tard, vous pourrez me répondre sur ce fil.
+                    </p>
+                  </td>
+                  {#if_character_2_url}
+                  <td width="168" style="width:168px;vertical-align:bottom;padding:0 0 0 12px;text-align:center;">
+                    <img src="{character_2_url}" alt="" width="156" style="display:block;width:156px;max-width:156px;height:auto;border:0;margin:0 auto;" />
+                  </td>
+                  {#endif}
+                </tr>
+              </table>
+
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;background:#c9f4f2;border-radius:12px;border:1px solid #9fd4ea;">
                 <tr><td style="padding:16px 18px;">
                   <p style="margin:0 0 8px;color:#0f3550;font-size:13px;font-weight:700;">Liens au cas où</p>

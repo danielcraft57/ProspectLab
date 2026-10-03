@@ -29,50 +29,67 @@
               <p style="margin:0 0 8px;color:rgba(255,255,255,0.95);font-size:15px;">{#if_echantillon_metier}Modèle {echantillon_metier}{#endif}{#if_secteur_label} · {secteur_label}{#endif}</p>
             </td>
           </tr>
-          {#if_echantillon_screenshot_url}
-          <tr>
-            <td style="padding:0;line-height:0;font-size:0;">
-              <img src="{echantillon_screenshot_url}" alt="Projection pour {entreprise}" width="600" height="371" style="display:block;width:100%;max-width:600px;height:auto;border:0;background:#c9f4f2;aspect-ratio:1.618/1;" />
-            </td>
-          </tr>
-          {#endif}
           <tr>
             <td style="padding:28px 28px 8px;">
               <p style="margin:0 0 16px;color:#1f2937;font-size:16px;line-height:1.65;">Bonjour <strong>{nom}</strong>,</p>
-              <p style="margin:0 0 16px;color:#1f2937;font-size:16px;line-height:1.65;">
-                Avant de parler devis, le frein le plus fréquent c'est l'inconnu : « est-ce que ça ira vraiment pour nous ? »
-              </p>
-              <p style="margin:0 0 16px;color:#1f2937;font-size:16px;line-height:1.65;">
-                Sans projection visuelle, on discute dans le vide, on compare des impressions, et on reporte. C'est classique - et ça fait perdre du temps des deux côtés.
-              </p>
-              <p style="margin:0 0 16px;color:#1f2937;font-size:16px;line-height:1.65;">
-                Le plus simple : vous projeter sur un modèle déjà prêt{#if_echantillon_metier} ({echantillon_metier}){#endif}{#if_echantillon_titre}, comme <strong>{echantillon_titre}</strong>{#endif}, avec l'enseigne de <strong>{entreprise}</strong> dessus.
-              </p>
-              {#if_landing_variant}
-              <p style="margin:0 0 16px;color:#1f2937;font-size:16px;line-height:1.65;">
-                J'ai aussi une maquette plus proche de votre site : <a href="{landing_variant_url}" style="color:#4da9d6;font-weight:600;">voir la maquette</a>.
-              </p>
-              {#endif}
-              <p style="margin:0 0 18px;color:#1f2937;font-size:16px;line-height:1.65;">
-                Est-ce que cette approche « voir avant de décider » vous parle ?
-              </p>
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;background:#c9f4f2;border-radius:12px;border:1px solid #9fd4ea;">
-                <tr><td style="padding:16px 18px;">
-                  <p style="margin:0 0 8px;color:#0f3550;font-size:13px;font-weight:700;">Voir avant de décider</p>
-                  <p style="margin:0;color:#374151;font-size:14px;line-height:1.55;">Projetez-vous avec l'enseigne de {entreprise} sur un modèle déjà prêt.</p>
-                </td></tr>
-              </table>
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0 10px;">
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin:0 0 16px 0;">
                 <tr>
-                  <td style="text-align:center;">
-                    <a href="{echantillon_url}" style="display:inline-block;background:linear-gradient(140deg,#9fd4ea 0%,#5faed8 28%,#2f78a6 62%,#184c70 100%);color:#ffffff;text-decoration:none;font-size:16px;font-weight:700;padding:15px 28px;border-radius:12px;line-height:1.2;box-shadow:0 10px 28px rgba(24,76,112,0.35);">Je me projette</a>
+                  {#if_character_1_url}
+                  <td width="168" style="width:168px;vertical-align:bottom;padding:0 12px 0 0;text-align:center;">
+                    <img src="{character_1_url}" alt="" width="156" style="display:block;width:156px;max-width:156px;height:auto;border:0;margin:0 auto;" />
+                  </td>
+                  {#endif}
+                  <td style="vertical-align:middle;padding:0;">
+                    <p style="margin:0 0 12px;color:#1f2937;font-size:16px;line-height:1.65;">
+                      Avant de parler devis, le frein le plus fréquent c'est l'inconnu : « est-ce que ça ira vraiment pour nous ? »
+                    </p>
+                    <p style="margin:0;color:#1f2937;font-size:16px;line-height:1.65;">
+                      Sans projection visuelle, on discute dans le vide, on compare des impressions, et on reporte. C'est classique - et ça fait perdre du temps des deux côtés.
+                    </p>
                   </td>
                 </tr>
               </table>
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 10px;">
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin:0 0 18px 0;">
+                <tr>
+                  <td style="vertical-align:middle;padding:0;">
+                    <p style="margin:0 0 12px;color:#1f2937;font-size:16px;line-height:1.65;">
+                      Le plus simple : vous projeter sur un modèle déjà prêt{#if_echantillon_metier} ({echantillon_metier}){#endif}{#if_echantillon_titre}, comme <strong>{echantillon_titre}</strong>{#endif}, avec l'enseigne de <strong>{entreprise}</strong> dessus.
+                    </p>
+                    <p style="margin:0;color:#1f2937;font-size:16px;line-height:1.65;">
+                      Est-ce que cette approche « voir avant de décider » vous parle ?
+                    </p>
+                  </td>
+                  {#if_character_2_url}
+                  <td width="168" style="width:168px;vertical-align:bottom;padding:0 0 0 12px;text-align:center;">
+                    <img src="{character_2_url}" alt="" width="156" style="display:block;width:156px;max-width:156px;height:auto;border:0;margin:0 auto;" />
+                  </td>
+                  {#endif}
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;background:#c9f4f2;border-radius:12px;border:1px solid #9fd4ea;">
+                <tr><td style="padding:16px 18px;">
+                  <p style="margin:0 0 8px;color:#0f3550;font-size:13px;font-weight:700;">Voir avant de décider</p>
+                  <p style="margin:0;color:#374151;font-size:14px;line-height:1.55;">Un style vous parle ? On le personnalise pour {entreprise}.</p>
+                </td></tr>
+              </table>
+
+              {#if_has_echantillons_cards}
+              <p style="margin:0 0 10px;color:#0f3550;font-size:15px;font-weight:700;line-height:1.4;">
+                Projetez-vous sur ces modèles
+              </p>
+              <p style="margin:0 0 12px;color:#6b7280;font-size:13px;line-height:1.5;">
+                Screenshot + démo - imaginez l'enseigne de {entreprise} dessus.
+              </p>
+              {echantillons_cards_html}
+              {#endif}
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0 10px;">
                 <tr>
                   <td style="text-align:center;">
-                    <a href="{echantillon_demo_url}" style="display:inline-block;color:#4da9d6;text-decoration:underline;font-size:14px;font-weight:600;padding:6px 12px;">Ouvrir la démo</a>
+                    <a href="{dc_contact_url}" style="display:inline-block;background:linear-gradient(140deg,#9fd4ea 0%,#5faed8 28%,#2f78a6 62%,#184c70 100%);color:#ffffff;text-decoration:none;font-size:16px;font-weight:700;padding:15px 28px;border-radius:12px;line-height:1.2;box-shadow:0 10px 28px rgba(24,76,112,0.35);">Je me projette</a>
                   </td>
                 </tr>
               </table>

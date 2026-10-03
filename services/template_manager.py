@@ -843,6 +843,23 @@ class TemplateManager:
                 else:
                     data['ville_ou_secteur'] = ''
                 data['has_ville_ou_secteur'] = bool(data.get('ville_ou_secteur'))
+                # Related echantillons (cartes) + personnage flottant
+                try:
+                    from services.danielcraft_echantillons import build_related_email_vars
+
+                    try:
+                        from config import BASE_URL, normalize_public_base_url
+                        base_url = normalize_public_base_url(BASE_URL or '', source='related') or ''
+                    except Exception:
+                        base_url = ''
+                    related_vars = build_related_email_vars(
+                        secteur_val or secteur_raw or categorie,
+                        limit=4,
+                        base_url=base_url,
+                    )
+                    data.update(related_vars)
+                except Exception:
+                    pass
 
             try:
                 latest_landing = db.get_latest_landing_variant_bundle(int(entreprise_id)) or {}
@@ -1484,6 +1501,51 @@ class TemplateManager:
                 variables['echantillon_screenshot_full_url'] = (
                     f"https://danielcraft.fr/echantillons/{echantillon_slug}/screenshots/tablet_1024x2500.webp"
                 )
+        # Personnages flottants par bloc (1..4 + left/right compat)
+        if not variables.get('character_1_url') or not variables.get('character_left_url'):
+            try:
+                from services.danielcraft_echantillons import build_character_email_vars
+
+                char_vars = build_character_email_vars(
+                    str(variables.get('secteur_label') or variables.get('secteur') or ''),
+                    base_url=base_url,
+                    count=2,
+                )
+                for key, value in char_vars.items():
+                    if not variables.get(key):
+                        variables[key] = value
+            except Exception:
+                pass
+        elif variables.get('character_url') and not str(variables.get('character_url')).startswith('http'):
+            rel = str(variables.get('character_rel') or variables.get('character_url')).lstrip('/')
+            variables['character_url'] = f"{base_url}/{rel}"
+            variables['has_character'] = True
+        # Related cards : regenerer avec base_url si on a le secteur mais pas encore le HTML
+        if not variables.get('related_cards_html') and (
+            variables.get('secteur') or variables.get('secteur_label') or variables.get('echantillon_slug')
+        ):
+            try:
+                from services.danielcraft_echantillons import build_related_email_vars
+
+                related_vars = build_related_email_vars(
+                    str(variables.get('secteur') or variables.get('secteur_label') or ''),
+                    limit=4,
+                    base_url=base_url,
+                )
+                for key, value in related_vars.items():
+                    if key not in variables or not variables.get(key):
+                        variables[key] = value
+            except Exception:
+                pass
+        # Galerie cards (primaire + related) pour les mails echantillons
+        try:
+            from services.danielcraft_echantillons import assemble_echantillons_gallery_vars
+
+            gallery_vars = assemble_echantillons_gallery_vars(variables)
+            variables.update(gallery_vars)
+        except Exception:
+            variables.setdefault('echantillons_cards_html', '')
+            variables.setdefault('has_echantillons_cards', False)
         # Aliases booléens pour les conditionnels {#if_security} / {#if_performance} / {#if_risk}
         # qui sont ensuite traités par le moteur générique {#if_<xxx>}.
         variables['security'] = variables.get('security_score') is not None
@@ -1800,6 +1862,24 @@ class TemplateManager:
         else:
             extended.setdefault('ville_ou_secteur', '')
             extended.setdefault('has_ville_ou_secteur', False)
+
+        try:
+            from services.danielcraft_echantillons import build_related_email_vars
+
+            try:
+                from config import BASE_URL, normalize_public_base_url
+                base_url = normalize_public_base_url(BASE_URL or '', source='preview_related') or ''
+            except Exception:
+                base_url = ''
+            related_vars = build_related_email_vars(
+                secteur or secteur_label,
+                limit=2,
+                base_url=base_url,
+            )
+            for key, value in related_vars.items():
+                extended.setdefault(key, value)
+        except Exception:
+            pass
 
         content_rendered, is_html = self.render_template(
             template_id or '__preview__',

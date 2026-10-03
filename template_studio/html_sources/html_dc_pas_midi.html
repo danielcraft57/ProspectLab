@@ -32,18 +32,43 @@
           <tr>
             <td style="padding:28px 28px 8px;">
               <p style="margin:0 0 16px;color:#1f2937;font-size:16px;line-height:1.65;">Bonjour <strong>{nom}</strong>,</p>
-              <p style="margin:0 0 16px;color:#1f2937;font-size:16px;line-height:1.65;">
-                Entre l'échantillon, le rapport et le quotidien, ce n'est pas toujours simple de trancher seul devant sa boîte mail.
-              </p>
-              <p style="margin:0 0 16px;color:#1f2937;font-size:16px;line-height:1.65;">
-                Du coup le sujet glisse, les liens restent ouverts « pour plus tard », et rien n'avance - alors qu'un court échange suffirait souvent à clarifier.
-              </p>
-              <p style="margin:0 0 16px;color:#1f2937;font-size:16px;line-height:1.65;">
-                Je vous propose 15 minutes pour démêler ça ensemble : ce qui vous plaît dans le style{#if_echantillon_titre} <strong>{echantillon_titre}</strong>{#endif}, ce qui bloque sur votre site, et si un échantillon sur-mesure a du sens pour <strong>{entreprise}</strong>. Autour de midi si vous êtes sur place, ça me va très bien.
-              </p>
-              <p style="margin:0 0 18px;color:#1f2937;font-size:16px;line-height:1.65;">
-                Est-ce un créneau pertinent pour vous cette semaine ?
-              </p>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin:0 0 16px 0;">
+                <tr>
+                  {#if_character_1_url}
+                  <td width="168" style="width:168px;vertical-align:bottom;padding:0 12px 0 0;text-align:center;">
+                    <img src="{character_1_url}" alt="" width="156" style="display:block;width:156px;max-width:156px;height:auto;border:0;margin:0 auto;" />
+                  </td>
+                  {#endif}
+                  <td style="vertical-align:middle;padding:0;">
+                    <p style="margin:0 0 12px;color:#1f2937;font-size:16px;line-height:1.65;">
+                      Entre l'échantillon, le rapport et le quotidien, ce n'est pas toujours simple de trancher seul devant sa boîte mail.
+                    </p>
+                    <p style="margin:0;color:#1f2937;font-size:16px;line-height:1.65;">
+                      Du coup le sujet glisse, les liens restent ouverts « pour plus tard », et rien n'avance - alors qu'un court échange suffirait souvent à clarifier.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin:0 0 18px 0;">
+                <tr>
+                  <td style="vertical-align:middle;padding:0;">
+                    <p style="margin:0 0 12px;color:#1f2937;font-size:16px;line-height:1.65;">
+                      Je vous propose 15 minutes pour démêler ça ensemble : ce qui vous plaît dans le style{#if_echantillon_titre} <strong>{echantillon_titre}</strong>{#endif}, ce qui bloque sur votre site, et si un échantillon sur-mesure a du sens pour <strong>{entreprise}</strong>. Autour de midi si vous êtes sur place, ça me va très bien.
+                    </p>
+                    <p style="margin:0;color:#1f2937;font-size:16px;line-height:1.65;">
+                      Est-ce un créneau pertinent pour vous cette semaine ?
+                    </p>
+                  </td>
+                  {#if_character_2_url}
+                  <td width="168" style="width:168px;vertical-align:bottom;padding:0 0 0 12px;text-align:center;">
+                    <img src="{character_2_url}" alt="" width="156" style="display:block;width:156px;max-width:156px;height:auto;border:0;margin:0 auto;" />
+                  </td>
+                  {#endif}
+                </tr>
+              </table>
+
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;background:#c9f4f2;border-radius:12px;border:1px solid #9fd4ea;">
                 <tr><td style="padding:16px 18px;">
                   <p style="margin:0 0 8px;color:#0f3550;font-size:13px;font-weight:700;">Ce qu'on peut voir ensemble</p>

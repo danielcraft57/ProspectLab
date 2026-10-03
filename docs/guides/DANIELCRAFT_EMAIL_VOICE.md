@@ -226,6 +226,16 @@ En prod ProspectLab : images sous `static/email/` + `services/email_inline_image
 | `{echantillon_url}` / `{echantillon_fiche_url}` | Fiche echantillon |
 | `{echantillon_demo_url}` | Demo live |
 | `{echantillon_screenshot_url}` | Hero email (crop) |
+| `{echantillon_2_titre}` / `{echantillon_2_*}` | 2e echantillon meme categorie |
+| `{echantillon_3_titre}` / `{echantillon_3_*}` | 3e echantillon (si dispo) |
+| `{related_cards_html}` | Table HTML 1-2 cartes related (pre-rendue) |
+| `{related_cards_html}` | Cartes related seulement |
+| `{echantillons_cards_html}` | Galerie complete (primaire + related) screenshot + CTA |
+| `{has_echantillons_cards}` | Flag galerie echantillons |
+| `{character_url}` | Personnage (compat = slot 1) |
+| `{character_1_url}` / `{character_2_url}` | 2 persos par mail (gauche puis droite) |
+| `{character_left_url}` / `{character_right_url}` | Compat duo (= slots 1 et 2) |
+| `{has_character}` / `{has_character_1}` ... | Flags personnages |
 | `{analysis_url}` | Lien `/analyse` (website, full=1, email, name) |
 | `{dc_contact_url}` | Ancre contact DanielCraft |
 | `{unsubscribe_url}` | Desinscription |

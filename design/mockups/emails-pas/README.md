@@ -6,6 +6,9 @@ Playbook : `docs/guides/SEQUENCE_EMAIL_PAS_SEMAINE.md`
 
 Sources de verite (HTML campagnes) : `template_studio/html_sources/html_dc_pas_*.html`
 
+Personnages email : `static/email/danielcraft/characters/`
+Cartes multi-echantillons : variables `{related_cards_html}` / `{echantillon_2_*}` (meme categorie catalogue).
+
 Ces maquettes sont des copies pour preview design. Apres edit des sources :
 
 ```powershell
