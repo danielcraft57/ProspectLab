@@ -62,69 +62,71 @@ class EmailAnalyzer:
     def extract_name_from_email(self, email):
         """
         Extrait un nom/prénom potentiel depuis la partie locale de l'email.
-        
+
         Analyse la partie avant le @ pour tenter d'extraire un nom et un prénom.
         Supporte plusieurs formats courants : prenom.nom, prenom_nom, prenom-nom.
-        
+        Ne dérive jamais un nom depuis un local-part générique (contact@, info@…).
+
         Args:
             email (str): L'adresse email à analyser
-            
+
         Returns:
             dict or None: Dictionnaire contenant :
                 - first_name (str): Prénom détecté (peut être None)
                 - last_name (str): Nom détecté
                 - full_name (str): Nom complet reconstitué
             Retourne None si aucun nom ne peut être extrait
-            
+
         Example:
             >>> analyzer = EmailAnalyzer()
             >>> analyzer.extract_name_from_email('jean.dupont@example.com')
             {'first_name': 'Jean', 'last_name': 'Dupont', 'full_name': 'Jean Dupont'}
+            >>> analyzer.extract_name_from_email('contact@example.com')
+            None
         """
         # Vérification de base : l'email doit contenir un @
         if not email or '@' not in email:
             return None
-        
+
         # Extraire la partie locale (avant le @)
-        local_part = email.split('@')[0]
-        
+        local_part = email.split('@')[0].strip()
+        if not local_part:
+            return None
+
+        try:
+            from utils.name_formatter import is_generic_email_for_name, is_generic_name_token
+        except Exception:
+            is_generic_email_for_name = None
+            is_generic_name_token = None
+
+        if is_generic_email_for_name and is_generic_email_for_name(email):
+            return None
+
         # Patterns courants pour séparer prénom et nom
         # Format : prenom.nom, prenom_nom, prenom-nom
-        if '.' in local_part:
-            parts = local_part.split('.')
-            if len(parts) >= 2:
-                return {
-                    'first_name': parts[0].capitalize(),
-                    'last_name': parts[-1].capitalize(),
-                    'full_name': ' '.join([p.capitalize() for p in parts])
-                }
-        
-        if '_' in local_part:
-            parts = local_part.split('_')
-            if len(parts) >= 2:
-                return {
-                    'first_name': parts[0].capitalize(),
-                    'last_name': parts[-1].capitalize(),
-                    'full_name': ' '.join([p.capitalize() for p in parts])
-                }
-        
-        if '-' in local_part:
-            parts = local_part.split('-')
-            if len(parts) >= 2:
-                return {
-                    'first_name': parts[0].capitalize(),
-                    'last_name': parts[-1].capitalize(),
-                    'full_name': ' '.join([p.capitalize() for p in parts])
-                }
-        
-        # Si c'est juste un nom
+        for sep in ('.', '_', '-'):
+            if sep in local_part:
+                parts = [p for p in local_part.split(sep) if p]
+                if len(parts) >= 2:
+                    # contact.dupont / info.commercial → pas un vrai prénom
+                    if is_generic_name_token and is_generic_name_token(parts[0]):
+                        return None
+                    return {
+                        'first_name': parts[0].capitalize(),
+                        'last_name': parts[-1].capitalize(),
+                        'full_name': ' '.join([p.capitalize() for p in parts])
+                    }
+
+        # Si c'est juste un nom (et pas un rôle générique)
         if len(local_part) > 2:
+            if is_generic_name_token and is_generic_name_token(local_part):
+                return None
             return {
                 'first_name': None,
                 'last_name': local_part.capitalize(),
                 'full_name': local_part.capitalize()
             }
-        
+
         return None
     
     def detect_email_provider(self, email):

@@ -1404,30 +1404,32 @@ class TemplateManager:
             extended_data.update(extended_overrides)
         
         # Formater le nom : contact > responsable entreprise > Monsieur/Madame
-        from utils.name_formatter import format_name
+        from utils.name_formatter import (
+            format_name,
+            is_generic_display_name,
+            is_generic_email_for_name,
+        )
         formatted_nom = format_name(nom) if nom else None
         hide_name_in_greeting = False
-        if not formatted_nom or str(formatted_nom).strip() in ('', 'N/A'):
-            formatted_nom = (extended_data.get('responsable') or '').strip() or None
+        if (
+            not formatted_nom
+            or str(formatted_nom).strip() in ('', 'N/A')
+            or is_generic_display_name(formatted_nom)
+        ):
+            formatted_nom = None
 
-        # Nettoyage des noms génériques (ex: "info", "contact", "infos@", ...)
-        # Dans ce cas on préfère un "Bonjour," neutre plutôt qu'un faux prénom.
-        generic_name_tokens = {
-            'info', 'infos', 'contact', 'contacts', 'hello', 'bonjour', 'support',
-            'sav', 'admin', 'administration', 'commercial', 'sales', 'service',
-            'secretariat', 'secrétariat', 'accueil', 'office', 'team', 'equipe', 'équipe',
-        }
-        if formatted_nom and isinstance(formatted_nom, str):
-            normalized_nom = formatted_nom.strip().lower()
-            normalized_nom = re.sub(r'[^a-z0-9@._+\- ]+', ' ', normalized_nom)
-            normalized_nom = re.sub(r'\s+', ' ', normalized_nom).strip()
-            local_part = normalized_nom.split('@')[0] if '@' in normalized_nom else normalized_nom
-            if local_part in generic_name_tokens:
+        if not formatted_nom:
+            responsable = (extended_data.get('responsable') or '').strip() or None
+            if responsable and not is_generic_display_name(responsable):
+                formatted_nom = responsable
+
+        if not formatted_nom:
+            # Email générique (contact@…) sans vrai nom : Bonjour neutre, pas "Contact"
+            if email and is_generic_email_for_name(email):
                 formatted_nom = ''
                 hide_name_in_greeting = True
-
-        if not formatted_nom and not hide_name_in_greeting:
-            formatted_nom = 'Monsieur/Madame'
+            else:
+                formatted_nom = 'Monsieur/Madame'
         
         # Base URL pour les images (hero.webp, etc.) et liens
         try:
@@ -1472,7 +1474,8 @@ class TemplateManager:
             extended_flat['website'] = website_val
         encoded_email = quote((email or '').strip(), safe='') if isinstance(email, str) and email.strip() else ''
         name_for_cta = (formatted_nom or '').strip()
-        if name_for_cta.lower() in {'', 'cher prospect', 'bonjour', 'monsieur/madame'}:
+        # Jamais passer name=Contact / Monsieur/Madame dans les liens analyse
+        if hide_name_in_greeting or not name_for_cta or is_generic_display_name(name_for_cta):
             name_for_cta = ''
         encoded_name = quote(name_for_cta, safe='') if name_for_cta else ''
         analysis_url = ''
