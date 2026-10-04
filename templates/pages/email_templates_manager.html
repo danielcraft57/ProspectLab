@@ -3,6 +3,9 @@
 {% block title %}Modèles d'emails - ProspectLab{% endblock %}
 
 {% block extra_css %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/neo.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-palenight.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/modules/pages/email_templates_manager.css') }}">
 {% endblock %}
 
@@ -186,8 +189,8 @@
                     <iframe id="etm-preview-iframe" title="Aperçu du template" sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox"></iframe>
                     <pre id="etm-preview-text" class="etm-preview-text" hidden></pre>
                     <button type="button" class="etm-preview-edit-hint" id="etm-preview-edit-hint" hidden>
-                        <i class="fa-solid fa-pen" aria-hidden="true"></i>
-                        Éditer le contenu
+                        <i class="fa-solid fa-code" aria-hidden="true"></i>
+                        Éditer le code source
                     </button>
                 </div>
                 <div class="etm-source-editor" id="etm-source-editor" hidden>
@@ -215,5 +218,10 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/xml/xml.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/css/css.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/htmlmixed/htmlmixed.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script src="{{ url_for('static', filename='js/email_templates_manager.js') }}"></script>
 {% endblock %}

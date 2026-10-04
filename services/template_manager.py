@@ -3,11 +3,14 @@ Gestionnaire de modèles de messages
 """
 
 import json
+import logging
 import re
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any
 from urllib.parse import quote
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize_danielcraft_href(url: str, brand_domain: str = 'danielcraft.fr') -> str:
@@ -605,7 +608,8 @@ class TemplateManager:
         return href_re.sub(repl, content)
     
     def create_template(self, name: str, subject: str, content: str, category: str = 'cold_email',
-                        template_id: Optional[str] = None, mail_account_id: Optional[int] = None) -> Dict:
+                        template_id: Optional[str] = None, mail_account_id: Optional[int] = None,
+                        is_html: Optional[bool] = None) -> Dict:
         """
         Crée un nouveau template
         
@@ -614,6 +618,7 @@ class TemplateManager:
             subject: Sujet de l'email
             content: Contenu de l'email (peut contenir {nom}, {entreprise})
             category: Catégorie du template
+            is_html: Forcer le flag HTML (optionnel)
         
         Returns:
             Template créé
@@ -622,14 +627,26 @@ class TemplateManager:
             template_id = str(template_id).strip()
         if not template_id:
             template_id = f"template_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+        try:
+            from utils.email_subject import apply_subject_to_html, normalize_template_subject
+            subject_clean = normalize_template_subject(subject)
+            content_synced = apply_subject_to_html(content or '', subject_clean)
+        except Exception:
+            subject_clean = (subject or '').strip()
+            content_synced = content or ''
+
+        html_flag = bool(is_html) if is_html is not None else (
+            category == 'html_email' or bool(re.search(r'<\s*html[\s>]', content_synced or '', re.I))
+        )
         
         template = {
             'id': template_id,
             'name': name,
             'category': category,
-            'subject': subject,
-            'content': content,
-            'is_html': category == 'html_email',
+            'subject': subject_clean,
+            'content': content_synced,
+            'is_html': html_flag,
             'mail_account_id': mail_account_id,
             'created_at': datetime.now().isoformat(),
             'updated_at': datetime.now().isoformat()
@@ -644,15 +661,15 @@ class TemplateManager:
                     template_id=template_id,
                     name=name,
                     category=category,
-                    subject=subject,
-                    content=content,
-                    is_html=(category == 'html_email'),
+                    subject=subject_clean,
+                    content=content_synced,
+                    is_html=html_flag,
                     is_active=True,
                     mail_account_id=mail_account_id,
                 )
                 return dict(saved)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.exception("create_template BDD echec id=%s: %s", template_id, exc)
 
         self.templates.append(template)
         self._save_templates()
@@ -694,6 +711,11 @@ class TemplateManager:
                         new_is_html = (new_category == 'html_email') or bool(existing.get('is_html'))
                     else:
                         new_is_html = bool(existing.get('is_html')) or (new_category == 'html_email')
+                    # Auto-detect HTML content (PAS / echantillons)
+                    if not new_is_html and isinstance(new_content, str):
+                        snip = new_content.strip()[:256].lower()
+                        if snip.startswith('<!doctype html') or snip.startswith('<html') or '<body' in snip:
+                            new_is_html = True
                     mid_to_set = existing.get('mail_account_id')
                     if mail_account_id is not None:
                         mid_to_set = mail_account_id
@@ -708,8 +730,14 @@ class TemplateManager:
                         mail_account_id=mid_to_set,
                     )
                     return dict(saved)
-        except Exception:
-            pass
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).exception(
+                'update_template BDD echoue pour %s: %s', template_id, exc
+            )
+            # Ne pas masquer l'erreur en revenant silencieusement au JSON local :
+            # l'UI doit voir l'echec (sinon "enregistrer" semble mort).
+            raise
 
         for template in self.templates:
             if template.get('id') == template_id:
@@ -1501,25 +1529,25 @@ class TemplateManager:
                 variables['echantillon_screenshot_full_url'] = (
                     f"https://danielcraft.fr/echantillons/{echantillon_slug}/screenshots/tablet_1024x2500.webp"
                 )
-        # Personnages flottants par bloc (1..4 + left/right compat)
-        if not variables.get('character_1_url') or not variables.get('character_left_url'):
-            try:
-                from services.danielcraft_echantillons import build_character_email_vars
+        # Personnages flottants : duo fixe par modele (seed = template_id)
+        try:
+            from services.danielcraft_echantillons import build_character_email_vars
 
-                char_vars = build_character_email_vars(
-                    str(variables.get('secteur_label') or variables.get('secteur') or ''),
-                    base_url=base_url,
-                    count=2,
-                )
-                for key, value in char_vars.items():
-                    if not variables.get(key):
-                        variables[key] = value
-            except Exception:
-                pass
-        elif variables.get('character_url') and not str(variables.get('character_url')).startswith('http'):
-            rel = str(variables.get('character_rel') or variables.get('character_url')).lstrip('/')
-            variables['character_url'] = f"{base_url}/{rel}"
-            variables['has_character'] = True
+            char_seed = str(
+                template_id
+                or template.get('id')
+                or template.get('name')
+                or 'default'
+            ).strip() or 'default'
+            char_vars = build_character_email_vars(
+                str(variables.get('secteur_label') or variables.get('secteur') or ''),
+                base_url=base_url,
+                count=2,
+                seed=char_seed,
+            )
+            variables.update(char_vars)
+        except Exception:
+            pass
         # Related cards : regenerer avec base_url si on a le secteur mais pas encore le HTML
         if not variables.get('related_cards_html') and (
             variables.get('secteur') or variables.get('secteur_label') or variables.get('echantillon_slug')
@@ -1531,8 +1559,11 @@ class TemplateManager:
                     str(variables.get('secteur') or variables.get('secteur_label') or ''),
                     limit=4,
                     base_url=base_url,
+                    seed=str(template_id or template.get('id') or '').strip() or None,
                 )
                 for key, value in related_vars.items():
+                    if key.startswith('character_') or key.startswith('has_character'):
+                        continue
                     if key not in variables or not variables.get(key):
                         variables[key] = value
             except Exception:
@@ -1873,11 +1904,25 @@ class TemplateManager:
                 base_url = ''
             related_vars = build_related_email_vars(
                 secteur or secteur_label,
-                limit=2,
+                limit=4,
                 base_url=base_url,
+                seed=str(template_id or '').strip() or None,
             )
             for key, value in related_vars.items():
+                if key.startswith('character_') or key.startswith('has_character'):
+                    continue
                 extended.setdefault(key, value)
+            try:
+                from services.danielcraft_echantillons import assemble_echantillons_gallery_vars
+
+                # Besoin des champs primaires pour la galerie cards
+                if not extended.get('echantillon_titre') and extended.get('echantillon_slug'):
+                    # laisser render_template enrichir ensuite ; galerie recalculee la-bas
+                    pass
+                gallery = assemble_echantillons_gallery_vars(extended)
+                extended.update(gallery)
+            except Exception:
+                pass
         except Exception:
             pass
 

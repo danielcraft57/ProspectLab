@@ -1428,6 +1428,37 @@ body[data-theme='dark'] .etm-preview-edit-hint {
     resize: vertical;
 }
 
+.etm-source-editor .CodeMirror {
+    flex: 1;
+    min-height: 640px;
+    height: auto;
+    border: 1px solid rgba(159, 212, 234, 0.7);
+    border-radius: 12px;
+    font-size: 13px;
+    line-height: 1.45;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    background: #f8fbfd;
+}
+
+.etm-source-editor .CodeMirror-scroll {
+    min-height: 640px;
+}
+
+.etm-source-editor .CodeMirror-gutters {
+    border-right: 1px solid rgba(159, 212, 234, 0.55);
+    background: rgba(223, 248, 248, 0.55);
+}
+
+body[data-theme='dark'] .etm-source-editor .CodeMirror {
+    border-color: rgba(51, 65, 85, 0.9);
+    background: #292d3e;
+}
+
+body[data-theme='dark'] .etm-source-editor .CodeMirror-gutters {
+    border-right-color: rgba(51, 65, 85, 0.9);
+    background: #1b1e2b;
+}
+
 .etm-list .etm-tpl-row + .etm-tpl-row {
     margin-top: 0;
 }

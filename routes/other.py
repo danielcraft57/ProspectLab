@@ -586,14 +586,17 @@ def api_template_detail(template_id):
     category = (data.get('category') or '').strip() if data.get('category') is not None else None
     content = data.get('content') if 'content' in data else None
     is_html = data.get('is_html') if 'is_html' in data else None
-    tpl = template_manager.update_template(
-        template_id=template_id,
-        name=name,
-        subject=subject,
-        content=content,
-        category=category or None,
-        is_html=is_html,
-    )
+    try:
+        tpl = template_manager.update_template(
+            template_id=template_id,
+            name=name,
+            subject=subject,
+            content=content,
+            category=category or None,
+            is_html=is_html,
+        )
+    except Exception as exc:
+        return jsonify({'error': f'Erreur enregistrement: {exc}'}), 500
     if tpl:
         return jsonify({'success': True, 'template': tpl})
     return jsonify({'error': 'Template introuvable'}), 404

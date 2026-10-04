@@ -21,6 +21,91 @@
     const subjectInput = $('#etm-subject');
     const contentInput = $('#etm-content');
     const isHtmlInput = $('#etm-is-html');
+    /** @type {import('codemirror').Editor|null} */
+    let contentCm = null;
+    let suppressCmDirty = false;
+
+    /**
+     * Theme CodeMirror selon le theme page.
+     * @returns {string}
+     */
+    function contentEditorTheme() {
+        return document.body.getAttribute('data-theme') === 'dark'
+            ? 'material-palenight'
+            : 'neo';
+    }
+
+    /**
+     * Lit le HTML du modele (CodeMirror ou textarea).
+     * @returns {string}
+     */
+    function getContentValue() {
+        if (contentCm) return contentCm.getValue();
+        return contentInput ? contentInput.value : '';
+    }
+
+    /**
+     * Ecrit le HTML du modele.
+     * @param {string} value
+     */
+    function setContentValue(value) {
+        const next = value || '';
+        if (contentCm) {
+            const cur = contentCm.getValue();
+            if (cur === next) return;
+            suppressCmDirty = true;
+            try {
+                contentCm.setValue(next);
+            } finally {
+                suppressCmDirty = false;
+            }
+            return;
+        }
+        if (contentInput) contentInput.value = next;
+    }
+
+    /**
+     * Initialise CodeMirror sur le textarea code source.
+     */
+    function initContentEditor() {
+        if (!contentInput || typeof CodeMirror === 'undefined' || contentCm) return;
+        contentCm = CodeMirror.fromTextArea(contentInput, {
+            mode: 'htmlmixed',
+            theme: contentEditorTheme(),
+            lineNumbers: true,
+            lineWrapping: true,
+            tabSize: 2,
+            indentUnit: 2,
+            indentWithTabs: false,
+            autofocus: false,
+            matchBrackets: false,
+            styleActiveLine: false,
+        });
+        contentCm.on('change', () => {
+            if (suppressCmDirty) return;
+            markDirty();
+        });
+        window.setTimeout(() => {
+            try {
+                contentCm.refresh();
+            } catch (_e) {
+                /* ignore */
+            }
+        }, 0);
+    }
+
+    /**
+     * Rafraichit taille/theme de l'editeur (apres affichage).
+     */
+    function refreshContentEditor() {
+        if (!contentCm) return;
+        try {
+            contentCm.setOption('theme', contentEditorTheme());
+            contentCm.refresh();
+        } catch (_e) {
+            /* ignore */
+        }
+    }
 
     const previewIframe = $('#etm-preview-iframe');
     const previewText = $('#etm-preview-text');
@@ -401,7 +486,7 @@
             name: (nameInput?.value || '').trim(),
             category: (categoryInput?.value || 'cold_email').trim(),
             subject: (subjectInput?.value || '').trim(),
-            content: contentInput?.value || '',
+            content: getContentValue(),
             is_html: !!isHtmlInput?.checked,
         };
     }
@@ -413,12 +498,13 @@
         const cat = t ? (displayCategory(t) || t.category || 'cold_email') : 'cold_email';
         if (categoryInput) categoryInput.value = cat;
         if (subjectInput) subjectInput.value = t?.subject || '';
-        if (contentInput) contentInput.value = t?.content || '';
+        setContentValue(t?.content || '');
         if (isHtmlInput) isHtmlInput.checked = !!t?.is_html || cat === 'html_email';
         dirty = false;
         refreshEditorButtons();
         updatePreviewTitle();
         if (previewMode === 'render') scheduleRenderPreview(true);
+        if (previewMode === 'source') refreshContentEditor();
     }
 
     function updatePreviewTitle() {
@@ -432,7 +518,7 @@
     function refreshEditorButtons() {
         const hasActive = !!activeId;
         if (saveBtn) {
-            saveBtn.disabled = !dirty || !(nameInput?.value || '').trim() || !(contentInput?.value || '').trim();
+            saveBtn.disabled = !dirty || !(nameInput?.value || '').trim() || !getContentValue().trim();
         }
         if (deleteBtn) deleteBtn.disabled = !hasActive;
         setBadge(dirty ? 'Modifié' : 'Prêt', dirty ? 'warn' : 'ok');
@@ -493,6 +579,11 @@
     }
 
     async function saveTemplate() {
+        // Toujours remonter l'édition visuelle vers le textarea avant lecture.
+        syncVisualEditToContent();
+        if (visualEditActive) {
+            disableVisualEdit();
+        }
         const data = currentEditorData();
         if (!data.name || !data.content) {
             toast('Nom et contenu requis.');
@@ -516,8 +607,8 @@
                         is_html: data.is_html,
                     }),
                 });
-                payload = await res.json();
-                if (!res.ok) throw new Error(payload?.error || 'Erreur sauvegarde');
+                payload = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(payload?.error || `Erreur sauvegarde (${res.status})`);
                 templateId = payload.template?.id || activeId;
             } else {
                 const res = await fetch('/api/templates', {
@@ -531,21 +622,27 @@
                         is_html: data.is_html,
                     }),
                 });
-                payload = await res.json();
-                if (!res.ok) throw new Error(payload?.error || 'Erreur création');
+                payload = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(payload?.error || `Erreur création (${res.status})`);
                 templateId = payload.template?.id || templateId;
             }
-            if (payload.template) applySavedTemplate(payload.template);
-            else {
+            if (payload.template && (payload.template.content || payload.template.content === '')) {
+                applySavedTemplate(payload.template);
+            } else {
                 await loadTemplates();
                 selectTemplate(templateId);
             }
             toast('Enregistré.');
             setBadge('Enregistré', 'ok');
+            // Recharge l'aperçu rendu pour visualiser le HTML sauvé.
+            if (previewMode === 'render') {
+                scheduleRenderPreview(true);
+            }
             window.setTimeout(() => setBadge('Prêt', 'ok'), 800);
         } catch (e) {
             setBadge('Erreur', 'error');
             toast(e.message || 'Erreur');
+            dirty = true;
         } finally {
             refreshEditorButtons();
         }
@@ -600,6 +697,10 @@
      */
     function setPreviewMode(mode) {
         const next = mode === 'source' ? 'source' : 'render';
+        // Ne pas perdre les edits contentEditable en changeant de mode.
+        if (visualEditActive) {
+            syncVisualEditToContent();
+        }
         previewMode = next;
         visualEditActive = false;
         if (previewRenderEl) previewRenderEl.hidden = next === 'source';
@@ -612,8 +713,8 @@
             frameWrap.classList.toggle('etm-frame-wrap--source', next === 'source');
             frameWrap.classList.toggle('etm-frame-wrap--visual-edit', false);
         }
-        if (next === 'source' && contentInput) {
-            contentInput.focus();
+        if (next === 'source') {
+            refreshContentEditor();
         } else {
             scheduleRenderPreview(true);
         }
@@ -638,7 +739,6 @@
     function openContentEditor(templateId, mode) {
         const open = () => {
             setPreviewMode(mode || 'source');
-            if (contentInput) contentInput.focus();
         };
         if (templateId !== activeId) {
             selectTemplate(templateId, open);
@@ -678,9 +778,10 @@
             const doc = previewIframe.contentDocument;
             if (!doc || !doc.body) return;
             const bodyHtml = doc.body.innerHTML;
-            const updated = replaceBodyInHtml(contentInput.value, bodyHtml);
-            if (updated !== contentInput.value) {
-                contentInput.value = updated;
+            const current = getContentValue();
+            const updated = replaceBodyInHtml(current, bodyHtml);
+            if (updated !== current) {
+                setContentValue(updated);
                 dirty = true;
                 refreshEditorButtons();
                 updatePreviewTitle();
@@ -695,7 +796,7 @@
      */
     function enableVisualEdit() {
         if (!previewIframe || !contentInput) return;
-        const raw = contentInput.value || '';
+        const raw = getContentValue();
         if (!raw.trim()) {
             toast('Aucun contenu à modifier.');
             return;
@@ -728,15 +829,15 @@
     }
 
     /**
-     * Clic zone aperçu : l'édition visuelle ne part que via le bouton hint
-     * (un clic direct sur l'iframe cassait le rendu live / includes).
+     * Clic zone aperçu : ouvre le code source (pas contentEditable).
+     * L'édition visuelle cassait les balises {#if_...} / {variables} des mails PAS.
      * @param {MouseEvent} ev
      */
     function handlePreviewAreaClick(ev) {
         if (previewMode !== 'render' || visualEditActive) return;
-        if (!contentInput || !(contentInput.value || '').trim()) return;
+        if (!getContentValue().trim()) return;
         if (ev.target.closest('.etm-preview-edit-hint')) {
-            enableVisualEdit();
+            openContentEditor(activeId, 'source');
         }
     }
 
@@ -836,19 +937,30 @@
         renderTimer = window.setTimeout(() => renderLivePreview(), force ? 40 : 220);
     }
 
-    function insertAtCursor(textarea, text) {
-        if (!textarea) return;
+    /**
+     * Insere du texte a la position du curseur (CodeMirror ou textarea).
+     * @param {string} text
+     */
+    function insertAtCursor(text) {
+        if (contentCm) {
+            const doc = contentCm.getDoc();
+            const cursor = doc.getCursor();
+            doc.replaceRange(text || '', cursor);
+            contentCm.focus();
+            return;
+        }
+        if (!contentInput) return;
         try {
-            const start = textarea.selectionStart;
-            const end = textarea.selectionEnd;
-            const value = textarea.value;
-            textarea.value = value.slice(0, start) + text + value.slice(end);
+            const start = contentInput.selectionStart;
+            const end = contentInput.selectionEnd;
+            const value = contentInput.value;
+            contentInput.value = value.slice(0, start) + text + value.slice(end);
             const pos = start + text.length;
-            textarea.setSelectionRange(pos, pos);
-            textarea.focus();
+            contentInput.setSelectionRange(pos, pos);
+            contentInput.focus();
         } catch (e) {
-            textarea.value += text;
-            textarea.focus();
+            contentInput.value += text;
+            contentInput.focus();
         }
     }
 
@@ -970,7 +1082,7 @@
         el.addEventListener('change', () => scheduleRenderPreview(false));
     });
 
-    [nameInput, categoryInput, subjectInput, contentInput, isHtmlInput].forEach(el => {
+    [nameInput, categoryInput, subjectInput, isHtmlInput].forEach(el => {
         if (!el) return;
         el.addEventListener('input', () => {
             markDirty();
@@ -983,7 +1095,7 @@
 
     chips.forEach(ch => {
         ch.addEventListener('click', () => {
-            insertAtCursor(contentInput, ch.getAttribute('data-insert') || '');
+            insertAtCursor(ch.getAttribute('data-insert') || '');
             markDirty();
         });
     });
@@ -1076,6 +1188,16 @@
             if (saveBtn && !saveBtn.disabled) saveTemplate();
         }
     });
+
+    initContentEditor();
+
+    // Theme page -> theme CodeMirror
+    try {
+        const themeObs = new MutationObserver(() => refreshContentEditor());
+        themeObs.observe(document.body, { attributes: true, attributeFilter: ['data-theme'] });
+    } catch (_e) {
+        /* ignore */
+    }
 
     loadTemplates().then(() => {
         setPreviewMode('render');

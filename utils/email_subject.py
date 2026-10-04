@@ -106,6 +106,43 @@ def normalize_template_subject(raw: Optional[str]) -> str:
     return text
 
 
+def apply_subject_to_html(html_text: Optional[str], subject: Optional[str]) -> str:
+    """
+    Synchronise le sujet dans le HTML (commentaire SUBJECT + balise title).
+
+    @param html_text: Contenu HTML du modele
+    @param subject: Sujet a injecter (placeholders conserves)
+    @returns: HTML mis a jour
+    """
+    out = html_text if isinstance(html_text, str) else ''
+    clean = normalize_template_subject(subject)
+    if not clean:
+        return out
+
+    if _SUBJECT_COMMENT_RE.search(out):
+        out = _SUBJECT_COMMENT_RE.sub(f'<!-- SUBJECT: {clean} -->', out, count=1)
+    elif re.search(r'<body[\s>]', out, re.IGNORECASE):
+        out = re.sub(
+            r'(<body[^>]*>)',
+            rf'\1\n  <!-- SUBJECT: {clean} -->',
+            out,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+
+    if _HTML_TITLE_RE.search(out):
+        out = _HTML_TITLE_RE.sub(f'<title>Objet: {clean}</title>', out, count=1)
+    elif re.search(r'<head[\s>]', out, re.IGNORECASE):
+        out = re.sub(
+            r'(<head[^>]*>)',
+            rf'\1\n  <title>Objet: {clean}</title>',
+            out,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+    return out
+
+
 def infer_subject_from_html(html_text: str) -> str:
     """
     Déduit le sujet depuis les sources HTML (commentaire SUBJECT ou balise title).

@@ -35,11 +35,9 @@
 
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin:0 0 16px 0;">
                 <tr>
-                  {#if_character_1_url}
                   <td width="168" style="width:168px;vertical-align:bottom;padding:0 12px 0 0;text-align:center;">
-                    <img src="{character_1_url}" alt="" width="156" style="display:block;width:156px;max-width:156px;height:auto;border:0;margin:0 auto;" />
+                    <img src="{base_url}/static/email/danielcraft/characters/dc-character-coiffure.jpg" alt="" width="156" style="display:block;width:156px;max-width:156px;height:auto;border:0;margin:0 auto;" />
                   </td>
-                  {#endif}
                   <td style="vertical-align:middle;padding:0;">
                     <p style="margin:0 0 12px;color:#1f2937;font-size:16px;line-height:1.65;">
                       Avant de parler devis, le frein le plus fréquent c'est l'inconnu : « est-ce que ça ira vraiment pour nous ? »
@@ -61,11 +59,9 @@
                       Est-ce que cette approche « voir avant de décider » vous parle ?
                     </p>
                   </td>
-                  {#if_character_2_url}
                   <td width="168" style="width:168px;vertical-align:bottom;padding:0 0 0 12px;text-align:center;">
-                    <img src="{character_2_url}" alt="" width="156" style="display:block;width:156px;max-width:156px;height:auto;border:0;margin:0 auto;" />
+                    <img src="{base_url}/static/email/danielcraft/characters/dc-character-immo.jpg" alt="" width="156" style="display:block;width:156px;max-width:156px;height:auto;border:0;margin:0 auto;" />
                   </td>
-                  {#endif}
                 </tr>
               </table>
 
@@ -103,9 +99,11 @@
           <tr>
             <td style="padding:20px 28px 26px;background:#f9fafb;text-align:center;border-top:1px solid #e5e7eb;">
               <p style="margin:0;color:#6b7280;font-size:12px;line-height:1.5;">
-                Pas un robot -
+                <a href="https://danielcraft.fr/mentions-legales" style="color:#6b7280;text-decoration:none;font-weight:600;">Mentions légales</a>
+                -
                 <a href="mailto:contact@danielcraft.fr" style="color:#6b7280;text-decoration:none;font-weight:600;">contact@danielcraft.fr</a>
-                - <a href="{unsubscribe_url}" style="color:#6b7280;text-decoration:none;font-weight:600;">Ne plus recevoir d'email</a>
+                -
+                <a href="{unsubscribe_url}" style="color:#6b7280;text-decoration:none;font-weight:600;">Ne plus recevoir d'email</a>
               </p>
             </td>
           </tr>

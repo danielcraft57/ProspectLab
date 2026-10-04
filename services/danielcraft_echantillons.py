@@ -7,6 +7,7 @@ et expose les URLs locales des screenshots (copie sous static/danielcraft).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 from functools import lru_cache
@@ -217,23 +218,30 @@ def match_echantillons_for_secteur(
 
 def _email_screenshot_for_slug(slug: str, base_url: str = "") -> str:
     """
-    URL screenshot pour une carte email (JPG local prioritaire).
+    URL screenshot pour une carte email (JPG hero local prioritaire).
+
+    Evite le webp tablet pleine page (trop haut, s'ecrase dans les cards).
 
     @param slug: Slug echantillon
     @param base_url: Base ProspectLab (optionnel)
-    @returns: URL absolue ou relative danielcraft
+    @returns: URL absolue ou relative
     """
     needle = (slug or "").strip().lower()
     if not needle:
         return ""
-    rel = f"static/email/danielcraft/pub/echantillons/{needle}.jpg"
-    local = _APP_ROOT / rel
     base = (base_url or "").rstrip("/")
-    if local.is_file() and base:
-        return f"{base}/{rel}"
-    if local.is_file():
-        return f"/{rel}"
-    return f"https://danielcraft.fr/echantillons/{needle}/screenshots/tablet_1024x2500.webp"
+
+    candidates = (
+        f"static/email/danielcraft/pub/echantillons/{needle}.jpg",
+        f"static/danielcraft/echantillons/{needle}/catalog_16x10.webp",
+    )
+    for rel in candidates:
+        local = _APP_ROOT / rel
+        if local.is_file():
+            return f"{base}/{rel}" if base else f"/{rel}"
+
+    # Dernier recours : hero danielcraft (pas le tablet pleine page)
+    return f"https://danielcraft.fr/echantillons/{needle}/screenshots/catalog_16x10.webp"
 
 
 _CHAR_ROOT = "static/email/danielcraft/characters"
@@ -242,6 +250,13 @@ _CHAR_COMMERCE = f"{_CHAR_ROOT}/dc-character-commerce.jpg"
 _CHAR_SANTE = f"{_CHAR_ROOT}/dc-character-sante.jpg"
 _CHAR_ARTISAN = f"{_CHAR_ROOT}/dc-character-artisan.jpg"
 _CHAR_RESTO = f"{_CHAR_ROOT}/dc-character-resto.jpg"
+_CHAR_AUTO = f"{_CHAR_ROOT}/dc-character-auto.jpg"
+_CHAR_COIFFURE = f"{_CHAR_ROOT}/dc-character-coiffure.jpg"
+_CHAR_IMMO = f"{_CHAR_ROOT}/dc-character-immo.jpg"
+_CHAR_SPORT = f"{_CHAR_ROOT}/dc-character-sport.jpg"
+_CHAR_BATIMENT = f"{_CHAR_ROOT}/dc-character-batiment.jpg"
+_CHAR_BUREAU = f"{_CHAR_ROOT}/dc-character-bureau.jpg"
+_CHAR_FLEURISTE = f"{_CHAR_ROOT}/dc-character-fleuriste.jpg"
 
 # Tous les personnages generes (ordre catalogue)
 CHARACTER_ROSTER_ALL: tuple[str, ...] = (
@@ -250,6 +265,13 @@ CHARACTER_ROSTER_ALL: tuple[str, ...] = (
     _CHAR_SANTE,
     _CHAR_ARTISAN,
     _CHAR_RESTO,
+    _CHAR_AUTO,
+    _CHAR_COIFFURE,
+    _CHAR_IMMO,
+    _CHAR_SPORT,
+    _CHAR_BATIMENT,
+    _CHAR_BUREAU,
+    _CHAR_FLEURISTE,
 )
 
 
@@ -279,18 +301,39 @@ def _existing_character_rels() -> list[str]:
     return [rel for rel in CHARACTER_ROSTER_ALL if (_APP_ROOT / rel).is_file()]
 
 
-def characters_pair_for_secteur(secteur_label: Optional[str] = None) -> tuple[str, str]:
+def _rng_for_character_seed(seed: Optional[str] = None) -> random.Random:
     """
-    Tire un duo aleatoire de personnages (gauche / droite).
+    RNG pour le tirage des personnages.
 
-    Le secteur est ignore (conserve pour compat d'appel) : on veut varier
-    d'un rendu a l'autre, pas toujours le meme couple.
+    Avec seed (ex. id de modele), le tirage est stable d'un rendu a l'autre.
+    Sans seed, comportement aleatoire (compat anciens appels).
+
+    @param seed: Cle de stabilite (template_id, etc.)
+    @returns: Instance random.Random
+    """
+    key = str(seed or "").strip()
+    if not key:
+        return random.Random()
+    digest = hashlib.md5(f"dc-char:{key}".encode("utf-8")).hexdigest()
+    return random.Random(int(digest[:16], 16))
+
+
+def characters_pair_for_secteur(
+    secteur_label: Optional[str] = None,
+    *,
+    seed: Optional[str] = None,
+) -> tuple[str, str]:
+    """
+    Duo de personnages (gauche / droite), fixe si seed fourni.
+
+    Le secteur est ignore (conserve pour compat d'appel).
 
     @param secteur_label: Ignoré (compat)
+    @param seed: Cle de stabilite (ex. id de modele email)
     @returns: Tuple (rel_gauche, rel_droite) sous static/email/...
     """
     _ = secteur_label
-    roster = characters_roster_for_secteur(None, count=2)
+    roster = characters_roster_for_secteur(None, count=2, seed=seed)
     if len(roster) >= 2:
         return (roster[0], roster[1])
     if len(roster) == 1:
@@ -298,39 +341,66 @@ def characters_pair_for_secteur(secteur_label: Optional[str] = None) -> tuple[st
     return (_CHAR_LOIC, _CHAR_COMMERCE)
 
 
+# Duos fixes par modele PAS (12 persos, aucun personnage reutilise)
+PAS_CHARACTER_PAIRS: dict[str, tuple[str, str]] = {
+    "html_dc_pas_echantillon": (_CHAR_LOIC, _CHAR_COMMERCE),
+    "html_dc_pas_style_custom": (_CHAR_SANTE, _CHAR_ARTISAN),
+    "html_dc_pas_constat_site": (_CHAR_RESTO, _CHAR_AUTO),
+    "html_dc_pas_projection": (_CHAR_COIFFURE, _CHAR_IMMO),
+    "html_dc_pas_midi": (_CHAR_SPORT, _CHAR_BATIMENT),
+    "html_dc_pas_breakup": (_CHAR_BUREAU, _CHAR_FLEURISTE),
+}
+
+
 def characters_roster_for_secteur(
     secteur_label: Optional[str] = None,
     *,
     count: int = 2,
+    seed: Optional[str] = None,
 ) -> list[str]:
     """
-    Tire aleatoirement N personnages distincts pour un mail.
+    Tire N personnages distincts pour un mail.
+
+    Si ``seed`` est un id PAS connu, renvoie le duo fixe du modele
+    (tous differents d'un mail a l'autre). Sinon: tirage deterministe
+    si seed fourni, aleatoire sinon.
 
     @param secteur_label: Ignoré (compat d'appel)
     @param count: Nombre max de chemins relatifs (2 par modele)
-    @returns: Liste de chemins relatifs existants, melanges
+    @param seed: Cle de stabilite (template_id recommande)
+    @returns: Liste de chemins relatifs existants
     @example
-        characters_roster_for_secteur(count=2)
-        # ex. [artisan, resto] puis [sante, loic] au prochain appel
+        characters_roster_for_secteur(count=2, seed="html_dc_pas_midi")
+        # artisan + resto (duo fixe J4)
     """
     _ = secteur_label
     existing = _existing_character_rels()
     if not existing:
         return []
+    key = str(seed or "").strip()
+    if key in PAS_CHARACTER_PAIRS:
+        pair = [rel for rel in PAS_CHARACTER_PAIRS[key] if rel in existing]
+        if pair:
+            return pair[: max(0, int(count))]
     n = min(max(0, int(count)), len(existing))
     if n <= 0:
         return []
-    return random.sample(existing, k=n)
+    return _rng_for_character_seed(seed).sample(existing, k=n)
 
 
-def character_rel_for_secteur(secteur_label: Optional[str] = None) -> str:
+def character_rel_for_secteur(
+    secteur_label: Optional[str] = None,
+    *,
+    seed: Optional[str] = None,
+) -> str:
     """
-    Compat : renvoie un personnage aleatoire (slot gauche).
+    Compat : renvoie le personnage du slot gauche.
 
     @param secteur_label: Ignoré (compat)
+    @param seed: Cle de stabilite
     @returns: Chemin relatif sous static/email/...
     """
-    left, _right = characters_pair_for_secteur(secteur_label)
+    left, _right = characters_pair_for_secteur(secteur_label, seed=seed)
     return left
 
 
@@ -339,6 +409,7 @@ def build_character_email_vars(
     *,
     base_url: str = "",
     count: int = 2,
+    seed: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Variables email pour personnages par bloc (character_1..N + left/right).
@@ -346,10 +417,15 @@ def build_character_email_vars(
     @param secteur_label: Secteur FR
     @param base_url: Base ProspectLab pour URLs absolues
     @param count: Nombre de slots (2 = un a gauche, un a droite)
+    @param seed: Cle de stabilite (ex. id de modele) pour figer le duo
     @returns: Dict placeholders character_*_url / has_character_*
     """
     base = (base_url or "").rstrip("/")
-    roster = characters_roster_for_secteur(secteur_label, count=max(1, int(count)))
+    roster = characters_roster_for_secteur(
+        secteur_label,
+        count=max(1, int(count)),
+        seed=seed,
+    )
     out: Dict[str, Any] = {
         "character_count": len(roster),
         "has_character": bool(roster),
@@ -426,11 +502,12 @@ def _render_echantillon_email_card(
 
     img_html = ""
     if shot_e:
+        # Crop 1200x1000 (6:5) -> card 544x453 : plus de hauteur, sans ecrasement
         img_html = (
             f'<a href="{demo_e}" style="text-decoration:none;">'
-            f'<img src="{shot_e}" alt="{titre_e}" width="544" '
+            f'<img src="{shot_e}" alt="{titre_e}" width="544" height="453" '
             f'style="display:block;width:100%;max-width:544px;height:auto;border:0;'
-            f'background:#c9f4f2;aspect-ratio:1.618/1;" /></a>'
+            f'background:#c9f4f2;object-fit:cover;object-position:top center;" /></a>'
         )
 
     fiche_html = ""
@@ -445,13 +522,15 @@ def _render_echantillon_email_card(
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
         'style="width:100%;border-collapse:collapse;margin:0 0 14px 0;'
         'border:1px solid #9fd4ea;border-radius:12px;overflow:hidden;background:#ffffff;">'
-        f'<tr><td style="padding:0;line-height:0;font-size:0;">{img_html}</td></tr>'
-        '<tr><td style="padding:14px 16px 16px;">'
+        '<tr><td style="padding:14px 16px 10px;">'
         f"{badge_html}"
         f'<p style="margin:0 0 4px;color:#0f3550;font-size:16px;font-weight:700;'
         f'line-height:1.35;">{titre_e}</p>'
-        f'<p style="margin:0 0 14px;color:#6b7280;font-size:13px;line-height:1.45;">'
+        f'<p style="margin:0;color:#6b7280;font-size:13px;line-height:1.45;">'
         f'{metier_e or "Ouvrir la démo pour voir le rendu"}</p>'
+        "</td></tr>"
+        f'<tr><td style="padding:0;line-height:0;font-size:0;">{img_html}</td></tr>'
+        '<tr><td style="padding:14px 16px 16px;">'
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0">'
         "<tr><td style=\"text-align:center;\">"
         f'<a href="{demo_e}" style="display:inline-block;background:linear-gradient('
@@ -499,6 +578,7 @@ def build_related_email_vars(
     *,
     limit: int = 4,
     base_url: str = "",
+    seed: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Variables email pour echantillons proches + HTML cartes related.
@@ -506,9 +586,10 @@ def build_related_email_vars(
     @param secteur: Secteur entreprise
     @param limit: Nombre max de related (4 par defaut pour galerie mail)
     @param base_url: Base ProspectLab pour les JPG locaux
+    @param seed: Cle pour figer les personnages (id de modele)
     @returns: Dict placeholders (echantillon_2_*, related_cards_html, character_*)
     @example
-        build_related_email_vars("Santé")
+        build_related_email_vars("Santé", seed="html_dc_pas_midi")
         # has_related_echantillons, echantillon_2_titre=...
     """
     max_related = max(0, min(int(limit), 6))
@@ -532,7 +613,11 @@ def build_related_email_vars(
         out[f"{prefix}screenshot_url"] = ""
         out[f"has_echantillon_{idx}"] = False
 
-    out.update(build_character_email_vars(label, base_url=base_url, count=2))
+    # Personnages : uniquement si seed (sinon render_template les fixe via template_id)
+    if seed is not None and str(seed).strip():
+        out.update(
+            build_character_email_vars(label, base_url=base_url, count=2, seed=seed)
+        )
 
     related_cards: List[Dict[str, Any]] = []
     for idx, item in enumerate(related, start=2):
