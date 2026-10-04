@@ -114,9 +114,11 @@ Tous les chemins ci‑dessous sont **relatifs** à `/api/public`.
 | **GET** | `/statistics/overview` | Statistiques | Vue compacte + série journalière (`?days=`, max 90) |
 | **GET** | `/reference/ciblage` | Entreprises | Listes secteurs, opportunités, statuts entreprise, tags |
 | **GET** | `/reference/ciblage/counts` | Entreprises | Idem avec effectifs `{ value, count }` |
+| **GET** | `/reference/carte-villes` | Entreprises | Villes (presets) + effectif dans un rayon (`rayon_km`) |
 | **GET** | `/entreprises/statuses` | Entreprises | Statuts entreprise supportés (pipeline, délivrabilité) |
 | **GET** | `/campagnes/statuses` | Campagnes | `draft`, `scheduled`, `running`, `completed`, `failed` |
 | **GET** | `/entreprises` | Entreprises | Liste paginée (`limit`, `offset`, `secteur`, `statut`, `search`) |
+| **GET** | `/entreprises/proches` | Entreprises | Proximité GPS (`latitude`, `longitude`, `rayon_km`, `limit`, `secteur`) |
 | **GET** | `/entreprises/<id>` | Entreprises | Détail entreprise |
 | **DELETE** | `/entreprises/<id>` | Entreprises + `entreprises_delete` | Suppression PERMANENTE (cascades de données liées incluses) |
 | **GET** | `/entreprises/by-website` | Entreprises | Recherche par site (`website`) |
@@ -133,6 +135,7 @@ Tous les chemins ci‑dessous sont **relatifs** à `/api/public`.
 | **GET** | `/entreprises/<id>/emails` | Entreprises + emails | Emails format court |
 | **GET** | `/entreprises/<id>/emails/all` | Entreprises + emails | Emails enrichis (`include_primary`) |
 | **GET** | `/entreprises/<id>/phones` | Entreprises | Téléphones scrapés + principal (`include_primary`) |
+| **GET** | `/entreprises/<id>/gallery` | Entreprises | Images scrapées / OpenGraph / logo (galerie légère) |
 | **GET** | `/entreprises/<id>/campagnes` | Campagnes | Campagnes liées à l’entreprise |
 | **GET** | `/emails` | Emails | Liste globale (`limit`, `offset`, `entreprise_id`) |
 | **GET** | `/campagnes` | Campagnes | Liste (`limit`, `offset`, `statut`, `entreprise_id`) |
@@ -142,12 +145,15 @@ Tous les chemins ci‑dessous sont **relatifs** à `/api/public`.
 | **GET** | `/website-analysis` | Entreprises | Rapport agrégé (`website`, `full`) |
 | **POST** | `/website-analysis` | Entreprises | Lance les analyses asynchrones (réponse typique **202**) |
 | **GET** | `/entreprises/<id>/screenshots` | Entreprises | Dernier set + historique (desktop/tablette/mobile) + champs `design_*` |
+| **GET** | `/entreprises/<id>/landing-variants` | Entreprises | Dernier run de landing variants (assets + screenshots) |
+| **GET** | `/landing-variants/runs/<run_id>` | Entreprises | Détail d’un run (html/css/js/screenshots) |
 | **GET** | `/entreprises/<id>/design-review` | Entreprises | Analyse design UX/UI (Gemini) du dernier screenshot |
 | **POST** | `/entreprises/<id>/design-review` | Entreprises | Lance l'analyse design (202 + `task_id`) |
 | **GET** | `/entreprises/<id>/gemini-report` | Entreprises | Rapport d'audit complet Gemini (tech/SEO/OSINT/pentest + screenshots) |
 | **POST** | `/entreprises/<id>/gemini-report` | Entreprises | Lance le rapport complet (202 + `task_id`, capture screenshots si besoin) |
 | **POST** | `/website-audit-report` | Auth audit (voir ci‑dessous) | Analyse **simple** (technique + SEO) → PDF local → email |
 | **POST** | `/website-audit-report/complete` | Auth audit | Analyse **complète** (6 modules) → PDF serv1 → email |
+| **GET**/**POST** | `/website-audit-report/complete/resume` | Auth audit | Reprise après pause Cursor (`pending_id` et/ou `website` + `email`) |
 | **GET** | `/website-audit-report/<task_id>` | Auth audit | Suivi tâche Celery (état, résultat si terminé) |
 | **POST** | `/push/register` | Token valide | Enregistre un jeton Expo Push (corps JSON, voir ci‑dessous) |
 | **DELETE** | `/push/register` | Token valide | Retire un jeton Expo Push enregistré |

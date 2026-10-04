@@ -64,6 +64,15 @@ const API_DOC_FAMILIES = [
                     },
                     {
                         method: 'GET',
+                        path: '/reference/carte-villes',
+                        desc: 'Villes (presets Grand Est) avec nombre d’entreprises géolocalisées dans un rayon autour du centre-ville.',
+                        permission: 'Entreprises',
+                        params: [
+                            { name: 'rayon_km', type: 'float', desc: 'Rayon de comptage (défaut 25, min 5, max 80)' }
+                        ]
+                    },
+                    {
+                        method: 'GET',
                         path: '/entreprises/statuses',
                         desc: 'Statuts entreprise supportés (pipeline + délivrabilité).',
                         permission: 'Entreprises'
@@ -79,7 +88,7 @@ const API_DOC_FAMILIES = [
             {
                 id: 'entreprises',
                 name: 'Entreprises',
-                categoryDesc: 'Liste, détail et recherches (site, email, téléphone) ; emails et téléphones d’une fiche ; campagnes liées. Suppression : DELETE sur la même URL que le détail — sans cache serveur ; données liées en cascade selon le schéma.',
+                categoryDesc: 'Liste, détail, proximité GPS, recherches (site, email, téléphone) ; galerie images ; emails et téléphones ; campagnes liées. Suppression : DELETE sur la même URL que le détail — sans cache serveur ; données liées en cascade selon le schéma.',
                 endpoints: [
                     {
                         method: 'GET',
@@ -92,6 +101,19 @@ const API_DOC_FAMILIES = [
                             { name: 'secteur', type: 'str' },
                             { name: 'statut', type: 'str' },
                             { name: 'search', type: 'str' }
+                        ]
+                    },
+                    {
+                        method: 'GET',
+                        path: '/entreprises/proches',
+                        desc: 'Entreprises ProspectLab proches d’un point GPS (pas OSM).',
+                        permission: 'Entreprises',
+                        params: [
+                            { name: 'latitude', type: 'float', desc: 'Requis' },
+                            { name: 'longitude', type: 'float', desc: 'Requis' },
+                            { name: 'rayon_km', type: 'float', desc: 'Alias radius_km ; défaut 10, max 100' },
+                            { name: 'limit', type: 'int', desc: 'Défaut 80, max 250' },
+                            { name: 'secteur', type: 'str', desc: 'Optionnel' }
                         ]
                     },
                     {
@@ -155,8 +177,14 @@ const API_DOC_FAMILIES = [
                     },
                     {
                         method: 'GET',
+                        path: '/entreprises/<id>/gallery',
+                        desc: 'Images liées à la fiche (scraping, OpenGraph, logo) pour galerie mobile légère.',
+                        permission: 'Entreprises'
+                    },
+                    {
+                        method: 'GET',
                         path: '/entreprises/<id>/screenshots',
-                        desc: 'Dernier set de screenshots publics (desktop/tablet/mobile) + historique récent.',
+                        desc: 'Dernier set de screenshots publics (desktop/tablet/mobile) + historique récent (+ champs design_* si analyse déjà faite).',
                         permission: 'Entreprises',
                         params: [{ name: 'limit', type: 'int', desc: 'Optionnel, défaut 20, max 100' }]
                     },
@@ -181,6 +209,43 @@ const API_DOC_FAMILIES = [
                             { name: 'limit', type: 'int' },
                             { name: 'offset', type: 'int' },
                             { name: 'statut', type: 'str' }
+                        ]
+                    }
+                ]
+            },
+            {
+                id: 'design-gemini',
+                name: 'Design review & rapport Gemini',
+                categoryDesc: 'Analyses UX/UI (Gemini Vision) sur screenshots, et rapport d’audit complet Gemini. Les clés Gemini ne sont jamais exposées. POST = tâche Celery (réponse 202 + task_id) ; relire ensuite le GET.',
+                endpoints: [
+                    {
+                        method: 'GET',
+                        path: '/entreprises/<id>/design-review',
+                        desc: 'Lecture de l’analyse design UX/UI du dernier screenshot (score, positifs/négatifs, pitch).',
+                        permission: 'Entreprises'
+                    },
+                    {
+                        method: 'POST',
+                        path: '/entreprises/<id>/design-review',
+                        desc: 'Lance l’analyse design (Celery, queue screenshot). 202 + task_id si un screenshot existe ; 409 sinon.',
+                        permission: 'Entreprises',
+                        bodyParams: [
+                            { name: 'screenshot_set_id', type: 'int', required: false, desc: 'Set cible (défaut : dernier set disponible)' }
+                        ]
+                    },
+                    {
+                        method: 'GET',
+                        path: '/entreprises/<id>/gemini-report',
+                        desc: 'Dernier rapport d’audit complet Gemini (tech/SEO/OSINT/pentest + screenshots). status=never si aucun rapport.',
+                        permission: 'Entreprises'
+                    },
+                    {
+                        method: 'POST',
+                        path: '/entreprises/<id>/gemini-report',
+                        desc: 'Lance le rapport Gemini complet (202 + task_id). Capture screenshots si besoin.',
+                        permission: 'Entreprises',
+                        bodyParams: [
+                            { name: 'ensure_screenshots', type: 'bool', required: false, desc: 'Capturer les screenshots manquants (défaut true)' }
                         ]
                     }
                 ]
@@ -401,12 +466,62 @@ const API_DOC_FAMILIES = [
                         ]
                     },
                     {
+                        method: 'POST',
+                        path: '/website-audit-report/complete/resume',
+                        desc: 'Reprise après pause Cursor (quota). GET aussi possible (lien email admin : ?pending_id=…).',
+                        permission: 'Auth audit (Bearer ou X-Website-Audit-Key)',
+                        bodyParams: [
+                            { name: 'pending_id', type: 'str', required: false, desc: 'Identifiant de reprise (recommandé)' },
+                            { name: 'website', type: 'str', required: false, desc: 'Alternative si pas de pending_id' },
+                            { name: 'email', type: 'str', required: false, desc: 'Avec website si pas de pending_id' },
+                            { name: 'extra_instructions', type: 'str', required: false, desc: 'Consignes agent serv1' }
+                        ]
+                    },
+                    {
+                        method: 'GET',
+                        path: '/website-audit-report/complete/resume',
+                        desc: 'Même reprise via lien (query pending_id, website, email). Réponse HTML courte si pending_id présent.',
+                        permission: 'Auth audit (Bearer ou X-Website-Audit-Key / audit_key en query)',
+                        params: [
+                            { name: 'pending_id', type: 'str', desc: 'Identifiant de reprise' },
+                            { name: 'website', type: 'str', desc: 'Optionnel' },
+                            { name: 'email', type: 'str', desc: 'Optionnel' }
+                        ]
+                    },
+                    {
                         method: 'GET',
                         path: '/website-audit-report/<task_id>',
                         desc: 'État Celery (PENDING, STARTED, SUCCESS, FAILURE) ; champ result si terminé avec succès.',
                         permission: 'Auth audit (Bearer ou X-Website-Audit-Key)',
                         params: [
                             { name: 'task_id', type: 'str', desc: 'Identifiant Celery renvoyé par le POST (segment d’URL)' }
+                        ]
+                    }
+                ]
+            },
+            {
+                id: 'push-mobile',
+                name: 'Push mobile (Expo)',
+                categoryDesc: 'Enregistrement / retrait d’un jeton Expo Push lié au token API (notif mobile). Content-Type application/json requis.',
+                endpoints: [
+                    {
+                        method: 'POST',
+                        path: '/push/register',
+                        desc: 'Enregistre un jeton Expo Push pour ce token API.',
+                        permission: 'Token valide',
+                        bodyParams: [
+                            { name: 'expo_push_token', type: 'str', required: true, desc: 'ExponentPushToken[…]' },
+                            { name: 'platform', type: 'str', required: false, desc: 'android | ios (défaut android)' },
+                            { name: 'installation_id', type: 'str', required: false, desc: 'Identifiant stable d’installation' }
+                        ]
+                    },
+                    {
+                        method: 'DELETE',
+                        path: '/push/register',
+                        desc: 'Retire un jeton Expo Push enregistré pour ce token API.',
+                        permission: 'Token valide',
+                        bodyParams: [
+                            { name: 'expo_push_token', type: 'str', required: true, desc: 'ExponentPushToken[…] à retirer' }
                         ]
                     }
                 ]
