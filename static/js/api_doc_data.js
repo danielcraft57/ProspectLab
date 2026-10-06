@@ -236,13 +236,18 @@ const API_DOC_FAMILIES = [
                     {
                         method: 'GET',
                         path: '/entreprises/<id>/gemini-report',
-                        desc: 'Dernier rapport d’audit complet Gemini (tech/SEO/OSINT/pentest + screenshots). status=never si aucun rapport.',
-                        permission: 'Entreprises'
+                        desc: 'Dernier rapport Gemini (score, indicateurs modules, résumé, pitch, points forts/faibles, actions, design) — même contenu que l’onglet site. status=never si aucun rapport.',
+                        permission: 'Entreprises',
+                        params: [
+                            { name: 'include_document', type: 'bool', desc: 'Inclure le Markdown report_document (volumineux)' },
+                            { name: 'include_raw', type: 'bool', desc: 'Inclure le dict latest brut (debug)' },
+                            { name: 'task_id', type: 'str', desc: 'Suivi Celery après un POST (progress / logs)' }
+                        ]
                     },
                     {
                         method: 'POST',
                         path: '/entreprises/<id>/gemini-report',
-                        desc: 'Lance le rapport Gemini complet (202 + task_id). Capture screenshots si besoin.',
+                        desc: 'Lance le rapport Gemini complet (202 + task_id + poll_url). Capture screenshots si besoin. Puis poller le GET.',
                         permission: 'Entreprises',
                         bodyParams: [
                             { name: 'ensure_screenshots', type: 'bool', required: false, desc: 'Capturer les screenshots manquants (défaut true)' }

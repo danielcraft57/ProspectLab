@@ -1783,13 +1783,212 @@ def post_entreprise_design_review_public(entreprise_id: int):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+def _coerce_public_bool(value, default: bool = False) -> bool:
+    """
+    Interprète un booléen query/JSON (1/true/oui…).
+
+    @param value: Valeur brute
+    @param default: Défaut si None / vide
+    @returns: Booléen
+    """
+    if value is None or value == '':
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ('1', 'true', 'yes', 'oui', 'on')
+
+
+def _build_public_gemini_report_payload(
+    entreprise_id: int,
+    *,
+    include_document: bool = False,
+    include_raw: bool = False,
+    task_id: str | None = None,
+) -> dict:
+    """
+    Charge utile publique du rapport Gemini, alignée sur l'onglet site
+    (score, indicateurs modules, résumé, bons/mauvais points, actions).
+
+    @param entreprise_id: ID entreprise
+    @param include_document: Inclure le Markdown ``report_document`` (volumineux)
+    @param include_raw: Inclure le dict ``latest`` brut (debug / compat)
+    @param task_id: Optionnel — état Celery de la tâche POST
+    @returns: Dict JSON-ready
+    """
+    eid = int(entreprise_id)
+    latest = database.get_latest_entreprise_gemini_report(eid)
+    task_info = None
+    if task_id and str(task_id).strip():
+        try:
+            from celery.result import AsyncResult
+            from celery_app import celery as celery_app
+
+            res = AsyncResult(str(task_id).strip(), app=celery_app)
+            state = (res.state or 'PENDING').upper()
+            meta = res.info if isinstance(res.info, dict) else {}
+            task_info = {
+                'task_id': str(task_id).strip(),
+                'state': state,
+                'ready': bool(res.ready()),
+                'successful': res.successful() if res.ready() else None,
+                'progress': meta.get('progress'),
+                'message': meta.get('message'),
+                'logs': meta.get('logs') if isinstance(meta.get('logs'), list) else None,
+            }
+            if state == 'FAILURE':
+                task_info['error'] = str(res.info)[:500] if res.info else 'Echec tache'
+            elif state == 'SUCCESS' and isinstance(res.result, dict):
+                task_info['result'] = {
+                    'success': res.result.get('success'),
+                    'overall_score': res.result.get('overall_score'),
+                    'source': res.result.get('source'),
+                    'error': res.result.get('error'),
+                }
+        except Exception as exc:
+            task_info = {
+                'task_id': str(task_id).strip(),
+                'state': 'UNKNOWN',
+                'error': str(exc)[:300],
+            }
+
+    if not latest:
+        payload = {
+            'success': True,
+            'entreprise_id': eid,
+            'status': 'never',
+            'overall_score': None,
+            'refonte_recommendation': None,
+            'source': None,
+            'analyzed_at': None,
+            'executive_summary': None,
+            'commercial_pitch': None,
+            'indicators': {},
+            'what_works': [],
+            'whats_wrong': [],
+            'priority_actions': [],
+            'improvements': [],
+            'design_analysis': None,
+            'report': None,
+            'report_id': None,
+            'screenshot_set_id': None,
+            'error_message': None,
+        }
+        if include_document:
+            payload['report_document'] = None
+        if include_raw:
+            payload['latest'] = None
+        if task_info is not None:
+            payload['task'] = task_info
+            # Si la tâche tourne encore et qu'aucun rapport n'existe, status pending
+            st = str(task_info.get('state') or '').upper()
+            if st in ('PENDING', 'STARTED', 'PROGRESS', 'RETRY'):
+                payload['status'] = 'pending'
+        return payload
+
+    report = latest.get('report') if isinstance(latest.get('report'), dict) else {}
+    modules_src = report.get('modules') if isinstance(report.get('modules'), dict) else {}
+    indicators: dict = {}
+    for key in ('design', 'technical', 'seo', 'osint', 'pentest'):
+        block = modules_src.get(key) if isinstance(modules_src.get(key), dict) else {}
+        score = block.get('score')
+        if score is None:
+            score = latest.get(f'score_{key}')
+        notes = block.get('notes') or latest.get(f'notes_{key}') or ''
+        if score is not None or str(notes).strip():
+            indicators[key] = {
+                'score': score,
+                'notes': str(notes).strip() if notes else '',
+            }
+
+    design = report.get('design_analysis') if isinstance(report.get('design_analysis'), dict) else None
+    if not design and any(
+        latest.get(k) for k in ('design_score', 'design_summary', 'design_ux_notes', 'design_ui_notes')
+    ):
+        design = {
+            'score': latest.get('design_score'),
+            'summary': latest.get('design_summary') or '',
+            'ux_notes': latest.get('design_ux_notes') or '',
+            'ui_notes': latest.get('design_ui_notes') or '',
+            'to_keep': [],
+            'to_redo': [],
+        }
+
+    status = str(latest.get('status') or 'done').strip().lower() or 'done'
+    if status in ('ok',):
+        status = 'done'
+
+    public_report = {
+        'overall_score': latest.get('overall_score') if latest.get('overall_score') is not None else report.get('overall_score'),
+        'refonte_recommendation': latest.get('refonte_recommendation') or report.get('refonte_recommendation'),
+        'executive_summary': (
+            latest.get('executive_summary')
+            or report.get('executive_summary')
+            or ''
+        ).strip() or None,
+        'commercial_pitch': (
+            latest.get('commercial_pitch')
+            or report.get('commercial_pitch')
+            or ''
+        ).strip() or None,
+        'what_works': list(report.get('what_works') or []),
+        'whats_wrong': list(report.get('whats_wrong') or []),
+        'priority_actions': list(report.get('priority_actions') or []),
+        'improvements': list(report.get('improvements') or []),
+        'modules': indicators,
+        'design_analysis': design,
+        'source': latest.get('source') or report.get('source'),
+    }
+    if include_document:
+        doc = (
+            latest.get('report_document')
+            or report.get('report_document')
+            or ''
+        ).strip()
+        public_report['report_document'] = doc or None
+
+    payload = {
+        'success': True,
+        'entreprise_id': eid,
+        'status': status,
+        'overall_score': public_report['overall_score'],
+        'refonte_recommendation': public_report['refonte_recommendation'],
+        'source': public_report['source'],
+        'analyzed_at': latest.get('analyzed_at'),
+        'executive_summary': public_report['executive_summary'],
+        'commercial_pitch': public_report['commercial_pitch'],
+        'indicators': indicators,
+        'what_works': public_report['what_works'],
+        'whats_wrong': public_report['whats_wrong'],
+        'priority_actions': public_report['priority_actions'],
+        'improvements': public_report['improvements'],
+        'design_analysis': design,
+        'report': public_report,
+        'report_id': latest.get('id'),
+        'screenshot_set_id': latest.get('screenshot_set_id'),
+        'error_message': latest.get('error_message'),
+    }
+    if include_document:
+        payload['report_document'] = public_report.get('report_document')
+    if include_raw:
+        payload['latest'] = latest
+    if task_info is not None:
+        payload['task'] = task_info
+    return payload
+
+
 @api_public_bp.route('/entreprises/<int:entreprise_id>/gemini-report', methods=['GET'])
 @api_token_required
 @require_api_permission('entreprises')
-@public_response_cache(20)
 def get_entreprise_gemini_report_public(entreprise_id: int):
     """
-    API publique : dernier rapport d'audit complet Gemini.
+    API publique : dernier rapport d'audit Gemini (même contenu que l'onglet site).
+
+    Query params:
+        include_document (bool): Markdown detaille ``report_document``
+        include_raw (bool): Dict ``latest`` brut (compat / debug)
+        task_id (str): Suivi Celery apres un POST (progress / logs)
+
+    Pas de cache GET : le rapport evolue pendant la tache Celery et le poll ``task_id``.
 
     @param entreprise_id: ID de l'entreprise
     """
@@ -1798,25 +1997,18 @@ def get_entreprise_gemini_report_public(entreprise_id: int):
         if not entreprise:
             return jsonify({'success': False, 'error': 'Entreprise introuvable'}), 404
 
-        latest = database.get_latest_entreprise_gemini_report(int(entreprise_id))
-        if not latest:
-            return jsonify({
-                'success': True,
-                'entreprise_id': int(entreprise_id),
-                'status': 'never',
-                'latest': None,
-            })
-        return jsonify({
-            'success': True,
-            'entreprise_id': int(entreprise_id),
-            'status': latest.get('status') or 'done',
-            'latest': latest,
-            'overall_score': latest.get('overall_score'),
-            'refonte_recommendation': latest.get('refonte_recommendation'),
-            'source': latest.get('source'),
-            'report': latest.get('report'),
-            'analyzed_at': latest.get('analyzed_at'),
-        })
+        include_document = _coerce_public_bool(request.args.get('include_document'), False)
+        include_raw = _coerce_public_bool(request.args.get('include_raw'), False)
+        task_id = (request.args.get('task_id') or '').strip() or None
+
+        return jsonify(
+            _build_public_gemini_report_payload(
+                int(entreprise_id),
+                include_document=include_document,
+                include_raw=include_raw,
+                task_id=task_id,
+            )
+        )
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -1827,6 +2019,13 @@ def get_entreprise_gemini_report_public(entreprise_id: int):
 def post_entreprise_gemini_report_public(entreprise_id: int):
     """
     API publique : lance un rapport Gemini complet (screenshots auto si besoin).
+
+    Produit score global, indicateurs modules (design/tech/SEO/OSINT/pentest),
+    resume, pitch, points forts / points faibles, actions et ameliorations —
+    comme l'onglet « Rapport Gemini » de l'interface.
+
+    Body JSON optionnel:
+        ensure_screenshots (bool, defaut true)
 
     @param entreprise_id: ID de l'entreprise
     """
@@ -1840,9 +2039,10 @@ def post_entreprise_gemini_report_public(entreprise_id: int):
             return jsonify({'success': False, 'error': 'Aucun website sur cette entreprise'}), 400
 
         payload = request.get_json(silent=True) or {}
-        ensure_screenshots = payload.get('ensure_screenshots', True)
-        if isinstance(ensure_screenshots, str):
-            ensure_screenshots = ensure_screenshots.strip().lower() in ('1', 'true', 'yes', 'oui')
+        ensure_screenshots = _coerce_public_bool(
+            payload.get('ensure_screenshots', True),
+            True,
+        )
 
         from tasks.gemini_full_report_tasks import analyze_entreprise_gemini_full_report_task
 
@@ -1858,7 +2058,11 @@ def post_entreprise_gemini_report_public(entreprise_id: int):
             'entreprise_id': int(entreprise_id),
             'task_id': task.id,
             'status': 'pending',
-            'message': 'Rapport Gemini enfile. Relisez GET .../gemini-report apres quelques secondes.',
+            'message': (
+                'Rapport Gemini enfile (score, indicateurs, points forts/faibles, actions). '
+                'Relisez GET .../gemini-report?task_id=<task_id> puis sans task_id une fois termine.'
+            ),
+            'poll_url': f'/api/public/entreprises/{int(entreprise_id)}/gemini-report?task_id={task.id}',
         }), 202
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

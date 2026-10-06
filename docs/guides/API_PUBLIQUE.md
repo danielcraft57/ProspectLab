@@ -149,7 +149,7 @@ Tous les chemins ci‑dessous sont **relatifs** à `/api/public`.
 | **GET** | `/landing-variants/runs/<run_id>` | Entreprises | Détail d’un run (html/css/js/screenshots) |
 | **GET** | `/entreprises/<id>/design-review` | Entreprises | Analyse design UX/UI (Gemini) du dernier screenshot |
 | **POST** | `/entreprises/<id>/design-review` | Entreprises | Lance l'analyse design (202 + `task_id`) |
-| **GET** | `/entreprises/<id>/gemini-report` | Entreprises | Rapport d'audit complet Gemini (tech/SEO/OSINT/pentest + screenshots) |
+| **GET** | `/entreprises/<id>/gemini-report` | Entreprises | Rapport Gemini structuré (score, indicateurs, bons/mauvais points, actions) ; `?task_id=` pour le suivi |
 | **POST** | `/entreprises/<id>/gemini-report` | Entreprises | Lance le rapport complet (202 + `task_id`, capture screenshots si besoin) |
 | **POST** | `/website-audit-report` | Auth audit (voir ci‑dessous) | Analyse **simple** (technique + SEO) → PDF local → email |
 | **POST** | `/website-audit-report/complete` | Auth audit | Analyse **complète** (6 modules) → PDF serv1 → email |
@@ -442,7 +442,17 @@ Corps JSON optionnel : `{ "screenshot_set_id": 456 }` pour cibler un set precis.
 
 #### GET `/entreprises/<id>/gemini-report`
 
-Rapport d'audit **complet** : screenshots (captures auto si manquants/404) + synthese tech / SEO / OSINT / pentest via Gemini Vision.
+Meme contenu que l'onglet **Rapport Gemini** du site : score global, indicateurs modules (design / tech / SEO / OSINT / pentest), resume, pitch commercial, points forts / points faibles, actions prioritaires, ameliorations, analyse design UX/UI.
+
+Query optionnelles :
+
+| Parametre | Defaut | Description |
+|-----------|--------|-------------|
+| `include_document` | `false` | Inclut le Markdown detaille `report_document` (volumineux) |
+| `include_raw` | `false` | Inclut le dict `latest` brut (debug / compat) |
+| `task_id` | — | Suivi Celery apres un POST (`progress`, `logs`, `state`) |
+
+Pas de cache serveur sur ce GET (le rapport evolue pendant la tache).
 
 ```bash
 curl -s -H "Authorization: Bearer VOTRE_TOKEN" \
@@ -460,31 +470,41 @@ Reponse type (`status: done`) :
   "refonte_recommendation": "partielle",
   "source": "gemini",
   "analyzed_at": "2026-04-01 12:00:00",
-  "report": {
-    "overall_score": 42,
-    "refonte_recommendation": "partielle",
-    "executive_summary": "…",
-    "what_works": ["…"],
-    "whats_wrong": ["…"],
-    "improvements": [
-      {"area": "seo", "priority": "haute", "action": "…"}
-    ],
-    "priority_actions": ["…"],
-    "commercial_pitch": "…",
-    "modules_used": {
-      "technical": "done",
-      "seo": "done",
-      "screenshots": "done"
-    }
-  }
+  "executive_summary": "Site daté, SEO fragile, opportunité de refonte partielle…",
+  "commercial_pitch": "Moderniser le site renforcerait la crédibilité commerciale.",
+  "indicators": {
+    "design": { "score": 38, "notes": "Contraste faible, CTA peu visible" },
+    "technical": { "score": 55, "notes": "HTTPS OK, headers incomplets" },
+    "seo": { "score": 30, "notes": "Titles manquants, H1 absents" },
+    "osint": { "score": 70, "notes": "Peu d'exposition publique" },
+    "pentest": { "score": 60, "notes": "Surface web limitée" }
+  },
+  "what_works": ["Coordonnées claires", "Parcours contact simple"],
+  "whats_wrong": ["Design daté", "Pages lentes mobile"],
+  "priority_actions": ["Refonte hero + CTA", "Corriger les titles SEO"],
+  "improvements": [
+    { "area": "seo", "priority": "haute", "action": "Ajouter title/meta uniques" }
+  ],
+  "design_analysis": {
+    "score": 35,
+    "summary": "UI vieillissante",
+    "ux_notes": "Navigation confuse",
+    "ui_notes": "Typo et contraste faibles",
+    "to_keep": ["Logo identifiable"],
+    "to_redo": ["Hero", "Formulaire contact"]
+  },
+  "report": { "...": "meme contenu (modules = indicators)" },
+  "report_id": 456,
+  "screenshot_set_id": 789,
+  "error_message": null
 }
 ```
 
-`status` vaut `never` s'il n'y a encore aucun rapport.
+`status` vaut `never` s'il n'y a encore aucun rapport, ou `pending` si `?task_id=` pointe une tache encore en cours.
 
 #### POST `/entreprises/<id>/gemini-report`
 
-Lance le rapport complet (file Celery `screenshot`). Si les screenshots manquent ou que les fichiers sont absents du disque, une capture est lancee avant l'appel Gemini.
+Lance le rapport complet (file Celery `screenshot`). Si les screenshots manquent ou que les fichiers sont absents du disque, une capture est lancee avant l'appel Gemini. Produit le meme contenu que l'onglet site (indicateurs, textes, bons/mauvais points).
 
 ```bash
 curl -s -X POST -H "Authorization: Bearer VOTRE_TOKEN" \
@@ -493,7 +513,20 @@ curl -s -X POST -H "Authorization: Bearer VOTRE_TOKEN" \
   "https://<domaine>/api/public/entreprises/123/gemini-report"
 ```
 
-Reponse **202** : `{ success, task_id, status: "pending", … }`. Relire ensuite le GET.
+Reponse **202** :
+
+```json
+{
+  "success": true,
+  "entreprise_id": 123,
+  "task_id": "uuid-celery",
+  "status": "pending",
+  "message": "…",
+  "poll_url": "/api/public/entreprises/123/gemini-report?task_id=uuid-celery"
+}
+```
+
+Puis poller `poll_url` (progress / logs) puis `GET` sans `task_id` une fois termine.
 
 ---
 

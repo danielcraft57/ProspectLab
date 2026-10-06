@@ -86,7 +86,15 @@ Gemini ne remplace pas les outils OSINT CLI (theHarvester, dnsrecon, etc.). Il *
 
 ## API publique
 
-- `GET /api/public/entreprises/<id>/gemini-report`
-- `POST /api/public/entreprises/<id>/gemini-report` (lance la tâche Celery, 202 + `task_id`)
+Même contenu que l'onglet **Rapport Gemini** de la fiche entreprise.
 
-Détail : [API_PUBLIQUE.md](API_PUBLIQUE.md).
+- `POST /api/public/entreprises/<id>/gemini-report` — lance la tâche Celery (202 + `task_id` + `poll_url`) ; body optionnel `{ "ensure_screenshots": true }`
+- `GET /api/public/entreprises/<id>/gemini-report` — lit le dernier rapport structuré :
+  - score global, recommandation de refonte, source, résumé, pitch
+  - **indicateurs** modules (`design`, `technical`, `seo`, `osint`, `pentest`) avec score + notes
+  - **bons / mauvais points** (`what_works`, `whats_wrong`)
+  - actions prioritaires + améliorations
+  - `design_analysis` (UX/UI, à garder / à refaire)
+  - query optionnelles : `?task_id=` (suivi), `?include_document=true` (Markdown détaillé), `?include_raw=true`
+
+Détail et exemples JSON : [API_PUBLIQUE.md](API_PUBLIQUE.md).
