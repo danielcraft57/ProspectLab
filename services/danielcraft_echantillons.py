@@ -349,6 +349,13 @@ PAS_CHARACTER_PAIRS: dict[str, tuple[str, str]] = {
     "html_dc_pas_projection": (_CHAR_COIFFURE, _CHAR_IMMO),
     "html_dc_pas_midi": (_CHAR_SPORT, _CHAR_BATIMENT),
     "html_dc_pas_breakup": (_CHAR_BUREAU, _CHAR_FLEURISTE),
+    # Suite audit semaine (memes 12 persos, memes duos)
+    "html_dc_as_rapport": (_CHAR_LOIC, _CHAR_COMMERCE),
+    "html_dc_as_notes": (_CHAR_SANTE, _CHAR_ARTISAN),
+    "html_dc_as_porte": (_CHAR_RESTO, _CHAR_AUTO),
+    "html_dc_as_friction": (_CHAR_COIFFURE, _CHAR_IMMO),
+    "html_dc_as_midi": (_CHAR_SPORT, _CHAR_BATIMENT),
+    "html_dc_as_breakup": (_CHAR_BUREAU, _CHAR_FLEURISTE),
 }
 
 

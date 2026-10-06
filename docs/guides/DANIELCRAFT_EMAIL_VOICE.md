@@ -253,7 +253,9 @@ Images audit : `{base_url}/static/email/danielcraft/audit/...`
 
 Ton des modeles : **vouvoiement** (pas de tutoiement dans les mails clients).
 
-IDs campagnes audit : `html_dc_audit_rapport`, `html_dc_clanche`, `html_dc_scores_nareuse`, `html_dc_relance`, `html_dc_franchement`, `html_dc_secu_clanche`, `html_dc_anciennete_rincee`, `html_dc_voisin_google`, `html_dc_ca_coince`, `html_dc_30_sec`.
+IDs campagnes audit (one-shot) : `html_dc_audit_rapport`, `html_dc_clanche`, `html_dc_scores_nareuse`, `html_dc_relance`, `html_dc_franchement`, `html_dc_secu_clanche`, `html_dc_anciennete_rincee`, `html_dc_voisin_google`, `html_dc_ca_coince`, `html_dc_30_sec`.
+
+Suite audit semaine (campagne) : `html_dc_as_rapport`, `html_dc_as_notes`, `html_dc_as_porte`, `html_dc_as_friction`, `html_dc_as_midi`, `html_dc_as_breakup` - voir [SEQUENCE_EMAIL_AUDIT_SEMAINE.md](SEQUENCE_EMAIL_AUDIT_SEMAINE.md).
 
 ---
 
