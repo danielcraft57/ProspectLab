@@ -317,7 +317,11 @@ Réponse **202** type :
 
 - **Modules** : scraping, technique, SEO, screenshots, OSINT, pentest (pipeline `run_full_website_analysis_impl`, scraping en premier).
 - **Cache** : si les six modules sont déjà en base, PDF + email sans relancer le pack (`skipped_analysis: true`).
-- **PDF** : composition **deterministe** locale (ReportLab) qui fusionne le pipeline mesure + la synthese Gemini deja en base — **sans agent Cursor**. Repli `complete_fallback` si la composition echoue.
+- **PDF** : composition **deterministe** locale (ReportLab) qui reprend le payload
+  `GET /entreprises/<id>/gemini-report?include_document=true` (score, modules, design,
+  forces/vigilance, actions, Markdown ``report_document``) + le pipeline mesure.
+  Si aucun rapport Gemini en base : generation via le meme moteur que
+  `POST .../gemini-report` avant composition. Repli `complete_fallback` si echec.
 - **File Celery** : queue analyse complete (`CELERY_FULL_ANALYSIS_QUEUE`, souvent `full_analysis`).
 
 Corps JSON : champs du mode simple, plus :

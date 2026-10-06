@@ -913,7 +913,21 @@ def _deliver_audit_report(
         pdf_engine_used = 'composed'
         self.update_state(state='PROGRESS', meta={'step': 'compose', 'progress': 82})
         try:
-            context = enrich_complete_report_context(db, context)
+            def _compose_progress(message: str, pct: Optional[int] = None) -> None:
+                meta = {
+                    'step': 'compose_gemini',
+                    'progress': int(pct) if pct is not None else 84,
+                    'message': str(message or '')[:240],
+                }
+                self.update_state(state='PROGRESS', meta=meta)
+                _audit_log(self, 'compose', str(message or '')[:200], website=url, mode=mode)
+
+            context = enrich_complete_report_context(
+                db,
+                context,
+                progress_cb=_compose_progress,
+                ensure_gemini=True,
+            )
             _audit_log(
                 self,
                 'compose',
@@ -921,6 +935,8 @@ def _deliver_audit_report(
                 website=url,
                 mode=mode,
                 gemini_used=bool(context.get('gemini_used')),
+                gemini_has_document=bool(context.get('gemini_has_document')),
+                gemini_report_id=context.get('gemini_report_id'),
             )
             self.update_state(state='PROGRESS', meta={'step': 'pdf_compose', 'progress': 88})
             pdf_path = _generate_complete_composed_pdf(context, url=url, eid=eid)

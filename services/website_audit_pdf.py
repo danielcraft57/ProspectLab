@@ -95,6 +95,7 @@ def _chart_scores_donut(scores: Dict[str, Optional[float]], out_path: Path) -> b
         ('SEO', 'seo'),
         ('Sécurité', 'security'),
         ('Performance', 'performance'),
+        ('Design', 'design'),
         ('Risque pentest', 'pentest_risk'),
         ('Opportunité', 'opportunity'),
     ):
@@ -140,6 +141,7 @@ def _chart_scores_bars(scores: Dict[str, Optional[float]], out_path: Path) -> bo
         ('SEO', scores.get('seo')),
         ('Sécurité', scores.get('security')),
         ('Performance', scores.get('performance')),
+        ('Design', scores.get('design')),
         ('Opportunité', scores.get('opportunity')),
     ]
     items = [(n, v) for n, v in items if v is not None]
@@ -399,7 +401,7 @@ class WebsiteAuditPdfGenerator:
         items = [
             ('SEO', scores.get('seo'), TEAL),
             ('Sécurité', scores.get('security'), INDIGO),
-            ('Perf.', scores.get('performance'), TEAL_MID),
+            ('Design', scores.get('design'), TEAL_MID),
             ('Pentest', scores.get('pentest_risk'), AMBER),
         ]
         cells = []
@@ -422,7 +424,10 @@ class WebsiteAuditPdfGenerator:
                         Paragraph(label, st['kpi_label']),
                     ]
                 )
-        if not any(scores.get(k) is not None for k in ('seo', 'security', 'performance', 'pentest_risk')):
+        if not any(
+            scores.get(k) is not None
+            for k in ('seo', 'security', 'design', 'pentest_risk', 'performance')
+        ):
             return None
 
         row: List[Any] = []
@@ -964,10 +969,12 @@ class WebsiteAuditPdfGenerator:
         tech = pipeline.get('technical') or {}
         seo = pipeline.get('seo') or {}
         pentest = pipeline.get('pentest') or {}
-        return {
+        scores = {
             'seo': _safe_float(seo.get('score')) if seo.get('status') == 'done' else None,
             'security': _safe_float(tech.get('security_score')) if tech.get('status') == 'done' else None,
             'performance': _safe_float(tech.get('performance_score')) if tech.get('status') == 'done' else None,
             'pentest_risk': _safe_float(pentest.get('risk_score')) if pentest.get('status') == 'done' else None,
             'opportunity': _safe_float(opp.get('score')),
+            'design': _safe_float(context.get('gemini_design_score')),
         }
+        return scores

@@ -75,6 +75,31 @@ class TestAuditHelpers(unittest.TestCase):
         self.assertFalse(audit_data_ready(partial, 'simple'))
         self.assertEqual(audit_missing_modules(partial, 'simple'), ['pentest'])
 
+    def test_parse_report_document_sections(self):
+        from services.website_audit_compose import parse_report_document_sections
+
+        md = """
+# Rapport
+
+## Design
+
+Le site manque de hierarchie visuelle.
+- Logo trop petit
+- CTA peu visible
+
+## SEO
+
+Meta description absente.
+1. Ajouter des titres H1
+2. Compresser les images
+"""
+        sections = parse_report_document_sections(md)
+        titles = [s.get('title') for s in sections]
+        self.assertIn('Design', titles)
+        self.assertIn('SEO', titles)
+        design = next(s for s in sections if s.get('title') == 'Design')
+        self.assertTrue(design.get('paragraphs') or design.get('bullets'))
+
     def test_compose_complete_executive_summary(self):
         from services.website_audit_compose import _merge_executive_summary
 
