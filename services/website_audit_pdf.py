@@ -606,11 +606,14 @@ class WebsiteAuditPdfGenerator:
                 filename = f'audit_essentiel_{eid}_{ts}.pdf'
             elif tier == 'complete_fallback':
                 filename = f'audit_complet_local_{eid}_{ts}.pdf'
+            elif tier == 'complete':
+                filename = f'rapport_complet_{eid}_{ts}.pdf'
             else:
                 filename = f'audit_site_{eid}_{ts}.pdf'
         out_path = self.output_dir / filename
         st = self._styles()
         is_essential = tier == 'essential'
+        is_complete = tier == 'complete'
 
         doc = SimpleDocTemplate(
             str(out_path),
@@ -644,11 +647,15 @@ class WebsiteAuditPdfGenerator:
             )
             story.append(Spacer(1, 0.25 * cm))
 
-        hero_title = 'Audit essentiel' if is_essential else 'Rapport d\'audit digital'
+        hero_title = 'Audit essentiel' if is_essential else ('Rapport complet' if is_complete else 'Rapport d\'audit digital')
         hero_tag = (
             'Version gratuite — synthèse & scores clés'
             if is_essential
-            else 'Audit consolidé — technique, SEO, sécurité & visibilité'
+            else (
+                'Données mesurées + synthèse design & visibilité'
+                if is_complete
+                else 'Audit consolidé — technique, SEO, sécurité & visibilité'
+            )
         )
         hero = Table(
             [

@@ -75,6 +75,41 @@ class TestAuditHelpers(unittest.TestCase):
         self.assertFalse(audit_data_ready(partial, 'simple'))
         self.assertEqual(audit_missing_modules(partial, 'simple'), ['pentest'])
 
+    def test_compose_complete_executive_summary(self):
+        from services.website_audit_compose import _merge_executive_summary
+
+        pipeline = {
+            'technical': {'status': 'done', 'security_score': 40},
+            'seo': {'status': 'done', 'score': 55},
+        }
+        gemini = {
+            'executive_summary': 'Le site manque de clarté sur mobile. Les bases SEO sont faibles.',
+            'commercial_pitch': 'Une refonte ciblée peut améliorer la confiance.',
+        }
+        lines = _merge_executive_summary(pipeline, None, gemini)
+        self.assertGreaterEqual(len(lines), 2)
+        joined = ' '.join(lines).lower()
+        self.assertIn('mobile', joined)
+
+    def test_compose_priority_actions_dedupes(self):
+        from services.website_audit_compose import _merge_priority_actions
+
+        pipeline = {
+            'seo': {
+                'status': 'done',
+                'issues': [{'message': 'Meta description manquante', 'impact': 'high'}],
+            },
+        }
+        gemini = {
+            'improvements': [
+                {'action': 'Corriger la meta description', 'priority': 'haute'},
+                {'action': 'Meta description manquante', 'priority': 'moyenne'},
+            ],
+        }
+        actions = _merge_priority_actions(pipeline, gemini)
+        self.assertGreaterEqual(len(actions), 1)
+        self.assertLessEqual(len(actions), 3)
+
     def test_cursor_usage_limit_detection(self):
         from services.cursor_usage_limit import contains_cursor_usage_limit
 

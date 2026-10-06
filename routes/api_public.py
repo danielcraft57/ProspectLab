@@ -2325,10 +2325,10 @@ def public_website_audit_report_simple():
 @website_audit_public_auth
 def public_website_audit_report_complete():
     """
-    API publique — **analyse complète** + rapport expert PDF + email.
+    API publique — **analyse complète** + rapport complet PDF + email.
 
     Modules : scraping, technique, SEO, screenshots, OSINT, pentest.
-    PDF : synthèse experte ; en cas d'échec : pause + email admin avec lien de reprise (pas d'envoi client).
+    PDF : composition deterministe (donnees mesurees + synthese Gemini en base), sans agent Cursor.
 
     Corps JSON:
         - website, email (requis)
@@ -2410,14 +2410,14 @@ def public_website_audit_report_complete():
         'email': recipient,
         'entreprise_id': entreprise_id,
         'task_id': async_res.id,
-        'pdf_engine': 'expert',
+        'pdf_engine': 'composed',
         'already_analyzed': already_analyzed,
         'missing_modules': missing_modules,
         'analysis_modules': [
             'scraping', 'technical', 'seo', 'screenshot', 'osint', 'pentest',
         ],
         'message': (
-            'Analyse complète en cours. Production du rapport expert puis envoi par email.'
+            'Analyse complète en cours. Production du rapport complet puis envoi par email.'
             + cache_msg
             + ' Suivi : GET /api/public/website-audit-report/<task_id>'
         ),

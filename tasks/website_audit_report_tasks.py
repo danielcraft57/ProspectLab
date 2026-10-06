@@ -849,12 +849,27 @@ def _generate_complete_fallback_pdf(
     url: str,
     eid: int,
 ) -> Path:
-    """Repli payant si l'agent échoue : rapport détaillé local, distinct du gratuit."""
+    """Repli si composition indisponible : rapport détaillé local, distinct du gratuit."""
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
     return WebsiteAuditPdfGenerator(_audit_output_dir(url)).generate(
         context,
         filename=f'audit_complet_local_{eid}_{ts}.pdf',
         report_tier='complete_fallback',
+    )
+
+
+def _generate_complete_composed_pdf(
+    context: Dict[str, Any],
+    *,
+    url: str,
+    eid: int,
+) -> Path:
+    """Rapport complet : composition deterministe (pipeline + synthese Gemini en base)."""
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    return WebsiteAuditPdfGenerator(_audit_output_dir(url)).generate(
+        context,
+        filename=f'rapport_complet_{eid}_{ts}.pdf',
+        report_tier='complete',
     )
 
 
@@ -893,110 +908,43 @@ def _deliver_audit_report(
     )
 
     if mode == 'complete':
-        pdf_engine_used = 'expert'
-        local_baseline: Optional[Path] = None
-        if agent_only and pending_local_pdf:
-            candidate = Path(pending_local_pdf)
-            if candidate.is_file() and candidate.stat().st_size > 1024:
-                local_baseline = candidate
-                _audit_log(
-                    self,
-                    'pdf_baseline',
-                    'PDF de référence réutilisé (reprise, sans régénération)',
-                    website=url,
-                    mode=mode,
-                    path=str(local_baseline),
-                )
-        if local_baseline is None:
-            local_baseline = _generate_local_baseline_pdf(context, url=url)
-        context = {
-            **context,
-            'local_pdf_path': str(local_baseline),
-            'resume_import_only': bool(agent_only),
-        }
-        if not agent_only or not pending_local_pdf:
+        from services.website_audit_compose import enrich_complete_report_context
+
+        pdf_engine_used = 'composed'
+        self.update_state(state='PROGRESS', meta={'step': 'compose', 'progress': 82})
+        try:
+            context = enrich_complete_report_context(db, context)
             _audit_log(
                 self,
-                'pdf_baseline',
-                'PDF de référence interne pour agent',
+                'compose',
+                'contexte rapport complet enrichi',
                 website=url,
                 mode=mode,
-                path=str(local_baseline),
+                gemini_used=bool(context.get('gemini_used')),
             )
-        try:
-            raw_agent_pdf = _generate_pdf_agent(self, context, extra_instructions=extra_instructions, url=url)
-            from services.website_audit_agent import resolve_agent_audit_pdf
-
-            pdf_path = resolve_agent_audit_pdf(url, AUDIT_REPORTS_DIR, hinted_path=raw_agent_pdf)
-            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-            delivered = _audit_output_dir(url) / f'audit_complet_{ts}.pdf'
-            shutil.copy2(pdf_path, delivered)
-            pdf_path = delivered
+            self.update_state(state='PROGRESS', meta={'step': 'pdf_compose', 'progress': 88})
+            pdf_path = _generate_complete_composed_pdf(context, url=url, eid=eid)
             _audit_log(
                 self,
-                'agent_pdf',
-                'PDF agent livré au client',
+                'pdf_compose',
+                'PDF rapport complet livré',
                 website=url,
                 mode=mode,
                 path=str(pdf_path),
-                size_kb=round(pdf_path.stat().st_size / 1024, 1),
+                size_kb=round(pdf_path.stat().st_size / 1024, 1) if pdf_path.is_file() else 0,
             )
-        except CursorUsageLimitError as cul:
-            if WEBSITE_AUDIT_AGENT_PAUSE_ON_AGENT_FAILURE:
-                return _pause_agent_pdf_generation(
-                    self,
-                    eid=eid,
-                    url=url,
-                    email=email,
-                    context=context,
-                    analysis_steps=analysis_steps,
-                    skipped_analysis=skipped_analysis,
-                    extra_instructions=extra_instructions,
-                    local_baseline=local_baseline,
-                    reason='cursor_usage_limit',
-                    detail=cul.detail if cul.detail else str(cul),
-                    pending_id=resume_pending_id,
-                )
-            raise
-        except Exception as agent_err:
-            if WEBSITE_AUDIT_AGENT_PAUSE_ON_AGENT_FAILURE:
-                return _pause_agent_pdf_generation(
-                    self,
-                    eid=eid,
-                    url=url,
-                    email=email,
-                    context=context,
-                    analysis_steps=analysis_steps,
-                    skipped_analysis=skipped_analysis,
-                    extra_instructions=extra_instructions,
-                    local_baseline=local_baseline,
-                    reason='agent_unavailable',
-                    detail=str(agent_err),
-                    pending_id=resume_pending_id,
-                )
-            if WEBSITE_AUDIT_AGENT_FALLBACK_LOCAL:
-                _audit_log(
-                    self,
-                    'agent_pdf',
-                    f'échec agent, repli local (FALLBACK_LOCAL): {agent_err!s}',
-                    level='warning',
-                    website=url,
-                    mode=mode,
-                )
-                self.update_state(state='PROGRESS', meta={'step': 'pdf_local_fallback', 'progress': 88})
-                pdf_path = _generate_complete_fallback_pdf(context, url=url, eid=eid)
-                pdf_engine_used = 'local_fallback'
-                _audit_log(
-                    self,
-                    'agent_pdf',
-                    'repli rapport complet local (agent indisponible)',
-                    level='warning',
-                    website=url,
-                    mode=mode,
-                    path=str(pdf_path),
-                )
-            else:
-                raise
+        except Exception as compose_err:
+            _audit_log(
+                self,
+                'pdf_compose',
+                f'échec composition, repli local: {compose_err!s}',
+                level='warning',
+                website=url,
+                mode=mode,
+            )
+            self.update_state(state='PROGRESS', meta={'step': 'pdf_local_fallback', 'progress': 88})
+            pdf_path = _generate_complete_fallback_pdf(context, url=url, eid=eid)
+            pdf_engine_used = 'local_fallback'
     else:
         self.update_state(state='PROGRESS', meta={'step': 'pdf_local', 'progress': 85})
         pdf_path = _generate_pdf_local(self, context, url=url, mode=mode)
