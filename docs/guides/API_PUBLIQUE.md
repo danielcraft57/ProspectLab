@@ -317,25 +317,26 @@ Réponse **202** type :
 
 - **Modules** : scraping, technique, SEO, screenshots, OSINT, pentest (pipeline `run_full_website_analysis_impl`, scraping en premier).
 - **Cache** : si les six modules sont déjà en base, PDF + email sans relancer le pack (`skipped_analysis: true`).
-- **PDF** : PDF de base ProspectLab (ReportLab) puis **agent Cursor distant** qui combine et réagence le livrable ; repli PDF local si agent indisponible (sauf **limite Cursor**).
-- **Limite Cursor** : pause (`paused: true`, `pending_id`), email admin (`WEBSITE_AUDIT_CURSOR_ALERT_EMAIL`), pas d'envoi au lead ; reprise via **POST `/website-audit-report/complete/resume`** après recharge du compte.
-- **File Celery** : queue analyse complète (`CELERY_FULL_ANALYSIS_QUEUE`, souvent `full_analysis`).
+- **PDF** : composition **deterministe** locale (ReportLab) qui fusionne le pipeline mesure + la synthese Gemini deja en base — **sans agent Cursor**. Repli `complete_fallback` si la composition echoue.
+- **File Celery** : queue analyse complete (`CELERY_FULL_ANALYSIS_QUEUE`, souvent `full_analysis`).
 
 Corps JSON : champs du mode simple, plus :
 
-| Champ | Requis | Type | Défaut | Description |
+| Champ | Requis | Type | Defaut | Description |
 |-------|--------|------|--------|-------------|
 | `max_depth` | non | int | `2` | Profondeur scraping |
 | `max_workers` | non | int | `5` | Workers scraping |
 | `max_time` | non | int | `300` | Timeout scraping (secondes) |
 | `max_pages` | non | int | `40` | Pages max scraping |
-| `extra_instructions` | non | string | — | Consignes additionnelles pour l'agent serv1 |
+| `extra_instructions` | non | string | — | Ignore pour la composition locale (conserve pour compat) |
 
-Réponse **202** : `mode: "complete"`, `pdf_engine: "agent"`, `already_analyzed`, `missing_modules`, `analysis_modules` (six modules).
+Reponse **202** : `mode: "complete"`, `pdf_engine: "composed"`, `already_analyzed`, `missing_modules`, `analysis_modules` (six modules).
 
-#### POST `/website-audit-report/complete/resume` — reprise après pause Cursor
+#### POST `/website-audit-report/complete/resume` — reprise (anciennes pauses agent)
 
-Corps JSON : `pending_id` (recommandé) et/ou `website` + `email` ; `extra_instructions` optionnel.
+Conservé pour les jobs encore en pause (ancien flux agent). Le flux standard n'utilise plus la pause Cursor.
+
+Corps JSON : `pending_id` (recommande) et/ou `website` + `email` ; `extra_instructions` optionnel.
 
 #### GET `/website-audit-report/<task_id>`
 

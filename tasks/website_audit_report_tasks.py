@@ -1413,7 +1413,7 @@ def website_audit_complete_resume_task(
     _audit_log(
         self,
         'resume',
-        'reprise génération agent + email',
+        'reprise génération rapport complet + email',
         website=url,
         mode='complete',
         pending_id=pending.get('pending_id'),
@@ -1421,7 +1421,7 @@ def website_audit_complete_resume_task(
     )
     self.update_state(
         state='PROGRESS',
-        meta={'step': 'resume_agent', 'progress': 80, 'pending_id': pending.get('pending_id')},
+        meta={'step': 'resume_compose', 'progress': 80, 'pending_id': pending.get('pending_id')},
     )
 
     db = Database()

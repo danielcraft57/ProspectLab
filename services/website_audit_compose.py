@@ -17,10 +17,10 @@ from services.website_audit_data import (
 )
 
 _REFONTE_LABELS = {
-    'aucune': 'Aucune refonte necessaire',
-    'legere': 'Retouches legeres',
-    'partielle': 'Refonte partielle recommandee',
-    'totale': 'Refonte complete recommandee',
+    'aucune': 'Aucune refonte nécessaire',
+    'legere': 'Retouches légères',
+    'partielle': 'Refonte partielle recommandée',
+    'totale': 'Refonte complète recommandée',
 }
 
 _PRIORITY_ORDER = {
@@ -194,7 +194,7 @@ def _build_design_section(gemini: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return {
         'id': 'design',
         'title': 'Design & experience',
-        'paragraphs': paragraphs or ['Analyse design disponible dans la synthese.'],
+        'paragraphs': paragraphs or ['Analyse design disponible dans la synthèse.'],
         'bullets': bullets,
     }
 
@@ -235,7 +235,7 @@ def _build_refonte_section(gemini: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         'id': 'refonte',
         'title': 'Niveau de refonte conseille',
         'paragraphs': [
-            f'Apres croisement des scores mesures et de la lecture design : <b>{label}</b>.{score_txt}',
+            f'Après croisement des scores mesurés et de la lecture design : <b>{label}</b>.{score_txt}',
             'Ce niveau indique l\'effort probable pour remettre le site au niveau attendu par vos clients.',
         ],
         'bullets': [],
@@ -299,7 +299,7 @@ def compose_complete_narrative_sections(
                     b for b in (sec.get('bullets') or []) if _norm_key(b) not in {_norm_key(a) for a in actions}
                 ][:12]
                 sec['paragraphs'] = [
-                    'Plan d\'action priorise (donnees mesurees + synthese design) :',
+                    'Plan d\'action priorisé (données mesurées + synthèse design) :',
                     *(sec.get('paragraphs') or [])[:1],
                 ]
                 break
