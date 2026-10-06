@@ -26,12 +26,121 @@ def _score_status(value: Optional[float], *, high_good: bool = True) -> str:
         if v >= 45:
             return 'in_progress'
         return 'at_risk'
-    # Pentest risk : plus haut = pire
+    # Risque : plus haut = pire
     if v < 40:
         return 'on_track'
     if v < 70:
         return 'in_progress'
     return 'at_risk'
+
+
+def _safe_score_0_100(value: Any) -> Optional[float]:
+    """Parse un score 0-100 ; None si absent / invalide."""
+    if value is None or value == '':
+        return None
+    try:
+        return max(0.0, min(100.0, float(value)))
+    except (TypeError, ValueError):
+        return None
+
+
+# Ordre officiel aligné page /analyse (Design, Visibilité, Sécurité, Risque).
+CANONICAL_AUDIT_SCORE_META: List[Dict[str, Any]] = [
+    {'key': 'design', 'label': 'Design', 'high_good': True},
+    {'key': 'seo', 'label': 'Visibilité', 'high_good': True},
+    {'key': 'securite', 'label': 'Sécurité', 'high_good': True},
+    {'key': 'risque', 'label': 'Risque', 'high_good': False},
+]
+
+
+def extract_canonical_audit_scores(context: Optional[Dict[str, Any]]) -> Dict[str, Optional[float]]:
+    """
+    Les 4 scores officiels (risque brut, pas inversé).
+
+    Sources : design Gemini / context, SEO pipeline, sécurité technique, risque pentest.
+
+    @param context: Contexte d'audit (pipeline + gemini_design_score optionnel)
+    @returns: Dict {design, seo, securite, risque}
+    """
+    ctx = context or {}
+    pipeline = ctx.get('pipeline') or {}
+    tech = pipeline.get('technical') or {}
+    seo = pipeline.get('seo') or {}
+    pentest = pipeline.get('pentest') or {}
+
+    design = _safe_score_0_100(ctx.get('gemini_design_score'))
+    if design is None:
+        gemini = ctx.get('gemini') or {}
+        if isinstance(gemini, dict):
+            design = _safe_score_0_100(
+                (gemini.get('design_analysis') or {}).get('score')
+                if isinstance(gemini.get('design_analysis'), dict)
+                else None
+            )
+            if design is None:
+                design = _safe_score_0_100(gemini.get('overall_score'))
+            if design is None:
+                modules = gemini.get('modules') or {}
+                if isinstance(modules, dict) and isinstance(modules.get('design'), dict):
+                    design = _safe_score_0_100(modules['design'].get('score'))
+
+    seo_score = None
+    if seo.get('status') == 'done' or (seo.get('score') is not None and not seo.get('status')):
+        seo_score = _safe_score_0_100(seo.get('score'))
+
+    securite = None
+    if tech.get('status') == 'done' or (
+        tech.get('security_score') is not None and not tech.get('status')
+    ):
+        securite = _safe_score_0_100(tech.get('security_score'))
+
+    risque = None
+    if pentest.get('status') == 'done' or (
+        pentest.get('risk_score') is not None and not pentest.get('status')
+    ):
+        risque = _safe_score_0_100(pentest.get('risk_score'))
+
+    return {
+        'design': design,
+        'seo': seo_score,
+        'securite': securite,
+        'risque': risque,
+    }
+
+
+def canonical_audit_score_chip_color(value: Optional[float], *, high_good: bool = True) -> str:
+    """Couleur hex pour pastille email / UI selon le score."""
+    status = _score_status(value, high_good=high_good)
+    return {
+        'on_track': '#059669',
+        'in_progress': '#d97706',
+        'at_risk': '#dc2626',
+        'unknown': '#94a3b8',
+    }.get(status, '#94a3b8')
+
+
+def canonical_audit_score_chips(context: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Pastilles prêtes pour email / PDF (label, valeur, couleur).
+
+    @param context: Contexte d'audit
+    @returns: Liste de dicts {key, label, value, display, color, high_good}
+    """
+    scores = extract_canonical_audit_scores(context)
+    chips: List[Dict[str, Any]] = []
+    for meta in CANONICAL_AUDIT_SCORE_META:
+        key = str(meta['key'])
+        high_good = bool(meta['high_good'])
+        raw = scores.get(key)
+        chips.append({
+            'key': key,
+            'label': str(meta['label']),
+            'value': raw,
+            'display': f'{int(raw)}/100' if raw is not None else '—',
+            'color': canonical_audit_score_chip_color(raw, high_good=high_good),
+            'high_good': high_good,
+        })
+    return chips
 
 
 AUDIT_MODULES_BY_MODE: Dict[str, List[str]] = {
@@ -307,15 +416,15 @@ def build_audit_essential_rows(pipeline: Dict[str, Any], opportunity: Optional[D
     pentest = pipeline.get('pentest') or {}
     scraping = pipeline.get('scraping') or {}
     if seo.get('score') is not None:
-        rows.append(['Score SEO', f'{int(seo["score"])}/100'])
+        rows.append(['Visibilité', f'{int(seo["score"])}/100'])
     if tech.get('security_score') is not None:
-        rows.append(['Sécurité technique', f'{int(tech["security_score"])}/100'])
-    if tech.get('performance_score') is not None:
-        rows.append(['Performance', f'{int(tech["performance_score"])}/100'])
+        rows.append(['Sécurité', f'{int(tech["security_score"])}/100'])
     if pentest.get('risk_score') is not None:
-        rows.append(['Risque pentest', f'{int(pentest["risk_score"])}/100'])
+        rows.append(['Risque', f'{int(pentest["risk_score"])}/100'])
+    if tech.get('performance_score') is not None:
+        rows.append(['Performance (détail)', f'{int(tech["performance_score"])}/100'])
     if opportunity and opportunity.get('score') is not None:
-        rows.append(['Opportunité', f'{int(opportunity["score"])}/100'])
+        rows.append(['Opportunité (détail)', f'{int(opportunity["score"])}/100'])
     if scraping.get('status') == 'done':
         rows.append(['Contacts trouvés', f'{scraping.get("emails_count", 0)} email(s)'])
     for email in (scraping.get('sample_emails') or [])[:2]:

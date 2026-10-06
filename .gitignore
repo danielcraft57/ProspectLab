@@ -125,6 +125,8 @@ production_data/
 *.dump
 scripts/_tmp_*
 deploy/scripts/_tmp_*
+tmp_audit_*
+tmp_audit_*/
 
 # Données templates (JSON générés/local) - la référence peut être regénérée
 templates_local/

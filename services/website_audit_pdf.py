@@ -27,17 +27,20 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-# --- Palette moderne (teal / indigo / slate) ---
-INK = colors.HexColor('#0f172a')
+# --- Palette DanielCraft (bleu / slate) ---
+INK = colors.HexColor('#0f3550')
 INK_SOFT = colors.HexColor('#334155')
-TEAL = colors.HexColor('#0f766e')
-TEAL_LIGHT = colors.HexColor('#ccfbf1')
-TEAL_MID = colors.HexColor('#14b8a6')
-INDIGO = colors.HexColor('#4f46e5')
-INDIGO_LIGHT = colors.HexColor('#eef2ff')
+DC_BLUE = colors.HexColor('#4da9d6')
+DC_BLUE_LIGHT = colors.HexColor('#e8f6fc')
+DC_BLUE_MID = colors.HexColor('#2563eb')
+TEAL = DC_BLUE  # compat aliases internes
+TEAL_LIGHT = DC_BLUE_LIGHT
+TEAL_MID = colors.HexColor('#0d9488')
+INDIGO = DC_BLUE_MID
+INDIGO_LIGHT = colors.HexColor('#eff6ff')
 AMBER = colors.HexColor('#d97706')
 AMBER_LIGHT = colors.HexColor('#fffbeb')
-SURFACE = colors.HexColor('#f8fafc')
+SURFACE = colors.HexColor('#f5fbfe')
 SURFACE_CARD = colors.HexColor('#ffffff')
 BORDER = colors.HexColor('#e2e8f0')
 WHITE = colors.white
@@ -62,8 +65,8 @@ STATUS_HEX = {
     'unknown': '#94a3b8',
 }
 
-CHART_COLORS = ['#0f766e', '#4f46e5', '#0891b2', '#d97706', '#64748b']
-CHART_BG = '#f8fafc'
+CHART_COLORS = ['#4f46e5', '#2563eb', '#0d9488', '#f59e0b']
+CHART_BG = '#f5fbfe'
 
 # Hauteur max utile d'une frame A4 (marges incluses) ~ 27 cm ; on laisse de la marge pour titres.
 _MAX_SCREENSHOT_HEIGHT_DESKTOP = 20 * cm
@@ -92,18 +95,20 @@ def _chart_scores_donut(scores: Dict[str, Optional[float]], out_path: Path) -> b
     labels: List[str] = []
     values: List[float] = []
     for label, key in (
-        ('SEO', 'seo'),
-        ('Sécurité', 'security'),
-        ('Performance', 'performance'),
         ('Design', 'design'),
-        ('Risque pentest', 'pentest_risk'),
-        ('Opportunité', 'opportunity'),
+        ('Visibilité', 'seo'),
+        ('Sécurité', 'securite'),
+        ('Risque', 'risque'),
     ):
         v = scores.get(key)
         if v is None:
+            # Compat anciennes clés
+            if key == 'securite':
+                v = scores.get('security')
+            elif key == 'risque':
+                v = scores.get('pentest_risk')
+        if v is None:
             continue
-        if key == 'pentest_risk':
-            v = max(0.0, 100.0 - float(v))
         labels.append(label)
         values.append(max(0.0, min(100.0, float(v))))
 
@@ -124,7 +129,7 @@ def _chart_scores_donut(scores: Dict[str, Optional[float]], out_path: Path) -> b
         t.set_color('white')
         t.set_fontweight('bold')
         t.set_fontsize(10)
-    ax.set_title('Synthèse des scores', fontsize=13, fontweight='bold', color='#0f172a', pad=14)
+    ax.set_title('Les 4 indicateurs', fontsize=13, fontweight='bold', color='#0f3550', pad=14)
     fig.tight_layout()
     fig.savefig(str(out_path), dpi=160, bbox_inches='tight', facecolor=CHART_BG)
     plt.close(fig)
@@ -138,11 +143,10 @@ def _chart_scores_bars(scores: Dict[str, Optional[float]], out_path: Path) -> bo
     import matplotlib.pyplot as plt
 
     items = [
-        ('SEO', scores.get('seo')),
-        ('Sécurité', scores.get('security')),
-        ('Performance', scores.get('performance')),
         ('Design', scores.get('design')),
-        ('Opportunité', scores.get('opportunity')),
+        ('Visibilité', scores.get('seo')),
+        ('Sécurité', scores.get('securite') if scores.get('securite') is not None else scores.get('security')),
+        ('Risque', scores.get('risque') if scores.get('risque') is not None else scores.get('pentest_risk')),
     ]
     items = [(n, v) for n, v in items if v is not None]
     if not items:
@@ -157,7 +161,7 @@ def _chart_scores_bars(scores: Dict[str, Optional[float]], out_path: Path) -> bo
     ax.set_yticklabels(names, fontsize=10, color='#334155')
     ax.set_xlim(0, 100)
     ax.set_xlabel('Score / 100', fontsize=9, color='#64748b')
-    ax.set_title('Comparatif des métriques', fontsize=12, fontweight='bold', color='#0f172a', pad=10)
+    ax.set_title('Comparatif Design · Visibilité · Sécurité · Risque', fontsize=11, fontweight='bold', color='#0f3550', pad=10)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     ax.grid(axis='x', alpha=0.25, linestyle='--')
@@ -169,12 +173,54 @@ def _chart_scores_bars(scores: Dict[str, Optional[float]], out_path: Path) -> bo
             va='center',
             fontsize=10,
             fontweight='bold',
-            color='#0f172a',
+            color='#0f3550',
         )
     fig.tight_layout()
     fig.savefig(str(out_path), dpi=160, bbox_inches='tight', facecolor=CHART_BG)
     plt.close(fig)
     return True
+
+
+def _resolve_character_path(secteur: Optional[str] = None, *, seed: Optional[str] = None) -> Optional[Path]:
+    """Chemin local d'un personnage DanielCraft pour la couverture PDF."""
+    try:
+        from config import APP_DIR
+        from services.danielcraft_echantillons import character_rel_for_secteur
+    except Exception:
+        return None
+    rel = character_rel_for_secteur(secteur, seed=seed or 'audit-pdf')
+    if not rel:
+        return None
+    candidate = Path(APP_DIR) / rel
+    if candidate.is_file():
+        return candidate
+    return None
+
+
+def _character_cover_image(path: Path, *, max_width: float = 3.2 * cm) -> Optional[Image]:
+    """Image personnage pour le bandeau hero (carré arrondi soft via resize)."""
+    try:
+        from PIL import Image as PILImage
+    except ImportError:
+        return _image_from_path(path, max_width, max_width)
+
+    try:
+        src = PILImage.open(path).convert('RGBA')
+    except Exception:
+        return None
+    size = 320
+    src = src.resize((size, size), PILImage.Resampling.LANCZOS)
+    mask = PILImage.new('L', (size, size), 0)
+    from PIL import ImageDraw
+
+    draw = ImageDraw.Draw(mask)
+    draw.rounded_rectangle([0, 0, size - 1, size - 1], radius=48, fill=255)
+    out = PILImage.new('RGBA', (size, size), (255, 255, 255, 0))
+    out.paste(src, (0, 0), mask=mask)
+    buf = BytesIO()
+    out.convert('RGB').save(buf, format='JPEG', quality=88, optimize=True)
+    buf.seek(0)
+    return Image(buf, width=max_width, height=max_width)
 
 
 def _resolve_screenshot_path(file_path: Optional[str]) -> Optional[Path]:
@@ -260,7 +306,7 @@ def _styled_screenshot_image(
     canvas = PILImage.new('RGB', (frame_w + shadow, frame_h + shadow), (248, 250, 252))
     card = PILImage.new('RGB', (frame_w, frame_h), (255, 255, 255))
     draw = ImageDraw.Draw(card)
-    draw.rectangle([0, 0, frame_w - 1, header_h - 1], fill=(15, 118, 110))
+    draw.rectangle([0, 0, frame_w - 1, header_h - 1], fill=(15, 53, 80))
     try:
         font = ImageFont.truetype('arial.ttf', 15)
     except Exception:
@@ -399,10 +445,10 @@ class WebsiteAuditPdfGenerator:
 
     def _kpi_cards(self, scores: Dict[str, Optional[float]], st: Dict[str, ParagraphStyle]) -> Optional[Table]:
         items = [
-            ('SEO', scores.get('seo'), TEAL),
-            ('Sécurité', scores.get('security'), INDIGO),
-            ('Design', scores.get('design'), TEAL_MID),
-            ('Pentest', scores.get('pentest_risk'), AMBER),
+            ('Design', scores.get('design'), colors.HexColor('#4f46e5')),
+            ('Visibilité', scores.get('seo'), DC_BLUE_MID),
+            ('Sécurité', scores.get('securite') if scores.get('securite') is not None else scores.get('security'), TEAL_MID),
+            ('Risque', scores.get('risque') if scores.get('risque') is not None else scores.get('pentest_risk'), AMBER),
         ]
         cells = []
         col_w = 4.1 * cm
@@ -416,18 +462,13 @@ class WebsiteAuditPdfGenerator:
                 )
             else:
                 display = int(val)
-                if label == 'Pentest':
-                    display = int(max(0, 100 - float(val)))
                 cells.append(
                     [
                         Paragraph(str(display), st['kpi_value']),
                         Paragraph(label, st['kpi_label']),
                     ]
                 )
-        if not any(
-            scores.get(k) is not None
-            for k in ('seo', 'security', 'design', 'pentest_risk', 'performance')
-        ):
+        if not any(scores.get(k) is not None for k in ('seo', 'securite', 'security', 'design', 'risque', 'pentest_risk')):
             return None
 
         row: List[Any] = []
@@ -451,16 +492,29 @@ class WebsiteAuditPdfGenerator:
                 [
                     ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                     ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                    ('BACKGROUND', (0, 0), (-1, -1), INDIGO_LIGHT),
+                    ('BACKGROUND', (0, 0), (-1, -1), DC_BLUE_LIGHT),
                     ('BOX', (0, 0), (-1, -1), 0.5, BORDER),
-                    ('TOPPADDING', (0, 0), (-1, -1), 8),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                    ('TOPPADDING', (0, 0), (-1, -1), 10),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
                     ('LEFTPADDING', (0, 0), (-1, -1), 4),
                     ('RIGHTPADDING', (0, 0), (-1, -1), 4),
                 ]
             )
         )
         return outer
+
+    def _extract_scores(self, context: Dict[str, Any]) -> Dict[str, Optional[float]]:
+        from services.website_audit_data import extract_canonical_audit_scores
+
+        canon = extract_canonical_audit_scores(context)
+        # Aliases pour anciens appels internes
+        return {
+            **canon,
+            'security': canon.get('securite'),
+            'pentest_risk': canon.get('risque'),
+            'performance': None,
+            'opportunity': None,
+        }
 
     def _append_narrative_block(
         self,
@@ -652,51 +706,70 @@ class WebsiteAuditPdfGenerator:
             )
             story.append(Spacer(1, 0.25 * cm))
 
-        hero_title = 'Audit essentiel' if is_essential else ('Rapport complet' if is_complete else 'Rapport d\'audit digital')
+        hero_title = 'Rapport simple' if is_essential else ('Rapport complet' if is_complete else 'Rapport d\'audit')
         hero_tag = (
-            'Version gratuite — synthèse & scores clés'
+            'Les 4 indicateurs + priorités concrètes'
             if is_essential
             else (
-                'Données mesurées + synthèse design & visibilité'
+                'Design · Visibilité · Sécurité · Risque — lecture détaillée'
                 if is_complete
-                else 'Audit consolidé — technique, SEO, sécurité & visibilité'
+                else 'Audit consolidé — Design, Visibilité, Sécurité, Risque'
             )
         )
-        hero = Table(
-            [
-                [Paragraph(hero_title, st['title'])],
-                [
-                    Paragraph(
-                        f'<b>{_esc(company)}</b><br/>'
-                        f'<font color="#94a3b8">{_esc(website)}</font>',
-                        st['subtitle'],
-                    )
-                ],
-                [
-                    Paragraph(
-                        hero_tag,
-                        ParagraphStyle(
-                            'Tag',
-                            parent=st['subtitle'],
-                            fontSize=9,
-                            textColor=TEAL_LIGHT,
-                        ),
-                    )
-                ],
-            ],
-            colWidths=[content_w],
-        )
-        hero.setStyle(
-            TableStyle(
-                [
-                    ('BACKGROUND', (0, 0), (-1, -1), INK),
-                    ('LEFTPADDING', (0, 0), (-1, -1), 20),
-                    ('RIGHTPADDING', (0, 0), (-1, -1), 20),
-                    ('TOPPADDING', (0, 0), (-1, 0), 18),
-                    ('BOTTOMPADDING', (0, -1), (-1, -1), 18),
-                ]
+        hero_copy = [
+            Paragraph(hero_title, st['title']),
+            Spacer(1, 0.12 * cm),
+            Paragraph(
+                f'<b>{_esc(company)}</b><br/>'
+                f'<font color="#cbd5e1">{_esc(website)}</font>',
+                st['subtitle'],
+            ),
+            Spacer(1, 0.1 * cm),
+            Paragraph(
+                hero_tag,
+                ParagraphStyle(
+                    'Tag',
+                    parent=st['subtitle'],
+                    fontSize=9,
+                    textColor=colors.HexColor('#bae6fd'),
+                ),
+            ),
+        ]
+        char_path = _resolve_character_path(secteur, seed=f'audit-pdf:{website or company}')
+        char_img = _character_cover_image(char_path) if char_path else None
+        if char_img:
+            hero = Table(
+                [[hero_copy, char_img]],
+                colWidths=[content_w - 4.0 * cm, 4.0 * cm],
             )
-        )
+            hero.setStyle(
+                TableStyle(
+                    [
+                        ('BACKGROUND', (0, 0), (-1, -1), INK),
+                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                        ('LEFTPADDING', (0, 0), (0, 0), 18),
+                        ('RIGHTPADDING', (0, 0), (0, 0), 8),
+                        ('LEFTPADDING', (1, 0), (1, 0), 4),
+                        ('RIGHTPADDING', (1, 0), (1, 0), 14),
+                        ('TOPPADDING', (0, 0), (-1, -1), 14),
+                        ('BOTTOMPADDING', (0, 0), (-1, -1), 14),
+                        ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+                    ]
+                )
+            )
+        else:
+            hero = Table([[hero_copy]], colWidths=[content_w])
+            hero.setStyle(
+                TableStyle(
+                    [
+                        ('BACKGROUND', (0, 0), (-1, -1), INK),
+                        ('LEFTPADDING', (0, 0), (-1, -1), 20),
+                        ('RIGHTPADDING', (0, 0), (-1, -1), 20),
+                        ('TOPPADDING', (0, 0), (-1, -1), 16),
+                        ('BOTTOMPADDING', (0, 0), (-1, -1), 16),
+                    ]
+                )
+            )
         story.append(hero)
 
         opp_cell = '—'
@@ -731,7 +804,44 @@ class WebsiteAuditPdfGenerator:
         kpi = self._kpi_cards(scores, st)
         if kpi:
             story.append(kpi)
-            story.append(Spacer(1, 0.4 * cm))
+            story.append(Spacer(1, 0.35 * cm))
+
+        def _append_quick_wins() -> None:
+            qw_local = context.get('quick_wins') or []
+            if not qw_local:
+                return
+            story.append(self._section_header('Priorités concrètes', st))
+            story.append(Spacer(1, 0.1 * cm))
+            qw_rows = []
+            limit = 3 if is_essential else 5
+            for i, w in enumerate(qw_local[:limit], 1):
+                qw_rows.append(
+                    [
+                        Paragraph(f'<font color="#4da9d6"><b>{i}</b></font>', st['body_bold']),
+                        Paragraph(_esc(w), st['body']),
+                    ]
+                )
+            qw_t = Table(qw_rows, colWidths=[1.0 * cm, 16.0 * cm])
+            qw_t.setStyle(
+                TableStyle(
+                    [
+                        ('BACKGROUND', (0, 0), (-1, -1), DC_BLUE_LIGHT),
+                        ('BOX', (0, 0), (-1, -1), 0.5, DC_BLUE),
+                        ('LEFTPADDING', (0, 0), (-1, -1), 10),
+                        ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+                        ('TOPPADDING', (0, 0), (-1, -1), 8),
+                        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                        ('LEFTPADDING', (0, 0), (0, -1), 6),
+                        ('RIGHTPADDING', (0, 0), (0, -1), 4),
+                    ]
+                )
+            )
+            story.append(qw_t)
+            story.append(Spacer(1, 0.35 * cm))
+
+        # Complet : scores → priorités → narration ; simple : scores → priorités aussi
+        _append_quick_wins()
 
         intro_blocks = [b for b in narrative_sections if b.get('id') == 'context']
         other_blocks = [b for b in narrative_sections if b.get('id') != 'context']
@@ -747,7 +857,7 @@ class WebsiteAuditPdfGenerator:
                 donut_ok = _chart_scores_donut(scores, donut)
                 bars_ok = _chart_scores_bars(scores, bars)
                 if donut_ok and bars_ok:
-                    story.append(self._section_header('Vue d\'ensemble & indicateurs', st))
+                    story.append(self._section_header('Vue d\'ensemble des 4 indicateurs', st))
                     story.append(Spacer(1, 0.12 * cm))
                     row = [
                         _image_from_path(donut, 7.8 * cm, 5.8 * cm),
@@ -775,7 +885,7 @@ class WebsiteAuditPdfGenerator:
                     story.append(Spacer(1, 0.25 * cm))
             finally:
                 shutil.rmtree(chart_tmp, ignore_errors=True)
-        elif scores.get('seo') is not None or scores.get('security') is not None:
+        elif any(scores.get(k) is not None for k in ('seo', 'securite', 'security', 'design', 'risque')):
             chart_tmp = Path(tempfile.mkdtemp(prefix='audit_charts_'))
             try:
                 bars = chart_tmp / 'bars.png'
@@ -806,38 +916,6 @@ class WebsiteAuditPdfGenerator:
                 if block.get('id') == 'synthesis':
                     continue
                 self._append_narrative_block(story, block, st)
-
-        qw = context.get('quick_wins') or []
-        if qw:
-            story.append(self._section_header('Actions prioritaires', st))
-            story.append(Spacer(1, 0.1 * cm))
-            qw_rows = []
-            limit = 4 if is_essential else 8
-            for i, w in enumerate(qw[:limit], 1):
-                qw_rows.append(
-                    [
-                        Paragraph(f'<font color="#0f766e"><b>{i}</b></font>', st['body_bold']),
-                        Paragraph(_esc(w), st['body']),
-                    ]
-                )
-            qw_t = Table(qw_rows, colWidths=[1.0 * cm, 16.0 * cm])
-            qw_t.setStyle(
-                TableStyle(
-                    [
-                        ('BACKGROUND', (0, 0), (-1, -1), AMBER_LIGHT),
-                        ('BOX', (0, 0), (-1, -1), 0.5, AMBER),
-                        ('LEFTPADDING', (0, 0), (-1, -1), 10),
-                        ('RIGHTPADDING', (0, 0), (-1, -1), 10),
-                        ('TOPPADDING', (0, 0), (-1, -1), 8),
-                        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-                        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                        ('LEFTPADDING', (0, 0), (0, -1), 6),
-                        ('RIGHTPADDING', (0, 0), (0, -1), 4),
-                    ]
-                )
-            )
-            story.append(qw_t)
-            story.append(Spacer(1, 0.35 * cm))
 
         if not is_essential:
             synth = [b for b in narrative_sections if b.get('id') == 'synthesis']
@@ -938,9 +1016,9 @@ class WebsiteAuditPdfGenerator:
                 story.append(Paragraph(f'• {title}', st['bullet']))
 
         footer_note = (
-            'DanielCraft · Audit essentiel (offre gratuite)'
+            'DanielCraft · Rapport simple'
             if is_essential
-            else 'DanielCraft · Rapport généré automatiquement'
+            else 'DanielCraft · Rapport complet'
         )
         story.append(Spacer(1, 0.6 * cm))
         footer_bar = Table(
@@ -962,19 +1040,3 @@ class WebsiteAuditPdfGenerator:
 
         doc.build(story)
         return out_path
-
-    def _extract_scores(self, context: Dict[str, Any]) -> Dict[str, Optional[float]]:
-        pipeline = context.get('pipeline') or {}
-        opp = context.get('opportunity') or {}
-        tech = pipeline.get('technical') or {}
-        seo = pipeline.get('seo') or {}
-        pentest = pipeline.get('pentest') or {}
-        scores = {
-            'seo': _safe_float(seo.get('score')) if seo.get('status') == 'done' else None,
-            'security': _safe_float(tech.get('security_score')) if tech.get('status') == 'done' else None,
-            'performance': _safe_float(tech.get('performance_score')) if tech.get('status') == 'done' else None,
-            'pentest_risk': _safe_float(pentest.get('risk_score')) if pentest.get('status') == 'done' else None,
-            'opportunity': _safe_float(opp.get('score')),
-            'design': _safe_float(context.get('gemini_design_score')),
-        }
-        return scores

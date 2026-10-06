@@ -98,46 +98,34 @@ def _normalize_email(raw: str) -> Optional[str]:
 
 
 def _audit_email_scores(context: Optional[Dict[str, Any]]) -> List[tuple[str, str, str]]:
-    """(label, valeur affichée, couleur) pour les pastilles de l'email."""
-    if not context:
-        return []
-    pipeline = context.get('pipeline') or {}
-    opp = context.get('opportunity') or {}
+    """(label, valeur affichée, couleur) — 4 pastilles officielles, risque brut."""
+    from services.website_audit_data import canonical_audit_score_chips
+
     chips: List[tuple[str, str, str]] = []
+    for chip in canonical_audit_score_chips(context):
+        if chip.get('value') is None:
+            continue
+        chips.append((str(chip['label']), str(chip['display']), str(chip['color'])))
+    return chips
 
-    def _add(label: str, raw: Any, *, invert: bool = False) -> None:
-        if raw is None:
-            return
-        try:
-            v = int(float(raw))
-        except (TypeError, ValueError):
-            return
-        display = str(max(0, 100 - v) if invert else v)
-        if v >= 70 and not invert:
-            color = '#059669'
-        elif v >= 45 and not invert:
-            color = '#d97706'
-        elif v < 40 and invert:
-            color = '#059669'
-        elif v < 70 and invert:
-            color = '#d97706'
-        else:
-            color = '#dc2626'
-        chips.append((label, f'{display}/100', color))
 
-    tech = pipeline.get('technical') or {}
-    if tech.get('status') == 'done':
-        _add('Sécurité', tech.get('security_score'))
-        _add('Performance', tech.get('performance_score'))
-    seo = pipeline.get('seo') or {}
-    if seo.get('status') == 'done':
-        _add('SEO', seo.get('score'))
-    pentest = pipeline.get('pentest') or {}
-    if pentest.get('status') == 'done':
-        _add('Risque pentest', pentest.get('risk_score'), invert=True)
-    if opp.get('score') is not None:
-        chips.append(('Opportunité', f'{int(opp["score"])}/100', '#4f46e5'))
-    return chips[:5]
+def _audit_email_character_url(context: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """URL absolue d'un personnage pour le hero email."""
+    try:
+        from services.danielcraft_echantillons import build_character_email_vars
+    except Exception:
+        return None
+    secteur = (context or {}).get('secteur') or ''
+    website = (context or {}).get('website') or ''
+    base = (BASE_URL or 'https://prospectlab.danielcraft.fr').rstrip('/')
+    vars_map = build_character_email_vars(
+        secteur,
+        base_url=base,
+        count=1,
+        seed=f'audit-email:{website or secteur or "default"}',
+    )
+    url = vars_map.get('character_1_url') or vars_map.get('character_left_url')
+    return str(url) if url else None
 
 
 def _build_audit_email_bodies(
@@ -148,7 +136,7 @@ def _build_audit_email_bodies(
     context: Optional[Dict[str, Any]] = None,
     skipped_analysis: bool = False,
 ) -> tuple[str, str]:
-    label = 'audit essentiel' if variant == 'simple' else 'audit complet'
+    label = 'rapport simple' if variant == 'simple' else 'rapport complet'
     exec_lines = (context or {}).get('executive_summary') or []
     chips = _audit_email_scores(context)
     cache_note = (
@@ -156,13 +144,14 @@ def _build_audit_email_bodies(
         if skipped_analysis
         else ''
     )
+    char_url = _audit_email_character_url(context)
 
     text_lines = [
         'Bonjour,',
         '',
-        f'Votre {label} pour {company} ({website}) est prêt.',
+        f'Ton {label} pour {company} ({website}) est prêt.',
         (
-            'Le PDF essentiel (scores + actions prioritaires) est en pièce jointe.'
+            'Le PDF simple (4 indicateurs + priorités) est en pièce jointe.'
             if variant == 'simple'
             else 'Le rapport complet est en pièce jointe.'
         ),
@@ -180,22 +169,34 @@ def _build_audit_email_bodies(
     if skipped_analysis:
         text_lines.append('')
         text_lines.append('(Données issues du cache — analyse non relancée.)')
-    text_lines.extend(['', 'Cordialement,', 'DanielCraft'])
+    text_lines.extend(['', 'À bientôt,', 'DanielCraft'])
     text = '\n'.join(text_lines)
 
+    # Grille 2×2 : 2 lignes de 2 pastilles (lisible sur mobile)
     chip_html = ''
     if chips:
-        cells = ''.join(
-            f'<td style="padding:6px 10px;text-align:center;">'
-            f'<div style="font-size:22px;font-weight:700;color:{color};">{val}</div>'
-            f'<div style="font-size:11px;color:#64748b;margin-top:4px;">{name}</div>'
-            f'</td>'
-            for name, val, color in chips
-        )
+        rows_html = []
+        for i in range(0, len(chips), 2):
+            pair = chips[i : i + 2]
+            cells = []
+            for name, val, color in pair:
+                cells.append(
+                    '<td width="50%" style="padding:6px;vertical-align:top;">'
+                    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+                    'style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;">'
+                    '<tr><td style="padding:14px 10px;text-align:center;">'
+                    f'<div style="font-size:24px;font-weight:800;color:{color};line-height:1.1;">{val}</div>'
+                    f'<div style="font-size:12px;color:#475569;margin-top:6px;font-weight:600;">{name}</div>'
+                    '</td></tr></table></td>'
+                )
+            if len(pair) == 1:
+                cells.append('<td width="50%" style="padding:6px;"></td>')
+            rows_html.append(f'<tr>{"".join(cells)}</tr>')
         chip_html = (
-            '<table role="presentation" cellpadding="0" cellspacing="0" '
-            'style="width:100%;margin:18px 0;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">'
-            f'<tr>{cells}</tr></table>'
+            '<table role="presentation" cellpadding="0" cellspacing="0" width="100%" '
+            'style="width:100%;max-width:100%;margin:18px 0;background:#f5fbfe;'
+            'border-radius:12px;border:1px solid #e2e8f0;">'
+            f'{"".join(rows_html)}</table>'
         )
 
     summary_html = ''
@@ -205,8 +206,8 @@ def _build_audit_email_bodies(
             for line in exec_lines[:4]
         )
         summary_html = (
-            '<p style="font-size:13px;font-weight:600;color:#0f766e;margin:16px 0 8px;">'
-            'Synthèse exécutive</p><ul style="margin:0;padding-left:20px;font-size:13px;">'
+            '<p style="font-size:13px;font-weight:700;color:#0f3550;margin:16px 0 8px;">'
+            'En bref</p><ul style="margin:0;padding-left:20px;font-size:13px;">'
             f'{items}</ul>'
         )
 
@@ -214,43 +215,60 @@ def _build_audit_email_bodies(
     if skipped_analysis:
         cache_html = (
             '<p style="font-size:12px;color:#64748b;background:#f1f5f9;padding:10px 12px;'
-            'border-radius:6px;margin-top:14px;">'
+            'border-radius:8px;margin-top:14px;">'
             'Analyses récentes déjà en base — rapport généré sans relancer les modules.'
             '</p>'
         )
 
     intro_html = (
-        'Votre audit essentiel est prêt : synthèse courte, scores et priorités.'
+        'Ton rapport simple est prêt : 4 indicateurs (Design, Visibilité, Sécurité, Risque) et priorités.'
         if variant == 'simple'
         else (
-            'Votre audit complet est prêt : synthèse experte, données mesurées, '
-            'captures et plan d\'action.'
+            'Ton rapport complet est prêt : les 4 indicateurs, la lecture détaillée '
+            'et un plan d\'action clair.'
         )
     )
     attach_html = (
-        '<strong>Pièce jointe :</strong> audit essentiel (version gratuite).'
+        '<strong>Pièce jointe :</strong> rapport simple (PDF).'
         if variant == 'simple'
-        else '<strong>Pièce jointe :</strong> audit complet (version détaillée).'
+        else '<strong>Pièce jointe :</strong> rapport complet (PDF).'
     )
+
+    char_html = ''
+    if char_url:
+        char_html = (
+            '<td width="96" style="padding:0 0 0 12px;vertical-align:middle;text-align:right;">'
+            f'<img src="{char_url}" alt="" width="88" height="88" '
+            'style="display:block;width:88px;max-width:88px;height:auto;border:0;border-radius:16px;" />'
+            '</td>'
+        )
+
     html = (
-        '<div style="font-family:Segoe UI,Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;color:#0f172a;">'
-        '<div style="background:linear-gradient(135deg,#0f766e 0%,#134e4a 100%);color:#fff;'
-        'padding:28px 26px;border-radius:10px 10px 0 0;">'
-        f'<p style="margin:0;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;opacity:0.85;">'
+        '<div style="margin:0;padding:12px;background:#f5fbfe;">'
+        '<div style="font-family:Segoe UI,Helvetica,Arial,sans-serif;max-width:600px;width:100%;'
+        'margin:0 auto;color:#0f172a;">'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        'style="background:linear-gradient(135deg,#0f3550 0%,#1a5270 100%);color:#fff;'
+        'border-radius:14px 14px 0 0;">'
+        '<tr>'
+        '<td style="padding:24px 22px;vertical-align:middle;">'
+        '<p style="margin:0;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;opacity:0.85;">'
         'DanielCraft</p>'
-        f'<h1 style="margin:10px 0 0;font-size:22px;font-weight:600;">{label.capitalize()}</h1>'
+        f'<h1 style="margin:10px 0 0;font-size:22px;font-weight:700;line-height:1.25;">'
+        f'{label[:1].upper()}{label[1:]}</h1>'
         f'<p style="margin:8px 0 0;font-size:14px;opacity:0.95;">{company}</p>'
-        f'<p style="margin:4px 0 0;font-size:12px;opacity:0.8;">{website}</p></div>'
-        '<div style="background:#ffffff;padding:26px;border:1px solid #e2e8f0;border-top:none;'
-        'border-radius:0 0 10px 10px;">'
-        f'<p style="font-size:14px;line-height:1.55;margin:0;color:#334155;">{intro_html}{cache_note}</p>'
+        f'<p style="margin:4px 0 0;font-size:12px;opacity:0.8;word-break:break-all;">{website}</p>'
+        f'</td>{char_html}</tr></table>'
+        '<div style="background:#ffffff;padding:22px 18px 24px;border:1px solid #e2e8f0;border-top:none;'
+        'border-radius:0 0 14px 14px;">'
+        f'<p style="font-size:15px;line-height:1.55;margin:0;color:#334155;">{intro_html}{cache_note}</p>'
         f'{chip_html}{summary_html}'
-        '<p style="font-size:13px;margin:20px 0 0;padding:14px;background:#ecfdf5;border-left:4px solid #0f766e;'
-        'border-radius:0 6px 6px 0;color:#134e4a;">'
+        '<p style="font-size:13px;margin:20px 0 0;padding:14px;background:#e8f6fc;border-left:4px solid #4da9d6;'
+        'border-radius:0 8px 8px 0;color:#0f3550;">'
         f'{attach_html}</p>'
         f'{cache_html}'
         '<p style="font-size:11px;color:#94a3b8;margin-top:24px;border-top:1px solid #e2e8f0;padding-top:14px;">'
-        'DanielCraft · Message automatique</p></div></div>'
+        'DanielCraft · Message automatique</p></div></div></div>'
     )
     return text, html
 
