@@ -130,12 +130,12 @@ def compose_periodic_report_header(
     campagnes_stats: Sequence[Mapping],
 ) -> Tuple[str, str, str]:
     """
-    Construit titre, sujet et impression globale pour les rapports matin/soir.
+    Construit titre, sujet et impression globale pour le digest périodique.
 
     Le rapport regroupe toutes les campagnes en cours (running / scheduled)
     plus les terminees recentes, dans un seul email.
 
-    @param report_type: 'evening' ou 'morning'
+    @param report_type: 'weekly' (défaut prod), 'evening' ou 'morning' (legacy)
     @param period_date: Date du snapshot
     @param campagnes_stats: Stats des campagnes incluses
     @returns: (title, subject, global_impression_text)
@@ -144,17 +144,28 @@ def compose_periodic_report_header(
     count = len(campagnes_stats) if campagnes_stats else 0
     impression = global_impression(campagnes_stats)
     hook = short_impression(campagnes_stats)
-    slot = 'soir' if report_type == 'evening' else 'matin'
+    if report_type == 'weekly':
+        slot = 'hebdo'
+        title_prefix = 'Bilan semaine campagnes'
+        subject_scope = 'bilan semaine'
+    elif report_type == 'evening':
+        slot = 'soir'
+        title_prefix = f'Point campagnes ({slot})'
+        subject_scope = 'campagnes'
+    else:
+        slot = 'matin'
+        title_prefix = f'Point campagnes ({slot})'
+        subject_scope = 'campagnes'
 
     if count == 0:
-        title = f'Point campagnes ({slot}) - {date_label}'
-        subject = f'[ProspectLab] Aucune campagne active · {date_label}'
+        title = f'{title_prefix} - {date_label}'
+        subject = f'[ProspectLab] Aucune campagne · {subject_scope} · {date_label}'
     elif count == 1:
-        title = f'Point campagnes ({slot}) - {date_label}'
-        subject = f'[ProspectLab] 1 campagne en cours · {date_label} — {hook}'
+        title = f'{title_prefix} - {date_label}'
+        subject = f'[ProspectLab] 1 campagne · {subject_scope} · {date_label} — {hook}'
     else:
-        title = f'Point campagnes ({slot}) - {date_label}'
-        subject = f'[ProspectLab] {count} campagnes en cours · {date_label} — {hook}'
+        title = f'{title_prefix} - {date_label}'
+        subject = f'[ProspectLab] {count} campagnes · {subject_scope} · {date_label} — {hook}'
 
     return title, subject, impression
 

@@ -156,21 +156,17 @@ celery.conf.update(
             'task': 'tasks.email_tasks.generate_recurring_weekly_plans',
             'schedule': crontab(hour=6, minute=0, day_of_week=0),  # Dimanche 6h Paris : semaine suivante
         },
-        # Rapports de campagnes (matin / soir) vers CAMPAIGN_REPORT_RECIPIENT
-        'campagnes-report-evening': {
+        # Digest hebdo unique (fin de semaine) vers CAMPAIGN_REPORT_RECIPIENT
+        # Celery crontab: day_of_week 5 = vendredi (0 = dimanche)
+        'campagnes-report-weekly': {
             'task': 'tasks.email_tasks.send_campagnes_report_task',
-            'schedule': crontab(hour=18, minute=0),  # Tous les jours à 18h (heure de Paris via CELERY_TIMEZONE)
-            'args': ('evening',),
+            'schedule': crontab(hour=18, minute=0, day_of_week=5),
+            'args': ('weekly',),
         },
-        'campagnes-report-morning': {
-            'task': 'tasks.email_tasks.send_campagnes_report_task',
-            'schedule': crontab(hour=8, minute=0),  # Tous les jours à 8h
-            'args': ('morning',),
-        },
-        # Vérification périodique des changements significatifs des performances de campagnes
+        # Monitoring: 1 seul mail de stabilisation par campagne (lifetime), toutes les 30 min
         'campagnes-significant-changes': {
             'task': 'tasks.email_tasks.check_campaigns_significant_changes_task',
-            'schedule': 1800.0,  # Toutes les 30 minutes
+            'schedule': 1800.0,
         },
         # Scan IMAP des bounces: 2 fois par jour (sans limite de messages par défaut)
         'bounce-scan-morning': {

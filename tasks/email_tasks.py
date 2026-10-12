@@ -1000,13 +1000,14 @@ def _build_campaigns_report_text(title, campagnes_stats, inbox_text='', global_i
 
 
 @celery.task
-def send_campagnes_report_task(report_type='evening'):
+def send_campagnes_report_task(report_type='weekly'):
     """
     Envoie un rapport email unique regroupant les campagnes en cours.
 
     - Inclut running / scheduled + completed/failed des 7 derniers jours
       (si au moins 1 email envoye).
-    - report_type ('evening' / 'morning') ne change que le libelle du slot.
+    - report_type ('weekly' / 'evening' / 'morning') ne change que le libelle.
+    - En prod Beat : un seul envoi hebdo (vendredi 18h Paris).
 
     Le rapport est envoye a CAMPAIGN_REPORT_RECIPIENT.
     """
@@ -1109,7 +1110,7 @@ def check_campaigns_significant_changes_task(
     stable_click_delta_threshold=0.5,
     stable_checks=3,
     min_emails_for_stability=5,
-    other_cooldown_hours=12,
+    other_cooldown_hours=12,  # legacy, ignoré : 1 seul envoi lifetime
     report_day_start_hour=8,
     report_day_end_hour=20,
 ):
@@ -1119,6 +1120,8 @@ def check_campaigns_significant_changes_task(
       on démarre une phase d'observation.
     - On n'envoie le rapport que quand le taux se stabilise :
       variations faibles pendant `stable_checks` exécutions consécutives.
+    - **Un seul mail de stabilisation par campagne** (lifetime) ; le digest
+      agrégé reste le bilan hebdo Beat.
 
     L'état (baseline / phase / compteur de stabilité) est conservé dans
     `logs/campagne_stats_cache.json` pour éviter les envois répétés.
@@ -1135,34 +1138,16 @@ def check_campaigns_significant_changes_task(
 
     campagnes = campagne_manager.get_campagnes_launched_between(start_utc_iso, end_utc_iso)
 
-    # --- Nouveau monitoring : hausse qualifiée -> stabilisation -> 1er rapport ---
+    # --- Monitoring : hausse qualifiée -> stabilisation -> 1 seul rapport lifetime ---
     cache = _load_stats_cache()
-    candidates_latest = []
-    candidates_others = []
     now_utc_iso = _to_utc_iso(now_paris)
 
-    def _parse_iso_to_dt(value):
-        """
-        Parse une date ISO (avec éventuellement suffixe 'Z') en datetime timezone-aware.
-        Retourne None si la date est invalide.
-        """
-        if not value:
-            return None
-        try:
-            return datetime.fromisoformat(str(value).replace('Z', '+00:00'))
-        except Exception:
-            return None
-
-    latest_cid_str = None
-    try:
-        latest_campaign = max(
-            campagnes,
-            key=lambda x: _parse_iso_to_dt(x.get('scheduled_at') or x.get('date_creation')) or datetime.min.replace(tzinfo=timezone.utc),
-        )
-        if latest_campaign and latest_campaign.get('id') is not None:
-            latest_cid_str = str(latest_campaign.get('id'))
-    except Exception:
-        latest_cid_str = None
+    def _already_sent_once(entry):
+        """True si un mail de stabilisation a déjà été envoyé pour cette campagne."""
+        if bool(entry.get('report_sent_once')):
+            return True
+        # Compat cache ancien : un last_sent_at compte comme déjà envoyé
+        return bool(entry.get('last_sent_at'))
 
     for c in campagnes:
         cid = c.get('id')
@@ -1190,13 +1175,25 @@ def check_campaigns_significant_changes_task(
 
         entry['last_seen_at'] = now_utc_iso
 
+        # Déjà un mail pour cette campagne : ne plus jamais re-déclencher
+        if _already_sent_once(entry):
+            entry['report_sent_once'] = True
+            entry['ready_to_send'] = False
+            entry['triggered'] = False
+            entry['stable_counter'] = 0
+            entry['last_open_rate'] = current_open
+            entry['last_click_rate'] = current_click
+            cache[cid_str] = entry
+            continue
+
         # Evite les faux signaux sur des campagnes avec trop peu de données.
-        # Réinitialise l'état si la campagne repasse sous le seuil (données insuffisantes).
         if total_emails < min_emails_for_stability:
             entry['ready_to_send'] = False
             entry['triggered'] = False
             entry['stable_counter'] = 0
             entry['triggered_at'] = None
+            entry['last_open_rate'] = current_open
+            entry['last_click_rate'] = current_click
             cache[cid_str] = entry
             continue
 
@@ -1238,36 +1235,7 @@ def check_campaigns_significant_changes_task(
             entry['last_click_rate'] = current_click
 
             if int(entry.get('stable_counter', 0) or 0) >= int(stable_checks) and not entry.get('ready_to_send', False):
-                is_latest = (latest_cid_str is not None and cid_str == latest_cid_str)
-
-                # Pour les autres campagnes : éviter d'envoyer trop souvent (écart plus espacé)
-                if not is_latest:
-                    last_sent_dt = _parse_iso_to_dt(entry.get('last_sent_at'))
-                    if last_sent_dt:
-                        cooldown_seconds = int(other_cooldown_hours * 3600)
-                        if (datetime.now(timezone.utc) - last_sent_dt).total_seconds() < cooldown_seconds:
-                            cache[cid_str] = entry
-                            continue
-
-                candidate = {
-                    'cid_str': cid_str,
-                    'id': cid,
-                    'nom': c.get('nom') or '',
-                    'statut': c.get('statut') or '',
-                    'total_emails': total_emails,
-                    'current_open': current_open,
-                    'current_click': current_click,
-                    'triggered_at': entry.get('triggered_at') or '',
-                    'baseline_open': float(entry.get('baseline_open_rate', current_open) or 0.0),
-                    'baseline_click': float(entry.get('baseline_click_rate', current_click) or 0.0),
-                }
-
-                # Marquer comme "prêt à envoyer" pour éviter des doublons tant qu'on n'a pas réellement envoyé
                 entry['ready_to_send'] = True
-                if is_latest:
-                    candidates_latest.append(candidate)
-                else:
-                    candidates_others.append(candidate)
 
         cache[cid_str] = entry
 
@@ -1277,59 +1245,44 @@ def check_campaigns_significant_changes_task(
 
     # Construire la liste à envoyer à partir de l'état en cache,
     # pour gérer le cas "report déclenché la nuit => envoyé au prochain run".
-    latest_ready = []
-    others_ready = []
+    to_send = []
     for c in campagnes:
         cid = c.get('id')
         if not cid:
             continue
         cid_str = str(cid)
         entry = cache.get(cid_str) or {}
+        if _already_sent_once(entry):
+            entry['report_sent_once'] = True
+            entry['ready_to_send'] = False
+            cache[cid_str] = entry
+            continue
         if not bool(entry.get('ready_to_send', False)):
             continue
 
         stats_send = campagne_manager.get_campagne_tracking_stats(cid)
         te = int(stats_send.get('total_emails', 0) or 0)
         if te < min_emails_for_stability:
-            # Cache obsolète ou campagne vidée : ne pas envoyer de rapport vide / incohérent
             entry['ready_to_send'] = False
             entry['triggered'] = False
             entry['stable_counter'] = 0
             cache[cid_str] = entry
             continue
 
-        is_latest = (latest_cid_str is not None and cid_str == latest_cid_str)
-        if is_latest:
-            latest_ready.append(
-                {
-                    'cid_str': cid_str,
-                    'id': cid,
-                    'nom': c.get('nom') or '',
-                    'statut': c.get('statut') or '',
-                    'total_emails': te,
-                    'current_open': float(entry.get('last_open_rate', 0.0) or 0.0),
-                    'current_click': float(entry.get('last_click_rate', 0.0) or 0.0),
-                }
-            )
-        else:
-            # Le cooldown a été pris en compte lors du passage ready_to_send,
-            # donc ici on n'applique pas un nouveau cooldown strict.
-            others_ready.append(
-                {
-                    'cid_str': cid_str,
-                    'id': cid,
-                    'nom': c.get('nom') or '',
-                    'statut': c.get('statut') or '',
-                    'total_emails': te,
-                    'current_open': float(entry.get('last_open_rate', 0.0) or 0.0),
-                    'current_click': float(entry.get('last_click_rate', 0.0) or 0.0),
-                }
-            )
+        to_send.append(
+            {
+                'cid_str': cid_str,
+                'id': cid,
+                'nom': c.get('nom') or '',
+                'statut': c.get('statut') or '',
+                'total_emails': te,
+                'current_open': float(entry.get('last_open_rate', 0.0) or 0.0),
+                'current_click': float(entry.get('last_click_rate', 0.0) or 0.0),
+            }
+        )
 
     # Persister l'état (1re boucle + invalidations ready_to_send de la 2e boucle)
     _save_stats_cache(cache)
-
-    to_send = list(latest_ready or []) + list(others_ready or [])
 
     if not is_daytime:
         if to_send:
@@ -1341,13 +1294,14 @@ def check_campaigns_significant_changes_task(
         # Important: on ne reset pas l'état, ready_to_send reste à True.
         return {'success': True, 'changes': 0, 'deferred': bool(to_send)}
 
-    # Reset uniquement pour les campagnes réellement envoyées (sinon on perd l'état)
+    # Marquer lifetime-sent uniquement pour les campagnes réellement envoyées
     for ch in to_send:
         cid_str = ch.get('cid_str')
         if not cid_str or cid_str not in cache:
             continue
         entry = cache[cid_str]
         entry['last_sent_at'] = now_utc_iso
+        entry['report_sent_once'] = True
         entry['baseline_open_rate'] = ch.get('current_open', entry.get('baseline_open_rate'))
         entry['baseline_click_rate'] = ch.get('current_click', entry.get('baseline_click_rate'))
         entry['triggered'] = False

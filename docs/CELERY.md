@@ -81,8 +81,8 @@ Variables utiles (`.env`) : `CELERY_WORKERS`, `CELERY_WORKER_QUEUES`, `CELERY_WO
 ProspectLab utilise Celery Beat pour plusieurs tâches de fond:
 
 - Lancement des campagnes programmées (toutes les minutes)
-- Rapports campagnes (matin/soir)
-- Monitoring des variations (toutes les 30 min)
+- Digest campagnes **hebdo** (vendredi 18h Paris) — plus de matin/soir quotidiens
+- Monitoring stabilisation (toutes les 30 min) : **1 seul mail lifetime par campagne**
 - **Scan des bounces IMAP (2 fois par jour)**
 
 ### Scan bounces IMAP
