@@ -795,6 +795,24 @@ class DatabaseSchema(DatabaseBase):
         finally:
             conn.close()
 
+    def ensure_scraper_technology_details_columns(self):
+        """
+        Ajoute version + statut de risque sur scraper_technologies (bases deja creees).
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            for col_sql in (
+                'ALTER TABLE scraper_technologies ADD COLUMN version TEXT',
+                'ALTER TABLE scraper_technologies ADD COLUMN vuln_status TEXT',
+                'ALTER TABLE scraper_technologies ADD COLUMN vuln_severity TEXT',
+                'ALTER TABLE scraper_technologies ADD COLUMN vuln_note TEXT',
+            ):
+                self.safe_execute_sql(cursor, col_sql)
+            conn.commit()
+        finally:
+            conn.close()
+
     def ensure_facebook_prospection_tables(self):
         """
         Migration idempotente : prospection Facebook (jobs, candidats pages, conversations).
@@ -900,6 +918,90 @@ class DatabaseSchema(DatabaseBase):
             self.execute_sql(
                 cursor,
                 'CREATE INDEX IF NOT EXISTS idx_fb_prospection_pages_ent ON facebook_prospection_pages(entreprise_id)',
+            )
+            self.safe_execute_sql(cursor, 'ALTER TABLE entreprises ADD COLUMN facebook_page_url TEXT')
+            self.safe_execute_sql(cursor, 'ALTER TABLE entreprises ADD COLUMN facebook_page_id INTEGER')
+            for col_sql in (
+                'ALTER TABLE facebook_prospection_pages ADD COLUMN category TEXT',
+                'ALTER TABLE facebook_prospection_pages ADD COLUMN likes_text TEXT',
+                'ALTER TABLE facebook_prospection_pages ADD COLUMN likes_count INTEGER',
+                'ALTER TABLE facebook_prospection_pages ADD COLUMN followers_text TEXT',
+                'ALTER TABLE facebook_prospection_pages ADD COLUMN followers_count INTEGER',
+                'ALTER TABLE facebook_prospection_pages ADD COLUMN rating REAL',
+                'ALTER TABLE facebook_prospection_pages ADD COLUMN intro TEXT',
+                'ALTER TABLE facebook_prospection_pages ADD COLUMN about_text TEXT',
+                'ALTER TABLE facebook_prospection_pages ADD COLUMN hours_text TEXT',
+                'ALTER TABLE facebook_prospection_pages ADD COLUMN address_1 TEXT',
+                'ALTER TABLE facebook_prospection_pages ADD COLUMN code_postal TEXT',
+                'ALTER TABLE facebook_prospection_pages ADD COLUMN ville TEXT',
+                'ALTER TABLE facebook_prospection_pages ADD COLUMN match_score REAL',
+                'ALTER TABLE facebook_prospection_pages ADD COLUMN scraped_at TIMESTAMP',
+                'ALTER TABLE facebook_prospection_pages ADD COLUMN username TEXT',
+                'ALTER TABLE facebook_prospection_pages ADD COLUMN fb_page_id TEXT',
+                'ALTER TABLE facebook_prospection_pages ADD COLUMN cover_url TEXT',
+                'ALTER TABLE facebook_prospection_pages ADD COLUMN logo_url TEXT',
+                'ALTER TABLE facebook_prospection_pages ADD COLUMN reviews_count INTEGER',
+                'ALTER TABLE facebook_prospection_pages ADD COLUMN creation_text TEXT',
+                'ALTER TABLE facebook_prospection_pages ADD COLUMN price_range TEXT',
+            ):
+                self.safe_execute_sql(cursor, col_sql)
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS facebook_prospection_page_contacts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    page_id INTEGER NOT NULL,
+                    kind TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (page_id) REFERENCES facebook_prospection_pages(id) ON DELETE CASCADE,
+                    UNIQUE(page_id, kind, value)
+                )
+                ''',
+            )
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS facebook_prospection_page_posts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    page_id INTEGER NOT NULL,
+                    position INTEGER NOT NULL DEFAULT 0,
+                    body_text TEXT NOT NULL,
+                    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (page_id) REFERENCES facebook_prospection_pages(id) ON DELETE CASCADE
+                )
+                ''',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_fb_page_contacts_page ON facebook_prospection_page_contacts(page_id, kind)',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_fb_page_posts_page ON facebook_prospection_page_posts(page_id, position)',
+            )
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS facebook_prospection_page_media (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    page_id INTEGER NOT NULL,
+                    kind TEXT NOT NULL,
+                    url TEXT NOT NULL,
+                    position INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (page_id) REFERENCES facebook_prospection_pages(id) ON DELETE CASCADE,
+                    UNIQUE(page_id, url)
+                )
+                ''',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_fb_page_media_page ON facebook_prospection_page_media(page_id, kind)',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_entreprises_facebook_page_id ON entreprises(facebook_page_id)',
             )
             conn.commit()
         finally:
@@ -2415,6 +2517,10 @@ class DatabaseSchema(DatabaseBase):
                 entreprise_id INTEGER NOT NULL,
                 category TEXT NOT NULL,
                 name TEXT NOT NULL,
+                version TEXT,
+                vuln_status TEXT,
+                vuln_severity TEXT,
+                vuln_note TEXT,
                 page_url TEXT,
                 date_found TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (scraper_id) REFERENCES scrapers(id) ON DELETE CASCADE,

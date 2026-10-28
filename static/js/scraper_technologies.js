@@ -109,7 +109,15 @@
             const categoryName = categoryNames[category] || category;
             html += `<div style="margin-bottom: 1.5rem;"><h4>${escapeHtml(categoryName)}</h4><ul>`;
             techs.forEach(tech => {
-                html += `<li>${escapeHtml(tech)}</li>`;
+                const item = (tech && typeof tech === 'object')
+                    ? tech
+                    : { label: String(tech || ''), vuln_status: null, vuln_note: '' };
+                const label = item.label || [item.name, item.version].filter(Boolean).join(' ') || String(tech);
+                let suffix = '';
+                if (item.vuln_status === 'vulnerable') suffix = ' (faillible)';
+                if (item.vuln_status === 'outdated') suffix = ' (obsolete)';
+                const title = item.vuln_note ? ` title="${escapeHtml(item.vuln_note)}"` : '';
+                html += `<li${title}>${escapeHtml(label)}${escapeHtml(suffix)}</li>`;
             });
             html += '</ul></div>';
         }

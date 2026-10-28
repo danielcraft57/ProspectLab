@@ -17,6 +17,12 @@ from typing import Dict, List, Optional, Callable, Set, Any
 from datetime import datetime
 from functools import lru_cache
 from services.logging_config import setup_logger
+from services.tech_fingerprint import (
+    annotate_technology_map,
+    detect_site_technologies,
+    merge_technology_maps,
+)
+from services.tech_version_probe import complete_technology_versions
 
 # Configurer le logger pour écrire dans scraping_tasks.log
 logger = setup_logger(__name__, 'scraping_tasks.log', level=logging.INFO)
@@ -178,40 +184,7 @@ class UnifiedScraper:
             'discord': ['discord.gg', 'discord.com']
         }
         
-        # Patterns de détection de technologies
-        self.technology_patterns = {
-            'cms': {
-                'wordpress': [r'/wp-content/', r'/wp-includes/', r'wp-json', r'wordpress'],
-                'drupal': [r'/sites/', r'/modules/', r'/themes/', r'drupal'],
-                'joomla': [r'/administrator/', r'/components/', r'/templates/', r'joomla'],
-                'prestashop': [r'/prestashop/', r'/modules/', r'prestashop'],
-                'magento': [r'/magento/', r'/skin/', r'magento'],
-                'shopify': [r'shopify', r'cdn.shopify.com'],
-                'wix': [r'wix.com', r'wixstatic.com'],
-                'squarespace': [r'squarespace.com', r'sqspcdn.com']
-            },
-            'framework': {
-                'react': [r'react', r'__REACT_DEVTOOLS', r'ReactDOM'],
-                'vue': [r'vue', r'__VUE__', r'Vue.js'],
-                'angular': [r'angular', r'ng-', r'@angular'],
-                'jquery': [r'jquery', r'jQuery'],
-                'bootstrap': [r'bootstrap', r'bs-'],
-                'tailwind': [r'tailwindcss']
-            },
-            'analytics': {
-                'google_analytics': [r'google-analytics.com', r'ga.js', r'gtag'],
-                'google_tag_manager': [r'googletagmanager.com', r'GTM-'],
-                'facebook_pixel': [r'facebook.net', r'fbq'],
-                'hotjar': [r'hotjar.com'],
-                'mixpanel': [r'mixpanel.com']
-            },
-            'cdn': {
-                'cloudflare': [r'cloudflare.com', r'cf-ray'],
-                'cloudfront': [r'cloudfront.net'],
-                'fastly': [r'fastly.com'],
-                'akamai': [r'akamai.net']
-            }
-        }
+        # Empreintes CMS / libs : voir services.tech_fingerprint
 
     def _fetch_with_protocol_fallback(self, url: str, timeout: int = 15) -> Optional[requests.Response]:
         """
@@ -920,38 +893,57 @@ class UnifiedScraper:
         return images
     
     def detect_technologies(self, html: str, headers: Dict) -> None:
-        """Détecte les technologies depuis le HTML et les headers"""
-        html_lower = html.lower()
-        tech_patterns = getattr(self, 'technology_patterns', None) or {}
-        
-        # Détecter depuis le HTML
-        for category, techs in tech_patterns.items():
-            for tech_name, patterns in techs.items():
-                for pattern in patterns:
-                    if re.search(pattern, html_lower, re.IGNORECASE):
-                        if category not in self.technologies:
-                            self.technologies[category] = []
-                        if tech_name not in self.technologies[category]:
-                            self.technologies[category].append(tech_name)
-                        break
-        
-        # Détecter depuis les headers
-        server = headers.get('Server', '').lower()
-        powered_by = headers.get('X-Powered-By', '').lower()
-        
-        if 'nginx' in server:
-            self.technologies.setdefault('server', []).append('nginx')
-        elif 'apache' in server:
-            self.technologies.setdefault('server', []).append('apache')
-        elif 'iis' in server:
-            self.technologies.setdefault('server', []).append('iis')
-        
-        if 'php' in powered_by:
-            self.technologies.setdefault('language', []).append('php')
-        elif 'asp.net' in powered_by or 'aspnet' in powered_by:
-            self.technologies.setdefault('language', []).append('asp.net')
-        elif 'express' in powered_by:
-            self.technologies.setdefault('framework', []).append('express')
+        """
+        Detecte CMS, libs et analytics (avec version si visible) puis fusionne.
+
+        @param html: HTML de la page
+        @param headers: Headers HTTP de la reponse
+        """
+        found = detect_site_technologies(html or '', headers or {})
+        with self.lock:
+            self.technologies = merge_technology_maps(self.technologies, found)
+
+    def _fetch_tech_snippet(self, url: str, max_bytes: int | None = None, timeout: int = 8) -> tuple:
+        """
+        Recupere un bout de page/fichier pour lire une version.
+
+        @param url: URL
+        @param max_bytes: Tronque si besoin
+        @param timeout: Timeout
+        @returns: (texte, headers)
+        """
+        try:
+            response = self._fetch_with_protocol_fallback(url, timeout=timeout)
+        except Exception:
+            return None, {}
+        if not response:
+            return None, {}
+        text = getattr(response, 'text', None) or ''
+        if max_bytes:
+            text = text[:max_bytes]
+        return text, dict(response.headers or {})
+
+    def _complete_tech_versions(self, page_url: str, html: str, headers: Dict) -> None:
+        """
+        RSS WordPress, readme, tete des JS : on va chercher le numero.
+
+        @param page_url: Page d'accueil
+        @param html: HTML deja charge
+        @param headers: Headers de la page
+        """
+        try:
+            completed = complete_technology_versions(
+                page_url,
+                html,
+                dict(headers or {}),
+                self.technologies,
+                fetch_fn=lambda u, max_bytes=None: self._fetch_tech_snippet(u, max_bytes=max_bytes),
+            )
+        except Exception:
+            logger.warning('[UnifiedScraper] Sondes de version en echec', exc_info=True)
+            return
+        with self.lock:
+            self.technologies = merge_technology_maps(self.technologies, completed)
     
     def extract_metadata(self, soup: BeautifulSoup) -> Dict:
         """
@@ -1173,19 +1165,354 @@ class UnifiedScraper:
                 icons['main_image'] = candidate
                 break
         
+        head_links = self._extract_head_and_nav_links(soup, base_root)
+        org = self._extract_jsonld_organization(json_ld)
+
         metadata = {
             'meta_tags': meta_tags,
             'open_graph': og_tags,
             'twitter_cards': twitter_tags,
             'json_ld': json_ld,
             'language': language,
-            'keywords': keywords_content.split(',') if keywords_content else [],
+            'keywords': [k.strip() for k in keywords_content.split(',') if k.strip()] if keywords_content else [],
             'icons': icons,
-            # Liste des images trouvées (optimisation BDD: uniquement les URLs + quelques infos, pas les binaires)
-            'images': images
+            'images': images,
+            'canonical': head_links.get('canonical'),
+            'feeds': head_links.get('feeds') or [],
+            'hreflang': head_links.get('hreflang') or [],
+            'header_links': head_links.get('pages') or [],
+            'nav_menu': head_links.get('nav_menu') or [],
+            'header_external': head_links.get('header_external') or [],
+            'identity_links': head_links.get('identity') or [],
+            'organization': org,
+            'seo_setup': head_links.get('seo_setup') or [],
+            'prospect_signals': self._build_prospect_signals(head_links, org, og_tags, meta_tags),
         }
-        
+
         return metadata
+
+    def _merge_header_links_into_metadata(self, page_metadata: Dict) -> None:
+        """
+        Ajoute les liens utiles trouves sur les pages internes (contact, jobs...).
+
+        @param page_metadata: Meta d'une page interne
+        """
+        if not self.metadata:
+            return
+        existing = {(x.get('url'), x.get('kind')) for x in (self.metadata.get('header_links') or [])}
+        for link in page_metadata.get('header_links') or []:
+            key = (link.get('url'), link.get('kind'))
+            if key in existing:
+                continue
+            self.metadata.setdefault('header_links', []).append(link)
+            existing.add(key)
+        seen_feeds = {x.get('url') for x in (self.metadata.get('feeds') or [])}
+        for feed in page_metadata.get('feeds') or []:
+            if feed.get('url') and feed.get('url') not in seen_feeds:
+                self.metadata.setdefault('feeds', []).append(feed)
+                seen_feeds.add(feed.get('url'))
+        menu_seen = {(x.get('url')) for x in (self.metadata.get('nav_menu') or [])}
+        for item in page_metadata.get('nav_menu') or []:
+            url = item.get('url')
+            if url and url not in menu_seen:
+                self.metadata.setdefault('nav_menu', []).append(item)
+                menu_seen.add(url)
+        ext_seen = {(x.get('url')) for x in (self.metadata.get('header_external') or [])}
+        for item in page_metadata.get('header_external') or []:
+            url = item.get('url')
+            if url and url not in ext_seen:
+                self.metadata.setdefault('header_external', []).append(item)
+                ext_seen.add(url)
+
+    def _extract_head_and_nav_links(self, soup: BeautifulSoup, base_root: str) -> Dict[str, Any]:
+        """
+        Liens utiles du <head> et du header (contact, devis, blog, RSS...).
+
+        @param soup: HTML parse
+        @param base_root: Origine du site
+        @returns: canonical, feeds, pages, identity, seo_setup, hreflang
+        """
+        result: Dict[str, Any] = {
+            'canonical': None,
+            'feeds': [],
+            'hreflang': [],
+            'pages': [],
+            'identity': [],
+            'seo_setup': [],
+            'nav_menu': [],
+            'header_external': [],
+        }
+        seen_urls: Set[str] = set()
+        menu_seen: Set[str] = set()
+        base_key = self._host_key(self.domain)
+
+        def abs_url(href: str) -> Optional[str]:
+            if not href or href.startswith(('javascript:', 'data:', '#')):
+                return None
+            try:
+                return self.normalize_url(href, base_root) or href
+            except Exception:
+                return href
+
+        for link in soup.find_all('link', href=True):
+            href = abs_url(link.get('href') or '')
+            if not href:
+                continue
+            rel = ' '.join(link.get('rel') or []).lower()
+            ltype = (link.get('type') or '').lower()
+            hreflang = link.get('hreflang') or ''
+            if 'canonical' in rel and not result['canonical']:
+                result['canonical'] = href
+            if 'alternate' in rel and ('rss' in ltype or 'atom' in ltype or '/feed' in href.lower()):
+                result['feeds'].append({'url': href, 'type': ltype or 'rss', 'title': link.get('title') or 'RSS'})
+            if 'alternate' in rel and hreflang:
+                result['hreflang'].append({'lang': hreflang, 'url': href})
+            if rel in ('author', 'publisher', 'me'):
+                result['identity'].append({'rel': rel, 'url': href, 'label': link.get('title') or rel})
+            if 'manifest' in rel:
+                result['identity'].append({'rel': 'manifest', 'url': href, 'label': 'Web app'})
+
+        for meta in soup.find_all('meta'):
+            name = (meta.get('name') or meta.get('property') or '').lower()
+            content = (meta.get('content') or '').strip()
+            if not content:
+                continue
+            if 'google-site-verification' in name:
+                result['seo_setup'].append('Google Search Console')
+            elif 'bing' in name and 'verif' in name:
+                result['seo_setup'].append('Bing Webmaster')
+            elif name == 'robots':
+                result['seo_setup'].append(f'robots: {content[:80]}')
+            elif name == 'theme-color':
+                result['seo_setup'].append(f'theme {content}')
+            elif 'al:ios' in name or 'al:android' in name:
+                result['seo_setup'].append('Application mobile')
+            elif name in ('geo.placename', 'geo.region', 'icbm'):
+                result['seo_setup'].append(content)
+
+        scopes = []
+        header_scopes = []
+        for tag in soup.find_all(['header', 'nav']):
+            scopes.append(tag)
+            header_scopes.append(tag)
+        banner = soup.find(attrs={'role': 'banner'})
+        if banner:
+            scopes.append(banner)
+            header_scopes.append(banner)
+        footer = soup.find('footer')
+        if footer:
+            scopes.append(footer)
+        if not scopes:
+            scopes = [soup]
+            header_scopes = [soup]
+
+        for scope in header_scopes:
+            for anchor in scope.find_all('a', href=True):
+                href = abs_url(anchor.get('href') or '')
+                if not href or href in menu_seen:
+                    continue
+                text = ' '.join(anchor.get_text(' ', strip=True).split())[:80]
+                title_attr = (anchor.get('title') or '').strip()[:80]
+                if not text:
+                    text = title_attr
+                if not text or len(text) < 2:
+                    continue
+                if href.startswith('mailto:') or href.startswith('tel:'):
+                    continue
+                menu_seen.add(href)
+                try:
+                    host_key = self._host_key(urlparse(href).netloc)
+                except Exception:
+                    host_key = ''
+                external = bool(host_key and host_key != base_key)
+                result['nav_menu'].append({
+                    'text': text,
+                    'url': href,
+                    'external': external,
+                })
+                if external and not self.detect_social_platform(href) and not self._is_blocked_external_host(host_key):
+                    ctx = ''
+                    try:
+                        parent = anchor.parent
+                        if parent:
+                            ctx = parent.get_text(separator=' ', strip=True)[:220]
+                    except Exception:
+                        pass
+                    blob = f'{text} {ctx}'.lower()
+                    likely_credit = (
+                        self._credit_link_heuristic(blob)
+                        or self._is_credit_platform_host(host_key)
+                    )
+                    result['header_external'].append({
+                        'url': href,
+                        'domain': host_key,
+                        'text': text,
+                        'likely_credit': likely_credit,
+                        'context_snippet': ctx[:220] if likely_credit and ctx else '',
+                    })
+                if len(result['nav_menu']) >= 36:
+                    break
+            if len(result['nav_menu']) >= 36:
+                break
+
+        nav_rules = [
+            ('contact', r'contact|nous.contacter|ecrire|envo[iy]er-un-message', 'Contact'),
+            ('quote', r'devis|tarif|prix|offre|reservation|rdv|rendez-vous|demander', 'Devis / tarifs'),
+            ('jobs', r'recrut|carriere|career|jobs|nous-rejoindre|emploi|offre-emploi', 'Recrutement'),
+            ('about', r'a-propos|about|qui-sommes|presentation|notre-histoire', 'A propos'),
+            ('blog', r'blog|actualit|news|magazine|journal', 'Blog'),
+            ('legal', r'mention|legal|cgu|cgv|confidential|privacy|rgpd|cookies', 'Legal'),
+            ('login', r'connexion|login|espace-client|mon-compte|client', 'Espace client'),
+        ]
+
+        for scope in scopes:
+            for anchor in scope.find_all('a', href=True):
+                href = abs_url(anchor.get('href') or '')
+                if not href or href in seen_urls:
+                    continue
+                text = ' '.join(anchor.get_text(' ', strip=True).split())[:80]
+                blob = f'{href} {text}'.lower()
+                kind = None
+                label = text
+                for key, pattern, pretty in nav_rules:
+                    if re.search(pattern, blob, re.I):
+                        kind = key
+                        label = pretty
+                        break
+                if not kind:
+                    continue
+                seen_urls.add(href)
+                result['pages'].append({
+                    'kind': kind,
+                    'label': label,
+                    'text': text or label,
+                    'url': href,
+                })
+
+        # Dedup seo_setup
+        result['seo_setup'] = list(dict.fromkeys(result['seo_setup']))
+        return result
+
+    def _extract_jsonld_organization(self, json_ld: List) -> Dict[str, Any]:
+        """
+        Sort nom, tel, email, adresse, sameAs depuis le JSON-LD.
+
+        @param json_ld: Blocs schema.org
+        @returns: Fiche organisation
+        """
+        orgs: List[Dict] = []
+
+        def walk(node: Any) -> None:
+            if isinstance(node, list):
+                for item in node:
+                    walk(item)
+                return
+            if not isinstance(node, dict):
+                return
+            if '@graph' in node:
+                walk(node.get('@graph'))
+            types = node.get('@type') or node.get('type') or ''
+            if isinstance(types, list):
+                type_blob = ' '.join(str(x) for x in types)
+            else:
+                type_blob = str(types)
+            if any(token in type_blob for token in ('Organization', 'LocalBusiness', 'Store', 'Corporation', 'NGO')):
+                orgs.append(node)
+            for value in node.values():
+                if isinstance(value, (dict, list)):
+                    walk(value)
+
+        walk(json_ld)
+        if not orgs:
+            return {}
+        node = orgs[0]
+        address = node.get('address') or {}
+        if isinstance(address, list) and address:
+            address = address[0] if isinstance(address[0], dict) else {}
+        if not isinstance(address, dict):
+            address = {}
+        same_as = node.get('sameAs') or []
+        if isinstance(same_as, str):
+            same_as = [same_as]
+        email = node.get('email') or ''
+        if isinstance(email, list):
+            email = email[0] if email else ''
+        telephone = node.get('telephone') or node.get('phone') or ''
+        if isinstance(telephone, list):
+            telephone = telephone[0] if telephone else ''
+        return {
+            'name': node.get('name') or node.get('legalName') or '',
+            'telephone': str(telephone or ''),
+            'email': str(email or '').replace('mailto:', ''),
+            'url': node.get('url') or '',
+            'street': address.get('streetAddress') or '',
+            'city': address.get('addressLocality') or '',
+            'postal_code': address.get('postalCode') or '',
+            'country': address.get('addressCountry') or '',
+            'same_as': [str(x) for x in same_as if x],
+        }
+
+    def _build_prospect_signals(
+        self,
+        head_links: Dict[str, Any],
+        org: Dict[str, Any],
+        og_tags: Dict,
+        meta_tags: Dict,
+    ) -> List[Dict[str, str]]:
+        """
+        Signaux commerciaux visibles dans le header / schema.
+
+        @param head_links: Liens classifies
+        @param org: JSON-LD orga
+        @param og_tags: Open Graph
+        @param meta_tags: Meta classiques
+        @returns: Liste de signaux {kind, label, detail}
+        """
+        kinds = {item.get('kind') for item in (head_links.get('pages') or [])}
+        signals: List[Dict[str, str]] = []
+        if 'quote' in kinds:
+            signals.append({
+                'kind': 'quote',
+                'label': 'Page devis / tarifs',
+                'detail': 'Ils vendent deja en ligne, bon angle commercial',
+            })
+        if 'jobs' in kinds:
+            signals.append({
+                'kind': 'jobs',
+                'label': 'Ils recrutent',
+                'detail': 'Boite en mouvement, souvent plus ouverte a un projet web',
+            })
+        if 'contact' not in kinds and not org.get('email') and not org.get('telephone'):
+            signals.append({
+                'kind': 'no-contact',
+                'label': 'Contact peu visible',
+                'detail': 'Pas de page contact claire dans le header',
+            })
+        if 'blog' in kinds:
+            signals.append({
+                'kind': 'blog',
+                'label': 'Blog / actus',
+                'detail': 'Ils publient, le SEO compte pour eux',
+            })
+        if head_links.get('feeds'):
+            signals.append({
+                'kind': 'rss',
+                'label': 'Flux RSS',
+                'detail': 'Contenu suivi possible',
+            })
+        if any(x.get('likely_credit') for x in (head_links.get('header_external') or [])):
+            signals.append({
+                'kind': 'agency',
+                'label': 'Credit agence visible',
+                'detail': 'Prestataire web ou hebergeur dans le header',
+            })
+        if not og_tags.get('title') and not meta_tags.get('description'):
+            signals.append({
+                'kind': 'thin-meta',
+                'label': 'SEO basique',
+                'detail': 'Titre / description absents ou pauvres',
+            })
+        return signals
     
     def generate_company_summary(self) -> str:
         """
@@ -1541,11 +1868,11 @@ class UnifiedScraper:
             self._collect_external_links_from_page(soup, url)
             self._collect_external_links_extras(soup, url)
 
-            # 6. Détecter les technologies (seulement sur la page d'accueil)
+            logger.info(f'[UnifiedScraper] Page {url}: Détection des technologies')
+            self.detect_technologies(text, response.headers)
             if depth == 0:
-                logger.info(f'[UnifiedScraper] Page {url}: Détection des technologies')
-                self.detect_technologies(text, response.headers)
-                logger.info(f'[UnifiedScraper] Page {url}: Technologies détectées: {self.technologies}')
+                self._complete_tech_versions(url, text, response.headers)
+            logger.info(f'[UnifiedScraper] Page {url}: Technologies détectées: {self.technologies}')
             
             # 7. Extraire les métadonnées de toutes les pages
             page_metadata = self.extract_metadata(soup)
@@ -1556,6 +1883,8 @@ class UnifiedScraper:
                     self.metadata = page_metadata
                     icons = page_metadata.get('icons', {})
                     logger.info(f'[UnifiedScraper] Page {url} (accueil): Métadonnées extraites - favicon={bool(icons.get("favicon"))}, logo={bool(icons.get("logo"))}, og_tags={len(page_metadata.get("open_graph", {}))}')
+                else:
+                    self._merge_header_links_into_metadata(page_metadata)
                 
                 # Collecter les OG de toutes les pages (même si vides pour la page d'accueil)
                 og_tags = page_metadata.get('open_graph', {})
@@ -1825,7 +2154,7 @@ class UnifiedScraper:
             'people': self.people,
             'phones': phones_list,
             'social_links': self.social_links,
-            'technologies': self.technologies,
+            'technologies': annotate_technology_map(self.technologies),
             'metadata': self.metadata,
             'og_data_by_page': self.og_data_by_page,  # OG de toutes les pages scrapées
             'images': self.images,  # Images extraites depuis les balises <img>

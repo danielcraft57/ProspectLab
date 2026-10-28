@@ -659,32 +659,42 @@ class ScraperManager(DatabaseBase):
         """Sauvegarde les technologies dans la transaction en cours"""
         if not technologies:
             return
-        
+
+        from services.tech_fingerprint import annotate_technology_map
+
         self.execute_sql(cursor,'DELETE FROM scraper_technologies WHERE scraper_id = ?', (scraper_id,))
-        
+
         if isinstance(technologies, str):
             try:
                 technologies = json.loads(technologies)
-            except:
+            except Exception:
                 return
-        
+
         if not isinstance(technologies, dict):
             return
-        
-        for category, techs in technologies.items():
-            if not techs:
-                continue
-            
-            if not isinstance(techs, list):
-                techs = [techs]
-            
+
+        annotated = annotate_technology_map(technologies)
+
+        for category, techs in annotated.items():
             for tech in techs:
-                tech_name = str(tech)
-                if tech_name:
-                    self.execute_sql(cursor,'''
-                        INSERT OR IGNORE INTO scraper_technologies (scraper_id, entreprise_id, category, name)
-                        VALUES (?, ?, ?, ?)
-                    ''', (scraper_id, entreprise_id, category, tech_name))
+                name = tech.get('name')
+                if not name:
+                    continue
+                self.execute_sql(cursor,'''
+                    INSERT OR IGNORE INTO scraper_technologies (
+                        scraper_id, entreprise_id, category, name, version, vuln_status, vuln_severity, vuln_note
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    scraper_id,
+                    entreprise_id,
+                    category,
+                    name,
+                    tech.get('version'),
+                    tech.get('vuln_status'),
+                    tech.get('vuln_severity'),
+                    tech.get('vuln_note'),
+                ))
     
     def save_scraper_technologies(self, scraper_id, entreprise_id, technologies):
         """Sauvegarde les technologies dans la table scraper_technologies (normalisation BDD)"""
@@ -1114,26 +1124,42 @@ class ScraperManager(DatabaseBase):
             scraper_id: ID du scraper
         
         Returns:
-            dict: Dictionnaire {category: [names]}
+            dict: Dictionnaire {category: [objets name/version/vuln]}
         """
         conn = self.get_connection()
         cursor = conn.cursor()
-        
-        self.execute_sql(cursor,'''
-            SELECT category, name FROM scraper_technologies WHERE scraper_id = ? ORDER BY date_found DESC
-        ''', (scraper_id,))
-        
+
+        try:
+            self.execute_sql(cursor,'''
+                SELECT category, name, version, vuln_status, vuln_severity, vuln_note
+                FROM scraper_technologies WHERE scraper_id = ? ORDER BY date_found DESC
+            ''', (scraper_id,))
+        except Exception:
+            self.execute_sql(cursor,'''
+                SELECT category, name FROM scraper_technologies WHERE scraper_id = ? ORDER BY date_found DESC
+            ''', (scraper_id,))
+
         rows = cursor.fetchall()
         conn.close()
-        
+
+        from services.tech_fingerprint import annotate_tech_entry, split_tech_label
+
         technologies = {}
         for row in rows:
             category = row['category']
-            name = row['name']
+            raw_name = row['name']
+            version = None
+            try:
+                version = row['version']
+            except Exception:
+                version = None
+            if not version:
+                raw_name, version = split_tech_label(str(raw_name or ''))
+            entry = annotate_tech_entry(raw_name, version)
             if category not in technologies:
                 technologies[category] = []
-            technologies[category].append(name)
-        
+            technologies[category].append(entry)
+
         return technologies
     
     def get_scraper_people(self, scraper_id):

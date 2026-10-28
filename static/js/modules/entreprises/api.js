@@ -228,6 +228,55 @@
         },
 
         /**
+         * Va chercher les versions (RSS WP, tete des JS) pour le dernier scrape.
+         * @param {number} id
+         * @returns {Promise<{technologies: Object}>}
+         */
+        async refreshTechVersions(id) {
+            const response = await fetch(`/api/entreprise/${id}/scrapers/tech-versions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            if (!response.ok) {
+                throw new Error('Impossible de recuperer les versions');
+            }
+            return await response.json();
+        },
+
+        /**
+         * Liens externes enrichis (BDD graphe + mini-scrape) pour un scrape.
+         * @param {number} entrepriseId
+         * @param {number} scraperId
+         * @returns {Promise<{links: Array, total: number}>}
+         */
+        async loadScraperExternalLinks(entrepriseId, scraperId) {
+            const response = await fetch(
+                `/api/entreprise/${entrepriseId}/scrapers/${scraperId}/external-links`
+            );
+            if (!response.ok) {
+                throw new Error('Liens externes indisponibles');
+            }
+            return await response.json();
+        },
+
+        /**
+         * Relance le mini-scrape des domaines externes (Celery).
+         * @param {number} entrepriseId
+         * @param {number} scraperId
+         * @returns {Promise<{queued: boolean}>}
+         */
+        async enrichScraperExternalLinks(entrepriseId, scraperId) {
+            const response = await fetch(
+                `/api/entreprise/${entrepriseId}/scrapers/${scraperId}/external-links/enrich`,
+                { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+            );
+            if (!response.ok) {
+                throw new Error('Mini-scrape externe impossible');
+            }
+            return await response.json();
+        },
+
+        /**
          * Charge le résumé du pipeline d'audit pour une entreprise.
          * @param {number} id
          * @returns {Promise<{entreprise_id: number, pipeline: Object}>}

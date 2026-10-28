@@ -1404,6 +1404,166 @@ class ExternalLinksManager(DatabaseBase):
         except ValueError:
             return default
 
+    def get_external_links_for_scraper(
+        self,
+        entreprise_id: int,
+        scraper_id: int,
+        *,
+        limit: int = 500,
+    ) -> Dict[str, Any]:
+        """
+        Retourne les liens externes d'un scrape (graphe BDD + snapshots metadata).
+
+        @param entreprise_id: fiche cliente
+        @param scraper_id: scrape unified
+        @param limit: plafond de lignes href
+        @returns: dict total, enriched_domains, known_in_db, links[]
+        """
+        limit = min(1000, max(1, int(limit)))
+        empty: Dict[str, Any] = {
+            'scraper_id': int(scraper_id or 0),
+            'entreprise_id': int(entreprise_id or 0),
+            'total': 0,
+            'enriched_domains': 0,
+            'known_in_db': 0,
+            'links': [],
+        }
+        if not entreprise_id or not scraper_id:
+            return empty
+
+        md_snap_by_url: Dict[str, Dict[str, Any]] = {}
+        md_snap_by_dom: Dict[str, Dict[str, Any]] = {}
+        try:
+            row = self.get_scraper_by_id(scraper_id)
+            if row and int(row.get('entreprise_id') or 0) == int(entreprise_id):
+                md = row.get('metadata')
+                if isinstance(md, dict):
+                    for it in md.get('external_links') or []:
+                        if not isinstance(it, dict):
+                            continue
+                        u = (it.get('url') or '').strip()
+                        d = (it.get('domain') or '').strip().lower()
+                        snap = it.get('external_snapshot') if isinstance(it.get('external_snapshot'), dict) else {}
+                        bundle = {'snap': snap, 'item': it}
+                        if u:
+                            md_snap_by_url[u] = bundle
+                        if d and d not in md_snap_by_dom:
+                            md_snap_by_dom[d] = bundle
+        except Exception as e:
+            logger.debug('get_external_links_for_scraper metadata: %s', e)
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        rows_fetch: List[Any] = []
+        try:
+            sql = '''
+                SELECT w.external_href, w.anchor_text, w.source_page_url, w.likely_credit, w.link_source,
+                       w.target_entreprise_id,
+                       d.domain_host, d.site_title, d.site_description, d.resolved_url, d.thumb_url,
+                       d.graph_group, d.mini_scraped_at, d.mini_scrape_error,
+                       te.nom AS target_nom, te.website AS target_website
+                FROM entreprise_external_links w
+                JOIN external_domains d ON d.id = w.domain_id
+                LEFT JOIN entreprises te ON te.id = w.target_entreprise_id
+                WHERE w.entreprise_id = ? AND w.scraper_id = ?
+                ORDER BY w.likely_credit DESC, d.domain_host ASC, w.external_href ASC
+                LIMIT ?
+            '''
+            self.execute_sql(cursor, sql, (entreprise_id, scraper_id, limit))
+            rows_fetch = cursor.fetchall() or []
+        finally:
+            conn.close()
+
+        links: List[Dict[str, Any]] = []
+        enriched_domains: Set[str] = set()
+        known = 0
+
+        def _append_link(
+            href: str,
+            dom: str,
+            r: Dict[str, Any],
+            meta_item: Dict[str, Any],
+            snap: Dict[str, Any],
+        ) -> None:
+            nonlocal known
+            site_title = (r.get('site_title') or '').strip() or str(snap.get('title') or '')[:300]
+            site_desc = (r.get('site_description') or '').strip() or str(snap.get('description') or '')[:520]
+            resolved = (r.get('resolved_url') or '').strip() or str(snap.get('final_url') or href)[:400]
+            thumb = (r.get('thumb_url') or '').strip()
+            if not thumb:
+                thumb = str(snap.get('favicon_url') or snap.get('og_image') or '')[:2000]
+            mini_at = (r.get('mini_scraped_at') or '').strip()
+            if not mini_at and snap and not snap.get('error'):
+                mini_at = 'metadata'
+            tid_raw = r.get('target_entreprise_id')
+            if tid_raw is None and meta_item.get('target_entreprise_id'):
+                tid_raw = meta_item.get('target_entreprise_id')
+            try:
+                tid_int = int(tid_raw) if tid_raw is not None and str(tid_raw).strip() != '' else None
+            except (TypeError, ValueError):
+                tid_int = None
+            if tid_int:
+                known += 1
+            if dom and (mini_at or site_title or site_desc):
+                enriched_domains.add(dom)
+            links.append(
+                {
+                    'url': href[:2000],
+                    'domain': dom,
+                    'text': (r.get('anchor_text') or meta_item.get('text') or '')[:500],
+                    'page_url': (r.get('source_page_url') or meta_item.get('page_url') or '')[:400],
+                    'likely_credit': bool(r.get('likely_credit') if 'likely_credit' in r else meta_item.get('likely_credit')),
+                    'link_source': (r.get('link_source') or meta_item.get('link_source') or '')[:80],
+                    'context_snippet': (meta_item.get('context_snippet') or '')[:300],
+                    'site_title': site_title[:300],
+                    'site_description': site_desc[:520],
+                    'resolved_url': resolved[:400],
+                    'thumb_url': thumb,
+                    'graph_group': ((r.get('graph_group') or meta_item.get('graph_group') or 'external').strip() or 'external'),
+                    'mini_scraped_at': mini_at,
+                    'mini_scrape_error': (r.get('mini_scrape_error') or snap.get('error') or '')[:300],
+                    'target_entreprise_id': tid_int,
+                    'target_nom': (r.get('target_nom') or '')[:120],
+                    'target_website': (r.get('target_website') or '')[:200],
+                    'known_in_db': bool(tid_int),
+                }
+            )
+
+        for raw in rows_fetch:
+            r = self.clean_row_dict(dict(raw))
+            href = (r.get('external_href') or '').strip()
+            if not href:
+                continue
+            dom = (r.get('domain_host') or '').strip().lower()
+            bundle = md_snap_by_url.get(href) or md_snap_by_dom.get(dom) or {}
+            snap = bundle.get('snap') if isinstance(bundle.get('snap'), dict) else {}
+            meta_item = bundle.get('item') if isinstance(bundle.get('item'), dict) else {}
+            _append_link(href, dom, r, meta_item, snap)
+
+        if not links and md_snap_by_url:
+            for href, bundle in list(md_snap_by_url.items())[:limit]:
+                it = bundle.get('item') if isinstance(bundle.get('item'), dict) else {}
+                snap = bundle.get('snap') if isinstance(bundle.get('snap'), dict) else {}
+                dom = (it.get('domain') or '').strip().lower()
+                pseudo: Dict[str, Any] = {
+                    'anchor_text': it.get('text'),
+                    'source_page_url': it.get('page_url'),
+                    'likely_credit': it.get('likely_credit'),
+                    'link_source': it.get('link_source'),
+                    'target_entreprise_id': it.get('target_entreprise_id'),
+                }
+                _append_link(href, dom, pseudo, it, snap)
+
+        empty.update(
+            {
+                'total': len(links),
+                'enriched_domains': len(enriched_domains),
+                'known_in_db': known,
+                'links': links,
+            }
+        )
+        return empty
+
     def suggest_entreprises_for_link_graph(self, q: str, limit: int = 15) -> List[Dict[str, Any]]:
         """Autocomplétion : entreprises ayant au moins un lien ``entreprise_external_links``."""
         q = (q or '').strip()

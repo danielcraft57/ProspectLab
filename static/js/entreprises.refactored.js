@@ -170,6 +170,55 @@
             }
         }
     }
+
+    /**
+     * Etat visuel du bouton mini-scrape liens externes (onglet scraping).
+     * @param {number} entrepriseId
+     * @param {boolean} isLoading
+     * @param {string} [message]
+     */
+    function setExternalLinksEnrichLoading(entrepriseId, isLoading, message) {
+        if (!entrepriseId) return;
+        const btn = document.querySelector(
+            `#entreprise-modal .btn-enrich-external-links[data-entreprise-id="${entrepriseId}"]`
+        );
+        if (!btn) return;
+        if (isLoading) {
+            btn.disabled = true;
+            btn.setAttribute('aria-busy', 'true');
+            btn.dataset.originalHtml = btn.dataset.originalHtml || btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Enrichissement...';
+            if (message) {
+                btn.title = message;
+            }
+        } else {
+            syncExternalLinksEnrichButtonState(entrepriseId);
+        }
+    }
+
+    /**
+     * Active ou grise le bouton enrichir selon qu'un scrape unified existe.
+     * @param {number} entrepriseId
+     */
+    function syncExternalLinksEnrichButtonState(entrepriseId) {
+        if (!entrepriseId) return;
+        const btn = document.querySelector(
+            `#entreprise-modal .btn-enrich-external-links[data-entreprise-id="${entrepriseId}"]`
+        );
+        if (!btn) return;
+        const hasScraper = !!(
+            currentModalLatestScraperId
+            && Number(currentModalEntrepriseId) === Number(entrepriseId)
+        );
+        btn.disabled = !hasScraper;
+        btn.removeAttribute('aria-busy');
+        if (btn.dataset.originalHtml) {
+            btn.innerHTML = btn.dataset.originalHtml;
+        }
+        btn.title = hasScraper
+            ? 'Mini-scrape des domaines lies depuis le dernier scrape'
+            : 'Lancez un scrape unified avant d enrichir les liens externes';
+    }
     
     const debounceFn = typeof window.debounce === 'function'
         ? window.debounce
@@ -238,6 +287,8 @@
     let totalEntreprises = 0;       // total tous résultats côté serveur
     let currentModalEntrepriseId = null;
     let currentModalEntrepriseData = null;
+    /** Dernier scrape unified affiche dans l'onglet scraping (mini-scrape externe). */
+    let currentModalLatestScraperId = null;
     let currentModalPentestScore = null;
     /** Annule un chargement de fiche en cours si on en ouvre une autre. */
     let modalLoadAbortController = null;
@@ -5398,6 +5449,7 @@
                         <button class="tab-btn active" data-tab="info">Info</button>
                         <button class="tab-btn" data-tab="images">Images (${nbImages})</button>
                         <button class="tab-btn" data-tab="pages">Pages (${nbPages})</button>
+                        <button class="tab-btn" data-tab="facebook">Facebook</button>
                         <button class="tab-btn" data-tab="scraping">Résultats scraping</button>
                         <button class="tab-btn" data-tab="gemini-report">Rapport Gemini</button>
                         <button class="tab-btn" data-tab="gemini-mockups" title="Echantillons DanielCraft + generation IA">Maquettes</button>
@@ -5491,6 +5543,7 @@
                             return html;
                         })()}
                         <div class="info-grid">
+                            ${createInfoRow('ID fiche', entreprise.id)}
                             ${createInfoRow('Nom', entreprise.nom)}
                             ${createInfoRow('Site web', entreprise.website, true)}
                             ${createInfoRow('Secteur', entreprise.secteur)}
@@ -5560,6 +5613,12 @@
                     <div class="tab-panel" id="tab-pages">
                         <div id="entreprise-pages-container" class="pages-tab-content">
                             <p class="empty-state">Aucune donnée OpenGraph disponible pour le moment. Lancez un scraping pour récupérer les métadonnées des pages.</p>
+                        </div>
+                    </div>
+
+                    <div class="tab-panel" id="tab-facebook" style="display:none;">
+                        <div id="entreprise-facebook-container" class="facebook-tab-content">
+                            <p class="empty-state">Ouvrez cet onglet pour charger Facebook.</p>
                         </div>
                     </div>
 
@@ -5644,7 +5703,10 @@
                                         <i class="fas fa-spider"></i>
                                         Résultats du scraping
                                     </h3>
+                                    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                                    <button type="button" class="btn btn-outline btn-enrich-external-links" data-entreprise-id="${entreprise.id}" title="Mini-scrape des domaines lies depuis le site"><i class="fas fa-globe-americas"></i> Enrichir liens externes</button>
                                     <button type="button" class="btn btn-outline btn-relancer-scraping" data-entreprise-id="${entreprise.id}" title="Relancer le scraping"><i class="fas fa-sync-alt"></i> Relancer</button>
+                                    </div>
                                 </div>
                                 <div id="scraping-stats" class="scraping-stats-summary">
                                     <!-- Les statistiques seront injectées ici -->
@@ -5764,6 +5826,7 @@
             modal.style.display = 'none';
             currentModalEntrepriseId = null;
             currentModalEntrepriseData = null;
+            currentModalLatestScraperId = null;
             currentModalPentestScore = null;
         }
     }
@@ -6296,6 +6359,41 @@
                 const d = (ev && ev.detail) || {};
                 setLandingVariantsStatus(d.message || 'Usage limit Cursor atteint, retry en attente.', true);
             });
+            document.addEventListener('external_mini_scrape:started', (ev) => {
+                const d = (ev && ev.detail) || {};
+                if (!currentModalEntrepriseId || Number(d.entreprise_id) !== Number(currentModalEntrepriseId)) {
+                    return;
+                }
+                setExternalLinksEnrichLoading(
+                    currentModalEntrepriseId,
+                    true,
+                    'Mini-scan des sites externes…'
+                );
+            });
+            document.addEventListener('external_mini_scrape:complete', (ev) => {
+                const d = (ev && ev.detail) || {};
+                if (!currentModalEntrepriseId || Number(d.entreprise_id) !== Number(currentModalEntrepriseId)) {
+                    return;
+                }
+                setExternalLinksEnrichLoading(currentModalEntrepriseId, false);
+                if (d.skipped) {
+                    const reason = d.reason || 'rien a enrichir';
+                    Notifications.show('Liens externes : ' + reason, 'info', 'fa-info-circle');
+                    return;
+                }
+                if (d.ok === false && d.error) {
+                    Notifications.show('Mini-scrape externe : ' + d.error, 'error', 'fa-exclamation-circle');
+                    return;
+                }
+                try {
+                    loadScrapingResults(currentModalEntrepriseId);
+                } catch (reloadErr) {
+                    console.warn('Reload scrape apres mini-scrape externe:', reloadErr);
+                }
+                if (!d.skipped) {
+                    Notifications.show('Liens externes enrichis', 'success', 'fa-globe-americas');
+                }
+            });
         }
 
         if (closeBtn) {
@@ -6343,6 +6441,16 @@
                     e.stopPropagation();
                     const idx = parseInt(imageBtn.getAttribute('data-image-index') || '0', 10);
                     openPreviewCollection(currentImagesItems, Number.isNaN(idx) ? 0 : idx);
+                    return;
+                }
+                const extDbBtn = e.target && e.target.closest && e.target.closest('[data-open-entreprise-id]');
+                if (extDbBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const tid = parseInt(extDbBtn.getAttribute('data-open-entreprise-id') || '0', 10);
+                    if (tid) {
+                        openEntrepriseModal(tid);
+                    }
                 }
             });
         }
@@ -6747,6 +6855,42 @@
                     e.preventDefault();
                     return;
                 }
+
+                const enrichExternalBtn = e.target.closest('.btn-enrich-external-links');
+                if (enrichExternalBtn && currentModalEntrepriseId) {
+                    e.preventDefault();
+                    if (!currentModalLatestScraperId) {
+                        Notifications.show(
+                            'Aucun scrape unified. Relancez le scraping d abord.',
+                            'warning',
+                            'fa-exclamation-triangle'
+                        );
+                        return;
+                    }
+                    if (!window.EntreprisesAPI || !window.EntreprisesAPI.enrichScraperExternalLinks) {
+                        Notifications.show('API liens externes indisponible.', 'error', 'fa-exclamation-circle');
+                        return;
+                    }
+                    setExternalLinksEnrichLoading(currentModalEntrepriseId, true, 'Mise en file Celery…');
+                    window.EntreprisesAPI.enrichScraperExternalLinks(
+                        currentModalEntrepriseId,
+                        currentModalLatestScraperId
+                    ).then(() => {
+                        Notifications.show(
+                            'Mini-scrape externe en file (worker mini_scrape)…',
+                            'info',
+                            'fa-globe-americas'
+                        );
+                    }).catch((err) => {
+                        setExternalLinksEnrichLoading(currentModalEntrepriseId, false);
+                        Notifications.show(
+                            err && err.message ? err.message : 'Impossible d enrichir les liens externes',
+                            'error',
+                            'fa-exclamation-circle'
+                        );
+                    });
+                    return;
+                }
             });
         }
         
@@ -6855,6 +6999,24 @@
             evolutionTab.addEventListener('click', () => {
                 if (currentModalEntrepriseId) {
                     loadMetricEvolutionTab(currentModalEntrepriseId);
+                }
+            });
+        }
+
+        const prospectionTabBtn = document.querySelector('.tab-btn[data-tab="prospection"]');
+        if (prospectionTabBtn) {
+            prospectionTabBtn.addEventListener('click', () => {
+                if (currentModalEntrepriseId) {
+                    loadProspectionTab(currentModalEntrepriseId);
+                }
+            });
+        }
+
+        const facebookTabBtn = document.querySelector('.tab-btn[data-tab="facebook"]');
+        if (facebookTabBtn) {
+            facebookTabBtn.addEventListener('click', () => {
+                if (currentModalEntrepriseId && window.EntrepriseFacebookTab) {
+                    window.EntrepriseFacebookTab.load(currentModalEntrepriseId);
                 }
             });
         }
@@ -7342,20 +7504,65 @@
             
             if (unifiedScrapers.length > 0) {
                 const latestScraper = unifiedScrapers[0];
+                currentModalLatestScraperId = latestScraper.id || null;
+                syncExternalLinksEnrichButtonState(entrepriseId);
                 const data = {
                     emails: Array.isArray(latestScraper.emails) ? latestScraper.emails : [],
                     people: Array.isArray(latestScraper.people) ? latestScraper.people : [],
                     phones: Array.isArray(latestScraper.phones) ? latestScraper.phones : [],
                     social_links: latestScraper.social_profiles || {},
                     technologies: latestScraper.technologies || {},
-                    metadata: latestScraper.metadata || {}
+                    metadata: latestScraper.metadata && typeof latestScraper.metadata === 'object'
+                        ? { ...latestScraper.metadata }
+                        : {}
                 };
+                if (latestScraper.id && window.EntreprisesAPI && window.EntreprisesAPI.loadScraperExternalLinks) {
+                    try {
+                        const extPayload = await window.EntreprisesAPI.loadScraperExternalLinks(
+                            entrepriseId,
+                            latestScraper.id
+                        );
+                        if (extPayload && Array.isArray(extPayload.links) && extPayload.links.length) {
+                            data.external_links_enriched = extPayload.links;
+                            data.external_links_stats = {
+                                total: extPayload.total,
+                                enriched_domains: extPayload.enriched_domains,
+                                known_in_db: extPayload.known_in_db
+                            };
+                        }
+                    } catch (extErr) {
+                        console.warn('Liens externes enrichis:', extErr);
+                    }
+                }
                 if (typeof window.ScrapingAnalysisDisplay !== 'undefined') {
                     window.ScrapingAnalysisDisplay.displayAll(data);
+                    if (
+                        window.ScrapingAnalysisDisplay.needsVersions
+                        && window.ScrapingAnalysisDisplay.needsVersions(data.technologies)
+                        && window.EntreprisesAPI
+                        && window.EntreprisesAPI.refreshTechVersions
+                    ) {
+                        try {
+                            const refreshed = await window.EntreprisesAPI.refreshTechVersions(entrepriseId);
+                            if (refreshed && refreshed.technologies) {
+                                data.technologies = refreshed.technologies;
+                                window.ScrapingAnalysisDisplay.displayAll(data);
+                            }
+                        } catch (refreshError) {
+                            const hint = document.getElementById('tech-stack-hint');
+                            if (hint) {
+                                hint.textContent = 'Pas moyen de recuperer les versions pour le moment.';
+                            }
+                            console.warn('Versions technos:', refreshError);
+                        }
+                    }
                 } else {
                     console.error('Module ScrapingAnalysisDisplay non disponible');
                 }
                 // Images : onglet dedie uniquement (pas de double fetch ici)
+            } else {
+                currentModalLatestScraperId = null;
+                syncExternalLinksEnrichButtonState(entrepriseId);
             }
         } catch (error) {
             console.error('Erreur lors du chargement des résultats:', error);

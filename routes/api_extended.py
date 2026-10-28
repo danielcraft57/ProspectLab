@@ -797,6 +797,97 @@ def get_scrapers(entreprise_id):
         return jsonify({'error': str(e)}), 500
 
 
+@api_extended_bp.route('/entreprise/<int:entreprise_id>/scrapers/tech-versions', methods=['POST'])
+@login_required
+def refresh_scraper_tech_versions(entreprise_id):
+    """
+    Va chercher les versions (RSS, readme, JS) et met a jour le dernier scrape.
+
+    @param entreprise_id: ID entreprise
+    @returns: JSON {technologies}
+    """
+    try:
+        scrapers = database.get_scrapers_by_entreprise(
+            entreprise_id,
+            latest_only=True,
+            include_images=False,
+        )
+        if not scrapers:
+            return jsonify({'error': 'Aucun scrape'}), 404
+        scraper = scrapers[0]
+        site_url = scraper.get('url') or ''
+        if not site_url:
+            return jsonify({'error': 'Pas d URL de site'}), 400
+
+        from services.tech_fingerprint import (
+            annotate_technology_map,
+            technology_map_to_labels,
+        )
+        from services.tech_version_probe import probe_site_versions
+
+        current = technology_map_to_labels(scraper.get('technologies') or {})
+        found = probe_site_versions(site_url, existing=current)
+        database.save_scraper_technologies(scraper['id'], entreprise_id, found)
+        return jsonify({
+            'technologies': annotate_technology_map(found),
+            'scraper_id': scraper['id'],
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_extended_bp.route(
+    '/entreprise/<int:entreprise_id>/scrapers/<int:scraper_id>/external-links',
+    methods=['GET'],
+)
+@login_required
+def get_scraper_external_links(entreprise_id, scraper_id):
+    """
+    Liens externes persistes pour un scrape (mini-scrape + match entreprise en base).
+
+    @param entreprise_id: ID entreprise
+    @param scraper_id: ID scraper unified
+    @returns: JSON { links, total, enriched_domains, known_in_db }
+    """
+    try:
+        scraper = database.get_scraper_by_id(scraper_id)
+        if not scraper:
+            return jsonify({'error': 'Scrape introuvable'}), 404
+        if int(scraper.get('entreprise_id') or 0) != int(entreprise_id):
+            return jsonify({'error': 'Scrape non associe a cette entreprise'}), 403
+        payload = database.get_external_links_for_scraper(entreprise_id, scraper_id)
+        return jsonify(payload)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_extended_bp.route(
+    '/entreprise/<int:entreprise_id>/scrapers/<int:scraper_id>/external-links/enrich',
+    methods=['POST'],
+)
+@login_required
+def enqueue_scraper_external_links_enrich(entreprise_id, scraper_id):
+    """
+    Relance le mini-scrape Celery des domaines externes du scrape.
+
+    @param entreprise_id: ID entreprise
+    @param scraper_id: ID scraper
+    @returns: JSON { queued: true }
+    """
+    try:
+        scraper = database.get_scraper_by_id(scraper_id)
+        if not scraper:
+            return jsonify({'error': 'Scrape introuvable'}), 404
+        if int(scraper.get('entreprise_id') or 0) != int(entreprise_id):
+            return jsonify({'error': 'Scrape non associe a cette entreprise'}), 403
+        from tasks.scraping_tasks import schedule_enrich_external_links_mini_scrape
+
+        schedule_enrich_external_links_mini_scrape(entreprise_id, scraper_id)
+        return jsonify({'queued': True, 'scraper_id': scraper_id})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @api_extended_bp.route('/entreprise/<int:entreprise_id>/images')
 @login_required
 def get_images(entreprise_id):

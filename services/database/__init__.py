@@ -175,6 +175,11 @@ class Database(
         self.init_database()
 
         try:
+            self.ensure_scraper_technology_details_columns()
+        except Exception:
+            log.warning('Migration scraper_technologies (version/vuln) non appliquée', exc_info=True)
+
+        try:
             self.ensure_pentest_forms_normalized_tables()
         except Exception:
             log.warning(

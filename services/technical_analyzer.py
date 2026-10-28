@@ -51,26 +51,25 @@ class TechnicalAnalyzer:
         # Base de données de technologies
         self.cms_patterns = {
             'WordPress': [
-                r'wp-content', r'wp-includes', r'/wp-admin', r'wordpress',
-                r'wp-json', r'wp-embed'
+                r'/wp-content/', r'/wp-includes/', r'/wp-admin', r'wp-json', r'wp-embed'
             ],
             'Drupal': [
-                r'/sites/default', r'drupal\.js', r'drupal\.css', r'Drupal\.settings'
+                r'/sites/default/files', r'drupal\.js', r'Drupal\.settings'
             ],
             'Joomla': [
-                r'/media/jui', r'/administrator', r'joomla', r'Joomla'
+                r'/media/jui', r'option=com_', r'/media/system/js/'
             ],
             'Magento': [
-                r'/media/', r'/skin/', r'Mage\.', r'magento'
+                r'mage-init', r'Mage\.Cookies', r'/static/version\d+'
             ],
             'PrestaShop': [
-                r'/themes/', r'/modules/', r'prestashop'
+                r'prestashop', r'/modules/ps_'
             ],
             'Shopify': [
-                r'shopify', r'shopifycdn', r'cdn\.shopify'
+                r'cdn\.shopify\.com', r'myshopify\.com'
             ],
             'WooCommerce': [
-                r'woocommerce', r'wc-', r'/wp-content/plugins/woocommerce'
+                r'/wp-content/plugins/woocommerce', r'woocommerce'
             ]
         }
         
@@ -308,18 +307,20 @@ class TechnicalAnalyzer:
         html_lower = html_content.lower()
         
         # WordPress
-        if 'wp-content' in html_lower or 'wordpress' in html_lower:
+        if re.search(r'/wp-content/|/wp-includes/|wp-json', html_lower):
             framework_info['framework'] = 'WordPress'
-            # Version dans meta generator
-            meta_gen = soup.find('meta', {'name': 'generator'})
+            meta_gen = soup.find('meta', {'name': 'generator'}) if soup else None
             if meta_gen:
                 gen_content = meta_gen.get('content', '')
-                version_match = re.search(r'(\d+\.\d+(?:\.\d+)?)', gen_content)
+                version_match = re.search(r'wordpress\s+(\d+\.\d+(?:\.\d+)?)', gen_content, re.I)
                 if version_match:
                     framework_info['framework_version'] = version_match.group(1)
-            # Version dans les commentaires HTML
             if not framework_info.get('framework_version'):
-                version_match = re.search(r'wordpress\s+(\d+\.\d+(?:\.\d+)?)', html_content, re.I)
+                version_match = re.search(
+                    r'wp-includes/(?:css|js)/[^"\']+[?&]ver=(\d+\.\d+(?:\.\d+)?)',
+                    html_content or '',
+                    re.I,
+                )
                 if version_match:
                     framework_info['framework_version'] = version_match.group(1)
         
@@ -681,9 +682,13 @@ class TechnicalAnalyzer:
                             version_match = re.search(r'wordpress\s+(\d+\.\d+(?:\.\d+)?)', html_content_full, re.I)
                             if version_match:
                                 version = version_match.group(1)
-                        # Version dans les fichiers CSS/JS
+                        # Uniquement les assets core (pas le ?ver= d'un plugin)
                         if not version:
-                            version_match = re.search(r'ver=(\d+\.\d+(?:\.\d+)?)', html_content_full)
+                            version_match = re.search(
+                                r'wp-includes/(?:css|js)/[^"\']+[?&]ver=(\d+\.\d+(?:\.\d+)?)',
+                                html_content_full,
+                                re.I,
+                            )
                             if version_match:
                                 version = version_match.group(1)
                     

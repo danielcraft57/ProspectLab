@@ -307,7 +307,14 @@
             html += '<div class="scraper-section"><h3>Technologies</h3><ul>';
             for (const [category, techs] of Object.entries(scraper.technologies)) {
                 const techList = Array.isArray(techs) ? techs : [techs];
-                html += `<li><strong>${category}:</strong> ${techList.join(', ')}</li>`;
+                const labels = techList.map((tech) => {
+                    if (tech && typeof tech === 'object') {
+                        const status = tech.vuln_status === 'vulnerable' ? ' (faillible)' : (tech.vuln_status === 'outdated' ? ' (obsolete)' : '');
+                        return (tech.label || tech.name || '') + status;
+                    }
+                    return String(tech);
+                });
+                html += `<li><strong>${category}:</strong> ${labels.join(', ')}</li>`;
             }
             html += '</ul></div>';
         }

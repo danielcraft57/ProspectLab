@@ -366,37 +366,27 @@ class EntrepriseAnalyzer:
         return None
     
     def detect_technologies(self, soup, html_content):
-        """Détecte les technologies utilisées"""
-        technologies = []
-        html_lower = html_content.lower()
-        
-        if 'bootstrap' in html_lower:
-            version = re.search(r'bootstrap[-\s]?([0-9.]+)', html_lower)
-            technologies.append(f"Bootstrap {version.group(1) if version else ''}")
-        
-        if 'react' in html_lower or 'reactjs' in html_lower:
-            technologies.append('React')
-        if 'vue' in html_lower or 'vuejs' in html_lower:
-            technologies.append('Vue.js')
-        if 'angular' in html_lower:
-            technologies.append('Angular')
-        
-        if 'wp-content' in html_lower or 'wordpress' in html_lower:
-            technologies.append('WordPress')
-        if 'joomla' in html_lower:
-            technologies.append('Joomla')
-        if 'drupal' in html_lower:
-            technologies.append('Drupal')
-        
-        meta_generator = soup.find('meta', {'name': 'generator'})
-        if meta_generator:
-            gen_content = meta_generator.get('content', '').lower()
-            if 'wordpress' in gen_content:
-                technologies.append('WordPress')
-            elif 'joomla' in gen_content:
-                technologies.append('Joomla')
-        
-        return ', '.join(technologies) if technologies else 'Non détecté'
+        """Detecte les technologies utilisees, avec version et risque si possible."""
+        from services.tech_fingerprint import annotate_technology_map, detect_site_technologies
+
+        found = detect_site_technologies(html_content or '', None)
+        annotated = annotate_technology_map(found)
+        labels = []
+        for techs in annotated.values():
+            for tech in techs:
+                label = tech.get('label') or tech.get('name')
+                status = tech.get('vuln_status')
+                if status == 'vulnerable':
+                    label = f"{label} (faillible)"
+                elif status == 'outdated':
+                    label = f"{label} (obsolete)"
+                if label:
+                    labels.append(label)
+        seen = []
+        for label in labels:
+            if label not in seen:
+                seen.append(label)
+        return ', '.join(seen) if seen else 'Non détecté'
     
     def analyze_site_age(self, soup, html_content):
         """Analyse l'âge du site"""
