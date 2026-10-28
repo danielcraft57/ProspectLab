@@ -298,9 +298,12 @@
     const chipLoadingState = {
         screenshots: new Set(),
         gemini: new Set(),
+        facebook: new Set(),
     };
     /** @type {Record<number, ReturnType<typeof setTimeout>>} */
     const geminiChipTimeouts = {};
+    /** @type {Record<number, ReturnType<typeof setTimeout>>} */
+    const facebookChipTimeouts = {};
     /** Evite double toast quota (event dedie + complete). */
     const geminiQuotaToastSeen = new Set();
     let tagsSuggestions = [];
@@ -560,7 +563,115 @@
             || (currentModalEntrepriseData && currentModalEntrepriseData.id === entrepriseId ? currentModalEntrepriseData : null);
         return (e && e.nom) ? String(e.nom) : 'Entreprise';
     }
+
+    window.getEntrepriseDisplayName = getEntrepriseNom;
+
+    /**
+     * Page Facebook deja liee sur la fiche entreprise.
+     * @param {object|null|undefined} entreprise
+     * @returns {boolean}
+     */
+    function hasFacebookPageLinked(entreprise) {
+        if (!entreprise) return false;
+        const url = entreprise.facebook_page_url != null ? String(entreprise.facebook_page_url).trim() : '';
+        return url.length > 0;
+    }
+
+    /**
+     * Pastilles actions rapides (screenshots, Gemini, Facebook) pour liste et cartes.
+     * @param {object} entreprise
+     * @returns {string}
+     */
+    function buildEntrepriseActionChipsHtml(entreprise) {
+        const id = entreprise.id;
+        const fbPageReady = hasFacebookPageLinked(entreprise);
+        const geminiHeuristic = String(entreprise.gemini_report_source || '').toLowerCase() === 'heuristic';
+        const shotLoading = isRowChipLoading('screenshots', id);
+        const geminiLoading = isRowChipLoading('gemini', id);
+        const fbLoading = isRowChipLoading('facebook', id);
+        return (
+            `<span class="row-chip row-chip-screenshots ${entreprise.has_screenshots ? 'is-ready' : 'is-missing'}${shotLoading ? ' is-loading' : ''}" data-action="launch-screenshots" data-entreprise-id="${id}" title="${shotLoading ? 'Capture en cours…' : (entreprise.has_screenshots ? 'Screenshots OK (cliquer pour relancer)' : 'Pas de screenshots / 404 — cliquer pour capturer')}" role="button" tabindex="${shotLoading ? '-1' : '0'}" aria-busy="${shotLoading ? 'true' : 'false'}" aria-disabled="${shotLoading ? 'true' : 'false'}">` +
+            `<i class="fas ${shotLoading ? 'fa-spinner fa-spin' : 'fa-camera'}" aria-hidden="true"></i></span>` +
+            `<span class="row-chip row-chip-gemini ${!entreprise.has_gemini_report ? 'is-missing' : (geminiHeuristic ? 'is-heuristic' : 'is-ready')}${geminiLoading ? ' is-loading' : ''}" data-action="launch-gemini" data-entreprise-id="${id}" title="${geminiLoading ? 'Rapport Gemini en cours…' : (!entreprise.has_gemini_report ? 'Pas de rapport Gemini — cliquer pour lancer' : (geminiHeuristic ? 'Rapport heuristique (quota / Vision KO) — recliquer pour un vrai Gemini' : 'Rapport Gemini OK (cliquer pour relancer)'))}" role="button" tabindex="${geminiLoading ? '-1' : '0'}" aria-busy="${geminiLoading ? 'true' : 'false'}" aria-disabled="${geminiLoading ? 'true' : 'false'}">` +
+            `<i class="fas ${geminiLoading ? 'fa-spinner fa-spin' : (geminiHeuristic ? 'fa-exclamation-triangle' : 'fa-robot')}" aria-hidden="true"></i></span>` +
+            `<span class="row-chip row-chip-facebook ${fbPageReady ? 'is-ready' : 'is-missing'}${fbLoading ? ' is-loading' : ''}" data-action="launch-facebook" data-entreprise-id="${id}" title="${fbLoading ? 'Recherche Facebook en cours…' : (fbPageReady ? 'Page Facebook liée (cliquer pour relancer la recherche)' : 'Pas de page Facebook — cliquer pour lancer la recherche')}" role="button" tabindex="${fbLoading ? '-1' : '0'}" aria-busy="${fbLoading ? 'true' : 'false'}" aria-disabled="${fbLoading ? 'true' : 'false'}">` +
+            `<i class="${fbLoading ? 'fas fa-spinner fa-spin' : 'fab fa-facebook'}" aria-hidden="true"></i></span>`
+        );
+    }
+
+    /**
+     * Lance une recherche Facebook (chip liste, meme flux que l'onglet).
+     * @param {number} entrepriseId
+     * @param {Object} [options]
+     */
+    async function triggerFacebookSearchFromList(entrepriseId, options = {}) {
+        const notify = options.notify !== false;
+        const eid = Number(entrepriseId);
+        if (!eid) return;
+        if (isRowChipLoading('facebook', eid)) {
+            if (notify) {
+                Notifications.show('Recherche Facebook déjà en cours…', 'info', 'fa-spinner');
+            }
+            return;
+        }
+        const tab = window.EntrepriseFacebookTab;
+        if (!tab || typeof tab.launchSearch !== 'function') {
+            if (notify) {
+                Notifications.show('Module Facebook indisponible. Recharge la page.', 'warning');
+            }
+            return;
+        }
+        await tab.launchSearch(eid, {
+            notify,
+            onLoading: (loading) => setRowChipLoading('facebook', eid, loading),
+            onDone: (job) => {
+                const ok = job && (String(job.status || '').toLowerCase() === 'completed'
+                    || String(job.status || '').toLowerCase() === 'partial');
+                if (ok) {
+                    document.querySelectorAll(`.row-chip-facebook[data-entreprise-id="${eid}"]`).forEach((el) => {
+                        el.classList.remove('is-missing');
+                        el.classList.add('is-ready');
+                        el.title = 'Page Facebook liée (cliquer pour relancer la recherche)';
+                    });
+                }
+                refreshEntrepriseFromServer(eid);
+            },
+        });
+    }
     
+    /** Evite deux start_scraping si les listeners modal se cumulent. */
+    const scrapeLaunchGuard = { key: '', at: 0 };
+
+    /**
+     * Enfile un scrape unified (debounce 5 s par entreprise + URL).
+     * @param {number} entrepriseId
+     * @param {string} url
+     * @returns {boolean}
+     */
+    function emitStartScrapingForEntreprise(entrepriseId, url) {
+        const socket = window.wsManager && window.wsManager.socket;
+        if (!socket || !url) {
+            return false;
+        }
+        const key = String(entrepriseId || '') + '|' + String(url).trim();
+        const now = Date.now();
+        if (scrapeLaunchGuard.key === key && now - scrapeLaunchGuard.at < 5000) {
+            console.warn('[scraping] start_scraping ignore (doublon recent)');
+            return false;
+        }
+        scrapeLaunchGuard.key = key;
+        scrapeLaunchGuard.at = now;
+        socket.emit('start_scraping', {
+            url: url,
+            max_depth: 3,
+            max_workers: 5,
+            max_time: 300,
+            max_pages: 50,
+            entreprise_id: entrepriseId
+        });
+        return true;
+    }
+
     async function triggerScrapingRelaunch(entrepriseId, options = {}) {
         const notify = options.notify !== false;
         const entreprise = allEntreprises.find(e => e && e.id === entrepriseId)
@@ -595,14 +706,7 @@
             Notifications.show(nom + ' — Scraping lancé...', 'info', 'fa-spider');
         }
 
-        socket.emit('start_scraping', {
-            url: url,
-            max_depth: 3,
-            max_workers: 5,
-            max_time: 300,
-            max_pages: 50,
-            entreprise_id: entrepriseId
-        });
+        emitStartScrapingForEntreprise(entrepriseId, url);
     }
     
     // Charger les secteurs (groupes) pour le filtre
@@ -1822,6 +1926,9 @@
                     ${entreprise.secteur ? `<p><strong>Secteur:</strong> ${Formatters.escapeHtml(entreprise.secteur)}</p>` : ''}
                     ${entreprise.categorie ? `<p><strong>Catégorie:</strong> ${Formatters.escapeHtml(entreprise.categorie)}</p>` : ''}
                     ${scoresSection}
+                    <div class="card-action-chips card-action-chips--card row-meta" role="group" aria-label="Actions rapides">
+                        ${buildEntrepriseActionChipsHtml(entreprise)}
+                    </div>
                     ${visibleTagsHtml ? `<div class="tags-container">${visibleTagsHtml}</div>` : ''}
                 </div>
                 <div class="card-footer">
@@ -2059,12 +2166,7 @@
                         <div class="row-meta">
                             ${entreprise.secteur ? `<span class="row-chip row-chip-sector" title="Secteur (groupe)"><i class="fas fa-industry" aria-hidden="true"></i> ${Formatters.escapeHtml(entreprise.secteur)}</span>` : ''}
                             ${entreprise.categorie ? `<span class="row-chip row-chip-category" title="Catégorie (métier)"><i class="fas fa-folder" aria-hidden="true"></i> ${Formatters.escapeHtml(entreprise.categorie)}</span>` : ''}
-                            <span class="row-chip row-chip-screenshots ${entreprise.has_screenshots ? 'is-ready' : 'is-missing'}${isRowChipLoading('screenshots', entreprise.id) ? ' is-loading' : ''}" data-action="launch-screenshots" data-entreprise-id="${entreprise.id}" title="${isRowChipLoading('screenshots', entreprise.id) ? 'Capture en cours…' : (entreprise.has_screenshots ? 'Screenshots OK (cliquer pour relancer)' : 'Pas de screenshots / 404 — cliquer pour capturer')}" role="button" tabindex="${isRowChipLoading('screenshots', entreprise.id) ? '-1' : '0'}" aria-busy="${isRowChipLoading('screenshots', entreprise.id) ? 'true' : 'false'}" aria-disabled="${isRowChipLoading('screenshots', entreprise.id) ? 'true' : 'false'}">
-                                <i class="fas ${isRowChipLoading('screenshots', entreprise.id) ? 'fa-spinner fa-spin' : 'fa-camera'}" aria-hidden="true"></i>
-                            </span>
-                            <span class="row-chip row-chip-gemini ${!entreprise.has_gemini_report ? 'is-missing' : ((String(entreprise.gemini_report_source || '').toLowerCase() === 'heuristic') ? 'is-heuristic' : 'is-ready')}${isRowChipLoading('gemini', entreprise.id) ? ' is-loading' : ''}" data-action="launch-gemini" data-entreprise-id="${entreprise.id}" title="${isRowChipLoading('gemini', entreprise.id) ? 'Rapport Gemini en cours…' : (!entreprise.has_gemini_report ? 'Pas de rapport Gemini — cliquer pour lancer' : ((String(entreprise.gemini_report_source || '').toLowerCase() === 'heuristic') ? 'Rapport heuristique (quota / Vision KO) — recliquer pour un vrai Gemini' : 'Rapport Gemini OK (cliquer pour relancer)'))}" role="button" tabindex="${isRowChipLoading('gemini', entreprise.id) ? '-1' : '0'}" aria-busy="${isRowChipLoading('gemini', entreprise.id) ? 'true' : 'false'}" aria-disabled="${isRowChipLoading('gemini', entreprise.id) ? 'true' : 'false'}">
-                                <i class="fas ${isRowChipLoading('gemini', entreprise.id) ? 'fa-spinner fa-spin' : ((String(entreprise.gemini_report_source || '').toLowerCase() === 'heuristic') ? 'fa-exclamation-triangle' : 'fa-robot')}" aria-hidden="true"></i>
-                            </span>
+                            ${buildEntrepriseActionChipsHtml(entreprise)}
                             ${langChipLabel ? `<span class="row-chip row-chip-lang" title="Langue principale"><i class="fas fa-language" aria-hidden="true"></i> ${Formatters.escapeHtml(langChipLabel)}</span>` : ''}
                             ${commercialTopMode && entreprise.priority_score != null ? `
                             <span class="row-chip row-chip-priority" title="Priorité commerciale">
@@ -2073,6 +2175,7 @@
                             </span>` : ''}
                             ${entreprise.statut ? (() => {
                                 const statut = String(entreprise.statut || '').trim();
+                                if (statut === 'Nouveau') return '';
                                 const cls = (Badges && typeof Badges.getStatusClass === 'function') ? Badges.getStatusClass(statut) : 'secondary';
                                 const icon = statut === 'Nouveau' ? 'fa-bolt'
                                     : statut === 'À qualifier' ? 'fa-question-circle'
@@ -2089,7 +2192,6 @@
                                     : 'fa-tag';
                                 return `<span class="row-chip row-chip-status badge badge-${cls}" title="Statut"><i class="fas ${icon}" aria-hidden="true"></i> ${Formatters.escapeHtml(statut)}</span>`;
                             })() : ''}
-                            ${entreprise.email_principal ? `<span class="row-meta-item row-meta-email">${Formatters.escapeHtml(entreprise.email_principal)}</span>` : ''}
                         </div>
                         ${visibleTagsHtml ? `<div class="tags-container">${visibleTagsHtml}</div>` : ''}
                     </div>
@@ -2362,28 +2464,36 @@
             });
         }
 
-        const shotChip = document.querySelector(`.row-chip-screenshots[data-entreprise-id="${entrepriseId}"]`);
-        if (shotChip) {
-            shotChip.addEventListener('click', (e) => {
+        document.querySelectorAll(`.row-chip-screenshots[data-entreprise-id="${entrepriseId}"]`).forEach((chip) => {
+            chip.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                if (isRowChipLoading('screenshots', entrepriseId) || shotChip.classList.contains('is-loading')) {
+                if (isRowChipLoading('screenshots', entrepriseId) || chip.classList.contains('is-loading')) {
                     return;
                 }
                 triggerScreenshotsCaptureFromList(entrepriseId);
             });
-        }
-        const geminiChip = document.querySelector(`.row-chip-gemini[data-entreprise-id="${entrepriseId}"]`);
-        if (geminiChip) {
-            geminiChip.addEventListener('click', (e) => {
+        });
+        document.querySelectorAll(`.row-chip-gemini[data-entreprise-id="${entrepriseId}"]`).forEach((chip) => {
+            chip.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                if (isRowChipLoading('gemini', entrepriseId) || geminiChip.classList.contains('is-loading')) {
+                if (isRowChipLoading('gemini', entrepriseId) || chip.classList.contains('is-loading')) {
                     return;
                 }
                 triggerGeminiFullReport(entrepriseId);
             });
-        }
+        });
+        document.querySelectorAll(`.row-chip-facebook[data-entreprise-id="${entrepriseId}"]`).forEach((chip) => {
+            chip.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (isRowChipLoading('facebook', entrepriseId) || chip.classList.contains('is-loading')) {
+                    return;
+                }
+                triggerFacebookSearchFromList(entrepriseId);
+            });
+        });
     }
 
     /**
@@ -2479,14 +2589,14 @@
     }
 
     /**
-     * Active / desactive l'etat "attente" sur les chips photo ou Gemini.
-     * @param {'screenshots'|'gemini'} kind
+     * Active / desactive l'etat "attente" sur les chips photo, Gemini ou Facebook.
+     * @param {'screenshots'|'gemini'|'facebook'} kind
      * @param {number} entrepriseId
      * @param {boolean} isLoading
      */
     function setRowChipLoading(kind, entrepriseId, isLoading) {
         const eid = Number(entrepriseId);
-        if (!eid || (kind !== 'screenshots' && kind !== 'gemini')) return;
+        if (!eid || (kind !== 'screenshots' && kind !== 'gemini' && kind !== 'facebook')) return;
         const bucket = chipLoadingState[kind];
         if (isLoading) bucket.add(eid);
         else bucket.delete(eid);
@@ -2517,9 +2627,30 @@
             }
         }
 
+        if (kind === 'facebook') {
+            if (facebookChipTimeouts[eid]) {
+                clearTimeout(facebookChipTimeouts[eid]);
+                delete facebookChipTimeouts[eid];
+            }
+            if (isLoading) {
+                facebookChipTimeouts[eid] = setTimeout(() => {
+                    if (!chipLoadingState.facebook.has(eid)) return;
+                    setRowChipLoading('facebook', eid, false);
+                    const nom = getEntrepriseNom(eid);
+                    Notifications.show(
+                        nom + ' — Recherche Facebook : pas de retour serveur (timeout). Réessaie ou recharge la page.',
+                        'warning',
+                        'fa-hourglass-end',
+                    );
+                }, 10 * 60 * 1000);
+            }
+        }
+
         const sel = kind === 'screenshots'
             ? `.row-chip-screenshots[data-entreprise-id="${eid}"]`
-            : `.row-chip-gemini[data-entreprise-id="${eid}"]`;
+            : kind === 'gemini'
+              ? `.row-chip-gemini[data-entreprise-id="${eid}"]`
+              : `.row-chip-facebook[data-entreprise-id="${eid}"]`;
         document.querySelectorAll(sel).forEach((el) => {
             el.classList.toggle('is-loading', !!isLoading);
             el.setAttribute('aria-busy', isLoading ? 'true' : 'false');
@@ -2528,7 +2659,9 @@
                 el.setAttribute('tabindex', '-1');
                 el.title = kind === 'screenshots'
                     ? 'Capture en cours…'
-                    : 'Rapport Gemini en cours…';
+                    : kind === 'gemini'
+                      ? 'Rapport Gemini en cours…'
+                      : 'Recherche Facebook en cours…';
                 const icon = el.querySelector('i');
                 if (icon) {
                     icon.className = 'fas fa-spinner fa-spin';
@@ -2536,28 +2669,33 @@
             } else {
                 el.setAttribute('tabindex', '0');
                 const icon = el.querySelector('i');
-                if (icon) {
+                if (kind === 'facebook') {
+                    if (icon) icon.className = 'fab fa-facebook';
+                } else if (icon) {
                     icon.className = kind === 'screenshots' ? 'fas fa-camera' : 'fas fa-robot';
                 }
-                // Restaurer le titre selon l'etat ready/missing
                 if (el.classList.contains('is-ready')) {
                     el.title = kind === 'screenshots'
                         ? 'Screenshots OK (cliquer pour relancer)'
-                        : 'Rapport Gemini OK (cliquer pour relancer)';
+                        : kind === 'gemini'
+                          ? 'Rapport Gemini OK (cliquer pour relancer)'
+                          : 'Page Facebook liée (cliquer pour relancer la recherche)';
                 } else if (el.classList.contains('is-heuristic')) {
                     el.title = 'Rapport heuristique (quota / Vision KO) — recliquer pour un vrai Gemini';
                     if (icon) icon.className = 'fas fa-exclamation-triangle';
                 } else {
                     el.title = kind === 'screenshots'
                         ? 'Pas de screenshots / 404 — cliquer pour capturer'
-                        : 'Pas de rapport Gemini — cliquer pour lancer';
+                        : kind === 'gemini'
+                          ? 'Pas de rapport Gemini — cliquer pour lancer'
+                          : 'Pas de page Facebook — cliquer pour lancer la recherche';
                 }
             }
         });
     }
 
     /**
-     * @param {'screenshots'|'gemini'} kind
+     * @param {'screenshots'|'gemini'|'facebook'} kind
      * @param {number} entrepriseId
      * @returns {boolean}
      */
@@ -2588,7 +2726,7 @@
         const isInteractiveTarget = (el) => {
             if (!el) return false;
             return Boolean(
-                el.closest('button, a, input, select, textarea, label, details, summary, .btn, .btn-icon, .btn-view-details, .btn-delete-entreprise, .btn-favori, .btn-groups, .score-relaunch-btn, .row-chip-screenshots, .row-chip-gemini')
+                el.closest('button, a, input, select, textarea, label, details, summary, .btn, .btn-icon, .btn-view-details, .btn-delete-entreprise, .btn-favori, .btn-groups, .score-relaunch-btn, .row-chip-screenshots, .row-chip-gemini, .row-chip-facebook')
             );
         };
 
@@ -6602,7 +6740,8 @@
             }
         }
         
-        if (modalBody) {
+        if (modalBody && !window._entrepriseModalBodyClickBound) {
+            window._entrepriseModalBodyClickBound = true;
             modalBody.addEventListener('click', async (e) => {
                 // Flèches de défilement des onglets
                 const leftArrow = e.target.closest('.tabs-arrow-left');
@@ -6762,8 +6901,9 @@
             });
         }
         
-        // Gestionnaires pour les boutons de copie (délégation d'événements)
-        if (modalBody) {
+        // Gestionnaires copie / relancer (delegation une seule fois sur modalBody)
+        if (modalBody && !window._entrepriseModalBodyActionsBound) {
+            window._entrepriseModalBodyActionsBound = true;
             modalBody.addEventListener('click', function(e) {
                 const copyEmailBtn = e.target.closest('[data-copy-email]');
                 if (copyEmailBtn) {
@@ -6844,14 +6984,7 @@
                     ensureModalWebSocketListeners();
                     setScrapingRelaunchLoading(currentModalEntrepriseId, true, 'Initialisation...');
                     Notifications.show('Scraping relancé...', 'info', 'fa-spider');
-                    socket.emit('start_scraping', {
-                        url: url,
-                        max_depth: 3,
-                        max_workers: 5,
-                        max_time: 300,
-                        max_pages: 50,
-                        entreprise_id: currentModalEntrepriseId
-                    });
+                    emitStartScrapingForEntreprise(currentModalEntrepriseId, url);
                     e.preventDefault();
                     return;
                 }

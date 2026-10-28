@@ -397,7 +397,7 @@ LANDING_VARIANTS_PUBLIC_BASE_URL = (
     or '/static/generated/landing_variants'
 )
 
-# Prospection Facebook (Playwright SocialDesk sur serv1 + serv2, Qdrant node15)
+# Prospection Facebook (Playwright SocialDesk sur serv1 Windows ; serv2 = Debian / Celery, pas Chrome)
 FACEBOOK_PROSPECTION_ENABLED = os.environ.get('FACEBOOK_PROSPECTION_ENABLED', 'false').lower() in (
     '1',
     'true',
@@ -407,13 +407,40 @@ FACEBOOK_PROSPECTION_ENABLED = os.environ.get('FACEBOOK_PROSPECTION_ENABLED', 'f
 FACEBOOK_PROSPECTION_ACCOUNT = (
     os.environ.get('FACEBOOK_PROSPECTION_ACCOUNT', 'danielcraft') or 'danielcraft'
 ).strip()
+# local = Playwright sur la machine qui lance ProspectLab | remote = SSH serv1 Windows (Chrome)
+FACEBOOK_PROSPECTION_RUNNER = (
+    os.environ.get('FACEBOOK_PROSPECTION_RUNNER', 'remote') or 'remote'
+).strip().lower()
+# Surcharge dossier storage-state (sinon data/accounts/<compte> sous REMOTE_FB_DIR)
+FACEBOOK_PROSPECTION_SESSION_DIR = (os.environ.get('FACEBOOK_PROSPECTION_SESSION_DIR', '') or '').strip().strip('\r')
+FACEBOOK_PROSPECTION_HEADLESS = os.environ.get('FACEBOOK_PROSPECTION_HEADLESS', 'true').lower() in (
+    '1',
+    'true',
+    'yes',
+    'on',
+)
+FACEBOOK_PROSPECTION_USE_CHROME_CHANNEL = os.environ.get(
+    'FACEBOOK_PROSPECTION_USE_CHROME_CHANNEL', 'true'
+).lower() in ('1', 'true', 'yes', 'on')
+# Navigateur visible sur serv1 (recherche test) — false = headless distant
+FACEBOOK_PROSPECTION_REMOTE_HEADLESS = os.environ.get(
+    'FACEBOOK_PROSPECTION_REMOTE_HEADLESS', 'false'
+).lower() in ('1', 'true', 'yes', 'on')
 FACEBOOK_PROSPECTION_REMOTE_HOST_SEARCH = (
     os.environ.get('FACEBOOK_PROSPECTION_REMOTE_HOST_SEARCH', 'loicDaniel@serv1.lan')
     or 'loicDaniel@serv1.lan'
 ).strip().strip('\r')
+# Second poste Windows Playwright (optionnel). serv2.lan = Debian : ne pas utiliser pour Facebook.
+FACEBOOK_PROSPECTION_REMOTE_HOST_SEARCH_ALT = (
+    os.environ.get('FACEBOOK_PROSPECTION_REMOTE_HOST_SEARCH_ALT', '') or ''
+).strip().strip('\r')
+# Messenger Playwright : serv1 pour l'instant. serv2.lan (Debian) = messagerie a part, plus tard.
 FACEBOOK_PROSPECTION_REMOTE_HOST_MESSENGER = (
-    os.environ.get('FACEBOOK_PROSPECTION_REMOTE_HOST_MESSENGER', 'loicDaniel@serv2.lan')
-    or 'loicDaniel@serv2.lan'
+    os.environ.get(
+        'FACEBOOK_PROSPECTION_REMOTE_HOST_MESSENGER',
+        os.environ.get('FACEBOOK_PROSPECTION_REMOTE_HOST_SEARCH', 'loicDaniel@serv1.lan'),
+    )
+    or 'loicDaniel@serv1.lan'
 ).strip().strip('\r')
 FACEBOOK_PROSPECTION_REMOTE_FB_DIR = (
     os.environ.get(
@@ -422,12 +449,12 @@ FACEBOOK_PROSPECTION_REMOTE_FB_DIR = (
     )
     or r'C:\Users\loicDaniel\Documents\SocialDesk\facebook-playwright'
 ).strip().strip('\r')
+_FACEBOOK_REMOTE_WRAPPER_DEFAULT = (
+    r'C:\Users\loicDaniel\Documents\SocialDesk\deploy\scripts\prospectlab_facebook_remote.py'
+)
 FACEBOOK_PROSPECTION_REMOTE_WRAPPER = (
-    os.environ.get(
-        'FACEBOOK_PROSPECTION_REMOTE_WRAPPER',
-        str(APP_DIR / 'scripts' / 'facebook_prospection' / 'run_socialdesk_facebook_remote.py'),
-    )
-    or str(APP_DIR / 'scripts' / 'facebook_prospection' / 'run_socialdesk_facebook_remote.py')
+    os.environ.get('FACEBOOK_PROSPECTION_REMOTE_WRAPPER', _FACEBOOK_REMOTE_WRAPPER_DEFAULT)
+    or _FACEBOOK_REMOTE_WRAPPER_DEFAULT
 ).strip().strip('\r')
 FACEBOOK_PROSPECTION_REMOTE_TIMEOUT_SEC = max(
     60, int(os.environ.get('FACEBOOK_PROSPECTION_REMOTE_TIMEOUT_SEC', '900') or '900')

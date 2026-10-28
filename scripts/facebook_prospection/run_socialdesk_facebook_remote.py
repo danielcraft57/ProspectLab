@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Wrapper Windows appele via SSH depuis node15.
+Wrapper Windows appele via SSH depuis node15 ou le poste dev.
 
-Pont vers facebook-playwright (SocialDesk) : check-session, puis a terme
-prospectlab-facebook-job.mjs pour search / scrape / messenger.
+Installe sur serv1/serv2 sous :
+  SocialDesk/deploy/scripts/prospectlab_facebook_remote.py
+(deploy : scripts/facebook_prospection/deploy_to_serv1.ps1)
 """
 
 from __future__ import annotations
@@ -13,8 +14,19 @@ import base64
 import json
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Any
+
+
+def _emit_json(obj: dict[str, Any]) -> None:
+    """Ecrit du JSON ASCII-safe (PowerShell/SSH cassent l'UTF-8)."""
+    print(json.dumps(obj, ensure_ascii=True), flush=True)
+
+
+def _emit_progress(obj: dict[str, Any]) -> None:
+    """Relaye une ligne de progression ASCII-safe."""
+    print('#PROGRESS:' + json.dumps(obj, ensure_ascii=True), flush=True)
 
 
 def parse_args() -> argparse.Namespace:
@@ -39,26 +51,58 @@ def run_node(module_dir: Path, args: list[str], timeout: int = 600) -> subproces
 
 
 def run_prospectlab_job(module_dir: Path, body: dict[str, Any], timeout: int = 900) -> dict[str, Any]:
-    """Appelle prospectlab-facebook-job.mjs (JSON sur stdin)."""
+    """Appelle prospectlab-facebook-job.mjs (JSON sur stdin). Relaye PROGRESS sur stdout."""
     script = module_dir / 'src' / 'prospectlab-facebook-job.mjs'
     if not script.is_file():
         return {'ok': False, 'error': f'script absent: {script}'}
     payload = json.dumps(body, ensure_ascii=False)
-    proc = subprocess.run(
+    proc = subprocess.Popen(
         ['node', str(script)],
         cwd=str(module_dir),
-        input=payload,
-        capture_output=True,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=timeout,
         encoding='utf-8',
         errors='replace',
-        check=False,
+        bufsize=1,
     )
-    stdout = (proc.stdout or '').strip()
-    if stdout.startswith('{'):
+    assert proc.stdin is not None
+    assert proc.stdout is not None
+    assert proc.stderr is not None
+    proc.stdin.write(payload)
+    proc.stdin.close()
+
+    def _pump_stderr() -> None:
+        for line in proc.stderr:
+            text = line.strip()
+            if not text.startswith('PROGRESS '):
+                continue
+            raw = text[len('PROGRESS ') :].strip()
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                payload = {'step': 'log', 'detail': raw[:300]}
+            if not isinstance(payload, dict):
+                payload = {'step': 'log', 'detail': str(payload)[:300]}
+            _emit_progress(payload)
+
+    err_thread = threading.Thread(target=_pump_stderr, daemon=True)
+    err_thread.start()
+    stdout_chunks: list[str] = []
+    for line in proc.stdout:
+        stdout_chunks.append(line)
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        return {'ok': False, 'error': 'timeout node facebook job', 'exit_code': 124}
+    err_thread.join(timeout=2)
+    stdout = ''.join(stdout_chunks).strip()
+    json_start = stdout.find('{')
+    if json_start >= 0:
         try:
-            parsed = json.loads(stdout)
+            parsed = json.loads(stdout[json_start:])
             parsed.setdefault('exit_code', proc.returncode)
             return parsed
         except json.JSONDecodeError:
@@ -67,7 +111,6 @@ def run_prospectlab_job(module_dir: Path, body: dict[str, Any], timeout: int = 9
         'ok': proc.returncode == 0,
         'exit_code': proc.returncode,
         'stdout_tail': stdout[-2000:],
-        'stderr_tail': (proc.stderr or '')[-1000:],
     }
 
 
@@ -95,33 +138,25 @@ def main() -> int:
     payload = job.get('payload') or {}
     fb_dir = Path(str(job.get('facebook_module_dir') or '')).expanduser()
     if not fb_dir.is_dir():
-        print(
-            json.dumps(
-                {
-                    'ok': False,
-                    'error': f'facebook_module_dir introuvable: {fb_dir}',
-                },
-                ensure_ascii=False,
-            )
-        )
+        _emit_json({'ok': False, 'error': f'facebook_module_dir introuvable: {fb_dir}'})
         return 1
 
     if job_type == 'check_session':
         out = handle_check_session(fb_dir, account)
-        print(json.dumps(out, ensure_ascii=False))
+        _emit_json(out)
         return 0 if out.get('ok') else 2
 
-    if job_type in ('search', 'scrape_page', 'messenger_inbox'):
+    if job_type in ('search', 'scrape_page', 'messenger_inbox', 'prospect_flow'):
         body = {
             'job_type': job_type,
             'account': account,
             'payload': payload,
         }
         out = run_prospectlab_job(fb_dir, body)
-        print(json.dumps(out, ensure_ascii=False))
+        _emit_json(out)
         return 0 if out.get('ok') else 3
 
-    print(json.dumps({'ok': False, 'error': f'job_type inconnu: {job_type}'}, ensure_ascii=False))
+    _emit_json({'ok': False, 'error': f'job_type inconnu: {job_type}'})
     return 1
 
 

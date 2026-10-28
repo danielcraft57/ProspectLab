@@ -169,7 +169,7 @@ class FacebookProspectionLocalRunner:
         if job_type == 'messenger_inbox':
             return {
                 'ok': False,
-                'error': 'messenger_inbox : utiliser runner remote (serv2) pour l instant',
+                'error': 'messenger_inbox : utiliser runner remote (serv1) pour l instant',
                 'job_type': job_type,
             }
         return {'ok': False, 'error': f'job_type local inconnu: {job_type}'}
