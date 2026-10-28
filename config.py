@@ -434,13 +434,10 @@ FACEBOOK_PROSPECTION_REMOTE_HOST_SEARCH = (
 FACEBOOK_PROSPECTION_REMOTE_HOST_SEARCH_ALT = (
     os.environ.get('FACEBOOK_PROSPECTION_REMOTE_HOST_SEARCH_ALT', '') or ''
 ).strip().strip('\r')
-# Messenger Playwright : serv1 pour l'instant. serv2.lan (Debian) = messagerie a part, plus tard.
+# Messenger Playwright : serv2 Debian (meme stack que SocialDesk messenger-inbox).
 FACEBOOK_PROSPECTION_REMOTE_HOST_MESSENGER = (
-    os.environ.get(
-        'FACEBOOK_PROSPECTION_REMOTE_HOST_MESSENGER',
-        os.environ.get('FACEBOOK_PROSPECTION_REMOTE_HOST_SEARCH', 'loicDaniel@serv1.lan'),
-    )
-    or 'loicDaniel@serv1.lan'
+    os.environ.get('FACEBOOK_PROSPECTION_REMOTE_HOST_MESSENGER', 'pi@serv2.lan')
+    or 'pi@serv2.lan'
 ).strip().strip('\r')
 FACEBOOK_PROSPECTION_REMOTE_FB_DIR = (
     os.environ.get(
@@ -449,6 +446,13 @@ FACEBOOK_PROSPECTION_REMOTE_FB_DIR = (
     )
     or r'C:\Users\loicDaniel\Documents\SocialDesk\facebook-playwright'
 ).strip().strip('\r')
+FACEBOOK_PROSPECTION_REMOTE_MESSENGER_FB_DIR = (
+    os.environ.get(
+        'FACEBOOK_PROSPECTION_REMOTE_MESSENGER_FB_DIR',
+        '/home/pi/Documents/socialdesk/facebook-playwright',
+    )
+    or '/home/pi/Documents/socialdesk/facebook-playwright'
+).strip().strip('\r')
 _FACEBOOK_REMOTE_WRAPPER_DEFAULT = (
     r'C:\Users\loicDaniel\Documents\SocialDesk\deploy\scripts\prospectlab_facebook_remote.py'
 )
@@ -456,22 +460,58 @@ FACEBOOK_PROSPECTION_REMOTE_WRAPPER = (
     os.environ.get('FACEBOOK_PROSPECTION_REMOTE_WRAPPER', _FACEBOOK_REMOTE_WRAPPER_DEFAULT)
     or _FACEBOOK_REMOTE_WRAPPER_DEFAULT
 ).strip().strip('\r')
+_FACEBOOK_MESSENGER_WRAPPER_DEFAULT = (
+    '/home/pi/Documents/socialdesk/deploy/scripts/prospectlab_facebook_remote.py'
+)
+FACEBOOK_PROSPECTION_REMOTE_MESSENGER_WRAPPER = (
+    os.environ.get(
+        'FACEBOOK_PROSPECTION_REMOTE_MESSENGER_WRAPPER',
+        _FACEBOOK_MESSENGER_WRAPPER_DEFAULT,
+    )
+    or _FACEBOOK_MESSENGER_WRAPPER_DEFAULT
+).strip().strip('\r')
 FACEBOOK_PROSPECTION_REMOTE_TIMEOUT_SEC = max(
     60, int(os.environ.get('FACEBOOK_PROSPECTION_REMOTE_TIMEOUT_SEC', '900') or '900')
 )
+# Sync inbox Messenger (lecture serv2) + notifications UI
+FACEBOOK_MESSENGER_SYNC_ENABLED = os.environ.get(
+    'FACEBOOK_MESSENGER_SYNC_ENABLED', 'true'
+).lower() in ('1', 'true', 'yes', 'on')
+FACEBOOK_MESSENGER_SYNC_INTERVAL_SEC = max(
+    120, int(os.environ.get('FACEBOOK_MESSENGER_SYNC_INTERVAL_SEC', '600') or '600')
+)
+FACEBOOK_MESSENGER_SYNC_MAX_THREADS = max(
+    5, min(40, int(os.environ.get('FACEBOOK_MESSENGER_SYNC_MAX_THREADS', '25') or '25'))
+)
+FACEBOOK_COOKIES_REFRESH_ENABLED = os.environ.get(
+    'FACEBOOK_COOKIES_REFRESH_ENABLED', 'true'
+).lower() in ('1', 'true', 'yes', 'on')
 FACEBOOK_PROSPECTION_QDRANT_URL = (
     os.environ.get('FACEBOOK_PROSPECTION_QDRANT_URL', os.environ.get('QDRANT_URL', '')) or ''
 ).strip().rstrip('/')
+VOCALGUARD_KB_PROFILE = (
+    os.environ.get('VOCALGUARD_KB_PROFILE', 'outbound_commercial') or 'outbound_commercial'
+).strip().lower()
+_VOCALGUARD_COLLECTIONS = {
+    'inbound': 'intents_inbound',
+    'outbound_commercial': 'intents_outbound_commercial',
+}
+# Collection Qdrant KB Messenger (intents_outbound_commercial par defaut)
 FACEBOOK_PROSPECTION_QDRANT_COLLECTION = (
-    os.environ.get('FACEBOOK_PROSPECTION_QDRANT_COLLECTION', 'prospectlab_facebook_messaging')
-    or 'prospectlab_facebook_messaging'
+    os.environ.get(
+        'FACEBOOK_PROSPECTION_QDRANT_COLLECTION',
+        _VOCALGUARD_COLLECTIONS.get(VOCALGUARD_KB_PROFILE, 'intents_outbound_commercial'),
+    )
+    or 'intents_outbound_commercial'
 ).strip()
 FACEBOOK_PROSPECTION_QDRANT_DIMS = max(
-    1, int(os.environ.get('FACEBOOK_PROSPECTION_QDRANT_DIMS', '768') or '768')
+    1, int(os.environ.get('FACEBOOK_PROSPECTION_QDRANT_DIMS', '384') or '384')
 )
 FACEBOOK_PROSPECTION_QDRANT_BRAND_ID = (
     os.environ.get('FACEBOOK_PROSPECTION_QDRANT_BRAND_ID', 'danielcraft') or 'danielcraft'
 ).strip()
+VOCALGUARD_URL = (os.environ.get('VOCALGUARD_URL', 'http://node14.lan:8000') or '').strip().rstrip('/')
+VOCALGUARD_INTERNAL_TOKEN = (os.environ.get('VOCALGUARD_INTERNAL_TOKEN', '') or '').strip()
 
 # File d’enqueue pour le pack « analyse site complet ».
 # Défaut « technical » : les workers existants écoutent déjà cette file (voir CELERY_WORKER_QUEUES).

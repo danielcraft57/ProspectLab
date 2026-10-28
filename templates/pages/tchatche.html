@@ -1,0 +1,132 @@
+{% extends 'base.html' %}
+
+{% block title %}Tchatche KB — ProspectLab{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/modules/pages/tchatche.css') }}?v=7">
+{% endblock %}
+
+{% block content %}
+<div class="tc-page">
+    <header class="tc-header">
+        <div class="tc-header-main">
+            <h1 class="tc-header-title">Tchatche KB</h1>
+            <p class="tc-header-desc">Simulateur client · Qdrant · intents commerciaux · variables CRM</p>
+        </div>
+        <button type="button" class="tc-btn tc-btn--outline" id="tchatche-reset">
+            <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
+            Nouvelle conversation
+        </button>
+    </header>
+
+    <div class="tc-kpi" id="tchatche-status-bar" aria-live="polite">
+        <div class="tc-kpi-skeleton">Chargement…</div>
+    </div>
+
+    <div class="tc-app">
+        <section class="tc-conv" aria-label="Conversation test">
+            <header class="tc-conv-head">
+                <div class="tc-peer">
+                    <span class="tc-peer-avatar" aria-hidden="true">C</span>
+                    <div class="tc-peer-meta">
+                        <strong>Client fictif</strong>
+                        <span class="tc-peer-status"><i class="fa-solid fa-circle"></i> Sandbox Messenger</span>
+                    </div>
+                </div>
+                <div class="tc-context">
+                    <label class="tc-context-label" for="tchatche-ent-search">Contexte CRM</label>
+                    <div class="tc-context-field">
+                        <input
+                            type="search"
+                            id="tchatche-ent-search"
+                            class="tc-context-input"
+                            placeholder="Rechercher une entreprise…"
+                            autocomplete="off"
+                        >
+                        <ul class="tchatche-ent-list" id="tchatche-ent-list" hidden></ul>
+                    </div>
+                    <p class="tc-context-badge" id="tchatche-ent-picked" hidden></p>
+                </div>
+            </header>
+
+            <div class="tc-conv-body">
+                <div class="tc-empty" id="tchatche-empty">
+                    <div class="tc-empty-icon" aria-hidden="true">
+                        <i class="fa-regular fa-comment-dots"></i>
+                    </div>
+                    <h2 class="tc-empty-title">Pret a tester la KB</h2>
+                    <p class="tc-empty-text">Choisis un scenario ou ecris un message comme sur Facebook.</p>
+                    <div class="tc-empty-grid" id="tchatche-prompts" aria-label="Scenarios">
+                        <button type="button" class="tc-scenario" data-prompt="audit gratuit">
+                            <span class="tc-scenario-kicker">Lead chaud</span>
+                            <span class="tc-scenario-label">Audit gratuit</span>
+                        </button>
+                        <button type="button" class="tc-scenario" data-prompt="notre site marche pas">
+                            <span class="tc-scenario-kicker">Douleur</span>
+                            <span class="tc-scenario-label">Site inutile</span>
+                        </button>
+                        <button type="button" class="tc-scenario" data-prompt="visibilite locale google maps">
+                            <span class="tc-scenario-kicker">Local</span>
+                            <span class="tc-scenario-label">Visibilite Maps</span>
+                        </button>
+                        <button type="button" class="tc-scenario" data-prompt="vous etes qui">
+                            <span class="tc-scenario-kicker">Decouverte</span>
+                            <span class="tc-scenario-label">Qui etes-vous ?</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="tc-messages" id="tchatche-messages" hidden></div>
+                <div class="tc-typing" id="tchatche-typing" hidden aria-live="polite">
+                    <span class="tc-typing-bubble">
+                        <span></span><span></span><span></span>
+                    </span>
+                </div>
+            </div>
+
+            <footer class="tc-composer">
+                <form class="tc-composer-form" id="tchatche-form">
+                    <textarea
+                        id="tchatche-input"
+                        class="tc-composer-input"
+                        rows="1"
+                        placeholder="Ecrire un message client…"
+                    ></textarea>
+                    <button type="submit" class="tc-composer-send" id="tchatche-send" aria-label="Envoyer">
+                        <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
+                    </button>
+                </form>
+            </footer>
+        </section>
+
+        <aside class="tc-debug" aria-label="Analyse moteur KB">
+            <div class="tc-debug-tabs" role="tablist">
+                <button type="button" class="tc-debug-tab is-active" data-tc-tab="intent" role="tab" aria-selected="true">Intent</button>
+                <button type="button" class="tc-debug-tab" data-tc-tab="scores" role="tab" aria-selected="false">Scores</button>
+                <button type="button" class="tc-debug-tab" data-tc-tab="vars" role="tab" aria-selected="false">Variables</button>
+            </div>
+
+            <div class="tc-debug-panel is-active" data-tc-panel="intent" id="tchatche-panel-intent">
+                <div class="tc-intent-hero">
+                    <span class="tc-intent-label">Tag detecte</span>
+                    <p class="tc-intent-tag" id="tchatche-intent">—</p>
+                    <p class="tc-intent-sub" id="tchatche-intent-sub">Envoie un message pour lancer la classification.</p>
+                </div>
+            </div>
+
+            <div class="tc-debug-panel" data-tc-panel="scores" hidden>
+                <ul class="tc-scores" id="tchatche-preds">
+                    <li class="tc-scores-empty">Aucun score tant que la conversation est vide.</li>
+                </ul>
+            </div>
+
+            <div class="tc-debug-panel" data-tc-panel="vars" hidden>
+                <ul class="tc-var-grid" id="tchatche-vars"></ul>
+            </div>
+        </aside>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/pages/tchatche.js') }}?v=7"></script>
+{% endblock %}

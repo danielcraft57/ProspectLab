@@ -41,6 +41,17 @@
                 {% endfor %}
             {% endif %}
             <li><a href="{{ url_for('main.dashboard') }}">Dashboard</a></li>
+            <li>
+                <a href="{{ url_for('main.tchatche_kb') }}">Tchatche</a>
+            </li>
+            {% if facebook_prospection_enabled %}
+            <li>
+                <a href="{{ url_for('main.messenger_inbox') }}" class="nav-messenger-link">
+                    Messagerie
+                    <span class="nav-unread-badge" id="nav-messenger-unread" hidden>0</span>
+                </a>
+            </li>
+            {% endif %}
             <li class="nav-dropdown">
                 <a href="#" class="dropdown-toggle">Entreprises <span class="dropdown-arrow">▼</span></a>
                 <ul class="dropdown-menu">

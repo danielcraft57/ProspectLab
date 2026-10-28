@@ -25,8 +25,7 @@ class FacebookProspectionJobRunner:
     """
     Facade unique pour les taches Celery et l'API.
 
-    Par defaut (RUNNER=remote) : search, scrape et Messenger Playwright sur serv1.
-    serv2 (Debian) : messagerie dediee prevue plus tard, pas encore branchee.
+    Par defaut (RUNNER=remote) : search/scrape/prospect sur serv1 ; inbox Messenger sur serv2 (Debian).
     RUNNER=local : Playwright Python sur la machine qui execute ProspectLab.
     """
 
@@ -52,7 +51,11 @@ class FacebookProspectionJobRunner:
         @returns: Dict avec cle ok
         """
         mode = _resolve_runner_mode()
-        use_remote = force_remote or mode == 'remote' or job_type == 'messenger_inbox'
+        use_remote = force_remote or mode == 'remote' or job_type in (
+            'messenger_inbox',
+            'messenger_sync',
+            'messenger_reply',
+        )
         if not use_remote and mode == 'local':
             if job_type == 'check_session':
                 return {
@@ -63,7 +66,11 @@ class FacebookProspectionJobRunner:
                 }
             return self._local.run_job(job_type, payload)
 
-        role = FacebookRemoteRole.MESSENGER if job_type == 'messenger_inbox' else FacebookRemoteRole.SEARCH
+        role = (
+            FacebookRemoteRole.MESSENGER
+            if job_type in ('messenger_inbox', 'messenger_sync', 'messenger_reply')
+            else FacebookRemoteRole.SEARCH
+        )
         remote_res = self._remote.run_job(
             role,
             job_type,

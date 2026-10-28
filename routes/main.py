@@ -60,6 +60,24 @@ def liste_entreprises():
     return render_page('entreprises.html')
 
 
+@main_bp.route('/messagerie-facebook')
+@login_required
+def messenger_inbox():
+    """
+    Inbox Messenger synchronisee (lecture + reponses + suggestions Qdrant).
+    """
+    return render_page('messenger.html')
+
+
+@main_bp.route('/tchatche-kb')
+@login_required
+def tchatche_kb():
+    """
+    Tchatche virtuel pour tester la KB Messenger (Q/R Qdrant) sans Facebook.
+    """
+    return render_page('tchatche.html')
+
+
 @main_bp.route('/entreprise/<int:entreprise_id>')
 @login_required
 def entreprise_detail(entreprise_id):

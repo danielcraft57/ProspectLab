@@ -6,8 +6,9 @@ Branche experimentale : retrouver une page Facebook d'un etablissement, scraper 
 
 | Role | Machine | Usage ProspectLab |
 |------|---------|-------------------|
-| Playwright Facebook (recherche, scrape, prospect, Messenger) | **serv1** Windows + SocialDesk | Tous les jobs Playwright via SSH, pour l'instant |
-| Celery workers | **serv2** Debian | Workers applicatifs ; **messagerie Facebook dediee prevue plus tard** (pas serv1 en parallele long terme) |
+| Recherche, scrape, prospect (page + 1er message compose) | **serv1** Windows | SSH PowerShell + Chrome |
+| Inbox Messenger (sync, reponses UI, Qdrant) | **serv2** Debian | SSH bash + Playwright headless (meme repo SocialDesk que `messenger-inbox.mjs`) |
+| Celery workers ProspectLab | **serv2** (ou node15) | File jobs, pas Chrome CM lourd |
 
 Compte Facebook : **danielcraft** (page DanielCraft + profil perso pour bascule Messenger).
 
@@ -19,45 +20,57 @@ Orchestration **node15** : Celery ou API declenchent le SSH depuis le Pi (meme c
 
 ## Cookies (tous les matins)
 
-Le rafraichissement reel des sessions Chrome est deja planifie dans SocialDesk :
+Meme flux **`sync-chrome-session.mjs`** sur **serv1** (worker SocialDesk 5h) et **serv2** (job `cookies-refresh-danielcraft-serv2` 5h05 + Celery ProspectLab 5h10).
 
-- Job `cookies-refresh-danielcraft` — cron `0 5 * * *`
-- Etapes `sync-chrome-session.mjs` pour LinkedIn, Facebook et X sur `danielcraft`
+- serv1 : job SocialDesk `cookies-refresh-danielcraft` — Chrome **ferme** avant le cron
+- serv2 : profil Chrome local `~/.config/google-chrome` (RDP pi, pas les cookies serv1)
+- ProspectLab : tache `facebook_prospection.refresh_cookies` (SSH sync sur serv1 + serv2)
+- Verification : `facebook_prospection.check_sessions` a 6h30
 
-ProspectLab ne duplique pas cette logique : une tache Celery Beat **verifie** la session FB sur **serv1** apres 6h30 (Paris) et loggue une alerte si `check-session` echoue. Pas de check Playwright sur serv2 (Debian).
+ProspectLab ne duplique pas le job LI/X : uniquement Facebook via le wrapper `cookies_refresh`.
 
-Apres un echec : lancer manuellement sur la machine concernee :
+Apres un echec **serv1** :
 
 ```powershell
 cd C:\Users\loicDaniel\Documents\SocialDesk\facebook-playwright
 node src/sync-chrome-session.mjs --account=danielcraft
 ```
 
+Apres un echec **serv2** (cookies propres a serv2, pas serv1) :
+
+```bash
+cd ~/Documents/socialdesk/facebook-playwright
+node src/sync-chrome-session.mjs --account=danielcraft
+```
+
 Chrome doit etre **ferme** (`requiresChromeClosed: true` sur le job cookies).
 
-## Qdrant (node15)
+## Qdrant / KB Messenger (node15)
 
-- URL : `QDRANT_URL=http://node15.lan:6333` (voir aussi `SocialDesk/docs/architecture-qdrant.md`)
-- Collection dediee ProspectLab (ne pas melanger avec `socialdesk_messaging`) :
-  - `QDRANT_COLLECTION_FACEBOOK_PROSPECTION=prospectlab_facebook_messaging`
-  - Vecteurs **768d** (Gemini `text-embedding-004`, aligne SocialDesk)
+Index vectoriel partage pour le tchatche et la messagerie :
 
-Types de points (`payload.kind`) :
+- URL : `QDRANT_URL=http://node15.lan:6333` (valider avec `seed_qdrant_collection.py` avant prod)
+- Collection : `intents_outbound_commercial` par defaut (384d, cosine)
+- Reponses : catalogue intents + recherche Qdrant ; API tchatche interne optionnelle (voir `env.example`)
 
-| kind | Role |
-|------|------|
-| `intent_def` | Definition d'intent (ex. `pricing_question`) |
-| `intent_example` | Exemple de message entrant |
-| `intent_reply` | Reponse type a envoyer |
-| `faq_snippet` | Info etablissement / offre DanielCraft |
+Guide detaille : **`docs/guides/TCHATCHE_KB.md`**.
 
-Indexer :
+Tchatche de test (sans Facebook) : page `/tchatche-kb`.
+
+Variables dans les reponses : `{{entreprise}}`, `{{nom}}`, `{{prenom}}`, `{{ville}}`, `{{website}}`, `{{telephone}}`, `{{secteur}}`, `{{metier}}`, plus blocs `{{#if_ville}}...{{/if_ville}}`.
+
+Phrases deja branchees (tchatche / Messenger) : `out_presentation`, `out_qualify_website`, `out_objection_has_site`. Le tchatche choisit une fiche CRM ; Messenger reprend `entreprise_id` du fil.
+
+Verifier la collection :
 
 ```powershell
 python scripts/facebook_prospection/seed_qdrant_collection.py
-python scripts/facebook_prospection/seed_qdrant_collection.py --apply
+```
 
-(FAQ source : `scripts/facebook_prospection/qdrant_seed_faq.json`)
+Reindexer apres ajout d'intents :
+
+```powershell
+python scripts/facebook_prospection/sync_vocalguard_qdrant.py
 ```
 
 ## Code SocialDesk a reutiliser
@@ -111,7 +124,16 @@ Deploy : `scripts/facebook_prospection/deploy_to_serv1.ps1` — index : `scripts
 - `facebook_prospection_page_candidates` — resultats recherche
 - `facebook_prospection_pages` — fiche FB retenue + JSON scrape
 - Colonne **`entreprises.facebook_page_url`** — lien affiche sur la fiche CRM (sync auto apres search / prospect_flow si score >= 0.35)
-- **`facebook_prospection_conversations`** + **`facebook_prospection_messages`** — fil Messenger et texte sortant
+- **`facebook_prospection_conversations`** + **`facebook_prospection_messages`** — fil Messenger lie a une entreprise (prospect)
+- **`facebook_messenger_threads`** + **`facebook_messenger_messages`** — inbox synchronisee (sync serv1) + compteur non lu
+
+Sync : job `messenger_sync` sur **serv2** via SSH. Deploy : `scripts/facebook_prospection/deploy_to_serv2.ps1`.
+
+### Page Messagerie
+
+- Menu **Messagerie** : sync / reponses / Qdrant — jobs Playwright sur **serv2** (pas serv1).
+- API : `POST .../conversations/<id>/suggestions`, `POST .../conversations/<id>/reply` body `{ message_text, send }`.
+- Qdrant : collection `intents_outbound_commercial` (+ API tchatche optionnelle). Tchatche : `/tchatche-kb`. Voir `docs/guides/TCHATCHE_KB.md`.
 - Statuts job **`prospect_flow`** : `completed`, **`partial`**, `failed`
 
 API debug : `POST /api/facebook-prospection/search-sync` avec `{ "query": "...", "entreprise_id": 40 }`.

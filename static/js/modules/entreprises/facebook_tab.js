@@ -9,6 +9,7 @@
         prospect_flow: 'Prospection',
         scrape_page: 'Scrape',
         messenger_inbox: 'Messenger',
+        messenger_sync: 'Sync inbox',
     };
 
     const STATUS_LABELS = {
@@ -120,7 +121,7 @@
         const pending = Number(queue.pending) || 0;
         const running = Number(queue.running) || 0;
         const pos = Number(queue.position) || 1;
-        const host = remoteNode === 'alt' ? 'alt (Windows)' : 'serv1';
+        const host = remoteNode === 'serv2' ? 'serv2' : remoteNode === 'alt' ? 'alt (Windows)' : 'serv1';
         const parts = [];
         if (running > 0) {
             parts.push(running + ' déjà en cours');
@@ -208,9 +209,12 @@
     }
 
     async function loadSummary(entrepriseId) {
-        const [pageRes, jobsRes] = await Promise.all([
+        const [pageRes, jobsRes, threadsRes] = await Promise.all([
             fetchJson('/api/facebook-prospection/entreprise/' + entrepriseId + '/page'),
             fetchJson('/api/facebook-prospection/entreprise/' + entrepriseId + '/jobs'),
+            fetchJson('/api/facebook-prospection/messenger/conversations?limit=30').catch(function () {
+                return { threads: [] };
+            }),
         ]);
         let messages = [];
         const convs = pageRes.conversations || [];
@@ -231,7 +235,92 @@
             jobs: jobsRes.jobs || [],
             conversations: convs,
             messages: messages,
+            messengerThreads: threadsRes.threads || [],
         };
+    }
+
+    function renderMessengerThreads(threads, entrepriseId) {
+        if (!threads || !threads.length) {
+            return (
+                '<p class="fb-muted">Aucune conversation enregistrée. Lance « Synchroniser l’inbox » pour importer Messenger.</p>'
+            );
+        }
+        return (
+            '<p class="fb-muted fb-messenger-hint">Toutes les conversations sync (serv2). Les fils liés à cette fiche sont surlignés.</p>' +
+            '<ul class="fb-messenger-list">' +
+            threads
+                .map(function (t) {
+                    const unread = Number(t.unread_count) || 0;
+                    const linked = Number(t.entreprise_id) === Number(entrepriseId);
+                    const name = t.contact_name || 'Contact';
+                    const preview = String(t.preview || '').slice(0, 140);
+                    return (
+                        '<li class="fb-messenger-item' +
+                        (unread ? ' fb-messenger-item--unread' : '') +
+                        (linked ? ' fb-messenger-item--linked' : '') +
+                        '">' +
+                        '<button type="button" class="fb-messenger-open" data-thread-id="' +
+                        esc(t.id) +
+                        '">' +
+                        '<span class="fb-messenger-name">' +
+                        esc(name) +
+                        (unread ? ' <span class="fb-messenger-badge">' + unread + '</span>' : '') +
+                        '</span>' +
+                        '<span class="fb-messenger-preview">' +
+                        esc(preview || '…') +
+                        '</span>' +
+                        '</button>' +
+                        '<div class="fb-messenger-thread" id="fb-messenger-thread-' +
+                        esc(t.id) +
+                        '" hidden></div>' +
+                        '</li>'
+                    );
+                })
+                .join('') +
+            '</ul>'
+        );
+    }
+
+    async function openMessengerThread(container, entrepriseId, threadId) {
+        const panel = container.querySelector('#fb-messenger-thread-' + threadId);
+        if (!panel) return;
+        const wasHidden = panel.hasAttribute('hidden');
+        panel.removeAttribute('hidden');
+        if (!wasHidden && panel.dataset.loaded === '1') {
+            panel.setAttribute('hidden', '');
+            return;
+        }
+        panel.innerHTML = '<p class="fb-muted">Chargement…</p>';
+        try {
+            await fetchJson('/api/facebook-prospection/messenger/conversations/' + threadId + '/read', {
+                method: 'POST',
+            });
+            const data = await fetchJson(
+                '/api/facebook-prospection/messenger/conversations/' + threadId + '/messages',
+            );
+            const msgs = data.messages || [];
+            panel.innerHTML = msgs.length
+                ? msgs
+                      .map(function (m) {
+                          const dir = String(m.direction || '');
+                          const cls = dir === 'outbound' ? 'out' : 'in';
+                          return (
+                              '<div class="fb-messenger-msg fb-messenger-msg--' +
+                              cls +
+                              '">' +
+                              esc(String(m.body_text || '')) +
+                              '</div>'
+                          );
+                      })
+                      .join('')
+                : '<p class="fb-muted">Pas de message en base pour ce fil.</p>';
+            panel.dataset.loaded = '1';
+            if (window.ProspectLabMessengerPoll && ProspectLabMessengerPoll.refresh) {
+                ProspectLabMessengerPoll.refresh();
+            }
+        } catch (e) {
+            panel.innerHTML = '<p class="error">' + esc(e.message || 'Erreur') + '</p>';
+        }
     }
 
     function latestResult(jobs) {
@@ -776,7 +865,7 @@
                 : '<p class="fb-muted">Aucune page enregistrée. Lance une recherche ou une prospection.</p>') +
             '</section>' +
             (conv || lastMsg
-                ? '<section class="fb-card"><div class="fb-card-head">Messenger</div><p>' +
+                ? '<section class="fb-card"><div class="fb-card-head">Messenger (prospect)</div><p>' +
                   pill(conv && conv.status, statusLabel(conv && conv.status)) +
                   '</p>' +
                   (lastMsg
@@ -786,6 +875,13 @@
                       : '') +
                   '</section>'
                 : '') +
+            '<section class="fb-card">' +
+            '<div class="fb-card-head fb-card-head--split">' +
+            '<span>Conversations enregistrées</span>' +
+            '<button type="button" class="btn btn-outline btn-small" id="fb-tab-sync-inbox">Synchroniser l’inbox</button>' +
+            '</div>' +
+            renderMessengerThreads(summary.messengerThreads, entrepriseId) +
+            '</section>' +
             '<section class="fb-card fb-actions-card">' +
             '<div class="fb-card-head">Actions</div>' +
             '<p class="fb-muted fb-actions-hint">Recherche, suivi et message Messenger. Par defaut dry-run (aucun envoi). Jobs files sur serv1 Windows.</p>' +
@@ -903,11 +999,23 @@
                     const typeLbl = jobTypeLabel(job.job_type);
                     if (options.notify !== false && window.Notifications) {
                         const kind = job.status === 'failed' ? 'error' : 'success';
+                        let extra = '';
+                        const parsed = parseJson(job.result_json);
+                        const syncSt = parsed && parsed.sync_stats;
+                        if (syncSt && Number(syncSt.inbound_new) > 0) {
+                            extra =
+                                ' — ' +
+                                syncSt.inbound_new +
+                                ' nouveau(x) message(s) enregistré(s)';
+                        }
                         Notifications.show(
-                            nom + ' — ' + typeLbl + ' terminée : ' + statusLabel(job.status),
+                            nom + ' — ' + typeLbl + ' terminée : ' + statusLabel(job.status) + extra,
                             kind,
                             job.status === 'failed' ? 'fa-exclamation-circle' : 'fa-check-circle',
                         );
+                        if (syncSt && Number(syncSt.inbound_new) > 0 && window.ProspectLabMessengerPoll) {
+                            ProspectLabMessengerPoll.refresh();
+                        }
                     }
                     if (typeof options.onLoading === 'function') {
                         options.onLoading(false);
@@ -1105,6 +1213,32 @@
                 });
             };
         }
+
+        const syncBtn = container.querySelector('#fb-tab-sync-inbox');
+        if (syncBtn) {
+            syncBtn.onclick = function () {
+                startAction(container, entrepriseId, function () {
+                    return fetchJson('/api/facebook-prospection/messenger/sync', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            entreprise_id: entrepriseId,
+                            async: true,
+                        }),
+                    }).then(function (d) {
+                        d.job_type = 'messenger_sync';
+                        return d;
+                    });
+                });
+            };
+        }
+
+        container.querySelectorAll('.fb-messenger-open').forEach(function (btn) {
+            btn.onclick = function () {
+                const tid = btn.getAttribute('data-thread-id');
+                if (tid) openMessengerThread(container, entrepriseId, tid);
+            };
+        });
 
         const latest = summary.jobs && summary.jobs[0];
         if (latest && isActiveStatus(latest.status)) {

@@ -67,6 +67,7 @@ from config import (
     RESTRICT_TO_LOCAL_NETWORK,
     FLASK_DEBUG,
     SOCKETIO_MESSAGE_QUEUE,
+    FACEBOOK_PROSPECTION_ENABLED,
 )
 from celery_app import make_celery
 
@@ -202,6 +203,7 @@ def inject_mail_account_context():
     return {
         'mail_accounts': accounts,
         'current_mail_account_id': session.get('mail_account_id', None),
+        'facebook_prospection_enabled': FACEBOOK_PROSPECTION_ENABLED,
     }
 
 # Enregistrer les handlers WebSocket

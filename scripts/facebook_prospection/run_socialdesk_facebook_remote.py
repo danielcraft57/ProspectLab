@@ -129,6 +129,28 @@ def handle_check_session(module_dir: Path, account: str) -> dict[str, Any]:
     }
 
 
+def handle_cookies_refresh(module_dir: Path, account: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """
+    Rafraichit storage-state / cookies depuis le profil Chrome local (sync-chrome-session.mjs).
+
+    @param module_dir: facebook-playwright
+    @param account: Compte SocialDesk
+    @param payload: headless optionnel (serv2 Debian)
+    """
+    args = ['src/sync-chrome-session.mjs', f'--account={account}']
+    if payload.get('headless'):
+        args.append('--headless')
+    proc = run_node(module_dir, args, timeout=600)
+    ok = proc.returncode == 0
+    return {
+        'ok': ok,
+        'job_type': 'cookies_refresh',
+        'exit_code': proc.returncode,
+        'stdout_tail': (proc.stdout or '')[-2500:],
+        'stderr_tail': (proc.stderr or '')[-1200:],
+    }
+
+
 def main() -> int:
     args = parse_args()
     raw = base64.b64decode(args.payload_b64.encode('ascii'))
@@ -146,7 +168,12 @@ def main() -> int:
         _emit_json(out)
         return 0 if out.get('ok') else 2
 
-    if job_type in ('search', 'scrape_page', 'messenger_inbox', 'prospect_flow'):
+    if job_type == 'cookies_refresh':
+        out = handle_cookies_refresh(fb_dir, account, payload if isinstance(payload, dict) else {})
+        _emit_json(out)
+        return 0 if out.get('ok') else 2
+
+    if job_type in ('search', 'scrape_page', 'messenger_inbox', 'messenger_sync', 'messenger_reply', 'prospect_flow'):
         body = {
             'job_type': job_type,
             'account': account,

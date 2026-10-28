@@ -8,7 +8,7 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
-from config import FACEBOOK_PROSPECTION_ENABLED
+from config import FACEBOOK_PROSPECTION_ENABLED, FACEBOOK_MESSENGER_SYNC_MAX_THREADS
 from services.auth import login_required
 from services.database import Database
 from services.facebook_prospection.entreprise_payload import (
@@ -17,8 +17,13 @@ from services.facebook_prospection.entreprise_payload import (
     default_prospect_message,
 )
 from services.facebook_prospection.job_runner import FacebookProspectionJobRunner
-from tasks.facebook_prospection_tasks import facebook_prospection_run_job_task
-
+from tasks.facebook_prospection_tasks import (
+    facebook_messenger_reply_task,
+    facebook_messenger_sync_inbox_task,
+    facebook_prospection_run_job_task,
+)
+from services.facebook_prospection.messenger_qa import answer_user_turn, kb_status
+from services.facebook_prospection.messenger_suggestions import build_reply_suggestions
 api_facebook_prospection_bp = Blueprint(
     'api_facebook_prospection',
     __name__,
@@ -62,7 +67,14 @@ def create_facebook_job():
 
     if not entreprise_id:
         return jsonify({'success': False, 'error': 'entreprise_id requis'}), 400
-    if job_type not in ('search', 'scrape_page', 'messenger_inbox', 'prospect_flow'):
+    if job_type not in (
+        'search',
+        'scrape_page',
+        'messenger_inbox',
+        'messenger_sync',
+        'messenger_reply',
+        'prospect_flow',
+    ):
         return jsonify({'success': False, 'error': 'job_type invalide'}), 400
 
     meta: dict[str, Any] = {'source': 'api'}
@@ -272,6 +284,292 @@ def list_facebook_conversation_messages(entreprise_id: int, conversation_id: int
         return jsonify({'success': False, 'error': 'Conversation introuvable'}), 404
     messages = db.list_facebook_prospection_messages(conversation_id)
     return jsonify({'success': True, 'messages': messages})
+
+
+@api_facebook_prospection_bp.route('/messenger/summary', methods=['GET'])
+@login_required
+def facebook_messenger_summary():
+    """Compteurs non lus pour notifications UI."""
+    blocked = _require_enabled()
+    if blocked:
+        return blocked
+    db = Database()
+    summary = db.get_facebook_messenger_summary()
+    latest = db.list_facebook_messenger_threads(unread_only=True, limit=5)
+    return jsonify({'success': True, 'summary': summary, 'latest_unread': latest})
+
+
+@api_facebook_prospection_bp.route('/messenger/conversations', methods=['GET'])
+@login_required
+def facebook_messenger_conversations():
+    """
+    Liste des fils synchronises.
+
+    Query : entreprise_id?, unread_only=1
+    """
+    blocked = _require_enabled()
+    if blocked:
+        return blocked
+    db = Database()
+    ent_raw = request.args.get('entreprise_id')
+    entreprise_id = int(ent_raw) if ent_raw and str(ent_raw).isdigit() else None
+    unread_only = request.args.get('unread_only', '').lower() in ('1', 'true', 'yes')
+    limit = min(100, max(1, int(request.args.get('limit', 40) or 40)))
+    threads = db.list_facebook_messenger_threads(
+        entreprise_id=entreprise_id,
+        unread_only=unread_only,
+        limit=limit,
+    )
+    return jsonify({'success': True, 'threads': threads})
+
+
+@api_facebook_prospection_bp.route('/messenger/conversations/<int:thread_id>/messages', methods=['GET'])
+@login_required
+def facebook_messenger_thread_messages(thread_id: int):
+    """Messages d'un fil Messenger synchronise."""
+    blocked = _require_enabled()
+    if blocked:
+        return blocked
+    db = Database()
+    messages = db.list_facebook_messenger_messages(thread_id)
+    if not messages:
+        threads = db.list_facebook_messenger_threads(limit=500)
+        if not any(int(t.get('id') or 0) == thread_id for t in threads):
+            return jsonify({'success': False, 'error': 'Fil introuvable'}), 404
+    return jsonify({'success': True, 'messages': messages})
+
+
+@api_facebook_prospection_bp.route('/messenger/conversations/<int:thread_id>/read', methods=['POST'])
+@login_required
+def facebook_messenger_mark_read(thread_id: int):
+    """Marque un fil comme lu dans ProspectLab."""
+    blocked = _require_enabled()
+    if blocked:
+        return blocked
+    db = Database()
+    if not db.mark_facebook_messenger_thread_read(thread_id):
+        return jsonify({'success': False, 'error': 'Fil introuvable'}), 404
+    return jsonify({'success': True, 'thread_id': thread_id})
+
+
+@api_facebook_prospection_bp.route('/tchatche/status', methods=['GET'])
+@login_required
+def facebook_tchatche_status():
+    """Etat Qdrant + config tchatche (pas besoin du flag Facebook)."""
+    info = kb_status()
+    return jsonify({'success': True, **info})
+
+
+@api_facebook_prospection_bp.route('/tchatche', methods=['POST'])
+@login_required
+def facebook_tchatche_turn():
+    """
+    Un tour de tchatche virtuel (KB Messenger / Qdrant).
+
+    Body : { text, recent_replies?, recent_tags?, recent_user_texts?, top_k?, entreprise_id? }
+    """
+    data = request.get_json(silent=True) or {}
+    text = (data.get('text') or '').strip()
+    if not text:
+        return jsonify({'success': False, 'error': 'text requis'}), 400
+    entreprise_id = data.get('entreprise_id')
+    try:
+        entreprise_id = int(entreprise_id) if entreprise_id else None
+    except (TypeError, ValueError):
+        entreprise_id = None
+    turn = answer_user_turn(
+        text,
+        recent_replies=list(data.get('recent_replies') or []),
+        recent_tags=list(data.get('recent_tags') or []),
+        recent_user_texts=list(data.get('recent_user_texts') or []),
+        top_k=int(data.get('top_k') or 8),
+        profile=str(data.get('profile') or '').strip() or None,
+        entreprise_id=entreprise_id,
+    )
+    return jsonify({'success': True, **turn})
+
+
+@api_facebook_prospection_bp.route('/tchatche/entreprises', methods=['GET'])
+@login_required
+def facebook_tchatche_entreprises():
+    """
+    Recherche d'entreprises pour personnaliser le tchatche.
+
+    Query : q (texte), limit (defaut 12)
+    """
+    q = (request.args.get('q') or request.args.get('search') or '').strip()
+    try:
+        limit = max(1, min(30, int(request.args.get('limit') or 12)))
+    except (TypeError, ValueError):
+        limit = 12
+    db = Database()
+    filters = {'search': q} if q else None
+    rows = db.get_entreprises(
+        filters=filters,
+        limit=limit,
+        include_og=False,
+    ) or []
+    items = []
+    for row in rows:
+        items.append(
+            {
+                'id': row.get('id'),
+                'nom': row.get('nom'),
+                'ville': row.get('ville'),
+                'website': row.get('website'),
+            }
+        )
+    return jsonify({'success': True, 'items': items})
+
+
+@api_facebook_prospection_bp.route('/messenger/conversations/<int:thread_id>/suggestions', methods=['POST'])
+@login_required
+def facebook_messenger_suggestions(thread_id: int):
+    """
+    Propositions de reponse (Qdrant) pour un fil.
+
+    Body JSON optionnel : { text?: str } sinon dernier inbound en base
+    """
+    blocked = _require_enabled()
+    if blocked:
+        return blocked
+    db = Database()
+    thread = db.get_facebook_messenger_thread(thread_id)
+    if not thread:
+        return jsonify({'success': False, 'error': 'Fil introuvable'}), 404
+
+    data = request.get_json(silent=True) or {}
+    text = (data.get('text') or '').strip()
+    if not text:
+        last = db.get_last_inbound_facebook_messenger_message(thread_id)
+        text = (last.get('body_text') if last else '') or (thread.get('preview') or '')
+
+    suggestions = build_reply_suggestions(
+        text,
+        contact_name=thread.get('contact_name'),
+        entreprise_id=thread.get('entreprise_id'),
+        limit=int(data.get('limit') or 5),
+    )
+    return jsonify(
+        {
+            'success': True,
+            'query': text[:500],
+            'suggestions': suggestions,
+            'qdrant': bool(suggestions) or bool((thread.get('preview') or text).strip()),
+        }
+    )
+
+
+@api_facebook_prospection_bp.route('/messenger/conversations/<int:thread_id>/reply', methods=['POST'])
+@login_required
+def facebook_messenger_send_reply(thread_id: int):
+    """
+    Compose / envoie une reponse Messenger sur serv1.
+
+    Body : { message_text, send?: bool, async?: bool }
+    """
+    blocked = _require_enabled()
+    if blocked:
+        return blocked
+
+    data = request.get_json(silent=True) or {}
+    message_text = (data.get('message_text') or '').strip()
+    if not message_text:
+        return jsonify({'success': False, 'error': 'message_text requis'}), 400
+    send = bool(data.get('send'))
+    use_async = data.get('async', True)
+
+    db = Database()
+    thread = db.get_facebook_messenger_thread(thread_id)
+    if not thread:
+        return jsonify({'success': False, 'error': 'Fil introuvable'}), 404
+
+    if use_async:
+        async_result = facebook_messenger_reply_task.apply_async(
+            kwargs={
+                'thread_id': int(thread_id),
+                'message_text': message_text,
+                'send': send,
+            }
+        )
+        return jsonify(
+            {
+                'success': True,
+                'celery_task_id': async_result.id,
+                'send': send,
+                'thread_id': thread_id,
+            }
+        )
+
+    from services.facebook_prospection.messenger_reply import execute_messenger_reply
+
+    result = execute_messenger_reply(db, thread_id, message_text, send=send)
+    ok = bool(result.get('ok'))
+    return jsonify({'success': ok, 'result': result}), (200 if ok else 502)
+
+
+@api_facebook_prospection_bp.route('/messenger/sync', methods=['POST'])
+@login_required
+def facebook_messenger_sync():
+    """
+    Enfile une sync inbox (lecture seule serv1).
+
+    Body JSON optionnel : { entreprise_id?, max_threads?, async?: true }
+    """
+    blocked = _require_enabled()
+    if blocked:
+        return blocked
+
+    data = request.get_json(silent=True) or {}
+    max_threads = data.get('max_threads') or FACEBOOK_MESSENGER_SYNC_MAX_THREADS
+    use_async = data.get('async', True)
+    entreprise_id = data.get('entreprise_id')
+
+    if use_async:
+        db = Database()
+        if entreprise_id:
+            meta: dict[str, Any] = {
+                'source': 'api_messenger_sync',
+                'max_threads': int(max_threads),
+                'headless': False,
+            }
+            assigned_node = db.auto_assign_facebook_remote_node('messenger_sync')
+            meta['remote_node'] = assigned_node
+            job_id = db.create_facebook_prospection_job(
+                int(entreprise_id),
+                'messenger_sync',
+                meta=meta,
+            )
+            queue = db.get_facebook_prospection_queue_snapshot(job_id)
+            async_result = facebook_prospection_run_job_task.apply_async(args=[job_id])
+            return jsonify(
+                {
+                    'success': True,
+                    'job_id': job_id,
+                    'job_type': 'messenger_sync',
+                    'celery_task_id': async_result.id,
+                    'queue': queue,
+                    'remote_node': assigned_node,
+                }
+            )
+        async_result = facebook_messenger_sync_inbox_task.apply_async(
+            kwargs={'max_threads': int(max_threads)}
+        )
+        return jsonify(
+            {
+                'success': True,
+                'job_type': 'messenger_sync',
+                'celery_task_id': async_result.id,
+                'async': True,
+            }
+        )
+
+    from tasks.facebook_prospection_tasks import run_facebook_messenger_sync
+
+    stats = run_facebook_messenger_sync(int(max_threads))
+    ok = bool(stats.get('ok'))
+    code = 200 if ok else 502
+    return jsonify({'success': ok, 'sync': stats}), code
 
 
 @api_facebook_prospection_bp.route('/entreprise/<int:entreprise_id>/prospect', methods=['POST'])

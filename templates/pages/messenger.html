@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+
+{% block title %}Messagerie Facebook — ProspectLab{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/modules/pages/messenger.css') }}?v=1">
+{% endblock %}
+
+{% block content %}
+<div class="messenger-page">
+    {% if not facebook_prospection_enabled %}
+    <div class="messenger-disabled">
+        <p>La messagerie Facebook est désactivée. Active <code>FACEBOOK_PROSPECTION_ENABLED=true</code> dans le <code>.env</code>.</p>
+    </div>
+    {% else %}
+    <header class="messenger-page-head">
+        <div>
+            <h1 class="messenger-page-title">Messagerie Facebook</h1>
+            <p class="messenger-page-sub">Messages sync depuis serv2 · suggestions KB (meme moteur que le tchatche)</p>
+        </div>
+        <div class="messenger-page-actions">
+            <button type="button" class="btn btn-outline" id="messenger-filter-all">Tous</button>
+            <button type="button" class="btn btn-outline" id="messenger-filter-unread">Non lus</button>
+            <button type="button" class="btn btn-primary" id="messenger-sync-btn">Synchroniser</button>
+        </div>
+    </header>
+    <div class="messenger-layout" id="messenger-app">
+        <aside class="messenger-sidebar" aria-label="Liste des conversations">
+            <div class="messenger-sidebar-status" id="messenger-list-status">Chargement…</div>
+            <ul class="messenger-thread-list" id="messenger-thread-list"></ul>
+        </aside>
+        <section class="messenger-main" aria-label="Conversation">
+            <div class="messenger-empty" id="messenger-empty">
+                <p>Sélectionne une conversation à gauche.</p>
+            </div>
+            <div class="messenger-conv" id="messenger-conv" hidden>
+                <header class="messenger-conv-head">
+                    <h2 id="messenger-conv-title">—</h2>
+                    <span class="messenger-conv-meta" id="messenger-conv-meta"></span>
+                </header>
+                <div class="messenger-messages" id="messenger-messages"></div>
+                <div class="messenger-suggestions" id="messenger-suggestions-wrap" hidden>
+                    <div class="messenger-suggestions-title">Propositions KB</div>
+                    <div class="messenger-suggestion-chips" id="messenger-suggestion-chips"></div>
+                </div>
+                <footer class="messenger-compose">
+                    <textarea id="messenger-reply-text" class="form-input" rows="3" placeholder="Ta réponse…"></textarea>
+                    <div class="messenger-compose-actions">
+                        <button type="button" class="btn btn-outline" id="messenger-suggest-btn">Proposer (KB)</button>
+                        <button type="button" class="btn btn-outline" id="messenger-dry-btn">Dry-run serv2</button>
+                        <button type="button" class="btn btn-primary" id="messenger-send-btn">Envoyer</button>
+                    </div>
+                    <p class="messenger-compose-hint" id="messenger-compose-status" role="status"></p>
+                </footer>
+            </div>
+        </section>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{% if facebook_prospection_enabled %}
+<script src="{{ url_for('static', filename='js/pages/messenger_inbox.js') }}?v=1"></script>
+{% endif %}
+{% endblock %}

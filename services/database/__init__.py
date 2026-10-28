@@ -33,6 +33,7 @@ from .email_templates import EmailTemplateManager
 from .mail_accounts import MailAccountManager
 from .external_links import ExternalLinksManager
 from .facebook_prospection import FacebookProspectionManager
+from .facebook_messenger import FacebookMessengerManager
 from .gemini_reports import GeminiReportManager
 from .postgresql_tune import apply_postgresql_tuning
 import os
@@ -57,6 +58,7 @@ class Database(
     SEOManager,
     ExternalLinksManager,
     FacebookProspectionManager,
+    FacebookMessengerManager,
     DatabaseBase  # DatabaseBase en dernier pour résoudre le MRO
 ):
     """
@@ -163,6 +165,11 @@ class Database(
             self.ensure_facebook_prospection_tables()
         except Exception:
             log.warning('Migration facebook_prospection_* non appliquée', exc_info=True)
+
+        try:
+            self.ensure_facebook_messenger_tables()
+        except Exception:
+            log.warning('Migration facebook_messenger_* non appliquée', exc_info=True)
 
         try:
             self.ensure_api_tokens_columns()

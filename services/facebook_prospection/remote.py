@@ -1,8 +1,8 @@
 """
 Execution distante des scripts SocialDesk facebook-playwright via SSH.
 
-serv1 : Windows + Chrome + SocialDesk (recherche, scrape, prospect, Messenger Playwright).
-serv2.lan : Debian (Celery) ; messagerie dediee prevue plus tard, pas Playwright aujourd'hui.
+serv1 : Windows + Chrome — recherche, scrape, prospect (compose page FB).
+serv2 : Debian + Playwright headless — inbox Messenger (aligne SocialDesk messenger).
 """
 
 from __future__ import annotations
@@ -26,6 +26,8 @@ from config import (
     FACEBOOK_PROSPECTION_REMOTE_HOST_MESSENGER,
     FACEBOOK_PROSPECTION_REMOTE_HOST_SEARCH,
     FACEBOOK_PROSPECTION_REMOTE_HOST_SEARCH_ALT,
+    FACEBOOK_PROSPECTION_REMOTE_MESSENGER_FB_DIR,
+    FACEBOOK_PROSPECTION_REMOTE_MESSENGER_WRAPPER,
     FACEBOOK_PROSPECTION_REMOTE_TIMEOUT_SEC,
     FACEBOOK_PROSPECTION_REMOTE_WRAPPER,
     LANDING_VARIANTS_SSH_KEY_PATH,
@@ -35,10 +37,32 @@ logger = logging.getLogger(__name__)
 
 
 class FacebookRemoteRole(str, Enum):
-    """Noeud Windows cible pour un job Playwright."""
+    """Noeud cible pour un job Playwright (serv1 search / serv2 messenger)."""
 
     SEARCH = 'search'
     MESSENGER = 'messenger'
+
+
+def _remote_stack(role: FacebookRemoteRole) -> tuple[str, str]:
+    """
+    Chemins wrapper + facebook-playwright selon le role.
+
+    @returns: (facebook_module_dir, wrapper_script)
+    """
+    if role == FacebookRemoteRole.MESSENGER:
+        return (
+            FACEBOOK_PROSPECTION_REMOTE_MESSENGER_FB_DIR,
+            FACEBOOK_PROSPECTION_REMOTE_MESSENGER_WRAPPER,
+        )
+    return FACEBOOK_PROSPECTION_REMOTE_FB_DIR, FACEBOOK_PROSPECTION_REMOTE_WRAPPER
+
+
+def _ssh_uses_linux_shell(host: str, role: FacebookRemoteRole) -> bool:
+    """True si la commande distante doit passer par bash (serv2 Debian)."""
+    if role == FacebookRemoteRole.MESSENGER:
+        return True
+    low = (host or '').lower()
+    return 'serv2' in low or host.startswith('pi@')
 
 
 def _ssh_bin() -> str:
@@ -76,8 +100,7 @@ def resolve_remote_host_override(meta: dict[str, Any] | None) -> str | None:
     if alt and node in ('alt', 'secondary', 'serv1_b', 'win2'):
         return alt
     if node in ('serv2', 'messenger', '2', 'serv2.lan'):
-        # Legacy meta : serv2 Debian n heberge pas Playwright ; retomber sur serv1.
-        return FACEBOOK_PROSPECTION_REMOTE_HOST_SEARCH
+        return FACEBOOK_PROSPECTION_REMOTE_HOST_MESSENGER
     if node in ('serv1', 'search', '1', 'serv1.lan', 'primary'):
         return FACEBOOK_PROSPECTION_REMOTE_HOST_SEARCH
     return None
@@ -93,6 +116,8 @@ def remote_host_short_label(host: str | None, role: FacebookRemoteRole) -> str:
         return 'alt'
     if 'serv1' in low:
         return 'serv1'
+    if 'serv2' in low:
+        return 'serv2'
     return host.split('@')[-1] if '@' in host else host
 
 
@@ -136,29 +161,37 @@ class FacebookProspectionRemote:
         Execute un job Facebook distant.
 
         @param role: SEARCH (serv1) ou MESSENGER (serv2)
-        @param job_type: search | scrape_page | messenger_inbox | check_session
+        @param job_type: search | scrape_page | messenger_* | check_session | cookies_refresh
         @param payload: parametres JSON (entreprise_id, query, fb_url, etc.)
         @param host_override: Force l'hote SSH (switch serv1/serv2)
         @returns: FacebookRemoteResult avec JSON parse si stdout est du JSON
         """
         host = (host_override or '').strip() or _host_for_role(role)
+        fb_dir, wrapper = _remote_stack(role)
         remote_payload = dict(payload or {})
         if 'headless' not in remote_payload:
-            remote_payload['headless'] = FACEBOOK_PROSPECTION_REMOTE_HEADLESS
+            remote_payload['headless'] = (
+                True if role == FacebookRemoteRole.MESSENGER else FACEBOOK_PROSPECTION_REMOTE_HEADLESS
+            )
         body = {
             'account': FACEBOOK_PROSPECTION_ACCOUNT,
             'job_type': job_type,
             'payload': remote_payload,
-            'facebook_module_dir': FACEBOOK_PROSPECTION_REMOTE_FB_DIR,
+            'facebook_module_dir': fb_dir,
         }
         payload_b64 = base64.b64encode(
             json.dumps(body, ensure_ascii=False).encode('utf-8')
         ).decode('ascii')
-        remote_inner = (
-            f"$env:PYTHONUNBUFFERED='1'; $env:PYTHONUTF8='1'; $env:PYTHONIOENCODING='utf-8'; "
-            f'python -u "{FACEBOOK_PROSPECTION_REMOTE_WRAPPER}" --payload-b64 {payload_b64}'
-        )
-        remote_cmd = f'powershell -NoProfile -Command "{remote_inner}"'
+        if _ssh_uses_linux_shell(host, role):
+            remote_cmd = (
+                f'PYTHONUNBUFFERED=1 PYTHONUTF8=1 python3 -u {wrapper!r} --payload-b64 {payload_b64}'
+            )
+        else:
+            remote_inner = (
+                f"$env:PYTHONUNBUFFERED='1'; $env:PYTHONUTF8='1'; $env:PYTHONIOENCODING='utf-8'; "
+                f'python -u "{wrapper}" --payload-b64 {payload_b64}'
+            )
+            remote_cmd = f'powershell -NoProfile -Command "{remote_inner}"'
         ssh_cmd = _build_ssh_base(host) + [remote_cmd]
         logger.info('Facebook remote %s@%s type=%s', role.value, host, job_type)
         stdout_chunks: list[str] = []

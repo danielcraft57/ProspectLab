@@ -12,7 +12,7 @@ from kombu import Queue
 from config import CELERY_BROKER_URL, CELERY_RESULT_BACKEND, CELERY_TASK_SERIALIZER, \
     CELERY_RESULT_SERIALIZER, CELERY_ACCEPT_CONTENT, CELERY_TIMEZONE, CELERY_ENABLE_UTC, \
     CELERY_TASK_TRACK_STARTED, CELERY_TASK_TIME_LIMIT, CELERY_TASK_SOFT_TIME_LIMIT, \
-    CELERY_WORKER_PREFETCH_MULTIPLIER, CELERY_TASK_ACKS_LATE
+    CELERY_WORKER_PREFETCH_MULTIPLIER, CELERY_TASK_ACKS_LATE, FACEBOOK_MESSENGER_SYNC_INTERVAL_SEC
 
 # Configuration des logs Celery via le module centralisé
 from services.logging_config import setup_celery_logger
@@ -188,10 +188,19 @@ celery.conf.update(
             'task': 'tasks.email_tasks.classify_inbox_replies_task',
             'schedule': 1800.0,  # Toutes les 30 minutes
         },
-        # Apres cookies SocialDesk 5h (serv1/serv2) — voir docs/guides/FACEBOOK_PROSPECTION.md
+        # Apres fenetre cookies 5h — sync serv1 + serv2 (sync-chrome-session)
+        'facebook-refresh-cookies': {
+            'task': 'facebook_prospection.refresh_cookies',
+            'schedule': crontab(hour=5, minute=10),
+        },
+        # Verification sessions apres refresh
         'facebook-check-sessions': {
             'task': 'facebook_prospection.check_sessions',
             'schedule': crontab(hour=6, minute=30),
+        },
+        'facebook-messenger-sync': {
+            'task': 'facebook_prospection.sync_messenger_inbox',
+            'schedule': float(FACEBOOK_MESSENGER_SYNC_INTERVAL_SEC),
         },
     },
 )

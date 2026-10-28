@@ -1,5 +1,5 @@
 # Deploiement du stack Facebook ProspectLab sur serv1 (Windows + Chrome).
-# serv2.lan = Debian (Celery) : pas de deploy SocialDesk / Playwright.
+# Messagerie inbox : deploy_to_serv2.ps1 (Debian).
 #
 # Usage :
 #   .\deploy_to_serv.ps1

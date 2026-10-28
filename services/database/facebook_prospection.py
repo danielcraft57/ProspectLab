@@ -258,7 +258,9 @@ class FacebookProspectionManager(DatabaseBase):
         """Lit serv1 ou alt depuis meta_json (serv2 Debian = messagerie plus tard, pas ici)."""
         job_type = str(row.get('job_type') or '')
         if job_type == 'messenger_inbox':
-            return 'serv1'
+            return 'serv2'
+        if job_type in ('messenger_sync', 'messenger_reply'):
+            return 'serv2'
         raw = row.get('meta_json')
         meta: dict[str, Any] = {}
         if isinstance(raw, dict):
@@ -273,18 +275,19 @@ class FacebookProspectionManager(DatabaseBase):
         if node in ('alt', 'secondary', 'serv1_b', 'win2'):
             return 'alt'
         if node in ('serv2', 'messenger', '2', 'serv2.lan'):
-            return 'serv1'
+            return 'serv2'
         return 'serv1'
 
     def auto_assign_facebook_remote_node(self, job_type: str) -> str:
         """
-        Affecte le noeud Windows Playwright (serv1 ou hote ALT optionnel).
+        Affecte serv1 / alt (recherche) ou serv2 (jobs Messenger).
 
-        serv2.lan est Debian (pas Chrome) : jamais choisi ici.
-
-        @param job_type: search | scrape_page | prospect_flow | messenger_inbox
-        @returns: 'serv1' ou 'alt'
+        @param job_type: search | scrape_page | prospect_flow | messenger_*
+        @returns: 'serv1', 'alt' ou 'serv2'
         """
+        if job_type in ('messenger_inbox', 'messenger_sync', 'messenger_reply'):
+            return 'serv2'
+
         from config import FACEBOOK_PROSPECTION_REMOTE_HOST_SEARCH_ALT
 
         alt_host = (FACEBOOK_PROSPECTION_REMOTE_HOST_SEARCH_ALT or '').strip()
@@ -308,6 +311,8 @@ class FacebookProspectionManager(DatabaseBase):
                 node = self._facebook_job_remote_node_from_row(r)
                 if node == 'alt':
                     loads['alt'] += 1
+                elif node == 'serv2':
+                    loads['serv1'] += 0
                 else:
                     loads['serv1'] += 1
         finally:

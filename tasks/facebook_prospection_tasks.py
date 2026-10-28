@@ -9,7 +9,12 @@ import logging
 from typing import Any
 
 from celery_app import celery
-from config import FACEBOOK_PROSPECTION_ENABLED
+from config import (
+    FACEBOOK_COOKIES_REFRESH_ENABLED,
+    FACEBOOK_MESSENGER_SYNC_ENABLED,
+    FACEBOOK_MESSENGER_SYNC_MAX_THREADS,
+    FACEBOOK_PROSPECTION_ENABLED,
+)
 from services.database import Database
 from services.facebook_prospection.entreprise_payload import (
     build_facebook_search_payload_from_entreprise,
@@ -17,6 +22,10 @@ from services.facebook_prospection.entreprise_payload import (
     default_prospect_message,
 )
 from services.facebook_prospection.job_runner import FacebookProspectionJobRunner
+from services.facebook_prospection.messenger_store import (
+    persist_messenger_inbox_report,
+    persist_messenger_sync_result,
+)
 from services.facebook_prospection.prospect_result import (
     normalize_prospect_flow_result,
     prospect_flow_job_status,
@@ -96,6 +105,37 @@ def _payload_for_job(db: Database, job: dict[str, Any]) -> dict[str, Any]:
                 }
                 if fb_url:
                     return payload_scrape
+    if job_type == 'messenger_sync':
+        return {
+            'max_threads': int(meta.get('max_threads') or FACEBOOK_MESSENGER_SYNC_MAX_THREADS),
+            'headless': meta.get('headless', False),
+        }
+    if job_type == 'messenger_inbox':
+        return {
+            'send': bool(meta.get('send')),
+            'headless': meta.get('headless', False),
+            'max_threads': int(meta.get('max_threads') or 3),
+            'unread_only': bool(meta.get('unread_only', True)),
+        }
+    if job_type == 'messenger_reply':
+        tid = meta.get('thread_id')
+        if tid:
+            thread = db.get_facebook_messenger_thread(int(tid))
+            if thread:
+                return {
+                    'contact_name': thread.get('contact_name') or '',
+                    'thread_url': thread.get('thread_url') or '',
+                    'message_text': meta.get('message_text') or '',
+                    'send': bool(meta.get('send')),
+                    'headless': meta.get('headless', False),
+                }
+        return {
+            'contact_name': meta.get('contact_name') or '',
+            'thread_url': meta.get('thread_url') or '',
+            'message_text': meta.get('message_text') or '',
+            'send': bool(meta.get('send')),
+            'headless': meta.get('headless', False),
+        }
     return payload
 
 
@@ -140,7 +180,11 @@ def execute_facebook_prospection_job(job_id: int) -> dict[str, Any]:
     meta = _meta_from_job(job)
     payload = _payload_for_job(db, job)
     host_override = resolve_remote_host_override(meta)
-    role = FacebookRemoteRole.MESSENGER if job_type == 'messenger_inbox' else FacebookRemoteRole.SEARCH
+    role = (
+        FacebookRemoteRole.MESSENGER
+        if job_type in ('messenger_inbox', 'messenger_sync', 'messenger_reply')
+        else FacebookRemoteRole.SEARCH
+    )
     host_label = remote_host_short_label(host_override, role)
 
     def on_progress(evt: dict[str, Any]) -> None:
@@ -235,6 +279,31 @@ def execute_facebook_prospection_job(job_id: int) -> dict[str, Any]:
             message_text=msg_text,
         )
 
+    sync_stats = None
+    if job_type == 'messenger_sync' and isinstance(parsed, dict):
+        sync_stats = persist_messenger_sync_result(db, parsed)
+        parsed['sync_stats'] = sync_stats
+    elif job_type == 'messenger_inbox' and isinstance(parsed, dict) and parsed.get('ok'):
+        sync_stats = persist_messenger_inbox_report(db, parsed)
+        parsed['sync_stats'] = sync_stats
+    elif job_type == 'messenger_reply' and isinstance(parsed, dict):
+        meta = _meta_from_job(job)
+        tid = meta.get('thread_id')
+        if tid and parsed.get('ok'):
+            from services.facebook_prospection.messenger_store import message_fingerprint
+
+            body = (meta.get('message_text') or parsed.get('message_text') or '').strip()
+            if body:
+                fp = message_fingerprint('outbound', body, 0)
+                db.add_facebook_messenger_message_if_new(
+                    int(tid),
+                    'outbound',
+                    body,
+                    msg_fingerprint=fp,
+                    raw_json={'source': 'messenger_reply_job', 'send': meta.get('send')},
+                )
+                db.mark_facebook_messenger_thread_read(int(tid))
+
     if job_type == 'prospect_flow':
         db_status, err_msg = prospect_flow_job_status(parsed)
     elif parsed.get('ok'):
@@ -263,6 +332,8 @@ def execute_facebook_prospection_job(job_id: int) -> dict[str, Any]:
             out['facebook_page_url'] = saved_page.get('url')
         if conv_out:
             out['conversation'] = conv_out
+        if sync_stats:
+            out['messenger_sync'] = sync_stats
         return out
 
     db.update_facebook_prospection_job_status(
@@ -285,6 +356,43 @@ def facebook_prospection_run_job_task(self, job_id: int) -> dict[str, Any]:
     return execute_facebook_prospection_job(int(job_id))
 
 
+@celery.task(name='facebook_prospection.refresh_cookies')
+def facebook_refresh_cookies_task() -> dict[str, Any]:
+    """
+    Rafraichit les cookies Facebook sur serv1 (Windows) et serv2 (Debian), comme sync-chrome-session.
+
+    @returns: Etat par role {search, messenger}
+    """
+    if not FACEBOOK_PROSPECTION_ENABLED:
+        return {'ok': True, 'skipped': True}
+    if not FACEBOOK_COOKIES_REFRESH_ENABLED:
+        return {'ok': True, 'skipped': True, 'reason': 'cookies_refresh_disabled'}
+
+    remote = FacebookProspectionRemote()
+    out: dict[str, Any] = {}
+    for role in (FacebookRemoteRole.SEARCH, FacebookRemoteRole.MESSENGER):
+        headless = role == FacebookRemoteRole.MESSENGER
+        res = remote.run_job(
+            role,
+            'cookies_refresh',
+            {'headless': headless},
+        )
+        parsed = res.parsed or {}
+        out[role.value] = {
+            'ok': res.ok,
+            'exit_code': res.exit_code,
+            'parsed': parsed,
+        }
+        if not res.ok:
+            logger.warning(
+                'Refresh cookies Facebook %s KO: %s',
+                role.value,
+                (res.stderr or parsed.get('stderr_tail') or '')[:400],
+            )
+    all_ok = all(item.get('ok') for item in out.values())
+    return {'ok': all_ok, 'hosts': out}
+
+
 @celery.task(name='facebook_prospection.check_sessions')
 def facebook_prospection_check_sessions_task() -> dict[str, Any]:
     """
@@ -299,13 +407,6 @@ def facebook_prospection_check_sessions_task() -> dict[str, Any]:
     remote = FacebookProspectionRemote()
     for role in (FacebookRemoteRole.SEARCH, FacebookRemoteRole.MESSENGER):
         target = _host_for_role(role)
-        if role == FacebookRemoteRole.MESSENGER and 'serv2' in target.lower():
-            logger.info(
-                'Skip check-session Messenger sur %s (serv2 = messagerie plus tard, pas Playwright)',
-                target,
-            )
-            out[role.value] = {'ok': True, 'skipped': True, 'reason': 'serv2_messaging_later'}
-            continue
         res = remote.check_session(role)
         out[role.value] = {
             'ok': res.ok,
@@ -319,3 +420,68 @@ def facebook_prospection_check_sessions_task() -> dict[str, Any]:
         item.get('ok') for key, item in out.items() if key != 'local' and isinstance(item, dict)
     )
     return {'ok': all_ok, 'hosts': out}
+
+
+def run_facebook_messenger_sync(max_threads: int | None = None) -> dict[str, Any]:
+    """
+    Lance messenger_sync sur serv1 et persiste les fils.
+
+    @param max_threads: Nombre max de conversations lues
+    @returns: Stats persist_messenger_sync_result
+    """
+    if not FACEBOOK_PROSPECTION_ENABLED:
+        return {'ok': False, 'error': 'FACEBOOK_PROSPECTION_ENABLED=false'}
+    if not FACEBOOK_MESSENGER_SYNC_ENABLED:
+        return {'ok': True, 'skipped': True, 'reason': 'sync_disabled'}
+
+    limit = int(max_threads or FACEBOOK_MESSENGER_SYNC_MAX_THREADS)
+    payload = {'max_threads': limit, 'headless': False}
+    parsed = _runner().run('messenger_sync', payload, force_remote=True)
+    if not isinstance(parsed, dict):
+        return {'ok': False, 'error': 'reponse invalide'}
+    db = Database()
+    stats = persist_messenger_sync_result(db, parsed)
+    stats['parsed_ok'] = bool(parsed.get('ok'))
+    if not parsed.get('ok'):
+        stats['ok'] = False
+        stats['error'] = str(parsed.get('error') or 'sync Playwright echoue')[:500]
+    return stats
+
+
+@celery.task(name='facebook_prospection.messenger_reply')
+def facebook_messenger_reply_task(
+    thread_id: int,
+    message_text: str,
+    send: bool = False,
+) -> dict[str, Any]:
+    """
+    Repond a un fil Messenger via serv1.
+
+    @param thread_id: ID facebook_messenger_threads
+    @param message_text: Corps du message
+    @param send: Envoi reel si True
+    @returns: Resultat Playwright
+    """
+    from services.facebook_prospection.messenger_reply import execute_messenger_reply
+
+    db = Database()
+    try:
+        return execute_messenger_reply(db, int(thread_id), message_text, send=bool(send))
+    except Exception as exc:
+        logger.exception('Messenger reply thread %s', thread_id)
+        return {'ok': False, 'error': str(exc)[:500]}
+
+
+@celery.task(name='facebook_prospection.sync_messenger_inbox')
+def facebook_messenger_sync_inbox_task(max_threads: int | None = None) -> dict[str, Any]:
+    """
+    Sync periodique ou manuelle de l'inbox Messenger (lecture seule).
+
+    @param max_threads: Limite optionnelle
+    @returns: Stats { inbound_new, unread_threads, ... }
+    """
+    try:
+        return run_facebook_messenger_sync(max_threads)
+    except Exception as exc:
+        logger.exception('Sync Messenger inbox')
+        return {'ok': False, 'error': str(exc)[:500]}
