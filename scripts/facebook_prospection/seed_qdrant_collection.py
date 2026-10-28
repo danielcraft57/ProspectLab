@@ -58,7 +58,7 @@ def main() -> int:
     parser.add_argument('--apply', action='store_true', help='Ecrit dans Qdrant (sinon dry-run)')
     parser.add_argument(
         '--seed',
-        default=str(ROOT / 'data' / 'facebook_prospection' / 'qdrant_seed_faq.json'),
+        default=str(ROOT / 'scripts' / 'facebook_prospection' / 'qdrant_seed_faq.json'),
     )
     args = parser.parse_args()
 

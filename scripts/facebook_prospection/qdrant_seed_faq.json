@@ -1,0 +1,65 @@
+{
+  "brand_id": "danielcraft",
+  "intents": [
+    {
+      "intent_id": "greeting",
+      "definition": "Salutation ou premier contact Messenger apres identification de la page.",
+      "examples": [
+        "Bonjour",
+        "Salut, c'est pour quoi ?",
+        "Hello"
+      ],
+      "replies": [
+        "Bonjour ! Je suis Loic chez DanielCraft. Vous avez un site ou une page FB pour votre activite ? Je peux vous faire un retour rapide gratuit si ca vous dit."
+      ]
+    },
+    {
+      "intent_id": "pricing_question",
+      "definition": "Question sur les tarifs, devis, forfait ou budget site web.",
+      "examples": [
+        "C'est combien un site ?",
+        "Vous faites des devis ?",
+        "Quel budget pour refaire mon site ?"
+      ],
+      "replies": [
+        "Ca depend du nombre de pages et des fonctions (formulaire, prise de RDV, etc.). En bref : on cale un appel de 15 min et je vous envoie une fourchette claire apres."
+      ]
+    },
+    {
+      "intent_id": "website_audit_offer",
+      "definition": "Demande d'audit, lenteur, SEO, securite du site existant.",
+      "examples": [
+        "Mon site est lent",
+        "Vous faites des audits ?",
+        "Il n'apparait pas sur Google"
+      ],
+      "replies": [
+        "Oui, on fait des audits rapides (perf, SEO, bases securite). Si vous m'envoyez l'URL je peux regarder et vous resumer les 3 priorites."
+      ]
+    },
+    {
+      "intent_id": "not_interested",
+      "definition": "Refus poli ou pas le bon moment.",
+      "examples": [
+        "Pas interesse",
+        "Plus tard",
+        "On a deja un prestataire"
+      ],
+      "replies": [
+        "Pas de souci, merci pour votre reponse. Je vous laisse mon site prestafacture.com au cas ou, bonne continuation."
+      ]
+    },
+    {
+      "intent_id": "handoff_human",
+      "definition": "Demande explicite de parler a un humain ou appel telephonique.",
+      "examples": [
+        "On peut s'appeler ?",
+        "Passez-moi quelqu'un",
+        "Votre numero ?"
+      ],
+      "replies": [
+        "Avec plaisir. Donnez-moi un creneau (matin/aprem) et un numero, je vous rappelle depuis DanielCraft."
+      ]
+    }
+  ]
+}

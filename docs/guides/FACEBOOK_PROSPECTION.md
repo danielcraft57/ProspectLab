@@ -52,6 +52,8 @@ Indexer :
 ```powershell
 python scripts/facebook_prospection/seed_qdrant_collection.py
 python scripts/facebook_prospection/seed_qdrant_collection.py --apply
+
+(FAQ source : `scripts/facebook_prospection/qdrant_seed_faq.json`)
 ```
 
 ## Code SocialDesk a reutiliser
