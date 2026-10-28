@@ -795,6 +795,116 @@ class DatabaseSchema(DatabaseBase):
         finally:
             conn.close()
 
+    def ensure_facebook_prospection_tables(self):
+        """
+        Migration idempotente : prospection Facebook (jobs, candidats pages, conversations).
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS facebook_prospection_jobs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entreprise_id INTEGER NOT NULL,
+                    job_type TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    search_query TEXT,
+                    meta_json TEXT,
+                    result_json TEXT,
+                    error_message TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE
+                )
+                ''',
+            )
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS facebook_prospection_page_candidates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id INTEGER NOT NULL,
+                    entreprise_id INTEGER NOT NULL,
+                    page_name TEXT,
+                    page_url TEXT NOT NULL,
+                    match_score REAL DEFAULT 0,
+                    raw_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (job_id) REFERENCES facebook_prospection_jobs(id) ON DELETE CASCADE,
+                    FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE
+                )
+                ''',
+            )
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS facebook_prospection_pages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entreprise_id INTEGER NOT NULL,
+                    job_id INTEGER,
+                    page_url TEXT NOT NULL,
+                    page_name TEXT,
+                    profile_json TEXT,
+                    selected INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE,
+                    FOREIGN KEY (job_id) REFERENCES facebook_prospection_jobs(id) ON DELETE SET NULL,
+                    UNIQUE(entreprise_id, page_url)
+                )
+                ''',
+            )
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS facebook_prospection_conversations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entreprise_id INTEGER NOT NULL,
+                    page_id INTEGER,
+                    thread_key TEXT,
+                    fb_page_url TEXT,
+                    status TEXT DEFAULT 'open',
+                    last_sync_at TIMESTAMP,
+                    meta_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE,
+                    FOREIGN KEY (page_id) REFERENCES facebook_prospection_pages(id) ON DELETE SET NULL
+                )
+                ''',
+            )
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS facebook_prospection_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    conversation_id INTEGER NOT NULL,
+                    direction TEXT NOT NULL,
+                    body_text TEXT,
+                    sent_at TIMESTAMP,
+                    raw_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (conversation_id) REFERENCES facebook_prospection_conversations(id) ON DELETE CASCADE
+                )
+                ''',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_fb_prospection_jobs_ent ON facebook_prospection_jobs(entreprise_id, created_at DESC)',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_fb_prospection_candidates_job ON facebook_prospection_page_candidates(job_id)',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_fb_prospection_pages_ent ON facebook_prospection_pages(entreprise_id)',
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def ensure_api_tokens_columns(self):
         """
         Migration idempotente des colonnes api_tokens (permissions, suppression entreprises).

@@ -397,6 +397,55 @@ LANDING_VARIANTS_PUBLIC_BASE_URL = (
     or '/static/generated/landing_variants'
 )
 
+# Prospection Facebook (Playwright SocialDesk sur serv1 + serv2, Qdrant node15)
+FACEBOOK_PROSPECTION_ENABLED = os.environ.get('FACEBOOK_PROSPECTION_ENABLED', 'false').lower() in (
+    '1',
+    'true',
+    'yes',
+    'on',
+)
+FACEBOOK_PROSPECTION_ACCOUNT = (
+    os.environ.get('FACEBOOK_PROSPECTION_ACCOUNT', 'danielcraft') or 'danielcraft'
+).strip()
+FACEBOOK_PROSPECTION_REMOTE_HOST_SEARCH = (
+    os.environ.get('FACEBOOK_PROSPECTION_REMOTE_HOST_SEARCH', 'loicDaniel@serv1.lan')
+    or 'loicDaniel@serv1.lan'
+).strip().strip('\r')
+FACEBOOK_PROSPECTION_REMOTE_HOST_MESSENGER = (
+    os.environ.get('FACEBOOK_PROSPECTION_REMOTE_HOST_MESSENGER', 'loicDaniel@serv2.lan')
+    or 'loicDaniel@serv2.lan'
+).strip().strip('\r')
+FACEBOOK_PROSPECTION_REMOTE_FB_DIR = (
+    os.environ.get(
+        'FACEBOOK_PROSPECTION_REMOTE_FB_DIR',
+        r'C:\Users\loicDaniel\Documents\SocialDesk\facebook-playwright',
+    )
+    or r'C:\Users\loicDaniel\Documents\SocialDesk\facebook-playwright'
+).strip().strip('\r')
+FACEBOOK_PROSPECTION_REMOTE_WRAPPER = (
+    os.environ.get(
+        'FACEBOOK_PROSPECTION_REMOTE_WRAPPER',
+        str(APP_DIR / 'scripts' / 'facebook_prospection' / 'run_socialdesk_facebook_remote.py'),
+    )
+    or str(APP_DIR / 'scripts' / 'facebook_prospection' / 'run_socialdesk_facebook_remote.py')
+).strip().strip('\r')
+FACEBOOK_PROSPECTION_REMOTE_TIMEOUT_SEC = max(
+    60, int(os.environ.get('FACEBOOK_PROSPECTION_REMOTE_TIMEOUT_SEC', '900') or '900')
+)
+FACEBOOK_PROSPECTION_QDRANT_URL = (
+    os.environ.get('FACEBOOK_PROSPECTION_QDRANT_URL', os.environ.get('QDRANT_URL', '')) or ''
+).strip().rstrip('/')
+FACEBOOK_PROSPECTION_QDRANT_COLLECTION = (
+    os.environ.get('FACEBOOK_PROSPECTION_QDRANT_COLLECTION', 'prospectlab_facebook_messaging')
+    or 'prospectlab_facebook_messaging'
+).strip()
+FACEBOOK_PROSPECTION_QDRANT_DIMS = max(
+    1, int(os.environ.get('FACEBOOK_PROSPECTION_QDRANT_DIMS', '768') or '768')
+)
+FACEBOOK_PROSPECTION_QDRANT_BRAND_ID = (
+    os.environ.get('FACEBOOK_PROSPECTION_QDRANT_BRAND_ID', 'danielcraft') or 'danielcraft'
+).strip()
+
 # File d’enqueue pour le pack « analyse site complet ».
 # Défaut « technical » : les workers existants écoutent déjà cette file (voir CELERY_WORKER_QUEUES).
 # Pour isoler le pack sur un worker dédié : CELERY_FULL_ANALYSIS_QUEUE=website_full et ajoutez

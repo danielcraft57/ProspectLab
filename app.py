@@ -166,6 +166,7 @@ from routes.api_integration import api_integration_bp
 from routes.upload import upload_bp
 from routes.other import other_bp
 from routes.mail_accounts import mail_accounts_bp
+from routes.api_facebook_prospection import api_facebook_prospection_bp
 from routes.auth import auth_bp
 
 app.register_blueprint(auth_bp)  # Auth en premier pour gérer la redirection /
@@ -175,6 +176,7 @@ app.register_blueprint(api_extended_bp)
 app.register_blueprint(api_public_bp)  # API publique
 app.register_blueprint(api_tokens_bp)  # Gestion des tokens API
 app.register_blueprint(api_integration_bp)  # API d'intégration interne (applications clientes)
+app.register_blueprint(api_facebook_prospection_bp)
 app.register_blueprint(upload_bp)
 app.register_blueprint(mail_accounts_bp)
 app.register_blueprint(other_bp)
@@ -368,7 +370,7 @@ def restrict_to_local_network():
 # - Routes API restantes (analyses-techniques, analyses-osint, analyses-pentest, etc.)
 
 # Importer les tâches Celery pour qu'elles soient enregistrées
-from tasks import analysis_tasks, scraping_tasks, technical_analysis_tasks
+from tasks import analysis_tasks, scraping_tasks, technical_analysis_tasks, facebook_prospection_tasks
 
 if __name__ == '__main__':
     """

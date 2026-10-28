@@ -126,6 +126,7 @@ celery.conf.update(
         'tasks.metric_rescan_tasks',
         'tasks.landing_variant_tasks',
         'tasks.website_audit_report_tasks',
+        'tasks.facebook_prospection_tasks',
     ),
     # Configuration pour Windows : utiliser solo au lieu de prefork
     # Le mode prefork n'est pas supporté sur Windows
@@ -186,6 +187,11 @@ celery.conf.update(
         'inbox-classify': {
             'task': 'tasks.email_tasks.classify_inbox_replies_task',
             'schedule': 1800.0,  # Toutes les 30 minutes
+        },
+        # Apres cookies SocialDesk 5h (serv1/serv2) — voir docs/guides/FACEBOOK_PROSPECTION.md
+        'facebook-check-sessions': {
+            'task': 'facebook_prospection.check_sessions',
+            'schedule': crontab(hour=6, minute=30),
         },
     },
 )

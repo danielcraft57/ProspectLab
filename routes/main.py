@@ -172,6 +172,15 @@ def carte_entreprises():
     return render_page('carte_entreprises.html')
 
 
+@main_bp.route('/facebook-prospection')
+@login_required
+def facebook_prospection_page():
+    """
+    Prospection Facebook : recherche page, scrape, Messenger (serv1 + serv2).
+    """
+    return render_page('facebook_prospection.html')
+
+
 @main_bp.route('/entreprises-google-maps')
 @login_required
 def entreprises_google_maps():
