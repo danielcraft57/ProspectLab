@@ -86,21 +86,69 @@ const API_DOC_FAMILIES = [
                 ]
             },
             {
+                id: 'groupes',
+                name: 'Groupes d\'entreprises',
+                categoryDesc: 'Segments ProspectLab (listes manuelles). Même permission « Entreprises » que la liste. Les membres se filtrent aussi via `GET /entreprises?groupe_id=`.',
+                endpoints: [
+                    {
+                        method: 'GET',
+                        path: '/groupes',
+                        desc: 'Liste tous les groupes : id, nom, description, couleur, date_creation, entreprises_count.',
+                        permission: 'Entreprises'
+                    },
+                    {
+                        method: 'GET',
+                        path: '/groupes/<id>',
+                        desc: 'Détail d’un groupe (404 si id inconnu).',
+                        permission: 'Entreprises'
+                    },
+                    {
+                        method: 'GET',
+                        path: '/groupes/<id>/entreprises',
+                        desc: 'Entreprises membres du groupe, paginées. Réponse : groupe_id, groupe_nom, count, total (1re page), data[]. Filtres identiques à GET /entreprises.',
+                        permission: 'Entreprises',
+                        params: [
+                            { name: 'limit', type: 'int', desc: 'Défaut 100, max 1000' },
+                            { name: 'offset', type: 'int', desc: 'Pagination' },
+                            { name: 'search', type: 'str', desc: 'Nom, site, etc.' },
+                            { name: 'secteur', type: 'str' },
+                            { name: 'categorie', type: 'str', desc: 'Catégorie métier' },
+                            { name: 'statut', type: 'str' },
+                            { name: 'opportunite', type: 'str' },
+                            { name: 'etape_prospection', type: 'str' },
+                            { name: 'has_email', type: 'bool', desc: '1, true ou yes' },
+                            { name: 'has_phone', type: 'bool', desc: 'Au moins un téléphone (principal ou scraper)' },
+                            { name: 'phone_line_type', type: 'str', desc: 'mobile (portable) ou fixed (fixe). Alias query phone_type.' },
+                            { name: 'include_phones', type: 'bool', desc: 'Liste complète phones[] par entreprise' }
+                        ]
+                    }
+                ]
+            },
+            {
                 id: 'entreprises',
                 name: 'Entreprises',
-                categoryDesc: 'Liste, détail, proximité GPS, recherches (site, email, téléphone) ; galerie images ; emails et téléphones ; campagnes liées. Suppression : DELETE sur la même URL que le détail — sans cache serveur ; données liées en cascade selon le schéma.',
+                categoryDesc: 'Liste, détail, proximité GPS, recherches (site, email, téléphone), filtres coordonnées (email, téléphone portable/fixe), groupes (`groupe_id`, `no_group`) ; galerie, emails, campagnes liées. Suppression : DELETE — droit token « suppression entreprises » en plus de la lecture.',
                 endpoints: [
                     {
                         method: 'GET',
                         path: '/entreprises',
-                        desc: 'Liste paginée. Pour `statut` : valeurs Gagné / Perdu / Relance incluent les statuts événementiels associés ; sinon filtre exact.',
+                        desc: 'Liste paginée. Statut Gagné / Perdu / Relance : inclut les statuts événementiels associés ; sinon filtre exact. Téléphone : principal + numéros scrapés ; type portable/fixe via line_type OSINT ou heuristique FR (06/07…).',
                         permission: 'Entreprises',
                         params: [
                             { name: 'limit', type: 'int', desc: 'Défaut 100, max 1000' },
                             { name: 'offset', type: 'int', desc: 'Pagination' },
                             { name: 'secteur', type: 'str' },
+                            { name: 'categorie', type: 'str', desc: 'Catégorie métier' },
                             { name: 'statut', type: 'str' },
-                            { name: 'search', type: 'str' }
+                            { name: 'opportunite', type: 'str' },
+                            { name: 'etape_prospection', type: 'str' },
+                            { name: 'search', type: 'str', desc: 'Nom, site, tags, emails scrapés…' },
+                            { name: 'groupe_id', type: 'int', desc: 'Membres d’un groupe ProspectLab' },
+                            { name: 'no_group', type: 'bool', desc: 'Entreprises sans aucun groupe (1 / true / yes)' },
+                            { name: 'has_email', type: 'bool', desc: 'Au moins un email connu' },
+                            { name: 'has_phone', type: 'bool', desc: 'Au moins un téléphone connu' },
+                            { name: 'phone_line_type', type: 'str', desc: 'mobile ou fixed (alias phone_type)' },
+                            { name: 'include_phones', type: 'bool', desc: 'Ajoute phones[] (principal + scraper) sur chaque fiche' }
                         ]
                     },
                     {

@@ -43,10 +43,10 @@
             <div class="filters-advanced-section">
                 <div class="filters-advanced-section-header">
                     <h4>Segmentation <span id="section-filter-count-segmentation" class="section-filter-count" style="display:none;">0</span></h4>
-                    <p>Affiner rapidement par secteur, groupe, email et statut.</p>
+                    <p>Affiner par secteur, groupe, coordonnées et statut.</p>
                 </div>
                 <div class="filters-advanced-section-body">
-                    <div class="filters-grid">
+                    <div class="filters-grid filters-grid-segmentation">
                     <div class="filter-group">
                         <label for="filter-secteur">Secteur (groupe)</label>
                         <select id="filter-secteur" class="form-select">
@@ -75,28 +75,48 @@
                             <option value="">Toutes les opportunités</option>
                         </select>
                     </div>
+                    </div>
 
-                    <div class="filter-group">
-                        <label class="filter-label">Emails</label>
-                        <label class="form-checkbox">
-                            <input type="checkbox" id="filter-has-email">
-                            <span>Entreprises avec email uniquement</span>
-                        </label>
+                    <div class="filters-grid filters-grid-contact">
+                    <div class="filter-group filter-group--contact">
+                        <label class="filter-label">Coordonnées</label>
+                        <div class="filter-checkbox-stack">
+                            <label class="form-checkbox">
+                                <input type="checkbox" id="filter-has-email">
+                                <span>Avec email uniquement</span>
+                            </label>
+                            <label class="form-checkbox">
+                                <input type="checkbox" id="filter-has-phone">
+                                <span>Avec téléphone uniquement</span>
+                            </label>
+                        </div>
                     </div>
 
                     <div class="filter-group">
-                        <label class="filter-label">Screenshots</label>
-                        <label class="form-checkbox">
-                            <input type="checkbox" id="filter-has-screenshots">
-                            <span>Avec screenshots uniquement</span>
-                        </label>
-                        <label class="form-checkbox" style="margin-top:0.35rem;">
-                            <input type="checkbox" id="filter-has-gemini-report">
-                            <span>Avec rapport Gemini uniquement</span>
-                        </label>
+                        <label for="filter-phone-line-type">Type de téléphone</label>
+                        <select id="filter-phone-line-type" class="form-select">
+                            <option value="">Tous types</option>
+                            <option value="mobile">Portable</option>
+                            <option value="fixed">Fixe</option>
+                        </select>
                     </div>
 
-                    <!-- Statut: pills interactifs plutôt qu'une simple liste déroulante -->
+                    <div class="filter-group filter-group--enrichment">
+                        <label class="filter-label">Enrichissement</label>
+                        <div class="filter-checkbox-stack">
+                            <label class="form-checkbox">
+                                <input type="checkbox" id="filter-has-screenshots">
+                                <span>Avec screenshots uniquement</span>
+                            </label>
+                            <label class="form-checkbox">
+                                <input type="checkbox" id="filter-has-gemini-report">
+                                <span>Avec rapport Gemini uniquement</span>
+                            </label>
+                        </div>
+                    </div>
+                    </div>
+
+                    <div class="filters-grid filters-grid-status-row">
                     <div class="filter-group filter-group-status">
                         <label class="filter-label">Statut</label>
                         <div id="filter-statut-pills" class="status-pills">
@@ -471,7 +491,7 @@
 <script src="{{ url_for('static', filename='js/modules/utils/notifications.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/utils/debounce.js') }}"></script>
 <!-- Module API -->
-<script src="{{ url_for('static', filename='js/modules/entreprises/api.js') }}?v=19"></script>
+<script src="{{ url_for('static', filename='js/modules/entreprises/api.js') }}?v=21"></script>
 <!-- Modules entreprises -->
 <script src="{{ url_for('static', filename='js/modules/entreprises/preview_modal.js') }}?v=17"></script>
 <script src="{{ url_for('static', filename='js/modules/entreprises/images_tab.js') }}?v=17"></script>
@@ -482,6 +502,6 @@
 <script src="{{ url_for('static', filename='js/modules/analyses/osint.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/analyses/pentest.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modules/analyses/scraping.js') }}?v=10"></script>
-<script src="{{ url_for('static', filename='js/entreprises.js') }}?v=29" defer></script>
+<script src="{{ url_for('static', filename='js/entreprises.js') }}?v=31" defer></script>
 {% endblock %}
 

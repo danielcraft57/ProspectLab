@@ -258,6 +258,78 @@ def _get_entreprise_phones_list(entreprise_id: int, include_primary: bool = True
     return out
 
 
+def _batch_attach_phones_to_entreprises(entreprises: list) -> None:
+    """
+    Ajoute phones[] sur chaque entreprise (liste publique, include_phones=1).
+    Une requête scraper_phones + fusion du téléphone principal par fiche.
+    """
+    if not entreprises:
+        return
+    id_list: list[int] = []
+    for ent in entreprises:
+        try:
+            id_list.append(int(ent.get('id')))
+        except (TypeError, ValueError):
+            continue
+    if not id_list:
+        return
+
+    by_id: dict[int, list] = {eid: [] for eid in id_list}
+    conn = database.get_connection()
+    cursor = conn.cursor()
+    placeholders = ','.join(['?'] * len(id_list))
+    database.execute_sql(
+        cursor,
+        f'''
+        SELECT entreprise_id, phone, page_url, date_found, phone_e164, carrier, location,
+               line_type, phone_valid, analyzed_at
+        FROM scraper_phones
+        WHERE entreprise_id IN ({placeholders})
+          AND phone IS NOT NULL AND TRIM(phone) <> ''
+        ORDER BY entreprise_id, date_found DESC
+        ''',
+        id_list,
+    )
+    for row in cursor.fetchall() or []:
+        r = dict(row) if not isinstance(row, dict) else row
+        try:
+            eid = int(r.get('entreprise_id'))
+        except (TypeError, ValueError):
+            continue
+        if eid not in by_id:
+            continue
+        pv = r.get('phone_valid')
+        by_id[eid].append({
+            'source': 'scraper',
+            'phone': r.get('phone'),
+            'page_url': r.get('page_url'),
+            'date_found': r.get('date_found'),
+            'phone_e164': r.get('phone_e164'),
+            'carrier': r.get('carrier'),
+            'location': r.get('location'),
+            'line_type': r.get('line_type'),
+            'valid': bool(pv) if pv is not None else None,
+            'analyzed_at': r.get('analyzed_at'),
+        })
+    conn.close()
+
+    for ent in entreprises:
+        try:
+            eid = int(ent.get('id'))
+        except (TypeError, ValueError):
+            continue
+        phones = list(by_id.get(eid) or [])
+        tel = (ent.get('telephone') or '').strip()
+        if tel and not any((x.get('phone') or '').strip() == tel for x in phones):
+            phones.insert(0, {
+                'source': 'principal',
+                'phone': tel,
+                'page_url': None,
+                'date_found': None,
+            })
+        ent['phones'] = phones
+
+
 def _extract_person_from_name_info(name_info) -> dict | None:
     """
     name_info provient de l'analyse email (JSON) et peut contenir des infos personne.
@@ -530,6 +602,80 @@ def _build_website_analysis_report(database: Database, entreprise_id: int, full:
     return report
 
 
+def _truthy_query_flag(raw) -> bool:
+    """Interprète un paramètre query booléen (1, true, yes)."""
+    return str(raw or '').lower() in ('1', 'true', 'yes')
+
+
+def _build_public_entreprises_filters_from_request():
+    """
+    Construit le dict de filtres entreprises à partir des query params de l'API publique.
+
+    @returns: dict|None — None si aucun filtre actif
+    """
+    filters = {}
+    if request.args.get('secteur'):
+        filters['secteur'] = request.args.get('secteur')
+    if request.args.get('categorie'):
+        filters['categorie'] = request.args.get('categorie')
+    if request.args.get('statut'):
+        filters['statut'] = _maybe_expand_statut_filter(request.args.get('statut'))
+    if request.args.get('opportunite'):
+        filters['opportunite'] = request.args.get('opportunite')
+    if request.args.get('search'):
+        filters['search'] = request.args.get('search')
+    if request.args.get('etape_prospection'):
+        filters['etape_prospection'] = request.args.get('etape_prospection')
+
+    groupe_id = request.args.get('groupe_id', type=int)
+    if groupe_id is not None and groupe_id > 0:
+        filters['groupe_id'] = groupe_id
+    if _truthy_query_flag(request.args.get('no_group')):
+        filters['no_group'] = 'true'
+    if _truthy_query_flag(request.args.get('has_email')):
+        filters['has_email'] = 'true'
+    if _truthy_query_flag(request.args.get('has_phone')):
+        filters['has_phone'] = 'true'
+    phone_line_type = (request.args.get('phone_line_type') or request.args.get('phone_type') or '').strip().lower()
+    if phone_line_type in ('mobile', 'portable', 'cell', 'fixed', 'fixe', 'landline'):
+        if phone_line_type in ('portable', 'cell'):
+            phone_line_type = 'mobile'
+        if phone_line_type in ('fixe', 'landline'):
+            phone_line_type = 'fixed'
+        filters['phone_line_type'] = phone_line_type
+
+    return filters or None
+
+
+def _fetch_public_entreprises_list(limit: int, offset: int, filters=None, include_phones: bool = False):
+    """
+    Liste paginée entreprises pour l'API publique (total sur la 1re page).
+
+    @param include_phones: Si True, ajoute phones[] sur chaque fiche
+    @returns: tuple (entreprises, total|None)
+    """
+    total = None
+    if offset == 0:
+        entreprises, total = database.get_entreprises(
+            filters=filters,
+            limit=limit,
+            offset=offset,
+            with_total=True,
+            include_og=False,
+        )
+    else:
+        entreprises = database.get_entreprises(
+            filters=filters,
+            limit=limit,
+            offset=offset,
+            include_og=False,
+        )
+    if include_phones and entreprises:
+        _batch_attach_phones_to_entreprises(entreprises)
+    from utils.helpers import clean_json_dict
+    return clean_json_dict(entreprises), total
+
+
 @api_public_bp.route('/entreprises', methods=['GET'])
 @api_token_required
 @require_api_permission('entreprises')
@@ -542,9 +688,17 @@ def get_entreprises():
         limit (int): Nombre maximum de résultats (défaut: 100, max: 1000)
         offset (int): Offset pour la pagination (défaut: 0)
         secteur (str): Filtrer par secteur
+        categorie (str): Filtrer par catégorie métier
         statut (str): Filtrer par statut
         opportunite (str): Filtrer par opportunite / score d'opportunite affiche
         search (str): Recherche textuelle (nom, website)
+        groupe_id (int): Membres d'un groupe ProspectLab
+        no_group (bool): Entreprises sans aucun groupe
+        has_email (bool): Au moins un email connu
+        has_phone (bool): Au moins un téléphone connu
+        phone_line_type (str): mobile | fixed (portable ou fixe)
+        etape_prospection (str): Filtre pipeline
+        include_phones (bool): Ajoute phones[] (principal + scraper) sur chaque fiche
         
     Returns:
         JSON: Liste des entreprises avec leurs informations
@@ -552,36 +706,11 @@ def get_entreprises():
     try:
         limit = min(int(request.args.get('limit', 100)), 1000)
         offset = int(request.args.get('offset', 0))
-        
-        filters = {}
-        if request.args.get('secteur'):
-            filters['secteur'] = request.args.get('secteur')
-        if request.args.get('statut'):
-            filters['statut'] = _maybe_expand_statut_filter(request.args.get('statut'))
-        if request.args.get('opportunite'):
-            filters['opportunite'] = request.args.get('opportunite')
-        if request.args.get('search'):
-            filters['search'] = request.args.get('search')
-        
-        # Total via COUNT(*) OVER sur la 1re page uniquement (évite un 2e scan COUNT)
-        total = None
-        if offset == 0:
-            entreprises, total = database.get_entreprises(
-                filters=filters if filters else None,
-                limit=limit,
-                offset=offset,
-                with_total=True,
-            )
-        else:
-            entreprises = database.get_entreprises(
-                filters=filters if filters else None,
-                limit=limit,
-                offset=offset,
-            )
-
-        # Nettoyer les valeurs NaN pour la sérialisation JSON
-        from utils.helpers import clean_json_dict
-        entreprises = clean_json_dict(entreprises)
+        filters = _build_public_entreprises_filters_from_request()
+        include_phones = _truthy_query_flag(request.args.get('include_phones'))
+        entreprises, total = _fetch_public_entreprises_list(
+            limit, offset, filters, include_phones=include_phones,
+        )
 
         payload = {
             'success': True,
@@ -598,6 +727,101 @@ def get_entreprises():
             'success': False,
             'error': str(e)
         }), 500
+
+
+@api_public_bp.route('/groupes', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+@public_response_cache(60)
+def public_list_groupes():
+    """
+    API publique : liste tous les groupes d'entreprises ProspectLab.
+
+    Returns:
+        JSON: groupes avec nom, couleur, effectif (entreprises_count)
+    """
+    try:
+        groupes = database.get_groupes_entreprises()
+        from utils.helpers import clean_json_dict
+        groupes = clean_json_dict(groupes)
+        return jsonify({
+            'success': True,
+            'count': len(groupes),
+            'data': groupes,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@api_public_bp.route('/groupes/<int:groupe_id>', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+@public_response_cache(60)
+def public_get_groupe(groupe_id):
+    """
+    API publique : détail d'un groupe d'entreprises.
+
+    Args:
+        groupe_id (int): Identifiant du groupe
+
+    Returns:
+        JSON: métadonnées du groupe + entreprises_count
+    """
+    try:
+        groupes = database.get_groupes_entreprises()
+        groupe = next((g for g in groupes if int(g.get('id') or 0) == int(groupe_id)), None)
+        if not groupe:
+            return jsonify({'success': False, 'error': 'Groupe introuvable.'}), 404
+        from utils.helpers import clean_json_dict
+        return jsonify({'success': True, 'data': clean_json_dict(groupe)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@api_public_bp.route('/groupes/<int:groupe_id>/entreprises', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+@public_response_cache(25)
+def public_groupe_entreprises(groupe_id):
+    """
+    API publique : entreprises membres d'un groupe.
+
+    Query params:
+        limit, offset — pagination (comme GET /entreprises)
+        search, statut, has_phone, phone_line_type, has_email, include_phones, etc.
+
+    Args:
+        groupe_id (int): Identifiant du groupe
+    """
+    try:
+        groupes = database.get_groupes_entreprises()
+        groupe = next((g for g in groupes if int(g.get('id') or 0) == int(groupe_id)), None)
+        if not groupe:
+            return jsonify({'success': False, 'error': 'Groupe introuvable.'}), 404
+
+        limit = min(int(request.args.get('limit', 100)), 1000)
+        offset = int(request.args.get('offset', 0))
+        filters = _build_public_entreprises_filters_from_request() or {}
+        filters['groupe_id'] = int(groupe_id)
+
+        include_phones = _truthy_query_flag(request.args.get('include_phones'))
+        entreprises, total = _fetch_public_entreprises_list(
+            limit, offset, filters, include_phones=include_phones,
+        )
+        payload = {
+            'success': True,
+            'groupe_id': int(groupe_id),
+            'groupe_nom': groupe.get('nom'),
+            'count': len(entreprises),
+            'limit': limit,
+            'offset': offset,
+            'data': entreprises,
+        }
+        if total is not None:
+            payload['total'] = int(total)
+        return jsonify(payload)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @api_public_bp.route('/entreprises/proches', methods=['GET'])

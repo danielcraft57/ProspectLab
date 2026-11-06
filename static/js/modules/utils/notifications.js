@@ -1,17 +1,194 @@
 /**
  * Système de notifications (Originator du pattern Memento).
  * L'état est sauvegardé/restauré via MementoCaretaker.
+ * Sons courts via Web Audio (succès, erreur, attente, warning) + volume réglable.
  */
 
 (function(window) {
     'use strict';
 
     const CARETAKER_KEY = 'notifications';
+    const SOUND_SETTINGS_KEY = 'prospectlab_notification_sounds_v1';
     const MAX_ITEMS = 100;
+    const BULK_SESSION_TIMEOUT_MS = 45 * 60 * 1000;
+
+    /**
+     * Moteur audio léger (beeps synthétisés, pas de fichiers externes).
+     */
+    const NotificationSoundEngine = {
+        _ctx: null,
+        _unlocked: false,
+
+        /**
+         * @returns {AudioContext|null}
+         */
+        _getContext() {
+            if (this._ctx) return this._ctx;
+            const Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!Ctx) return null;
+            try {
+                this._ctx = new Ctx();
+            } catch (e) {
+                return null;
+            }
+            return this._ctx;
+        },
+
+        /**
+         * Débloque l'audio après un geste utilisateur (politique navigateur).
+         * @returns {Promise<void>}
+         */
+        async unlock() {
+            const ctx = this._getContext();
+            if (!ctx) return;
+            if (ctx.state === 'suspended') {
+                try {
+                    await ctx.resume();
+                } catch (e) {}
+            }
+            this._unlocked = ctx.state === 'running';
+        },
+
+        /**
+         * Joue une note sinusoïdale amortie.
+         * @param {number} frequency
+         * @param {number} startTime
+         * @param {number} durationSec
+         * @param {number} gainPeak
+         * @param {AudioContext} ctx
+         * @param {GainNode} master
+         */
+        _tone(frequency, startTime, durationSec, gainPeak, ctx, master) {
+            const osc = ctx.createOscillator();
+            const g = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(frequency, startTime);
+            g.gain.setValueAtTime(0.0001, startTime);
+            g.gain.exponentialRampToValueAtTime(Math.max(gainPeak, 0.0001), startTime + 0.012);
+            g.gain.exponentialRampToValueAtTime(0.0001, startTime + durationSec);
+            osc.connect(g);
+            g.connect(master);
+            osc.start(startTime);
+            osc.stop(startTime + durationSec + 0.02);
+        },
+
+        /**
+         * Profils sonores par catégorie.
+         * @param {'success'|'error'|'warning'|'waiting'|'info'} category
+         * @param {number} volume01
+         */
+        play(category, volume01) {
+            if (!NotificationsSoundSettings.isEnabled()) return;
+            const ctx = this._getContext();
+            if (!ctx) return;
+            const vol = Math.max(0, Math.min(1, Number(volume01) || 0));
+            if (vol <= 0) return;
+
+            const run = () => {
+                const t0 = ctx.currentTime + 0.01;
+                const master = ctx.createGain();
+                master.gain.setValueAtTime(vol * 0.22, t0);
+                master.connect(ctx.destination);
+
+                if (category === 'success') {
+                    this._tone(523.25, t0, 0.11, 1, ctx, master);
+                    this._tone(659.25, t0 + 0.1, 0.14, 0.85, ctx, master);
+                    this._tone(783.99, t0 + 0.2, 0.18, 0.7, ctx, master);
+                } else if (category === 'error') {
+                    this._tone(220, t0, 0.16, 1, ctx, master);
+                    this._tone(185, t0 + 0.12, 0.22, 0.9, ctx, master);
+                } else if (category === 'warning') {
+                    this._tone(440, t0, 0.09, 1, ctx, master);
+                    this._tone(392, t0 + 0.11, 0.09, 0.85, ctx, master);
+                    this._tone(440, t0 + 0.22, 0.12, 0.75, ctx, master);
+                } else if (category === 'waiting') {
+                    this._tone(330, t0, 0.08, 0.7, ctx, master);
+                    this._tone(392, t0 + 0.14, 0.1, 0.55, ctx, master);
+                } else {
+                    this._tone(880, t0, 0.06, 0.45, ctx, master);
+                }
+            };
+
+            if (ctx.state === 'suspended') {
+                ctx.resume().then(run).catch(function() {});
+            } else {
+                run();
+            }
+        }
+    };
+
+    const NotificationsSoundSettings = {
+        _enabled: true,
+        _volume: 0.35,
+
+        load() {
+            try {
+                const raw = window.localStorage.getItem(SOUND_SETTINGS_KEY);
+                if (!raw) return;
+                const data = JSON.parse(raw);
+                if (typeof data.enabled === 'boolean') this._enabled = data.enabled;
+                if (typeof data.volume === 'number') {
+                    this._volume = Math.max(0, Math.min(1, data.volume));
+                }
+            } catch (e) {}
+        },
+
+        persist() {
+            try {
+                window.localStorage.setItem(SOUND_SETTINGS_KEY, JSON.stringify({
+                    enabled: this._enabled,
+                    volume: this._volume
+                }));
+            } catch (e) {}
+        },
+
+        isEnabled() {
+            return !!this._enabled;
+        },
+
+        setEnabled(value) {
+            this._enabled = !!value;
+            this.persist();
+            try {
+                document.dispatchEvent(new CustomEvent('notifications:sound-settings', {
+                    detail: { enabled: this._enabled, volume: this._volume }
+                }));
+            } catch (e) {}
+        },
+
+        getVolume() {
+            return this._volume;
+        },
+
+        /**
+         * @param {number} volume01 - entre 0 et 1
+         */
+        setVolume(volume01) {
+            this._volume = Math.max(0, Math.min(1, Number(volume01) || 0));
+            this.persist();
+            try {
+                document.dispatchEvent(new CustomEvent('notifications:sound-settings', {
+                    detail: { enabled: this._enabled, volume: this._volume }
+                }));
+            } catch (e) {}
+        },
+
+        getVolumePercent() {
+            return Math.round(this._volume * 100);
+        },
+
+        setVolumePercent(percent) {
+            this.setVolume(Math.max(0, Math.min(100, Number(percent) || 0)) / 100);
+        }
+    };
+
+    NotificationsSoundSettings.load();
 
     const Notifications = {
         _items: [],
         _counter: 0,
+        /** @type {{ pending: number, errors: number, ids: Set<number>, timeoutId: number|null, initialTotal: number }|null} */
+        _bulkSoundSession: null,
 
         /** Crée un Memento de l'état actuel (Originator). */
         createMemento() {
@@ -52,6 +229,7 @@
                 if (m) window.MementoCaretaker.save(CARETAKER_KEY, m);
             }
         },
+
         /**
          * Icônes par défaut selon le type
          */
@@ -64,14 +242,136 @@
             };
             return icons[type] || icons.info;
         },
+
+        /**
+         * Catégorie sonore dérivée du type et de l'icône (attente = spinners / sabliers).
+         * @param {string} type
+         * @param {string|null} icon
+         * @returns {'success'|'error'|'warning'|'waiting'|'info'}
+         */
+        _soundCategoryFor(type, icon) {
+            const t = String(type || 'info');
+            if (t === 'success') return 'success';
+            if (t === 'error') return 'error';
+            if (t === 'warning') return 'warning';
+            const ic = String(icon || '');
+            if (/fa-spinner|fa-hourglass|fa-clock|fa-list-ol|fa-play-circle|fa-camera|fa-spider|fa-layer-group/i.test(ic)) {
+                return 'waiting';
+            }
+            return 'info';
+        },
+
+        /**
+         * Joue un son si autorisé par les options.
+         * @param {string} type
+         * @param {string|null} icon
+         * @param {object} options
+         */
+        _maybePlaySound(type, icon, options) {
+            const opts = options || {};
+            if (opts.sound === false) return;
+            const category = opts.soundCategory || this._soundCategoryFor(type, icon);
+            NotificationSoundEngine.play(category, NotificationsSoundSettings.getVolume());
+        },
+
+        /**
+         * Démarre une session bulk : un son d'attente au lancement, un seul son de synthèse à la fin.
+         * @param {{ total: number, entrepriseIds: number[] }} config
+         */
+        startBulkSoundSession(config) {
+            const total = Math.max(0, Number(config && config.total) || 0);
+            if (total <= 3) return;
+            const ids = Array.isArray(config && config.entrepriseIds)
+                ? config.entrepriseIds.map(function(x) { return Number(x); }).filter(function(n) { return n > 0; })
+                : [];
+            if (this._bulkSoundSession && this._bulkSoundSession.timeoutId) {
+                clearTimeout(this._bulkSoundSession.timeoutId);
+            }
+            this._bulkSoundSession = {
+                pending: total,
+                errors: 0,
+                ids: new Set(ids),
+                initialTotal: total,
+                timeoutId: null
+            };
+            const self = this;
+            this._bulkSoundSession.timeoutId = window.setTimeout(function() {
+                if (!self._bulkSoundSession) return;
+                NotificationSoundEngine.play('warning', NotificationsSoundSettings.getVolume());
+                self._bulkSoundSession = null;
+            }, BULK_SESSION_TIMEOUT_MS);
+            NotificationSoundEngine.unlock();
+            NotificationSoundEngine.play('waiting', NotificationsSoundSettings.getVolume());
+        },
+
+        /**
+         * Applique les options son bulk sur une notif liée à une entreprise.
+         * @param {number|null|undefined} entrepriseId
+         * @param {object} options - objet muté sur place
+         */
+        applyBulkSoundOptions(entrepriseId, options) {
+            const session = this._bulkSoundSession;
+            if (!session) return;
+            const eid = Number(entrepriseId);
+            if (!eid || !session.ids.has(eid)) return;
+            options.sound = false;
+        },
+
+        /**
+         * À appeler sur les événements terminaux (succès / erreur) d'une entreprise en bulk.
+         * @param {number|null|undefined} entrepriseId
+         * @param {string} type
+         */
+        notifyBulkTerminalEvent(entrepriseId, type) {
+            const session = this._bulkSoundSession;
+            if (!session) return;
+            const eid = Number(entrepriseId);
+            if (!eid || !session.ids.has(eid)) return;
+            if (String(type) === 'error') session.errors += 1;
+            session.pending -= 1;
+            if (session.pending > 0) return;
+            if (session.timeoutId) {
+                clearTimeout(session.timeoutId);
+            }
+            let finalCategory = 'success';
+            if (session.errors >= session.initialTotal) {
+                finalCategory = 'error';
+            } else if (session.errors > 0) {
+                finalCategory = 'warning';
+            }
+            NotificationSoundEngine.play(finalCategory, NotificationsSoundSettings.getVolume());
+            this._bulkSoundSession = null;
+        },
+
+        /**
+         * Prévisualisation depuis le panneau réglages.
+         * @param {string} [category]
+         */
+        playTestSound(category) {
+            NotificationSoundEngine.unlock();
+            NotificationSoundEngine.play(category || 'success', NotificationsSoundSettings.getVolume());
+        },
+
         /**
          * Affiche une notification (toast)
          * @param {string} message
          * @param {string} type - 'info', 'success', 'error', 'warning'
          * @param {string} [icon] - classe FontAwesome (ex: 'fa-play-circle') ou null pour l'icône par défaut
+         * @param {object} [options] - sound, soundCategory, bulkTerminal, entrepriseId
          */
-        show(message, type = 'info', icon = null) {
+        show(message, type = 'info', icon = null, options = null) {
+            let opts = options && typeof options === 'object' ? options : {};
             const iconClass = icon || this.getDefaultIcon(type);
+
+            if (opts.entrepriseId != null) {
+                this.applyBulkSoundOptions(opts.entrepriseId, opts);
+            }
+            if (opts.bulkTerminal && opts.entrepriseId != null) {
+                this.notifyBulkTerminalEvent(opts.entrepriseId, type);
+            }
+
+            this._maybePlaySound(type, iconClass, opts);
+
             let container = document.getElementById('notifications-toast-container');
             if (!container) {
                 container = document.createElement('div');
@@ -91,7 +391,6 @@
                 </div>
             `;
 
-            // Enregistrer dans l'historique
             const item = {
                 id: Date.now() + '-' + Math.random().toString(36).slice(2),
                 message: String(message),
@@ -121,7 +420,7 @@
                 }, 250);
             }, 3500);
         },
-        
+
         /**
          * Retourne la couleur selon le type
          * @param {string} type
@@ -166,16 +465,20 @@
             try {
                 document.dispatchEvent(new CustomEvent('notifications:cleared'));
             } catch (e) {}
-        }
+        },
+
+        /** Réglages sonores (volume, activation). */
+        soundSettings: NotificationsSoundSettings,
+
+        /** Moteur audio (tests avancés). */
+        soundEngine: NotificationSoundEngine
     };
-    
-    // Restauration d'état via le Caretaker (pattern Memento)
+
     if (window.MementoCaretaker) {
         const memento = window.MementoCaretaker.load(CARETAKER_KEY);
         if (memento) {
             Notifications.restoreFromMemento(memento);
         } else {
-            // Migration depuis l'ancienne clé
             try {
                 const raw = window.localStorage.getItem('prospectlab_notifications_v1');
                 if (raw) {
@@ -193,4 +496,3 @@
 
     window.Notifications = Notifications;
 })(window);
-

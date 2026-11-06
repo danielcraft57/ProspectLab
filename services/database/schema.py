@@ -1007,6 +1007,56 @@ class DatabaseSchema(DatabaseBase):
         finally:
             conn.close()
 
+    def ensure_tchatche_kb_tables(self):
+        """Tables archive / contexte sandbox Tchatche KB."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS tchatche_sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entreprise_id INTEGER NOT NULL,
+                    created_by INTEGER,
+                    title TEXT,
+                    context_summary TEXT,
+                    meta_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE
+                )
+                ''',
+            )
+            self.execute_sql(
+                cursor,
+                '''
+                CREATE TABLE IF NOT EXISTS tchatche_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER NOT NULL,
+                    role TEXT NOT NULL,
+                    body_text TEXT,
+                    intent_tag TEXT,
+                    engine TEXT,
+                    score REAL,
+                    meta_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (session_id) REFERENCES tchatche_sessions(id) ON DELETE CASCADE
+                )
+                ''',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_tchatche_sessions_ent ON tchatche_sessions(entreprise_id, updated_at DESC)',
+            )
+            self.execute_sql(
+                cursor,
+                'CREATE INDEX IF NOT EXISTS idx_tchatche_messages_sess ON tchatche_messages(session_id, id ASC)',
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def ensure_api_tokens_columns(self):
         """
         Migration idempotente des colonnes api_tokens (permissions, suppression entreprises).

@@ -153,4 +153,5 @@ ml_face/
 # Variantes de landing générées automatiquement
 static/generated/landing_variants/
 AGENT.md
+AGENTS.md
 

@@ -3,7 +3,7 @@
 {% block title %}Tchatche KB — ProspectLab{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/modules/pages/tchatche.css') }}?v=7">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/modules/pages/tchatche.css') }}?v=13">
 {% endblock %}
 
 {% block content %}
@@ -34,7 +34,8 @@
                     </div>
                 </div>
                 <div class="tc-context">
-                    <label class="tc-context-label" for="tchatche-ent-search">Contexte CRM</label>
+                    <p class="tc-context-label tc-context-label--step">Etape 1 · obligatoire</p>
+                    <label class="tc-context-label" for="tchatche-ent-search">Choisir l'entreprise a tester</label>
                     <div class="tc-context-field">
                         <input
                             type="search"
@@ -49,14 +50,27 @@
                 </div>
             </header>
 
+            <div class="tc-fiche" id="tchatche-fiche" hidden>
+                <div class="tc-fiche-head">
+                    <h2 class="tc-fiche-title" id="tchatche-fiche-title">Fiche CRM</h2>
+                    <p class="tc-fiche-meta" id="tchatche-fiche-meta"></p>
+                </div>
+                <div class="tc-openings">
+                    <p class="tc-openings-label">Premier message (DanielCraft vers le client)</p>
+                    <div class="tc-openings-list" id="tchatche-openings"></div>
+                </div>
+            </div>
+
             <div class="tc-conv-body">
                 <div class="tc-empty" id="tchatche-empty">
                     <div class="tc-empty-icon" aria-hidden="true">
                         <i class="fa-regular fa-comment-dots"></i>
                     </div>
-                    <h2 class="tc-empty-title">Pret a tester la KB</h2>
-                    <p class="tc-empty-text">Choisis un scenario ou ecris un message comme sur Facebook.</p>
-                    <div class="tc-empty-grid" id="tchatche-prompts" aria-label="Scenarios">
+                    <h2 class="tc-empty-title" id="tchatche-empty-title">Commence par une entreprise</h2>
+                    <p class="tc-empty-text" id="tchatche-empty-hint">
+                        Recherche une fiche dans le champ ci-dessus (nom, ville). Sans entreprise, la KB ne peut pas personnaliser les reponses.
+                    </p>
+                    <div class="tc-empty-grid" id="tchatche-prompts" aria-label="Scenarios" hidden>
                         <button type="button" class="tc-scenario" data-prompt="audit gratuit">
                             <span class="tc-scenario-kicker">Lead chaud</span>
                             <span class="tc-scenario-label">Audit gratuit</span>
@@ -83,15 +97,17 @@
                 </div>
             </div>
 
-            <footer class="tc-composer">
-                <form class="tc-composer-form" id="tchatche-form">
+            <footer class="tc-composer tc-composer--locked" id="tchatche-composer">
+                <p class="tc-composer-lock" id="tchatche-composer-lock">Selectionne une entreprise pour activer le chat.</p>
+                <form class="tc-composer-form tc-composer-form--locked" id="tchatche-form">
                     <textarea
                         id="tchatche-input"
                         class="tc-composer-input"
                         rows="1"
-                        placeholder="Ecrire un message client…"
+                        disabled
+                        placeholder="Choisis une entreprise en haut…"
                     ></textarea>
-                    <button type="submit" class="tc-composer-send" id="tchatche-send" aria-label="Envoyer">
+                    <button type="submit" class="tc-composer-send" id="tchatche-send" aria-label="Envoyer" disabled>
                         <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
                     </button>
                 </form>
@@ -101,6 +117,8 @@
         <aside class="tc-debug" aria-label="Analyse moteur KB">
             <div class="tc-debug-tabs" role="tablist">
                 <button type="button" class="tc-debug-tab is-active" data-tc-tab="intent" role="tab" aria-selected="true">Intent</button>
+                <button type="button" class="tc-debug-tab" data-tc-tab="context" role="tab" aria-selected="false">Contexte</button>
+                <button type="button" class="tc-debug-tab" data-tc-tab="archive" role="tab" aria-selected="false">Archive</button>
                 <button type="button" class="tc-debug-tab" data-tc-tab="scores" role="tab" aria-selected="false">Scores</button>
                 <button type="button" class="tc-debug-tab" data-tc-tab="vars" role="tab" aria-selected="false">Variables</button>
             </div>
@@ -111,6 +129,31 @@
                     <p class="tc-intent-tag" id="tchatche-intent">—</p>
                     <p class="tc-intent-sub" id="tchatche-intent-sub">Envoie un message pour lancer la classification.</p>
                 </div>
+            </div>
+
+            <div class="tc-debug-panel" data-tc-panel="context" hidden>
+                <p class="tc-context-panel-hint">Fenetre envoyee au moteur (6 derniers tours) + resume archive.</p>
+                <label class="tc-context-label" for="tchatche-context-summary">Resume (optionnel)</label>
+                <textarea
+                    id="tchatche-context-summary"
+                    class="tc-context-summary"
+                    rows="3"
+                    placeholder="Note ou futur resume IA…"
+                    disabled
+                ></textarea>
+                <button type="button" class="tc-btn tc-btn--outline tc-context-save" id="tchatche-context-save" disabled>
+                    Enregistrer le resume
+                </button>
+                <div class="tc-context-window" id="tchatche-context-window">
+                    <p class="tc-var-hint">Envoie un message ou charge une archive pour voir le contexte.</p>
+                </div>
+            </div>
+
+            <div class="tc-debug-panel" data-tc-panel="archive" hidden>
+                <p class="tc-context-panel-hint">Tests sandbox enregistres pour l'entreprise selectionnee.</p>
+                <ul class="tc-archive-list" id="tchatche-archive-list">
+                    <li class="tc-var-hint">Choisis une entreprise pour lister l'archive.</li>
+                </ul>
             </div>
 
             <div class="tc-debug-panel" data-tc-panel="scores" hidden>
@@ -128,5 +171,5 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{{ url_for('static', filename='js/pages/tchatche.js') }}?v=7"></script>
+<script src="{{ url_for('static', filename='js/pages/tchatche.js') }}?v=14"></script>
 {% endblock %}

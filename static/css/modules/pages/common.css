@@ -23,6 +23,30 @@
     margin-bottom: 1.5rem;
 }
 
+#advanced-filters .filters-grid-segmentation,
+#advanced-filters .filters-grid-contact {
+    margin-bottom: 0.85rem;
+}
+
+#advanced-filters .filters-grid-status-row {
+    margin-bottom: 0;
+}
+
+#advanced-filters .filter-checkbox-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+#advanced-filters .filter-group--contact,
+#advanced-filters .filter-group--enrichment {
+    min-width: 12rem;
+}
+
+#advanced-filters .filter-group-status {
+    grid-column: 1 / -1;
+}
+
 .filter-group {
     display: flex;
     flex-direction: column;

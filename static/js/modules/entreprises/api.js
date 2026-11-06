@@ -115,6 +115,30 @@
         },
 
         /**
+         * loadDetails avec reessais (SQLite / analyses lourdes peuvent bloquer l'API un moment).
+         * @param {number} id
+         * @param {{ timeoutMs?: number, retries?: number, signal?: AbortSignal }} [options]
+         * @returns {Promise<Object>}
+         */
+        async loadDetailsWithRetry(id, options = {}) {
+            const retries = Math.max(1, Number(options.retries) || 3);
+            const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 45000;
+            let lastError;
+            for (let attempt = 1; attempt <= retries; attempt++) {
+                try {
+                    return await this.loadDetails(id, { timeoutMs, signal: options.signal });
+                } catch (err) {
+                    lastError = err;
+                    const msg = err && err.message ? String(err.message) : '';
+                    const isTimeout = msg.includes('Chargement trop long');
+                    if (!isTimeout || attempt >= retries) throw err;
+                    await new Promise((r) => setTimeout(r, 600 * attempt));
+                }
+            }
+            throw lastError;
+        },
+
+        /**
          * Recalcule le score d'opportunité d'une entreprise et retourne le détail.
          * @param {number} id
          * @returns {Promise<{success: boolean, opportunity?: string, score?: number, breakdown?: Object, indicators?: Array}>}
@@ -172,15 +196,81 @@
         },
         
         /**
-         * Supprime une entreprise
+         * Supprime une entreprise.
+         * Tente DELETE puis POST /delete (au cas où un reverse-proxy filtre DELETE).
+         * Un 404 est traité comme déjà supprimée (idempotent).
          * @param {number} id
-         * @returns {Promise<void>}
+         * @returns {Promise<{success:boolean, alreadyGone?:boolean, message?:string}>}
          */
         async delete(id) {
-            const response = await fetch(`/api/entreprise/${id}`, {
-                method: 'DELETE'
+            const eid = Number(id);
+            if (!eid) throw new Error('Identifiant entreprise invalide');
+
+            async function parseError(response) {
+                try {
+                    const data = await response.json();
+                    if (data && data.error) return String(data.error);
+                } catch (_) {
+                    // ignore
+                }
+                return `Erreur lors de la suppression (HTTP ${response.status})`;
+            }
+
+            let response = await fetch(`/api/entreprise/${eid}`, {
+                method: 'DELETE',
+                credentials: 'same-origin',
             });
-            if (!response.ok) throw new Error('Erreur lors de la suppression');
+
+            // Fallback POST si DELETE est bloqué (proxy / WAF → souvent 404/405/403)
+            if (response.status === 404 || response.status === 405 || response.status === 403) {
+                const postRes = await fetch(`/api/entreprise/${eid}/delete`, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: '{}',
+                });
+                if (postRes.ok) {
+                    const data = await postRes.json().catch(() => ({}));
+                    return { success: true, message: data && data.message };
+                }
+                if (postRes.status === 404) {
+                    return { success: true, alreadyGone: true };
+                }
+                throw new Error(await parseError(postRes));
+            }
+
+            if (response.ok) {
+                const data = await response.json().catch(() => ({}));
+                return { success: true, message: data && data.message };
+            }
+            throw new Error(await parseError(response));
+        },
+
+        /**
+         * Supprime plusieurs entreprises en une requête.
+         * @param {number[]} ids
+         * @returns {Promise<{deleted:number[], already_gone:number[], failed:Array, deleted_count:number, already_gone_count:number, failed_count:number}>}
+         */
+        async bulkDelete(ids) {
+            const list = (Array.isArray(ids) ? ids : [])
+                .map((v) => Number(v))
+                .filter((n) => n > 0);
+            const response = await fetch('/api/entreprises/bulk-delete', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids: list }),
+            });
+            let data = {};
+            try {
+                data = await response.json();
+            } catch (_) {
+                data = {};
+            }
+            if (!response.ok && response.status !== 207) {
+                throw new Error((data && data.error) || `Erreur suppression bulk (HTTP ${response.status})`);
+            }
+            return data;
         },
         
         /**

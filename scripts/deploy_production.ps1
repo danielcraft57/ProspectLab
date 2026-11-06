@@ -1,5 +1,7 @@
-# Script de déploiement ProspectLab en production
-# Usage: .\scripts\deploy_production.ps1 [serveur] [utilisateur] [chemin]
+﻿# Script de déploiement ProspectLab en production
+# Usage (si ExecutionPolicy bloque les .ps1, utiliser deploy_production.cmd ou -ExecutionPolicy Bypass) :
+#   .\scripts\deploy_production.cmd -Server node15.lan -User pi -RemotePath /opt/prospectlab -ProxyServer node12.lan -ProxyUser pi
+#   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_production.ps1 ...
 
 param(
     [Parameter(Mandatory=$false)]
@@ -18,17 +20,68 @@ param(
     [string]$ProxyUser = 'deploy',
 
     [Parameter(Mandatory=$false)]
-    [switch]$SkipNfsClient
-,
+    [switch]$SkipNfsClient,
+
     [Parameter(Mandatory=$false)]
-    [switch]$NoRemoteGitClone
-,
+    [switch]$NoRemoteGitClone,
+
     [Parameter(Mandatory=$false)]
-    [string]$RemoteGitBranch = 'main'
+    [string]$RemoteGitBranch = 'main',
+
+    [Parameter(Mandatory=$false)]
+    [switch]$SkipPipInstall
 )
 # Usage: .\deploy_production.ps1 -Server serveur-app.lan -User deploy -ProxyServer serveur-proxy.lan -ProxyUser deploy
 
 $ErrorActionPreference = 'Stop'
+
+# Affichage console Windows : UTF-8 pour les accents (evite DÃ©ploiement, Ã©, etc.)
+function Initialize-DeployConsoleEncoding {
+    try {
+        if ($env:OS -eq 'Windows_NT') {
+            $null = cmd /c chcp 65001
+        }
+        $utf8 = [System.Text.UTF8Encoding]::new($false)
+        [Console]::OutputEncoding = $utf8
+        [Console]::InputEncoding = $utf8
+        $global:OutputEncoding = $utf8
+    } catch {
+        # Ne pas bloquer le deploy si la console refuse UTF-8
+    }
+}
+Initialize-DeployConsoleEncoding
+
+<#
+.SYNOPSIS
+    Execute ssh sans que stderr distant (sudo, git, etc.) declenche ErrorAction Stop.
+#>
+function Invoke-SshNative {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RemoteShellCommand,
+        [string]$HostSpec = '',
+        [int]$ConnectTimeoutSec = 0
+    )
+    if ([string]::IsNullOrWhiteSpace($HostSpec)) {
+        $HostSpec = "$User@$Server"
+    }
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        if ($ConnectTimeoutSec -gt 0) {
+            $output = ssh -o ConnectTimeout=$ConnectTimeoutSec $HostSpec $RemoteShellCommand 2>&1
+        } else {
+            $output = ssh $HostSpec $RemoteShellCommand 2>&1
+        }
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
+    [PSCustomObject]@{
+        Output   = $output
+        ExitCode = $exitCode
+    }
+}
 
 function Get-DotEnvValue {
     param(
@@ -65,7 +118,7 @@ if ($UseRemoteGitClone) {
         $RepoUrl = ''
     }
     if ([string]::IsNullOrWhiteSpace($RepoUrl)) {
-        Write-Host "⚠️  Remote git origin introuvable localement. Basculage sur transfert de fichiers classique." -ForegroundColor Yellow
+        Write-Host "[ATTENTION]  Remote git origin introuvable localement. Basculage sur transfert de fichiers classique." -ForegroundColor Yellow
         $UseRemoteGitClone = $false
     }
 }
@@ -77,9 +130,9 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Connexion échouée"
     }
-    Write-Host "✅ Connexion SSH OK" -ForegroundColor Green
+    Write-Host "[OK] Connexion SSH OK" -ForegroundColor Green
 } catch {
-    Write-Host "❌ Impossible de se connecter au serveur" -ForegroundColor Red
+    Write-Host "[ERREUR] Impossible de se connecter au serveur" -ForegroundColor Red
     Write-Host "   Vérifiez que:" -ForegroundColor Yellow
     Write-Host "   - Le serveur est allumé" -ForegroundColor Yellow
     Write-Host "   - SSH est activé" -ForegroundColor Yellow
@@ -88,7 +141,7 @@ try {
 }
 Write-Host ""
 
-$deployDir = Join-Path $PROJECT_DIR "deploy"
+$deployDir = $null
 if ($UseRemoteGitClone) {
     Write-Host "[2/9] Reset complet + clone git ($RemoteGitBranch) sur le serveur..." -ForegroundColor Yellow
     # Preserve assets non versionnes (screenshots, landing_variants, env) - commandes one-liner (evite CRLF)
@@ -96,40 +149,33 @@ if ($UseRemoteGitClone) {
     $preserveCmd = "PRESERVE=/tmp/prospectlab_preserve_assets; rm -rf `$PRESERVE; mkdir -p `$PRESERVE; if [ -d $RemotePath/static/screenshots ]; then cp -a $RemotePath/static/screenshots `$PRESERVE/screenshots; fi; if [ -d $RemotePath/static/generated ]; then cp -a $RemotePath/static/generated `$PRESERVE/generated; fi; if [ -f $RemotePath/.env ]; then cp -a $RemotePath/.env `$PRESERVE/.env; fi; if [ -d $RemotePath/env ]; then echo KEEP_ENV=1 > `$PRESERVE/keep_env.flag; mv $RemotePath/env `$PRESERVE/env; fi"
     ssh "$User@$Server" $preserveCmd | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "⚠️  Preservation partielle (continue quand meme)" -ForegroundColor Yellow
+        Write-Host "[ATTENTION]  Preservation partielle (continue quand meme)" -ForegroundColor Yellow
     }
 
-    $resetOutput = ssh "$User@$Server" "sudo rm -rf $RemotePath; sudo mkdir -p $RemotePath; sudo chown -R $User`:$User $RemotePath" 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "❌ Impossible de réinitialiser le dossier distant $RemotePath" -ForegroundColor Red
-        Write-Host $resetOutput -ForegroundColor Gray
+    $resetResult = Invoke-SshNative "sudo rm -rf $RemotePath; sudo mkdir -p $RemotePath; sudo chown -R $User`:$User $RemotePath"
+    if ($resetResult.ExitCode -ne 0) {
+        Write-Host "[ERREUR] Impossible de réinitialiser le dossier distant $RemotePath" -ForegroundColor Red
+        Write-Host $resetResult.Output -ForegroundColor Gray
         exit 1
     }
-    # git clone ecrit "Cloning into..." sur stderr : avec ErrorActionPreference Stop,
-    # PowerShell traite ca comme une erreur fatale. On capture sans planter.
-    $prevEap = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    $cloneOutput = ssh "$User@$Server" "git clone --branch $RemoteGitBranch --single-branch $RepoUrl $RemotePath" 2>&1
-    $cloneExit = $LASTEXITCODE
-    $ErrorActionPreference = $prevEap
-    if ($cloneExit -ne 0) {
-        Write-Host "❌ Impossible de cloner $RemoteGitBranch sur le serveur" -ForegroundColor Red
-        Write-Host ($cloneOutput | Out-String) -ForegroundColor Gray
+    $cloneResult = Invoke-SshNative "git clone --branch $RemoteGitBranch --single-branch $RepoUrl $RemotePath"
+    if ($cloneResult.ExitCode -ne 0) {
+        Write-Host "[ERREUR] Impossible de cloner $RemoteGitBranch sur le serveur" -ForegroundColor Red
+        Write-Host ($cloneResult.Output | Out-String) -ForegroundColor Gray
         exit 1
     }
 
     # Restore preserved assets
     $restoreCmd = "PRESERVE=/tmp/prospectlab_preserve_assets; mkdir -p $RemotePath/static; if [ -d `$PRESERVE/screenshots ]; then rm -rf $RemotePath/static/screenshots; cp -a `$PRESERVE/screenshots $RemotePath/static/screenshots; fi; if [ -d `$PRESERVE/generated ]; then rm -rf $RemotePath/static/generated; cp -a `$PRESERVE/generated $RemotePath/static/generated; fi; if [ -f `$PRESERVE/.env ] && [ ! -f $RemotePath/.env ]; then cp -a `$PRESERVE/.env $RemotePath/.env; fi; if [ -f `$PRESERVE/keep_env.flag ] && [ -d `$PRESERVE/env ]; then rm -rf $RemotePath/env; mv `$PRESERVE/env $RemotePath/env; fi; rm -rf `$PRESERVE"
     ssh "$User@$Server" $restoreCmd | Out-Null
-    Write-Host "✅ Clone $RemoteGitBranch effectué depuis $RepoUrl (assets preserves)" -ForegroundColor Green
+    Write-Host "[OK] Clone $RemoteGitBranch effectué depuis $RepoUrl (assets preserves)" -ForegroundColor Green
     Write-Host ""
 } else {
-    # Créer le répertoire de déploiement local
+    # Staging dans %TEMP% : evite Remove-Item sur deploy/ quand un JS est verrouille (IDE, antivirus).
+    $deployDir = Join-Path $env:TEMP ("prospectlab_deploy_" + [System.Guid]::NewGuid().ToString("n"))
     Write-Host "[2/9] Préparation des fichiers locaux..." -ForegroundColor Yellow
-    if (Test-Path $deployDir) {
-        Remove-Item -Recurse -Force $deployDir
-    }
-    New-Item -ItemType Directory -Path $deployDir | Out-Null
+    Write-Host "   Dossier staging: $deployDir" -ForegroundColor Gray
+    New-Item -ItemType Directory -Path $deployDir -Force | Out-Null
 
     # Copier les fichiers nécessaires
     $filesToCopy = @(
@@ -215,7 +261,7 @@ if ($UseRemoteGitClone) {
         return $exclude
     } | Remove-Item -Recurse -Force
 
-    Write-Host "✅ Fichiers préparés" -ForegroundColor Green
+    Write-Host "[OK] Fichiers préparés" -ForegroundColor Green
     Write-Host ""
 }
 
@@ -223,17 +269,24 @@ if ($UseRemoteGitClone) {
 Write-Host "[3/9] Vérification de Conda..." -ForegroundColor Yellow
 $condaCheck = ssh "$User@$Server" "which conda 2>/dev/null || (source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null && which conda) || (source ~/anaconda3/etc/profile.d/conda.sh 2>/dev/null && which conda) || true" 2>$null
 if (-not $condaCheck) {
-    Write-Host "❌ Conda n'est pas installé sur le serveur (miniconda3 ou anaconda3)" -ForegroundColor Red
+    Write-Host "[ERREUR] Conda n'est pas installé sur le serveur (miniconda3 ou anaconda3)" -ForegroundColor Red
     Write-Host "   Installez Miniconda puis relancez le déploiement." -ForegroundColor Yellow
     exit 1
 }
-Write-Host "✅ Conda détecté" -ForegroundColor Green
+Write-Host "[OK] Conda détecté" -ForegroundColor Green
 Write-Host ""
 
 # Créer le répertoire sur le serveur
 Write-Host "[4/9] Préparation du répertoire sur le serveur..." -ForegroundColor Yellow
-ssh "$User@$Server" "sudo mkdir -p $RemotePath && sudo chown -R $User`:$User $RemotePath" | Out-Null
-Write-Host "✅ Répertoire créé sur le serveur" -ForegroundColor Green
+$prepDir = Invoke-SshNative "mkdir -p $RemotePath 2>/dev/null; test -d $RemotePath && test -w $RemotePath"
+if ($prepDir.ExitCode -ne 0) {
+    $prepDir = Invoke-SshNative "sudo mkdir -p $RemotePath && sudo chown -R $User`:$User $RemotePath"
+}
+if ($prepDir.ExitCode -eq 0) {
+    Write-Host "[OK] Répertoire créé sur le serveur" -ForegroundColor Green
+} else {
+    Write-Host "[ATTENTION]  Preparation du repertoire distante partielle (sudo interactif?). Verifiez $RemotePath sur $Server" -ForegroundColor Yellow
+}
 Write-Host ""
 
 # Copier les fichiers vers le serveur
@@ -264,7 +317,11 @@ if ($useRsync) {
     
     try {
         Push-Location $deployDir
-        tar -czf $tempTarGz * 2>&1 | Out-Null
+        $prevEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        # tar.exe ecrit sur stderr (chemins manquants, symlinks) : ne pas traiter comme erreur PowerShell fatale
+        tar -czf $tempTarGz * 2>$null
+        $ErrorActionPreference = $prevEap
         
         if (Test-Path $tempTarGz) {
             scp $tempTarGz "$User@$Server`:/tmp/prospectlab_deploy.tar.gz" 2>&1 | Out-Null
@@ -298,11 +355,11 @@ if ($useRsync) {
 }
 
 if (-not $transferSuccess) {
-    Write-Host "❌ Erreur lors du transfert des fichiers" -ForegroundColor Red
+    Write-Host "[ERREUR] Erreur lors du transfert des fichiers" -ForegroundColor Red
     Write-Host "   Vérifiez les permissions et la connexion SSH" -ForegroundColor Yellow
     exit 1
 }
-Write-Host "✅ Fichiers transférés" -ForegroundColor Green
+Write-Host "[OK] Fichiers transférés" -ForegroundColor Green
 
 # Envoi explicite de chaque dossier (garantit leur présence, notamment si tar sous Windows mal extrait)
 $dirsToSync = @('routes', 'services', 'tasks', 'templates', 'static', 'utils', 'scripts', 'template_studio')
@@ -311,14 +368,14 @@ foreach ($dir in $dirsToSync) {
     if (Test-Path $dirPath -PathType Container) {
         Write-Host "   Envoi de $dir..." -ForegroundColor Gray
         scp -r "$dirPath" "$User@$Server`:$RemotePath/" 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { Write-Host "❌ Erreur envoi $dir" -ForegroundColor Red; exit 1 }
+        if ($LASTEXITCODE -ne 0) { Write-Host "[ERREUR] Erreur envoi $dir" -ForegroundColor Red; exit 1 }
     }
 }
-Write-Host "✅ Dossiers synchronisés (routes, services, tasks, templates, static, utils, scripts)" -ForegroundColor Green
+Write-Host "[OK] Dossiers synchronisés (routes, services, tasks, templates, static, utils, scripts)" -ForegroundColor Green
 Write-Host ""
 } else {
     Write-Host "[5/9] Transfert des fichiers vers le serveur..." -ForegroundColor Yellow
-    Write-Host "✅ Étape ignorée (mode clone git actif)." -ForegroundColor Green
+    Write-Host "[OK] Étape ignorée (mode clone git actif)." -ForegroundColor Green
     Write-Host ""
 }
 
@@ -356,8 +413,9 @@ if (-not $SkipNfsClient) {
         }
         Write-Host "[5b/9] Montage NFS client (serveur $nfsServerDeploy, NFS_AUTO_STASH=$nfsAutoStashVal)..." -ForegroundColor Yellow
         $nfsClientScript = "$RemotePath/scripts/linux/setup_nfs_client_prospectlab.sh"
-        $nfsClientOut = ssh "$User@$Server" "sudo env REMOTE_PATH=$RemotePath NFS_SERVER=$nfsServerDeploy NFS_EXPORT_ROOT=$nfsExportRootDeploy NFS_AUTO_STASH=$nfsAutoStashVal bash $nfsClientScript" 2>&1
-        if ($LASTEXITCODE -ne 0) {
+        $nfsClientResult = Invoke-SshNative "sudo env REMOTE_PATH=$RemotePath NFS_SERVER=$nfsServerDeploy NFS_EXPORT_ROOT=$nfsExportRootDeploy NFS_AUTO_STASH=$nfsAutoStashVal bash $nfsClientScript"
+        $nfsClientOut = $nfsClientResult.Output
+        if ($nfsClientResult.ExitCode -ne 0) {
             Write-Host "Échec montage NFS client sur le serveur app" -ForegroundColor Red
             Write-Host $nfsClientOut -ForegroundColor Gray
             exit 1
@@ -373,79 +431,91 @@ $envProdLocal = Join-Path $PROJECT_DIR '.env.prod'
 if (Test-Path -LiteralPath $envProdLocal -PathType Leaf) {
     scp $envProdLocal "$User@$Server`:$RemotePath/.env.prod" 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "❌ Erreur lors de l'envoi de .env.prod" -ForegroundColor Red
+        Write-Host "[ERREUR] Erreur lors de l'envoi de .env.prod" -ForegroundColor Red
         exit 1
     }
     # Pas de fallback sed 's/\r$//' depuis PowerShell: si le \ est mangé, sed coupe le r de .fr
     # (BASE_URL=...danielcraft.fr → ...danielcraft.f). Uniquement fix_env_crlf.sh (Python).
     ssh "$User@$Server" "cd $RemotePath; cp -f .env.prod .env; chmod 600 .env .env.prod; bash scripts/linux/fix_env_crlf.sh $RemotePath/.env" 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "❌ Erreur lors de la copie .env.prod → .env sur le serveur" -ForegroundColor Red
+        Write-Host "[ERREUR] Erreur lors de la copie .env.prod → .env sur le serveur" -ForegroundColor Red
         exit 1
     }
-    Write-Host "✅ .env mis à jour sur $RemotePath (depuis .env.prod, CRLF corrigés si besoin)" -ForegroundColor Green
+    Write-Host "[OK] .env mis à jour sur $RemotePath (depuis .env.prod, CRLF corrigés si besoin)" -ForegroundColor Green
 } else {
-    Write-Host "⚠️  Fichier .env.prod introuvable à la racine du projet : $envProdLocal" -ForegroundColor Yellow
+    Write-Host "[ATTENTION]  Fichier .env.prod introuvable à la racine du projet : $envProdLocal" -ForegroundColor Yellow
     Write-Host "   Le .env existant sur le serveur n'a pas été modifié." -ForegroundColor Gray
 }
 Write-Host ""
 
 # Créer ou mettre à jour l'environnement Conda sur le serveur (prefix = env)
 Write-Host "[6/9] Configuration de l'environnement Conda..." -ForegroundColor Yellow
-$prevEapConda = $ErrorActionPreference
-$ErrorActionPreference = 'Continue'
-$condaOutput = ssh "$User@$Server" "set -e; source ~/miniconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/anaconda3/etc/profile.d/conda.sh; cd $RemotePath; if [ ! -d env ]; then conda create --prefix $RemotePath/env python=3.11 -y --override-channels -c conda-forge; fi; $RemotePath/env/bin/pip install --upgrade pip setuptools wheel; $RemotePath/env/bin/pip install -r requirements.txt" 2>&1
-$condaExit = $LASTEXITCODE
-$ErrorActionPreference = $prevEapConda
-if ($condaExit -ne 0) {
-    Write-Host "❌ Erreur lors de l'installation des dépendances Conda/pip" -ForegroundColor Red
-    Write-Host ($condaOutput | Out-String) -ForegroundColor Gray
-    exit 1
+if ($SkipPipInstall) {
+    Write-Host "[ATTENTION]  SkipPipInstall : etape pip ignoree (sync code uniquement)." -ForegroundColor Yellow
+    Write-Host ""
+} else {
+    $condaResult = Invoke-SshNative "chmod +x $RemotePath/scripts/linux/deploy_pip_install.sh 2>/dev/null; bash $RemotePath/scripts/linux/deploy_pip_install.sh $RemotePath"
+    $condaOutput = $condaResult.Output
+    if ($condaResult.ExitCode -ne 0) {
+        Write-Host "[ERREUR] Erreur lors de l'installation des dépendances Conda/pip" -ForegroundColor Red
+        Write-Host ($condaOutput | Out-String) -ForegroundColor Gray
+        exit 1
+    }
+    if ("$condaOutput" -match 'WARN: pip install') {
+        Write-Host "[ATTENTION]  pip partiellement en echec, imports critiques OK." -ForegroundColor Yellow
+    }
+    Write-Host "[OK] Environnement Conda configuré (prefix=$RemotePath/env)" -ForegroundColor Green
+    Write-Host ""
 }
-Write-Host "✅ Environnement Conda configuré (prefix=$RemotePath/env)" -ForegroundColor Green
-Write-Host ""
 
 # Créer les répertoires nécessaires
 Write-Host "[7/9] Création des répertoires nécessaires..." -ForegroundColor Yellow
 ssh "$User@$Server" "cd $RemotePath && mkdir -p logs logs_server" | Out-Null
-Write-Host "✅ Répertoires créés" -ForegroundColor Green
+Write-Host "[OK] Répertoires créés" -ForegroundColor Green
 Write-Host ""
 
 # Ajouter les permissions d'exécution aux scripts shell
 Write-Host "[7.5/9] Configuration des permissions des scripts..." -ForegroundColor Yellow
 ssh "$User@$Server" "cd $RemotePath && find scripts/linux -name '*.sh' -type f -exec chmod +x {} \; 2>/dev/null || true" | Out-Null
 ssh "$User@$Server" "cd $RemotePath && find scripts -name '*.sh' -type f -exec chmod +x {} \; 2>/dev/null || true" | Out-Null
-Write-Host "✅ Permissions des scripts configurées" -ForegroundColor Green
+Write-Host "[OK] Permissions des scripts configurées" -ForegroundColor Green
 Write-Host ""
 
 # Mettre à jour les services systemd pour Conda (env)
 Write-Host "[7.6/9] Mise à jour des services systemd (Conda)..." -ForegroundColor Yellow
-$updateServices = ssh "$User@$Server" "test -x $RemotePath/scripts/linux/update_services_to_conda.sh && cd $RemotePath && sudo bash scripts/linux/update_services_to_conda.sh" 2>&1
-if ($LASTEXITCODE -eq 0) { Write-Host "✅ Services systemd mis à jour" -ForegroundColor Green } else { Write-Host "⚠️  Mise à jour des services ignorée (vérifiez sudo)" -ForegroundColor Yellow }
+$updateServices = Invoke-SshNative "test -x $RemotePath/scripts/linux/update_services_to_conda.sh && cd $RemotePath && sudo bash scripts/linux/update_services_to_conda.sh"
+if ($updateServices.ExitCode -eq 0) { Write-Host "[OK] Services systemd mis à jour" -ForegroundColor Green } else { Write-Host "[ATTENTION]  Mise à jour des services ignorée (sudo sans mot de passe? voir NOPASSWD sur node15)" -ForegroundColor Yellow }
 Write-Host ""
 
 # Synchroniser les modèles email Facturio (sources HTML -> JSON -> BDD)
 Write-Host "[7.7/9] Synchronisation Template Studio (modèles email)..." -ForegroundColor Yellow
-$syncTplOut = ssh "$User@$Server" "cd $RemotePath && if [ -f env/bin/python ]; then env/bin/python scripts/linux/sync_template_studio_to_db.py html_facturio_beta_places html_facturio_beta_reforme2026 html_facturio_beta_dev_vertical; elif command -v python3 >/dev/null 2>&1; then python3 scripts/linux/sync_template_studio_to_db.py html_facturio_beta_places html_facturio_beta_reforme2026 html_facturio_beta_dev_vertical; else echo 'Python introuvable pour sync templates'; fi" 2>&1
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "✅ Modèles email synchronisés" -ForegroundColor Green
+$syncTplResult = Invoke-SshNative "cd $RemotePath && if [ -f env/bin/python ]; then env/bin/python scripts/linux/sync_template_studio_to_db.py html_facturio_beta_places html_facturio_beta_reforme2026 html_facturio_beta_dev_vertical; elif command -v python3 >/dev/null 2>&1; then python3 scripts/linux/sync_template_studio_to_db.py html_facturio_beta_places html_facturio_beta_reforme2026 html_facturio_beta_dev_vertical; else echo 'Python introuvable pour sync templates'; fi"
+if ($syncTplResult.ExitCode -eq 0) {
+    Write-Host "[OK] Modèles email synchronisés" -ForegroundColor Green
 } else {
-    Write-Host "⚠️  Sync templates ignorée ou partielle" -ForegroundColor Yellow
-    Write-Host $syncTplOut -ForegroundColor Gray
+    Write-Host "[ATTENTION]  Sync templates ignorée ou partielle" -ForegroundColor Yellow
+    Write-Host $syncTplResult.Output -ForegroundColor Gray
 }
 Write-Host ""
 
 # Nettoyage du cache et redémarrage des services
 Write-Host "[8/9] Nettoyage Redis/Logs et redémarrage des services..." -ForegroundColor Yellow
 ssh "$User@$Server" "cd $RemotePath && if [ -x scripts/linux/clear-redis.sh ]; then ./scripts/linux/clear-redis.sh; fi && if [ -x scripts/linux/clear-logs.sh ]; then ./scripts/linux/clear-logs.sh; fi && if [ -x scripts/linux/clear-celerybeat-schedule.sh ]; then ./scripts/linux/clear-celerybeat-schedule.sh; fi" | Out-Null
-ssh "$User@$Server" "sudo systemctl restart prospectlab prospectlab-celery prospectlab-celerybeat" | Out-Null
+$restartResult = Invoke-SshNative "sudo systemctl restart prospectlab prospectlab-celery prospectlab-celerybeat"
+if ($restartResult.ExitCode -ne 0) {
+    Write-Host "[ATTENTION]  Redemarrage systemd non effectue (sudo). Sur $Server : sudo systemctl restart prospectlab prospectlab-celery prospectlab-celerybeat" -ForegroundColor Yellow
+}
 $beatStatus = ssh "$User@$Server" "systemctl is-active prospectlab-celerybeat" 2>$null
 if ($beatStatus -eq 'active') {
-    Write-Host "✅ Celery Beat actif après redémarrage" -ForegroundColor Green
+    Write-Host "[OK] Celery Beat actif après redémarrage" -ForegroundColor Green
 } else {
-    Write-Host "⚠️  Celery Beat ne répond pas (état: $beatStatus). Sur le serveur: rm -f $RemotePath/celerybeat-schedule.* $RemotePath/celery_beat.pid && sudo systemctl restart prospectlab-celerybeat" -ForegroundColor Yellow
+    Write-Host "[ATTENTION]  Celery Beat ne répond pas (état: $beatStatus). Sur le serveur: rm -f $RemotePath/celerybeat-schedule.* $RemotePath/celery_beat.pid && sudo systemctl restart prospectlab-celerybeat" -ForegroundColor Yellow
 }
-Write-Host "✅ Cache vidé et services redémarrés" -ForegroundColor Green
+if ($restartResult.ExitCode -eq 0) {
+    Write-Host "[OK] Cache vidé et services redémarrés" -ForegroundColor Green
+} else {
+    Write-Host "[OK] Cache vidé (redemarrage services a faire a la main si besoin)" -ForegroundColor Green
+}
 Write-Host ""
 
 # Vérification que l'application répond sur le serveur app (évite 502 côté Nginx)
@@ -454,9 +524,9 @@ Start-Sleep -Seconds 3
 $httpCode = ssh "$User@$Server" "curl -s -o /dev/null -w '%{http_code}' --connect-timeout 10 http://127.0.0.1:5000/" 2>$null
 if (-not $httpCode) { $httpCode = '000' }
 if ($httpCode -eq '200' -or $httpCode -eq '302' -or $httpCode -eq '301') {
-    Write-Host "✅ Application répond sur ${Server}:5000 (HTTP $httpCode)" -ForegroundColor Green
+    Write-Host "[OK] Application répond sur ${Server}:5000 (HTTP $httpCode)" -ForegroundColor Green
 } else {
-    Write-Host "⚠️  L'application ne répond pas correctement sur ${Server}:5000 (HTTP $httpCode)" -ForegroundColor Yellow
+    Write-Host "[ATTENTION]  L'application ne répond pas correctement sur ${Server}:5000 (HTTP $httpCode)" -ForegroundColor Yellow
     Write-Host "   Sur le serveur app, vérifiez: sudo systemctl status prospectlab && curl -I http://127.0.0.1:5000/" -ForegroundColor Gray
     Write-Host "   Si Nginx affiche 502, vérifiez sur le serveur proxy que le serveur app est résolu et que le port 5000 est joignable." -ForegroundColor Gray
     Write-Host "   Voir: docs/configuration/DEPLOIEMENT_PRODUCTION.md (section Dépannage 502)" -ForegroundColor Gray
@@ -466,15 +536,13 @@ Write-Host ""
 # Rechargement Nginx optionnel sur le serveur proxy
 if ($ProxyServer) {
     Write-Host "[8.6/9] Rechargement Nginx sur le serveur proxy $ProxyServer..." -ForegroundColor Yellow
-    $prevEapNginx = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    $nginxReload = ssh -o ConnectTimeout=5 "$ProxyUser@$ProxyServer" "sudo nginx -t; sudo systemctl reload nginx; systemctl is-active nginx" 2>&1
-    $nginxExit = $LASTEXITCODE
-    $ErrorActionPreference = $prevEapNginx
+    $nginxReloadResult = Invoke-SshNative -HostSpec "$ProxyUser@$ProxyServer" -ConnectTimeoutSec 5 "sudo nginx -t; sudo systemctl reload nginx; systemctl is-active nginx"
+    $nginxReload = $nginxReloadResult.Output
+    $nginxExit = $nginxReloadResult.ExitCode
     if ($nginxExit -eq 0 -and ("$nginxReload" -match 'active')) {
-        Write-Host "✅ Nginx rechargé sur $ProxyServer" -ForegroundColor Green
+        Write-Host "[OK] Nginx rechargé sur $ProxyServer" -ForegroundColor Green
     } else {
-        Write-Host "⚠️  Impossible de recharger Nginx sur $ProxyServer (vérifiez SSH et sudo)" -ForegroundColor Yellow
+        Write-Host "[ATTENTION]  Impossible de recharger Nginx sur $ProxyServer (vérifiez SSH et sudo)" -ForegroundColor Yellow
         Write-Host ($nginxReload | Out-String) -ForegroundColor Gray
     }
     Write-Host ""
@@ -494,9 +562,13 @@ Write-Host "  docs/configuration/DEPLOIEMENT_PRODUCTION.md" -ForegroundColor Gra
 Write-Host ""
 
 # Nettoyer le répertoire de déploiement local
-if (Test-Path $deployDir) {
-    Remove-Item -Recurse -Force $deployDir
-    Write-Host "✅ Répertoire de déploiement local nettoyé" -ForegroundColor Green
+if ($deployDir -and (Test-Path -LiteralPath $deployDir)) {
+    try {
+        Remove-Item -LiteralPath $deployDir -Recurse -Force -ErrorAction Stop
+        Write-Host "[OK] Répertoire de déploiement local nettoyé" -ForegroundColor Green
+    } catch {
+        Write-Host "[ATTENTION]  Staging local laissé en place (fichier verrouillé?) : $deployDir" -ForegroundColor Yellow
+    }
 } else {
-    Write-Host "✅ Aucun répertoire de déploiement local à nettoyer (mode clone git)." -ForegroundColor Green
+    Write-Host "[OK] Aucun répertoire de déploiement local à nettoyer (mode clone git)." -ForegroundColor Green
 }

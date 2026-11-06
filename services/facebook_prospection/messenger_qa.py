@@ -7,17 +7,27 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from services.facebook_prospection.qdrant import FacebookProspectionQdrant
+from services.facebook_prospection.dialogue import (
+    build_qdrant_query_text,
+    dialogue_override_tag,
+    penalize_repeated_intents,
+    pick_intent_from_predictions,
+    template_pick_index,
+)
 from config import VOCALGUARD_KB_PROFILE
+from services.facebook_prospection.qdrant import FacebookProspectionQdrant
 from services.facebook_prospection.reply_vars import (
     INTENT_TEMPLATES,
     apply_vars_to_suggestions,
+    build_var_groups_for_ui,
     load_entreprise_reply_vars,
     merge_template_suggestions,
     public_var_catalog,
     render_reply_template,
+    templates_for_tag,
 )
 from services.facebook_prospection.vocalguard_client import chat_turn, list_intents, vocalguard_configured
+from services.facebook_prospection.vocalguard_kb_db import vocalguard_db_configured
 from services.facebook_prospection.vocalguard_embed import EMBED_DIM, embed_text
 
 logger = logging.getLogger(__name__)
@@ -72,6 +82,9 @@ def search_intents_qdrant(
     *,
     top_k: int = 8,
     profile: str | None = None,
+    recent_tags: list[str] | None = None,
+    recent_user_texts: list[str] | None = None,
+    recent_replies: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Predict local : hashing VocalGuard + collection Qdrant.
@@ -79,10 +92,18 @@ def search_intents_qdrant(
     @param text: Message user
     @param top_k: Nombre d'intents
     @param profile: inbound | outbound_commercial
+    @param recent_tags: Derniers tags (contexte embed)
+    @param recent_user_texts: Historique client
+    @param recent_replies: Historique bot
     @returns: Liste {tag, score, ref_type}
     """
-    query = (text or '').strip()
-    if not query:
+    query = build_qdrant_query_text(
+        text,
+        recent_user_texts=recent_user_texts,
+        recent_replies=recent_replies,
+        recent_tags=recent_tags,
+    )
+    if not query.strip():
         return []
     prof = profile or VOCALGUARD_KB_PROFILE
     store = FacebookProspectionQdrant(profile=prof)
@@ -198,22 +219,39 @@ def answer_user_turn(
             fiche,
         )
 
-    preds = search_intents_qdrant(query, top_k=top_k, profile=prof)
+    preds = search_intents_qdrant(
+        query,
+        top_k=top_k,
+        profile=prof,
+        recent_tags=recent_tags,
+        recent_user_texts=recent_user_texts,
+        recent_replies=recent_replies,
+    )
+    preds = penalize_repeated_intents(preds, recent_tags)
+    forced = dialogue_override_tag(query, recent_tags)
     catalog = _catalog(prof)
-    tag = preds[0]['tag'] if preds else None
-    score = float(preds[0]['score']) if preds else 0.0
+    tag, score, preds = pick_intent_from_predictions(
+        preds,
+        forced_tag=forced,
+        recent_replies=recent_replies,
+        catalog=catalog,
+    )
+    tpl_idx = template_pick_index(tag, recent_tags, query)
     intent = catalog.get(str(tag)) if tag else None
     reply = _reply_from_intent(intent)
-    if not reply and tag:
-        reply = (
-            f"Intent detecte : {tag} "
-            f"(score {score:.2f}). Active l'API tchatche interne dans le .env pour les phrases du catalogue."
-        )
-    if not reply:
+    if not tag:
         reply = (
             "Aucun intent proche dans la collection Qdrant. "
             "Verifie QDRANT_URL, la collection intents_outbound_commercial et la sync catalogue."
         )
+    elif not reply and not templates_for_tag(tag):
+        reply = (
+            f"Intent detecte : {tag} "
+            f"(score {score:.2f}). Ajoute un template dans INTENT_TEMPLATES "
+            f"(services/facebook_prospection/reply_vars.py) ou branche VOCALGUARD_URL."
+        )
+    elif not reply:
+        reply = ''
     suggestions = _suggestions_from_reply(reply, tag, score, preds, profile=prof, catalog=catalog)
     return _personalize_turn(
         {
@@ -224,12 +262,14 @@ def answer_user_turn(
             'engine': 'qdrant',
             'suggestions': suggestions,
             'top_predictions': preds,
-            'persona_reason': None,
+            'persona_reason': forced,
             'mood': None,
             'action': (intent or {}).get('action') if intent else None,
+            'template_index': tpl_idx,
         },
         vars_map,
         fiche,
+        recent_replies=recent_replies,
     )
 
 
@@ -237,6 +277,8 @@ def _personalize_turn(
     turn: dict[str, Any],
     vars_map: dict[str, str],
     fiche: dict[str, Any] | None,
+    *,
+    recent_replies: list[str] | None = None,
 ) -> dict[str, Any]:
     """
     Injecte les variables entreprise dans reply + suggestions.
@@ -244,6 +286,7 @@ def _personalize_turn(
     @param turn: Tour Q/R brut
     @param vars_map: Placeholders
     @param fiche: Fiche CRM ou None
+    @param recent_replies: Evite de renvoyer la meme phrase bot
     @returns: Tour enrichi
     """
     turn['reply'] = render_reply_template(str(turn.get('reply') or ''), vars_map)
@@ -253,11 +296,14 @@ def _personalize_turn(
         vars_map,
         list(turn.get('suggestions') or []),
         score=float(turn.get('score') or 0),
+        template_index=int(turn.get('template_index') or 0),
+        avoid_replies=list(recent_replies or [])[-3:],
     )
     if reply:
         turn['reply'] = reply
         turn['suggestions'] = chips
     turn['vars'] = vars_map
+    turn['var_groups'] = build_var_groups_for_ui(vars_map)
     turn['templates'] = list(INTENT_TEMPLATES.get(str(turn.get('tag') or ''), []))
     turn['entreprise_id'] = int(fiche['id']) if fiche and fiche.get('id') is not None else None
     turn['entreprise_nom'] = (fiche or {}).get('nom') if fiche else None
@@ -324,9 +370,11 @@ def kb_status() -> dict[str, Any]:
     store = FacebookProspectionQdrant()
     info = store.collection_info()
     chat_api = vocalguard_configured()
+    vg_db = vocalguard_db_configured()
     return {
         'qdrant': info,
         'kb_chat_configured': chat_api,
+        'kb_db_configured': vg_db,
         'embed': 'hashing_384',
         'dims': store.dims,
         'collection': store.collection,

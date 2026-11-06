@@ -2,7 +2,13 @@
 
 Ce document résume les changements techniques importants pour la maintenance et le déploiement.
 
-## Emails tracking BASE_URL + Gemini multi-clés (octobre 2026)
+## Filtres téléphone entreprises + API groupes publiques (novembre 2025)
+
+- **Page Entreprises** : filtres « Avec téléphone », type portable/fixe, panneau segmentation réorganisé (coordonnées / enrichissement) ; application AJAX immédiate (debounce 300 ms).
+- **API interne** : `has_phone`, `phone_line_type` sur `GET /api/entreprises` (via `_parse_entreprise_list_filters`).
+- **API publique** : `GET /api/public/groupes`, `/groupes/<id>`, `/groupes/<id>/entreprises` ; filtres `groupe_id`, `has_phone`, `phone_line_type` sur `GET /api/public/entreprises`.
+- **Doc** : [guides/API_PUBLIQUE.md](guides/API_PUBLIQUE.md).
+
 
 - **BASE_URL / CTA** : normalisation HTTPS + réparation des hôtes tronqués (`*.danielcraft.f` → `.fr`) dans `config.py` ; domaines marque / sites nettoyés dans les query params des templates ; script `scripts/linux/repair_truncated_tracking_urls.py` ; `fix_env_crlf.sh` en Python (plus de `sed`/`rstrip` qui mangeait le `r` de `.fr`).
 - **Gemini** : rotation multi-comptes (429 RPM / 503 → clé suivante, 401/403 → révocation process, RPD réel → blacklist jusqu'au reset Pacific) ; file Redis `GEMINI_JOB_SPACING_SEC` + slots `GEMINI_FULL_REPORT_MAX_CONCURRENT` ; journal / toasts quota sur fiche.

@@ -117,7 +117,10 @@ Tous les chemins ci‑dessous sont **relatifs** à `/api/public`.
 | **GET** | `/reference/carte-villes` | Entreprises | Villes (presets) + effectif dans un rayon (`rayon_km`) |
 | **GET** | `/entreprises/statuses` | Entreprises | Statuts entreprise supportés (pipeline, délivrabilité) |
 | **GET** | `/campagnes/statuses` | Campagnes | `draft`, `scheduled`, `running`, `completed`, `failed` |
-| **GET** | `/entreprises` | Entreprises | Liste paginée (`limit`, `offset`, `secteur`, `statut`, `search`) |
+| **GET** | `/entreprises` | Entreprises | Liste paginée (`limit`, `offset`, `secteur`, `statut`, `search`, `groupe_id`, `has_phone`, `phone_line_type`, …) |
+| **GET** | `/groupes` | Entreprises | Liste des groupes ProspectLab (`entreprises_count`) |
+| **GET** | `/groupes/<id>` | Entreprises | Détail d'un groupe |
+| **GET** | `/groupes/<id>/entreprises` | Entreprises | Membres du groupe (pagination + filtres comme `/entreprises`) |
 | **GET** | `/entreprises/proches` | Entreprises | Proximité GPS (`latitude`, `longitude`, `rayon_km`, `limit`, `secteur`) |
 | **GET** | `/entreprises/<id>` | Entreprises | Détail entreprise |
 | **DELETE** | `/entreprises/<id>` | Entreprises + `entreprises_delete` | Suppression PERMANENTE (cascades de données liées incluses) |
@@ -218,8 +221,22 @@ La **valeur complète** du secret n’est **pas** renvoyée.
 
 **GET** `/entreprises`
 
-Paramètres : `limit` (défaut 100, max 1000), `offset`, `secteur`, `statut`, `search`.  
+Paramètres principaux :
+
+- Pagination : `limit` (défaut 100, max 1000), `offset`
+- Segmentation : `secteur`, `categorie`, `statut`, `opportunite`, `etape_prospection`, `search`
+- Groupes : `groupe_id` (membres d'un groupe), `no_group=1` (sans groupe)
+- Coordonnées : `has_email=1`, `has_phone=1`, `phone_line_type=mobile|fixed` (portable ou fixe)
+- Chaque fiche liste inclut `telephone`, `display_phone` (principal ou 1er scraper) et `phones_count`
+- `include_phones=1` : ajoute le tableau `phones[]` (comme GET `/entreprises/<id>/phones`)
+
 Pour `statut` : si la valeur est `Gagné`, `Perdu` ou `Relance`, le filtre inclut les statuts événementiels associés ; sinon filtre exact.
+
+**GET** `/groupes` — liste tous les groupes (nom, description, couleur, `entreprises_count`).
+
+**GET** `/groupes/<id>` — détail d'un groupe.
+
+**GET** `/groupes/<id>/entreprises` — entreprises du groupe ; accepte les mêmes filtres que `/entreprises` (ex. `?has_phone=1&phone_line_type=mobile`).
 
 **GET** `/entreprises/by-website?website=`** — URL ou domaine normalisé.
 

@@ -50,6 +50,38 @@
         }
     }
 
+    /**
+     * Numéro affichable (principal ou premier scraper).
+     * @param {object} entreprise
+     * @returns {string}
+     */
+    function getEntrepriseDisplayPhone(entreprise) {
+        if (!entreprise) return '';
+        return String(entreprise.display_phone || entreprise.telephone || '').trim();
+    }
+
+    /**
+     * Ligne ou puce téléphone cliquable (tel:).
+     * @param {object} entreprise
+     * @param {'line'|'chip'} mode
+     * @returns {string}
+     */
+    function buildEntreprisePhoneHtml(entreprise, mode) {
+        const phone = getEntrepriseDisplayPhone(entreprise);
+        if (!phone) return '';
+        const safe = Formatters.escapeHtml(phone);
+        const telHref = 'tel:' + phone.replace(/[\s.\-/()]/g, '');
+        if (mode === 'chip') {
+            let extra = '';
+            const n = entreprise.phones_count;
+            if (typeof n === 'number' && n > 1) {
+                extra = ` (+${n - 1})`;
+            }
+            return `<span class="row-chip row-chip-phone" title="Téléphone"><i class="fas fa-phone" aria-hidden="true"></i> <a class="row-chip-phone-link" href="${telHref}">${safe}${Formatters.escapeHtml(extra)}</a></span>`;
+        }
+        return `<p class="entreprise-phone-line"><strong>Tél.</strong> <a href="${telHref}">${safe}</a></p>`;
+    }
+
     function getInitials(name) {
         const s = String(name || '').trim();
         if (!s) return '?';
@@ -68,16 +100,72 @@
         return s;
     }
 
+    /**
+     * URL favicon directe sur le site (evite les proxies Google qui 404 en console).
+     * @param {string} domain
+     * @returns {string}
+     */
+    function faviconDirectUrl(domain) {
+        const d = String(domain || '').trim();
+        if (!d) return '';
+        return `https://${d}/favicon.ico`;
+    }
+
+    /**
+     * Favicon via service tiers (DDG par defaut ; Google en dernier recours seulement).
+     * @param {string} domain
+     * @param {'ddg'|'google'} provider
+     * @returns {string}
+     */
     function faviconFallbackUrl(domain, provider) {
         const d = String(domain || '').trim();
         if (!d) return '';
-        if (provider === 'ddg') {
-            return `https://icons.duckduckgo.com/ip3/${encodeURIComponent(d)}.ico`;
+        if (provider === 'google') {
+            return `https://www.google.com/s2/favicons?sz=128&domain=${encodeURIComponent(d)}`;
         }
-        // google s2 favicons (par défaut)
-        return `https://www.google.com/s2/favicons?sz=128&domain=${encodeURIComponent(d)}`;
+        return `https://icons.duckduckgo.com/ip3/${encodeURIComponent(d)}.ico`;
     }
-    
+
+    /**
+     * True si l'URL est un proxy favicon (souvent 404 gstatic / bruit console).
+     * @param {string} url
+     * @returns {boolean}
+     */
+    function isThirdPartyFaviconProxyUrl(url) {
+        if (!url) return false;
+        const u = String(url).toLowerCase();
+        return (
+            u.includes('gstatic.com/favicon')
+            || u.includes('faviconv2')
+            || u.includes('google.com/s2/favicons')
+            || u.includes('icons.duckduckgo.com/ip3/')
+        );
+    }
+
+    /**
+     * Retire les URLs proxy ou invalides pour le logo carte / liste.
+     * @param {string|null|undefined} url
+     * @returns {string}
+     */
+    function sanitizeEntrepriseLogoUrl(url) {
+        if (!url) return '';
+        const normalized = normalizeToHttps(url);
+        if (!normalized || isThirdPartyFaviconProxyUrl(normalized)) return '';
+        return normalized;
+    }
+
+    /**
+     * En cas d'échec du logo stocké : on affiche les initiales (plus de fallback .ico / DDG).
+     * @param {HTMLImageElement} img
+     */
+    function handleEntrepriseLogoImgError(img) {
+        if (!img) return;
+        img.style.display = 'none';
+        const ph = img.nextElementSibling;
+        if (ph) ph.style.display = 'flex';
+    }
+
+    window.handleEntrepriseLogoImgError = handleEntrepriseLogoImgError;
     function setScoreRelaunchLoading(entrepriseId, analysisType, isLoading) {
         if (!entrepriseId || !analysisType) return;
         const eid = Number(entrepriseId);
@@ -388,6 +476,8 @@
             seo_null: getElChecked('filter-seo-null'),
             pentest_null: getElChecked('filter-pentest-null'),
             has_email: getElChecked('filter-has-email'),
+            has_phone: getElChecked('filter-has-phone'),
+            phone_line_type: getElValue('filter-phone-line-type'),
             has_screenshots: getElChecked('filter-has-screenshots'),
             has_gemini_report: getElChecked('filter-has-gemini-report'),
             has_blog: getElChecked('filter-has-blog'),
@@ -476,6 +566,11 @@
             setCheckbox('filter-seo-null', s.seo_null);
             setCheckbox('filter-pentest-null', s.pentest_null);
             setCheckbox('filter-has-email', s.has_email);
+            setCheckbox('filter-has-phone', s.has_phone);
+            const filterPhoneLineType = document.getElementById('filter-phone-line-type');
+            if (filterPhoneLineType && typeof s.phone_line_type === 'string') {
+                filterPhoneLineType.value = s.phone_line_type;
+            }
             setCheckbox('filter-has-screenshots', s.has_screenshots);
             setCheckbox('filter-has-gemini-report', s.has_gemini_report);
             setCheckbox('filter-has-blog', s.has_blog);
@@ -1039,6 +1134,14 @@
         if (hasEmailCheckbox && hasEmailCheckbox.checked) {
             filters.has_email = 'true';
         }
+        const hasPhoneCheckbox = document.getElementById('filter-has-phone');
+        if (hasPhoneCheckbox && hasPhoneCheckbox.checked) {
+            filters.has_phone = 'true';
+        }
+        const phoneLineType = get('filter-phone-line-type') || '';
+        if (phoneLineType) {
+            filters.phone_line_type = phoneLineType;
+        }
         const hasScreenshotsCheckbox = document.getElementById('filter-has-screenshots');
         if (hasScreenshotsCheckbox && hasScreenshotsCheckbox.checked) {
             filters.has_screenshots = 'true';
@@ -1490,7 +1593,10 @@
         // Court délai pour laisser le backend persister score_securite / score_seo avant de refetch
         await new Promise(r => setTimeout(r, 600));
         try {
-            const updated = await EntreprisesAPI.loadDetails(entrepriseId);
+            const updated = await EntreprisesAPI.loadDetailsWithRetry(entrepriseId, {
+                timeoutMs: 45000,
+                retries: 3,
+            });
             // Compléter avec les scores d'analyse (SEO, Pentest, etc.) depuis le pipeline d'audit
             try {
                 const audit = await EntreprisesAPI.loadAuditPipeline(entrepriseId);
@@ -1545,7 +1651,12 @@
             }
             updateEntrepriseCardsInDom(updated, { animateOnlyMetric });
         } catch (e) {
-            console.error('Erreur lors de la mise à jour temps réel de l\'entreprise:', e);
+            const msg = e && e.message ? String(e.message) : '';
+            if (msg.includes('Chargement trop long')) {
+                console.warn('Mise à jour entreprise reportée (serveur occupé), id=', entrepriseId);
+            } else {
+                console.error('Erreur lors de la mise à jour temps réel de l\'entreprise:', e);
+            }
         }
     }
     
@@ -1861,11 +1972,11 @@
             </div>
         `;
         
-        const domain = getDisplayDomain(entreprise.website || mainImage || '');
         const initials = getInitials(entreprise.nom || '');
-        const safeMainImage = mainImage ? normalizeToHttps(mainImage) : '';
-        const fallbackGoogle = faviconFallbackUrl(domain, 'google');
-        const fallbackDdg = faviconFallbackUrl(domain, 'ddg');
+        // Pas de fallback live favicon.ico / DuckDuckGo : sites morts = spam 404 console.
+        // On n'affiche une image que si le scraping a déjà stocké logo / favicon / og_image.
+        const safeMainImage = sanitizeEntrepriseLogoUrl(mainImage);
+        const cardLogoSrc = safeMainImage;
 
         const isSelected = selectedEntreprises.has(entreprise.id);
 
@@ -1873,24 +1984,18 @@
             <div class="entreprise-card${isSelected ? ' entreprise-selected' : ''}" data-id="${entreprise.id}">
                 <div class="card-header-with-logo">
                     <div class="card-logo-container">
+                        ${cardLogoSrc ? `
                         <img
-                            src="${safeMainImage || fallbackGoogle}"
+                            src="${Formatters.escapeHtml(cardLogoSrc)}"
                             alt="${Formatters.escapeHtml(entreprise.nom || 'Logo')}"
                             class="card-logo"
                             loading="lazy"
                             referrerpolicy="no-referrer"
-                            data-fallback-step="0"
+                            data-fallback-step="9"
                             onload="this.nextElementSibling && (this.nextElementSibling.style.display='none')"
-                            onerror="
-                                try {
-                                    const step = (this.dataset && this.dataset.fallbackStep) ? String(this.dataset.fallbackStep) : '0';
-                                    if (step === '0' && '${fallbackGoogle}') { this.dataset.fallbackStep = '1'; this.src='${fallbackGoogle}'; return; }
-                                    if (step === '1' && '${fallbackDdg}') { this.dataset.fallbackStep = '2'; this.src='${fallbackDdg}'; return; }
-                                } catch (e) {}
-                                this.style.display='none';
-                            "
-                        >
-                        <div class="card-logo-placeholder" aria-hidden="true">${Formatters.escapeHtml(initials)}</div>
+                            onerror="handleEntrepriseLogoImgError(this)"
+                        >` : ''}
+                        <div class="card-logo-placeholder" aria-hidden="true" style="display: ${cardLogoSrc ? 'none' : 'flex'};">${Formatters.escapeHtml(initials)}</div>
                     </div>
                     <div class="card-header">
                         <div style="display:flex; align-items:center; gap:0.4rem; min-width:0;">
@@ -1923,6 +2028,7 @@
                 <div class="card-body">
                     ${resumePreview ? `<p class="resume-preview" style="color: #666; font-size: 0.9rem; margin-bottom: 0.75rem; font-style: italic;">${Formatters.escapeHtml(resumePreview)}</p>` : ''}
                     ${entreprise.website ? `<p><strong>Site:</strong> <a href="${entreprise.website}" target="_blank">${Formatters.escapeHtml(getDisplayDomain(entreprise.website))}</a></p>` : ''}
+                    ${buildEntreprisePhoneHtml(entreprise, 'line')}
                     ${entreprise.secteur ? `<p><strong>Secteur:</strong> ${Formatters.escapeHtml(entreprise.secteur)}</p>` : ''}
                     ${entreprise.categorie ? `<p><strong>Catégorie:</strong> ${Formatters.escapeHtml(entreprise.categorie)}</p>` : ''}
                     ${scoresSection}
@@ -2119,11 +2225,10 @@
                 }
             }
         }
-        const rowDomain = getDisplayDomain(entreprise.website || rowMainImage || '');
         const rowInitials = getInitials(entreprise.nom || '');
-        const rowSafeImage = rowMainImage ? normalizeToHttps(rowMainImage) : '';
-        const rowFallbackGoogle = faviconFallbackUrl(rowDomain, 'google');
-        const rowFallbackDdg = faviconFallbackUrl(rowDomain, 'ddg');
+        // Image uniquement si déjà en base (logo/favicon/og). Pas d'appel live .ico / DDG.
+        const rowSafeImage = sanitizeEntrepriseLogoUrl(rowMainImage);
+        const rowLogoSrc = rowSafeImage;
 
         const isSelected = selectedEntreprises.has(entreprise.id);
 
@@ -2138,22 +2243,18 @@
                         title="Sélectionner cette entreprise"
                         style="position:absolute; top:-6px; left:-6px; width:16px; height:16px;"
                     >
+                    ${rowLogoSrc ? `
                     <img
-                        src="${rowSafeImage || rowFallbackGoogle}"
+                        src="${Formatters.escapeHtml(rowLogoSrc)}"
                         alt=""
                         class="row-logo-img"
                         loading="lazy"
                         referrerpolicy="no-referrer"
-                        data-fallback-step="0"
+                        data-fallback-step="9"
                         onload="if (this.nextElementSibling) this.nextElementSibling.style.display='none';"
-                        onerror="
-                            var step = (this.dataset && this.dataset.fallbackStep) ? this.dataset.fallbackStep : '0';
-                            if (step === '0' && '${rowFallbackGoogle}') { this.dataset.fallbackStep = '1'; this.src='${rowFallbackGoogle}'; return; }
-                            if (step === '1' && '${rowFallbackDdg}') { this.dataset.fallbackStep = '2'; this.src='${rowFallbackDdg}'; return; }
-                            this.style.display='none'; if (this.nextElementSibling) this.nextElementSibling.style.display='flex';
-                        "
-                    >
-                    <div class="row-logo-placeholder" style="display: ${rowSafeImage || rowFallbackGoogle ? 'none' : 'flex'};">${Formatters.escapeHtml(rowInitials)}</div>
+                        onerror="handleEntrepriseLogoImgError(this)"
+                    >` : ''}
+                    <div class="row-logo-placeholder" style="display: ${rowLogoSrc ? 'none' : 'flex'};">${Formatters.escapeHtml(rowInitials)}</div>
                 </div>
                 <div class="row-main">
                     <div class="row-name">
@@ -2166,6 +2267,7 @@
                         <div class="row-meta">
                             ${entreprise.secteur ? `<span class="row-chip row-chip-sector" title="Secteur (groupe)"><i class="fas fa-industry" aria-hidden="true"></i> ${Formatters.escapeHtml(entreprise.secteur)}</span>` : ''}
                             ${entreprise.categorie ? `<span class="row-chip row-chip-category" title="Catégorie (métier)"><i class="fas fa-folder" aria-hidden="true"></i> ${Formatters.escapeHtml(entreprise.categorie)}</span>` : ''}
+                            ${buildEntreprisePhoneHtml(entreprise, 'chip')}
                             ${buildEntrepriseActionChipsHtml(entreprise)}
                             ${langChipLabel ? `<span class="row-chip row-chip-lang" title="Langue principale"><i class="fas fa-language" aria-hidden="true"></i> ${Formatters.escapeHtml(langChipLabel)}</span>` : ''}
                             ${commercialTopMode && entreprise.priority_score != null ? `
@@ -3224,7 +3326,10 @@
             'filter-seo-null',
             'filter-pentest-null',
             'filter-has-email',
+            'filter-has-phone',
+            'filter-phone-line-type',
             'filter-has-screenshots',
+            'filter-has-gemini-report',
             'filter-cms',
             'filter-framework',
             'filter-has-blog',
@@ -3489,6 +3594,7 @@
                                 'info',
                                 'fa-layer-group'
                             );
+                            registerBulkSoundSessionFromJobs(jobs);
                         }
                         if (skippedNoUrl > 0) {
                             Notifications.show(
@@ -3529,6 +3635,7 @@
                                 'info',
                                 'fa-layer-group'
                             );
+                            registerBulkSoundSessionFromJobs(jobs);
                         }
                         if (skippedNoUrl > 0) {
                             Notifications.show(
@@ -3538,7 +3645,7 @@
                         }
                         jobs.forEach((job, i) => {
                             setTimeout(() => {
-                                triggerScrapingRelaunch(job.id, { notify: true });
+                                triggerScrapingRelaunch(job.id, { notify: jobs.length <= 3 });
                             }, i * staggerMs);
                         });
                     } else if (action === 'launch-screenshots') {
@@ -3575,6 +3682,7 @@
                                 'info',
                                 'fa-camera'
                             );
+                            registerBulkSoundSessionFromJobs(jobs);
                         }
                         if (skippedNoUrl > 0) {
                             Notifications.show(
@@ -3601,28 +3709,54 @@
                         }
 
                         let deletedCount = 0;
+                        let alreadyGoneCount = 0;
                         let failedCount = 0;
-                        for (const id of ids) {
-                            try {
-                                await EntreprisesAPI.delete(id);
-                                deletedCount++;
-                                // Retirer du bloc sélectionné après suppression réussie.
-                                setEntrepriseSelected(id, false);
-                            } catch (e) {
-                                failedCount++;
-                                console.error('Erreur suppression entreprise (bulk):', id, e);
+                        try {
+                            if (typeof EntreprisesAPI.bulkDelete === 'function') {
+                                const result = await EntreprisesAPI.bulkDelete(ids);
+                                deletedCount = Number(result.deleted_count || 0);
+                                alreadyGoneCount = Number(result.already_gone_count || 0);
+                                failedCount = Number(result.failed_count || 0);
+                                const cleared = []
+                                    .concat(result.deleted || [])
+                                    .concat(result.already_gone || []);
+                                cleared.forEach((id) => setEntrepriseSelected(id, false));
+                                (result.failed || []).forEach((item) => {
+                                    console.error('Erreur suppression entreprise (bulk):', item && item.id, item && item.error);
+                                });
+                            } else {
+                                for (const id of ids) {
+                                    try {
+                                        const res = await EntreprisesAPI.delete(id);
+                                        if (res && res.alreadyGone) alreadyGoneCount++;
+                                        else deletedCount++;
+                                        setEntrepriseSelected(id, false);
+                                    } catch (e) {
+                                        failedCount++;
+                                        console.error('Erreur suppression entreprise (bulk):', id, e);
+                                    }
+                                }
                             }
+                        } catch (e) {
+                            failedCount = ids.length;
+                            console.error('Erreur suppression bulk:', e);
+                            Notifications.show(
+                                (e && e.message) ? e.message : 'Erreur lors de la suppression groupée',
+                                'error'
+                            );
                         }
 
                         await applyFilters();
                         if (failedCount > 0) {
                             Notifications.show(
-                                `Suppression terminée : ${deletedCount} supprimée${deletedCount > 1 ? 's' : ''}, ${failedCount} en échec.`,
+                                `Suppression terminée : ${deletedCount} supprimée${deletedCount > 1 ? 's' : ''}, ${alreadyGoneCount} déjà absente${alreadyGoneCount > 1 ? 's' : ''}, ${failedCount} en échec.`,
                                 'warning'
                             );
                         } else {
+                            const totalOk = deletedCount + alreadyGoneCount;
                             Notifications.show(
-                                `${deletedCount} entreprise${deletedCount > 1 ? 's' : ''} supprimée${deletedCount > 1 ? 's' : ''}`,
+                                `${totalOk} entreprise${totalOk > 1 ? 's' : ''} retirée${totalOk > 1 ? 's' : ''}`
+                                    + (alreadyGoneCount ? ` (${alreadyGoneCount} déjà absente${alreadyGoneCount > 1 ? 's' : ''})` : ''),
                                 'success'
                             );
                         }
@@ -3903,7 +4037,10 @@
         const pentestMin = document.getElementById('filter-pentest-min')?.value;
         const pentestMax = document.getElementById('filter-pentest-max')?.value;
         const hasEmail = document.getElementById('filter-has-email')?.checked;
+        const hasPhone = document.getElementById('filter-has-phone')?.checked;
+        const phoneLineType = document.getElementById('filter-phone-line-type')?.value;
         const hasScreenshots = document.getElementById('filter-has-screenshots')?.checked;
+        const hasGeminiReport = document.getElementById('filter-has-gemini-report')?.checked;
 
         const hasActiveTags = Array.isArray(activeTagFilters) && activeTagFilters.length > 0;
         const typedTags = tagsInputValue
@@ -3919,7 +4056,10 @@
             (statut ? 1 : 0) +
             (etapeProspection ? 1 : 0) +
             (hasEmail ? 1 : 0) +
-            (hasScreenshots ? 1 : 0);
+            (hasPhone ? 1 : 0) +
+            (phoneLineType ? 1 : 0) +
+            (hasScreenshots ? 1 : 0) +
+            (hasGeminiReport ? 1 : 0);
         const commercialProfile = document.getElementById('filter-commercial-profile')?.value;
         const scoresCount =
             (commercialProfile ? 1 : 0) +
@@ -5969,6 +6109,33 @@
         }
     }
     
+    function registerBulkSoundSessionFromJobs(jobs) {
+        if (!window.Notifications || typeof Notifications.startBulkSoundSession !== 'function') {
+            return;
+        }
+        if (!Array.isArray(jobs) || jobs.length <= 3) {
+            return;
+        }
+        const ids = jobs.map((j) => j.id);
+        Notifications.startBulkSoundSession({ total: jobs.length, entrepriseIds: ids });
+    }
+
+    /**
+     * Affiche un toast avec sons bulk / fin de lot par entreprise.
+     * @param {number|null|undefined} entrepriseId
+     * @param {string} message
+     * @param {string} type
+     * @param {string|null} [icon]
+     * @param {object} [extraOptions]
+     */
+    function showEntrepriseNotification(entrepriseId, message, type, icon, extraOptions) {
+        const opts = Object.assign({}, extraOptions || {});
+        if (entrepriseId != null && entrepriseId !== '') {
+            opts.entrepriseId = Number(entrepriseId);
+        }
+        Notifications.show(message, type, icon, opts);
+    }
+
     function ensureModalWebSocketListeners() {
         const s = window.wsManager && window.wsManager.socket;
         if (!s) return;
@@ -5997,7 +6164,7 @@
                 scheduleApplyFilters();
             }
             const nom = getEntrepriseNom(eid);
-            Notifications.show(nom + ' — Analyse technique terminée', 'success', 'fa-check-circle');
+            showEntrepriseNotification(eid, nom + ' — Analyse technique terminée', 'success', 'fa-check-circle', { bulkTerminal: true });
             if (eid === currentModalEntrepriseId) {
                 setTimeout(() => loadTechnicalAnalysis(currentModalEntrepriseId, { skipClear: true }), 400);
                 setTimeout(() => loadMetricEvolutionTab(currentModalEntrepriseId), 650);
@@ -6008,7 +6175,7 @@
             if (eid != null) {
                 setScoreRelaunchLoading(eid, 'technique', false);
                 const nom = getEntrepriseNom(eid);
-                Notifications.show(nom + ' — ' + (data.error || 'Erreur analyse technique'), 'error', 'fa-exclamation-circle');
+                showEntrepriseNotification(eid, nom + ' — ' + (data.error || 'Erreur analyse technique'), 'error', 'fa-exclamation-circle', { bulkTerminal: true });
             } else if (data && data.error) {
                 Notifications.show(data.error, 'error', 'fa-exclamation-circle');
             }
@@ -6030,7 +6197,7 @@
                 scheduleApplyFilters();
             }
             const nom = getEntrepriseNom(eid);
-            Notifications.show(nom + ' — Analyse SEO terminée', 'success', 'fa-check-circle');
+            showEntrepriseNotification(eid, nom + ' — Analyse SEO terminée', 'success', 'fa-check-circle', { bulkTerminal: true });
             if (eid === currentModalEntrepriseId) {
                 setTimeout(() => loadSEOAnalysis(currentModalEntrepriseId, { skipClear: true }), 400);
                 setTimeout(() => loadMetricEvolutionTab(currentModalEntrepriseId), 650);
@@ -6041,7 +6208,7 @@
             if (eid != null) {
                 setScoreRelaunchLoading(eid, 'seo', false);
                 const nom = getEntrepriseNom(eid);
-                Notifications.show(nom + ' — ' + (data.error || 'Erreur analyse SEO'), 'error', 'fa-exclamation-circle');
+                showEntrepriseNotification(eid, nom + ' — ' + (data.error || 'Erreur analyse SEO'), 'error', 'fa-exclamation-circle', { bulkTerminal: true });
             } else if (data && data.error) {
                 Notifications.show(data.error, 'error', 'fa-exclamation-circle');
             }
@@ -6053,7 +6220,7 @@
             const eid = eidOf(data);
             if (eid != null) {
                 const nom = getEntrepriseNom(eid);
-                Notifications.show(nom + ' — Analyse OSINT terminée', 'success', 'fa-check-circle');
+                showEntrepriseNotification(eid, nom + ' — Analyse OSINT terminée', 'success', 'fa-check-circle', { bulkTerminal: true });
                 if (isEntrepriseCurrentlyRendered(eid)) {
                     scheduleApplyFilters();
                 }
@@ -6066,7 +6233,7 @@
             const eid = eidOf(data);
             if (eid != null) {
                 const nom = getEntrepriseNom(eid);
-                Notifications.show(nom + ' — ' + (data.error || 'Erreur analyse OSINT'), 'error', 'fa-exclamation-circle');
+                showEntrepriseNotification(eid, nom + ' — ' + (data.error || 'Erreur analyse OSINT'), 'error', 'fa-exclamation-circle', { bulkTerminal: true });
             } else if (data && data.error) {
                 Notifications.show(data.error, 'error', 'fa-exclamation-circle');
             }
@@ -6088,7 +6255,7 @@
                 scheduleApplyFilters();
             }
             const nom = getEntrepriseNom(eid);
-            Notifications.show(nom + ' — Analyse Pentest terminée', 'success', 'fa-check-circle');
+            showEntrepriseNotification(eid, nom + ' — Analyse Pentest terminée', 'success', 'fa-check-circle', { bulkTerminal: true });
             if (eid === currentModalEntrepriseId) {
                 setTimeout(() => loadPentestAnalysis(currentModalEntrepriseId, { skipClear: true }), 400);
             }
@@ -6098,7 +6265,7 @@
             if (eid != null) {
                 setScoreRelaunchLoading(eid, 'pentest', false);
                 const nom = getEntrepriseNom(eid);
-                Notifications.show(nom + ' — ' + (data.error || 'Erreur analyse Pentest'), 'error', 'fa-exclamation-circle');
+                showEntrepriseNotification(eid, nom + ' — ' + (data.error || 'Erreur analyse Pentest'), 'error', 'fa-exclamation-circle', { bulkTerminal: true });
             } else if (data && data.error) {
                 Notifications.show(data.error, 'error', 'fa-exclamation-circle');
             }
@@ -6127,7 +6294,7 @@
                 scheduleApplyFilters();
             }
             const nom = getEntrepriseNom(entrepriseId);
-            Notifications.show(nom + ' — Scraping terminé', 'success', 'fa-check-circle');
+            showEntrepriseNotification(entrepriseId, nom + ' — Scraping terminé', 'success', 'fa-check-circle', { bulkTerminal: true });
             if (entrepriseId === currentModalEntrepriseId) {
                 refreshEntrepriseFromServer(entrepriseId).then(() => {
                     try { loadScrapingResults(entrepriseId); } catch (e) {}
@@ -6142,7 +6309,7 @@
             if (entrepriseId == null) return;
             setScrapingRelaunchLoading(entrepriseId, false);
             const nom = getEntrepriseNom(entrepriseId);
-            Notifications.show(nom + ' — ' + (data && data.error ? data.error : 'Erreur scraping'), 'error', 'fa-exclamation-circle');
+            showEntrepriseNotification(entrepriseId, nom + ' — ' + (data && data.error ? data.error : 'Erreur scraping'), 'error', 'fa-exclamation-circle', { bulkTerminal: true });
         });
 
         s.on('screenshot_capture_started', function(data) {
@@ -6153,7 +6320,7 @@
                 setInfoScreenshotsLoading(true, (data && data.message) || 'Capture screenshots démarrée...');
             }
             const nom = getEntrepriseNom(entrepriseId);
-            Notifications.show(nom + ' — Capture screenshots démarrée', 'info', 'fa-camera');
+            showEntrepriseNotification(entrepriseId, nom + ' — Capture screenshots démarrée', 'info', 'fa-camera');
         });
 
         s.on('screenshot_capture_progress', function(data) {
@@ -6169,7 +6336,7 @@
             const entrepriseId = data && data.entreprise_id != null ? data.entreprise_id : currentModalEntrepriseId;
             if (entrepriseId == null) return;
             const nom = getEntrepriseNom(entrepriseId);
-            Notifications.show(nom + ' — Screenshots mis à jour', 'success', 'fa-check-circle');
+            showEntrepriseNotification(entrepriseId, nom + ' — Screenshots mis à jour', 'success', 'fa-check-circle', { bulkTerminal: true });
             setRowChipLoading('screenshots', entrepriseId, false);
             document.querySelectorAll(`.row-chip-screenshots[data-entreprise-id="${entrepriseId}"]`).forEach((el) => {
                 el.classList.remove('is-missing');
@@ -6190,7 +6357,7 @@
             const err = data && data.error ? data.error : 'Erreur capture screenshots';
             if (entrepriseId != null) {
                 const nom = getEntrepriseNom(entrepriseId);
-                Notifications.show(nom + ' — ' + err, 'error', 'fa-exclamation-circle');
+                showEntrepriseNotification(entrepriseId, nom + ' — ' + err, 'error', 'fa-exclamation-circle', { bulkTerminal: true });
                 setRowChipLoading('screenshots', entrepriseId, false);
             } else {
                 Notifications.show(err, 'error', 'fa-exclamation-circle');
@@ -6215,9 +6382,9 @@
             const pos = data.queue_position != null ? Number(data.queue_position) : 1;
             const eta = data.queue_eta_sec != null ? Number(data.queue_eta_sec) : 0;
             if (data.already_pending) {
-                Notifications.show(nom + ' — ' + msg, 'info', 'fa-hourglass-half');
+                showEntrepriseNotification(eid, nom + ' — ' + msg, 'info', 'fa-hourglass-half');
             } else if (pos > 1 || eta >= 30) {
-                Notifications.show(nom + ' — ' + msg, 'info', 'fa-list-ol');
+                showEntrepriseNotification(eid, nom + ' — ' + msg, 'info', 'fa-list-ol');
             }
             if (Number(eid) === Number(currentModalEntrepriseId)) {
                 // Force le journal visible des le demarrage (sinon display:none)
@@ -6291,14 +6458,16 @@
                 );
             } else if (src === 'heuristic') {
                 setRowChipLoading('gemini', eid, false);
-                Notifications.show(
+                showEntrepriseNotification(
+                    eid,
                     nom + ' — Gemini indisponible, rapport heuristique (' + sc + ')',
                     'warning',
-                    'fa-exclamation-triangle'
+                    'fa-exclamation-triangle',
+                    { bulkTerminal: true }
                 );
             } else {
                 setRowChipLoading('gemini', eid, false);
-                Notifications.show(nom + ' — Rapport Gemini terminé (' + sc + ')', 'success', 'fa-robot');
+                showEntrepriseNotification(eid, nom + ' — Rapport Gemini terminé (' + sc + ')', 'success', 'fa-robot', { bulkTerminal: true });
             }
             document.querySelectorAll(`.row-chip-gemini[data-entreprise-id="${eid}"]`).forEach((el) => {
                 el.classList.remove('is-missing', 'is-ready', 'is-heuristic');
@@ -6428,7 +6597,7 @@
             }
             if (eid != null) {
                 const nom = getEntrepriseNom(eid);
-                Notifications.show(nom + ' — ' + err, 'error', 'fa-exclamation-circle');
+                showEntrepriseNotification(eid, nom + ' — ' + err, 'error', 'fa-exclamation-circle', { bulkTerminal: true });
                 setRowChipLoading('gemini', eid, false);
             } else if (isQuota) {
                 Notifications.show(

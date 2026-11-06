@@ -159,6 +159,8 @@ conda create --prefix /opt/prospectlab/env python=3.11 -y
 /opt/prospectlab/env/bin/pip install -r requirements.txt
 ```
 
+**Python 3.13 (Pi / env existant)** : ne pas epingler `psycopg2-binary==2.9.9` (compilation echoue). Le depot utilise `psycopg2-binary>=2.9.10` et `lxml>=5.2`. Le script `scripts/linux/deploy_pip_install.sh` (etape [6/9] de `deploy_production.ps1`) valide les imports critiques ; option `-SkipPipInstall` pour une sync code sans pip.
+
 ### 1.4 bis. Navigateur Playwright (screenshots)
 
 Apres `pip install`, telecharger Chromium pour les captures (obligatoire sur les workers qui font les screenshots) :

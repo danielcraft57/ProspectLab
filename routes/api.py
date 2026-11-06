@@ -67,6 +67,8 @@ def _parse_entreprise_list_query_filters():
         'groupe_id': request.args.get('groupe_id', type=int),
         'no_group': request.args.get('no_group'),
         'has_email': request.args.get('has_email'),
+        'has_phone': request.args.get('has_phone'),
+        'phone_line_type': request.args.get('phone_line_type') or request.args.get('phone_type'),
         'has_screenshots': request.args.get('has_screenshots'),
         'has_gemini_report': request.args.get('has_gemini_report'),
         'cms': request.args.get('cms'),
@@ -88,10 +90,12 @@ def _parse_entreprise_list_query_filters():
         if k in ('security_min', 'security_max', 'pentest_min', 'pentest_max', 'seo_min', 'seo_max',
                  'performance_min', 'performance_max'):
             return 0 <= v <= 100
-        if k in ('has_email', 'no_group', 'has_blog', 'has_form', 'has_tunnel',
+        if k in ('has_email', 'has_phone', 'no_group', 'has_blog', 'has_form', 'has_tunnel',
                  'security_null', 'pentest_null', 'seo_null', 'has_screenshots',
                  'has_gemini_report'):
             return str(v).lower() in ('1', 'true', 'yes')
+        if k == 'phone_line_type':
+            return str(v).strip().lower() in ('mobile', 'portable', 'cell', 'fixed', 'fixe', 'landline')
         if k == 'etape_prospection':
             return bool(v and str(v).strip())
         return v != ''
@@ -507,6 +511,114 @@ def delete_groupe_entreprise(groupe_id):
         return jsonify({'error': str(e)}), 500
 
 
+def _delete_entreprise_by_id(entreprise_id: int):
+    """
+    Supprime une fiche entreprise par identifiant.
+
+    @param entreprise_id: Identifiant de l'entreprise
+    @returns: Tuple (payload dict, http_status)
+    """
+    try:
+        conn = database.get_connection()
+        cursor = conn.cursor()
+        database.execute_sql(cursor, 'SELECT id, nom FROM entreprises WHERE id = ?', (entreprise_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return {'success': False, 'error': 'Entreprise introuvable', 'deleted_id': entreprise_id}, 404
+
+        try:
+            nom = row['nom']
+        except (TypeError, KeyError, IndexError):
+            nom = row[1] if len(row) > 1 else None
+
+        database.execute_sql(cursor, 'DELETE FROM entreprises WHERE id = ?', (entreprise_id,))
+        conn.commit()
+        conn.close()
+
+        label = (nom or '').strip() or f'#{entreprise_id}'
+        return {
+            'success': True,
+            'deleted_id': entreprise_id,
+            'message': f'Entreprise « {label} » supprimée avec succès',
+        }, 200
+    except Exception as e:
+        return {'success': False, 'error': str(e), 'deleted_id': entreprise_id}, 500
+
+
+@api_bp.route('/entreprise/<int:entreprise_id>/delete', methods=['POST'])
+@login_required
+def entreprise_delete_post(entreprise_id):
+    """
+    Suppression d'une entreprise via POST (fallback si DELETE est filtré par un proxy).
+
+    @param entreprise_id: Identifiant de l'entreprise
+    @returns: JSON de confirmation ou erreur
+    """
+    payload, status = _delete_entreprise_by_id(entreprise_id)
+    return jsonify(payload), status
+
+
+@api_bp.route('/entreprises/bulk-delete', methods=['POST'])
+@login_required
+def entreprises_bulk_delete():
+    """
+    Supprime plusieurs entreprises en une requête.
+
+    Body JSON attendu : ``{ "ids": [1, 2, 3] }``.
+    Les IDs déjà absents sont comptés comme ``already_gone`` (idempotent).
+
+    @returns: JSON avec deleted / already_gone / failed
+    """
+    data = request.get_json(silent=True) or {}
+    raw_ids = data.get('ids') or []
+    if not isinstance(raw_ids, list) or not raw_ids:
+        return jsonify({'success': False, 'error': 'Liste d\'ids requise'}), 400
+
+    ids = []
+    for value in raw_ids:
+        try:
+            eid = int(value)
+        except (TypeError, ValueError):
+            continue
+        if eid > 0:
+            ids.append(eid)
+
+    # Dédupliquer en conservant l'ordre
+    seen = set()
+    unique_ids = []
+    for eid in ids:
+        if eid in seen:
+            continue
+        seen.add(eid)
+        unique_ids.append(eid)
+
+    if not unique_ids:
+        return jsonify({'success': False, 'error': 'Aucun id valide'}), 400
+
+    deleted = []
+    already_gone = []
+    failed = []
+    for eid in unique_ids:
+        payload, status = _delete_entreprise_by_id(eid)
+        if status == 200:
+            deleted.append(eid)
+        elif status == 404:
+            already_gone.append(eid)
+        else:
+            failed.append({'id': eid, 'error': payload.get('error') or 'Erreur'})
+
+    return jsonify({
+        'success': len(failed) == 0,
+        'deleted': deleted,
+        'already_gone': already_gone,
+        'failed': failed,
+        'deleted_count': len(deleted),
+        'already_gone_count': len(already_gone),
+        'failed_count': len(failed),
+    }), 200 if not failed else 207
+
+
 @api_bp.route('/entreprise/<int:entreprise_id>', methods=['GET', 'DELETE'])
 @login_required
 def entreprise_detail(entreprise_id):
@@ -524,29 +636,8 @@ def entreprise_detail(entreprise_id):
         JSON: Détails de l'entreprise ou confirmation de suppression
     """
     if request.method == 'DELETE':
-        try:
-            conn = database.get_connection()
-            cursor = conn.cursor()
-            
-            # Récupérer le nom de l'entreprise avant suppression
-            database.execute_sql(cursor, 'SELECT nom FROM entreprises WHERE id = ?', (entreprise_id,))
-            row = cursor.fetchone()
-            
-            if not row:
-                conn.close()
-                return jsonify({'error': 'Entreprise introuvable'}), 404
-            
-            # Supprimer l'entreprise
-            database.execute_sql(cursor, 'DELETE FROM entreprises WHERE id = ?', (entreprise_id,))
-            conn.commit()
-            conn.close()
-            
-            return jsonify({
-                'success': True,
-                'message': f'Entreprise "{row["nom"]}" supprimée avec succès'
-            })
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
+        payload, status = _delete_entreprise_by_id(entreprise_id)
+        return jsonify(payload), status
     
     # GET: Détails de l'entreprise
     try:

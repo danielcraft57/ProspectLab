@@ -104,6 +104,13 @@ def list_intents(*, profile: str | None = None, timeout: float = 10.0) -> list[d
     @param timeout: Timeout HTTP
     @returns: Liste d'intents
     """
+    from services.facebook_prospection.vocalguard_kb_db import list_intents_from_db, vocalguard_db_configured
+
+    if vocalguard_db_configured():
+        items = list_intents_from_db(profile=profile, enabled_only=True)
+        if items:
+            return items
+
     base = _base()
     if not base:
         return []

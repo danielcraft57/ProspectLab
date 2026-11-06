@@ -175,6 +175,91 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    /**
+     * Volume et mute des sons de notification (navbar, à côté du thème).
+     */
+    (function initNotificationSoundNav() {
+        const soundToggleBtn = document.querySelector('[data-notifications-sound-toggle]');
+        const soundIcon = document.querySelector('[data-notifications-sound-icon]');
+        const soundVolumeInput = document.querySelector('[data-notifications-sound-volume]');
+        const soundWrap = document.querySelector('[data-nav-sound-control]');
+
+        if (!soundToggleBtn && !soundVolumeInput) {
+            return;
+        }
+
+        function syncSoundUi() {
+            const ss = window.Notifications && window.Notifications.soundSettings;
+            if (!ss) return;
+            const enabled = ss.isEnabled();
+            const vol = ss.getVolumePercent();
+            if (soundVolumeInput) {
+                soundVolumeInput.value = String(vol);
+                soundVolumeInput.disabled = !enabled;
+            }
+            if (soundIcon) {
+                soundIcon.classList.remove('fa-volume-high', 'fa-volume-low', 'fa-volume-xmark');
+                if (!enabled || vol === 0) {
+                    soundIcon.classList.add('fa-volume-xmark');
+                } else if (vol < 35) {
+                    soundIcon.classList.add('fa-volume-low');
+                } else {
+                    soundIcon.classList.add('fa-volume-high');
+                }
+            }
+            if (soundToggleBtn) {
+                soundToggleBtn.classList.toggle('is-muted', !enabled);
+                soundToggleBtn.setAttribute(
+                    'aria-label',
+                    enabled ? 'Sons des notifications activés' : 'Sons des notifications coupés'
+                );
+                soundToggleBtn.title = enabled ? 'Couper les sons' : 'Activer les sons';
+            }
+            if (soundWrap) {
+                soundWrap.classList.toggle('is-muted', !enabled);
+            }
+        }
+
+        if (window.Notifications && window.Notifications.soundSettings) {
+            syncSoundUi();
+        }
+
+        if (soundToggleBtn && window.Notifications && window.Notifications.soundSettings) {
+            soundToggleBtn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                const ss = window.Notifications.soundSettings;
+                const next = !ss.isEnabled();
+                ss.setEnabled(next);
+                if (next && window.Notifications.soundEngine) {
+                    window.Notifications.soundEngine.unlock();
+                }
+                if (next && window.Notifications.playTestSound) {
+                    window.Notifications.playTestSound('info');
+                }
+                syncSoundUi();
+            });
+        }
+
+        if (soundVolumeInput && window.Notifications && window.Notifications.soundSettings) {
+            soundVolumeInput.addEventListener('input', function () {
+                window.Notifications.soundSettings.setVolumePercent(soundVolumeInput.value);
+                if (window.Notifications.soundEngine) {
+                    window.Notifications.soundEngine.unlock();
+                }
+                syncSoundUi();
+            });
+            soundVolumeInput.addEventListener('change', function () {
+                if (window.Notifications.playTestSound && window.Notifications.soundSettings.isEnabled()) {
+                    window.Notifications.playTestSound('success');
+                }
+            });
+        }
+
+        document.addEventListener('notifications:sound-settings', function () {
+            syncSoundUi();
+        });
+    })();
+
     // Centre de notifications global
     (function initNotificationsCenter() {
         const toggleBtn = document.querySelector('[data-notifications-toggle]');
@@ -186,6 +271,12 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!toggleBtn || !badge || !panel || !list) {
             return;
         }
+
+        toggleBtn.addEventListener('click', function () {
+            if (window.Notifications && window.Notifications.soundEngine) {
+                window.Notifications.soundEngine.unlock();
+            }
+        });
 
         function formatTime(date) {
             try {

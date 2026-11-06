@@ -103,6 +103,67 @@ class FacebookProspectionQdrant:
         if resp.status_code not in (200, 201):
             raise RuntimeError(f'Qdrant upsert HTTP {resp.status_code}: {resp.text[:200]}')
 
+    def upsert_vocalguard_point(
+        self,
+        *,
+        point_id: int,
+        vector: list[float],
+        intent_tag: str,
+        ref_type: str,
+        ref_id: int,
+        profile: str | None = None,
+    ) -> None:
+        """
+        Upsert aligne VocalGuard (point id = intent_embeddings.id).
+
+        @param point_id: ID embedding / point Qdrant
+        @param vector: Vecteur 384d
+        @param intent_tag: Tag
+        @param ref_type: pattern | response
+        @param ref_id: ID pattern ou response
+        @param profile: Profil KB
+        """
+        if len(vector) != self.dims:
+            raise ValueError(f'vecteur {len(vector)} != {self.dims}')
+        prof = (profile or self.profile or 'outbound_commercial').strip().lower()
+        payload = {
+            'intent_tag': (intent_tag or '').strip(),
+            'ref_type': str(ref_type)[:20],
+            'ref_id': int(ref_id),
+            'profile': prof,
+        }
+        resp = requests.put(
+            f'{_qdrant_base()}/collections/{self.collection}/points?wait=true',
+            json={
+                'points': [
+                    {
+                        'id': int(point_id),
+                        'vector': [float(x) for x in vector],
+                        'payload': payload,
+                    }
+                ]
+            },
+            timeout=30,
+        )
+        if resp.status_code not in (200, 201):
+            raise RuntimeError(f'Qdrant upsert HTTP {resp.status_code}: {resp.text[:200]}')
+
+    def delete_points_by_ids(self, point_ids: list[int]) -> None:
+        """
+        Supprime des points Qdrant (IDs intent_embeddings).
+
+        @param point_ids: Liste d'IDs
+        """
+        if not point_ids or not self.enabled():
+            return
+        resp = requests.post(
+            f'{_qdrant_base()}/collections/{self.collection}/points/delete?wait=true',
+            json={'points': [int(x) for x in point_ids]},
+            timeout=30,
+        )
+        if resp.status_code not in (200, 202):
+            logger.warning('Qdrant delete HTTP %s', resp.status_code)
+
     def collection_info(self) -> dict[str, Any]:
         """
         Snapshot collection (points, dim).
@@ -189,6 +250,50 @@ class FacebookProspectionQdrant:
         if not hits and must:
             hits = self._search_unfiltered(vector, limit=limit, min_score=min_score, want_profile=want_profile)
         return hits
+
+    def list_intent_tags(self, *, limit: int = 2000) -> set[str]:
+        """
+        Liste les intent_tag presents dans la collection (scroll Qdrant).
+
+        @param limit: Points max par page scroll
+        @returns: Ensemble de tags
+        """
+        if not self.enabled():
+            return set()
+        tags: set[str] = set()
+        offset = None
+        pages = 0
+        while pages < 50:
+            body: dict[str, Any] = {
+                'limit': min(limit, 256),
+                'with_payload': True,
+            }
+            if offset is not None:
+                body['offset'] = offset
+            try:
+                resp = requests.post(
+                    f'{_qdrant_base()}/collections/{self.collection}/points/scroll',
+                    json=body,
+                    timeout=20,
+                )
+            except requests.RequestException as exc:
+                logger.warning('Qdrant scroll: %s', exc)
+                break
+            if resp.status_code != 200:
+                break
+            data = resp.json() or {}
+            result = data.get('result') or {}
+            points = result.get('points') or []
+            for pt in points:
+                payload = pt.get('payload') or {}
+                tag = str(payload.get('intent_tag') or '').strip()
+                if tag:
+                    tags.add(tag)
+            offset = result.get('next_page_offset')
+            pages += 1
+            if offset is None:
+                break
+        return tags
 
     def _search_unfiltered(
         self,

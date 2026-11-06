@@ -34,6 +34,7 @@ from .mail_accounts import MailAccountManager
 from .external_links import ExternalLinksManager
 from .facebook_prospection import FacebookProspectionManager
 from .facebook_messenger import FacebookMessengerManager
+from .tchatche_kb import TchatcheKbManager
 from .gemini_reports import GeminiReportManager
 from .postgresql_tune import apply_postgresql_tuning
 import os
@@ -59,6 +60,7 @@ class Database(
     ExternalLinksManager,
     FacebookProspectionManager,
     FacebookMessengerManager,
+    TchatcheKbManager,
     DatabaseBase  # DatabaseBase en dernier pour résoudre le MRO
 ):
     """
@@ -170,6 +172,11 @@ class Database(
             self.ensure_facebook_messenger_tables()
         except Exception:
             log.warning('Migration facebook_messenger_* non appliquée', exc_info=True)
+
+        try:
+            self.ensure_tchatche_kb_tables()
+        except Exception:
+            log.warning('Migration tchatche_kb_* non appliquée', exc_info=True)
 
         try:
             self.ensure_api_tokens_columns()

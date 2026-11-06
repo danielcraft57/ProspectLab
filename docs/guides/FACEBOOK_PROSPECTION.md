@@ -59,7 +59,7 @@ Tchatche de test (sans Facebook) : page `/tchatche-kb`.
 
 Variables dans les reponses : `{{entreprise}}`, `{{nom}}`, `{{prenom}}`, `{{ville}}`, `{{website}}`, `{{telephone}}`, `{{secteur}}`, `{{metier}}`, plus blocs `{{#if_ville}}...{{/if_ville}}`.
 
-Phrases deja branchees (tchatche / Messenger) : `out_presentation`, `out_qualify_website`, `out_objection_has_site`. Le tchatche choisit une fiche CRM ; Messenger reprend `entreprise_id` du fil.
+Phrases deja branchees (tchatche / Messenger) : `out_presentation`, `out_qualify_website`, `out_objection_has_site`, `out_who_are_you`, `out_audit_offer`. Le tchatche choisit une fiche CRM ; Messenger reprend `entreprise_id` du fil.
 
 Verifier la collection :
 

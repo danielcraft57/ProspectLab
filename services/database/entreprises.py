@@ -1062,6 +1062,99 @@ class EntrepriseManager(DatabaseBase):
                     )
                 """
 
+    @staticmethod
+    def _has_phone_sql_fragment():
+        """
+        Prédicat SQL (alias e) : au moins un numéro connu (téléphone principal ou scraper).
+
+        @returns: Fragment SQL booléen utilisable après AND
+        """
+        return """(
+            (e.telephone IS NOT NULL AND TRIM(e.telephone) <> '')
+            OR EXISTS (
+                SELECT 1 FROM scraper_phones sp_hp
+                WHERE sp_hp.entreprise_id = e.id
+                  AND sp_hp.phone IS NOT NULL AND TRIM(sp_hp.phone) <> ''
+            )
+        )"""
+
+    @staticmethod
+    def _sql_phone_text_mobile_heuristic(column_expr):
+        """
+        Heuristique FR / international courante pour détecter un portable sans line_type OSINT.
+
+        @param column_expr: Expression SQL du champ texte (ex. sp.phone, e.telephone)
+        @returns: Fragment SQL booléen
+        """
+        col = f"COALESCE({column_expr}, '')"
+        digits = (
+            f"REPLACE(REPLACE(REPLACE(REPLACE({col}, ' ', ''), '.', ''), '-', ''), '/', '')"
+        )
+        # %% requis dans les LIKE : psycopg2 interprète % comme placeholder paramètre.
+        return f"""(
+            {digits} LIKE '06%%'
+            OR {digits} LIKE '07%%'
+            OR {digits} LIKE '336%%'
+            OR {digits} LIKE '337%%'
+            OR {digits} LIKE '00336%%'
+            OR {digits} LIKE '00337%%'
+            OR {col} LIKE '+336%%'
+            OR {col} LIKE '+337%%'
+            OR {col} LIKE '+33 6%%'
+            OR {col} LIKE '+33 7%%'
+        )"""
+
+    @staticmethod
+    def _sql_entreprise_has_mobile_phone():
+        """Fragment SQL : l'entreprise a au moins un numéro portable connu."""
+        mobile_heur = EntrepriseManager._sql_phone_text_mobile_heuristic('sp.phone')
+        tel_heur = EntrepriseManager._sql_phone_text_mobile_heuristic('e.telephone')
+        return f"""(
+            EXISTS (
+                SELECT 1 FROM scraper_phones sp
+                WHERE sp.entreprise_id = e.id
+                  AND sp.phone IS NOT NULL AND TRIM(sp.phone) <> ''
+                  AND (
+                    UPPER(TRIM(COALESCE(sp.line_type, ''))) IN ('MOBILE', 'FIXED_LINE_OR_MOBILE')
+                    OR (
+                        TRIM(COALESCE(sp.line_type, '')) = ''
+                        AND {mobile_heur}
+                    )
+                  )
+            )
+            OR (
+                e.telephone IS NOT NULL AND TRIM(e.telephone) <> ''
+                AND {tel_heur}
+            )
+        )"""
+
+    @staticmethod
+    def _sql_entreprise_has_fixed_phone():
+        """Fragment SQL : l'entreprise a au moins un numéro fixe connu."""
+        mobile_heur_sp = EntrepriseManager._sql_phone_text_mobile_heuristic('sp.phone')
+        mobile_heur_tel = EntrepriseManager._sql_phone_text_mobile_heuristic('e.telephone')
+        return f"""(
+            EXISTS (
+                SELECT 1 FROM scraper_phones sp
+                WHERE sp.entreprise_id = e.id
+                  AND sp.phone IS NOT NULL AND TRIM(sp.phone) <> ''
+                  AND (
+                    UPPER(TRIM(COALESCE(sp.line_type, ''))) IN (
+                        'FIXED_LINE', 'VOIP', 'TOLL_FREE', 'SHARED_COST',
+                        'PREMIUM_RATE', 'PERSONAL_NUMBER', 'PAGER', 'UAN'
+                    )
+                    OR (
+                        TRIM(COALESCE(sp.line_type, '')) = ''
+                        AND NOT ({mobile_heur_sp})
+                    )
+                  )
+            )
+            OR (
+                e.telephone IS NOT NULL AND TRIM(e.telephone) <> ''
+                AND NOT ({mobile_heur_tel})
+            )
+        )"""
+
     def refresh_has_known_email(self, entreprise_id, cursor=None):
         """Met à jour entreprises.has_known_email (0/1) pour une fiche."""
         if not entreprise_id:
@@ -1429,6 +1522,17 @@ class EntrepriseManager(DatabaseBase):
                 inner_query += ' AND COALESCE(e.has_screenshots, 0) = 1'
             if str(filters.get('has_gemini_report', '')).lower() in ('1', 'true', 'yes'):
                 inner_query += ' AND COALESCE(e.has_gemini_report, 0) = 1'
+            if str(filters.get('has_phone', '')).lower() in ('1', 'true', 'yes'):
+                inner_query += ' AND ' + EntrepriseManager._has_phone_sql_fragment()
+            phone_line_type = (filters.get('phone_line_type') or filters.get('phone_type') or '')
+            if isinstance(phone_line_type, str):
+                phone_line_type = phone_line_type.strip().lower()
+            else:
+                phone_line_type = ''
+            if phone_line_type in ('mobile', 'portable', 'cell'):
+                inner_query += ' AND ' + EntrepriseManager._sql_entreprise_has_mobile_phone()
+            elif phone_line_type in ('fixed', 'fixe', 'landline'):
+                inner_query += ' AND ' + EntrepriseManager._sql_entreprise_has_fixed_phone()
             if filters.get('cms'):
                 cms_val = filters['cms']
                 if isinstance(cms_val, (list, tuple, set)):
@@ -1495,6 +1599,77 @@ class EntrepriseManager(DatabaseBase):
             'has_seo_filters': has_seo_filters and not seo_applied,
         }
         return inner_query, params, flags
+
+    def attach_list_phone_fields(self, entreprises: list) -> list:
+        """
+        Enrichit les listes entreprises avec display_phone et phones_count.
+
+        display_phone = telephone principal, sinon premier numéro scraper.
+        phones_count = volume connu (principal + lignes scraper_phones, sans dédoublonnage fin).
+
+        @param entreprises: Liste de dicts entreprise (modifiée sur place)
+        @returns: La même liste enrichie
+        """
+        if not entreprises:
+            return entreprises
+        ids: list[int] = []
+        for ent in entreprises:
+            try:
+                eid = int(ent.get('id'))
+            except (TypeError, ValueError):
+                continue
+            if eid not in ids:
+                ids.append(eid)
+        if not ids:
+            return entreprises
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        placeholders = ','.join(['?'] * len(ids))
+        self.execute_sql(
+            cursor,
+            f'''
+            SELECT entreprise_id, phone, date_found
+            FROM scraper_phones
+            WHERE entreprise_id IN ({placeholders})
+              AND phone IS NOT NULL AND TRIM(phone) <> ''
+            ORDER BY entreprise_id, date_found DESC
+            ''',
+            ids,
+        )
+        rows = cursor.fetchall() or []
+        conn.close()
+
+        first_by_id: dict[int, str] = {}
+        count_by_id: dict[int, int] = {}
+        for row in rows:
+            r = dict(row) if not isinstance(row, dict) else row
+            try:
+                eid = int(r.get('entreprise_id'))
+            except (TypeError, ValueError):
+                continue
+            phone = (r.get('phone') or '').strip()
+            if not phone:
+                continue
+            count_by_id[eid] = count_by_id.get(eid, 0) + 1
+            if eid not in first_by_id:
+                first_by_id[eid] = phone
+
+        for ent in entreprises:
+            try:
+                eid = int(ent.get('id'))
+            except (TypeError, ValueError):
+                continue
+            principal = (ent.get('telephone') or '').strip()
+            scraper_n = count_by_id.get(eid, 0)
+            scraper_first = first_by_id.get(eid, '')
+            ent['display_phone'] = principal or scraper_first or ''
+            if principal:
+                ent['phones_count'] = scraper_n if scraper_n else 1
+            else:
+                ent['phones_count'] = scraper_n
+
+        return entreprises
 
     def get_entreprises(self, analyse_id=None, filters=None, limit=None, offset=None, include_og=True,
                         with_total=False):
@@ -1580,6 +1755,9 @@ class EntrepriseManager(DatabaseBase):
                     entreprise['og_data'] = None
             
             entreprises.append(entreprise)
+
+        if entreprises:
+            self.attach_list_phone_fields(entreprises)
         
         entreprises = clean_json_dict(entreprises)
         if with_total:
@@ -3663,6 +3841,8 @@ class EntrepriseManager(DatabaseBase):
             else:
                 ent['tags'] = []
             entreprises.append(clean_json_dict(ent))
+        if entreprises:
+            self.attach_list_phone_fields(entreprises)
         return entreprises
 
     def toggle_favori(self, entreprise_id):

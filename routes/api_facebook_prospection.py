@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, session
 
 from config import FACEBOOK_PROSPECTION_ENABLED, FACEBOOK_MESSENGER_SYNC_MAX_THREADS
 from services.auth import login_required
@@ -23,7 +23,20 @@ from tasks.facebook_prospection_tasks import (
     facebook_prospection_run_job_task,
 )
 from services.facebook_prospection.messenger_qa import answer_user_turn, kb_status
+from services.facebook_prospection.kb_coverage import kb_coverage_report
+from services.facebook_prospection.vocalguard_kb_db import (
+    get_intent_by_tag_from_db,
+    list_intents_from_db,
+    update_intent_in_db,
+    vocalguard_db_configured,
+)
 from services.facebook_prospection.messenger_suggestions import build_reply_suggestions
+from services.facebook_prospection.reply_vars import (
+    build_var_groups_for_ui,
+    load_entreprise_reply_vars,
+    render_reply_template,
+    templates_for_tag,
+)
 api_facebook_prospection_bp = Blueprint(
     'api_facebook_prospection',
     __name__,
@@ -360,13 +373,98 @@ def facebook_tchatche_status():
     return jsonify({'success': True, **info})
 
 
+@api_facebook_prospection_bp.route('/tchatche/coverage', methods=['GET'])
+@login_required
+def facebook_tchatche_coverage():
+    """
+    Audit Q/R : tags Qdrant vs catalogue VocalGuard vs templates ProspectLab.
+
+    Utile pour lister les intents sans phrase dans le sandbox.
+    """
+    report = kb_coverage_report()
+    return jsonify({'success': True, **report})
+
+
+@api_facebook_prospection_bp.route('/kb/intents', methods=['GET'])
+@login_required
+def facebook_kb_intents_list():
+    """
+    Catalogue Q/R VocalGuard (Postgres partage) pour revue / edition.
+
+    Query : profile (defaut outbound_commercial), enabled_only (defaut true)
+    """
+    profile = (request.args.get('profile') or '').strip() or None
+    enabled_only = (request.args.get('enabled_only') or 'true').strip().lower() not in (
+        '0',
+        'false',
+        'no',
+    )
+    if not vocalguard_db_configured():
+        return jsonify(
+            {
+                'success': False,
+                'error': 'VOCALGUARD_DATABASE_URL manquant : configure la base VocalGuard (meme BDD que l app)',
+            }
+        ), 503
+    items = list_intents_from_db(profile=profile, enabled_only=enabled_only)
+    return jsonify(
+        {
+            'success': True,
+            'profile': profile,
+            'items': items,
+            'source': 'vocalguard_postgres',
+            'qdrant_url': 'node15 (QDRANT_URL)',
+        }
+    )
+
+
+@api_facebook_prospection_bp.route('/kb/intents/<tag>', methods=['GET'])
+@login_required
+def facebook_kb_intent_detail(tag: str):
+    """Detail Q/R d un intent (patterns + responses)."""
+    if not vocalguard_db_configured():
+        return jsonify({'success': False, 'error': 'VOCALGUARD_DATABASE_URL manquant'}), 503
+    item = get_intent_by_tag_from_db(tag)
+    if not item:
+        return jsonify({'success': False, 'error': f'Intent inconnu: {tag}'}), 404
+    return jsonify({'success': True, 'intent': item, 'source': 'vocalguard_postgres'})
+
+
+@api_facebook_prospection_bp.route('/kb/intents/<tag>', methods=['PATCH'])
+@login_required
+def facebook_kb_intent_patch(tag: str):
+    """
+    Met a jour patterns/reponses dans Postgres VocalGuard + sync Qdrant node15.
+
+    Body : { patterns?: string[], responses?: string[], enabled?: bool, priority?: int }
+    """
+    if not vocalguard_db_configured():
+        return jsonify({'success': False, 'error': 'VOCALGUARD_DATABASE_URL manquant'}), 503
+    data = request.get_json(silent=True) or {}
+    try:
+        updated = update_intent_in_db(
+            tag,
+            patterns=list(data['patterns']) if 'patterns' in data else None,
+            responses=list(data['responses']) if 'responses' in data else None,
+            enabled=data.get('enabled') if 'enabled' in data else None,
+            priority=int(data['priority']) if data.get('priority') is not None else None,
+        )
+    except RuntimeError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 503
+    except Exception as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 500
+    if not updated:
+        return jsonify({'success': False, 'error': f'Intent inconnu: {tag}'}), 404
+    return jsonify({'success': True, 'intent': updated, 'source': 'vocalguard_postgres'})
+
+
 @api_facebook_prospection_bp.route('/tchatche', methods=['POST'])
 @login_required
 def facebook_tchatche_turn():
     """
     Un tour de tchatche virtuel (KB Messenger / Qdrant).
 
-    Body : { text, recent_replies?, recent_tags?, recent_user_texts?, top_k?, entreprise_id? }
+    Body : { text, session_id?, recent_replies?, recent_tags?, recent_user_texts?, top_k?, entreprise_id? }
     """
     data = request.get_json(silent=True) or {}
     text = (data.get('text') or '').strip()
@@ -377,16 +475,245 @@ def facebook_tchatche_turn():
         entreprise_id = int(entreprise_id) if entreprise_id else None
     except (TypeError, ValueError):
         entreprise_id = None
+    if not entreprise_id:
+        return jsonify(
+            {
+                'success': False,
+                'error': 'entreprise_id requis : choisis une fiche CRM avant de tester le tchatche',
+            }
+        ), 400
+
+    db = Database()
+    session_id_raw = data.get('session_id')
+    session_id: int | None = None
+    if session_id_raw not in (None, '', 0, '0'):
+        try:
+            session_id = int(session_id_raw)
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'error': 'session_id invalide'}), 400
+        if not db.get_tchatche_session(session_id, entreprise_id=entreprise_id):
+            return jsonify({'success': False, 'error': 'Session introuvable pour cette entreprise'}), 404
+
+    if not session_id:
+        session_id = db.create_tchatche_session(
+            entreprise_id,
+            created_by=session.get('user_id'),
+        )
+
+    ctx = _tchatche_context_from_db(db, session_id, data)
     turn = answer_user_turn(
         text,
-        recent_replies=list(data.get('recent_replies') or []),
-        recent_tags=list(data.get('recent_tags') or []),
-        recent_user_texts=list(data.get('recent_user_texts') or []),
+        recent_replies=ctx['recent_replies'],
+        recent_tags=ctx['recent_tags'],
+        recent_user_texts=ctx['recent_user_texts'],
         top_k=int(data.get('top_k') or 8),
         profile=str(data.get('profile') or '').strip() or None,
         entreprise_id=entreprise_id,
     )
-    return jsonify({'success': True, **turn})
+
+    sess = db.get_tchatche_session(session_id, entreprise_id=entreprise_id) or {}
+    if not (sess.get('title') or '').strip():
+        db.touch_tchatche_session(session_id, title=text[:80])
+
+    db.add_tchatche_message(session_id, 'user', text)
+    db.add_tchatche_message(
+        session_id,
+        'bot',
+        str(turn.get('reply') or ''),
+        intent_tag=str(turn.get('tag') or '') or None,
+        engine=str(turn.get('engine') or turn.get('source') or '') or None,
+        score=float(turn.get('score') or 0) if turn.get('score') is not None else None,
+        meta=_tchatche_turn_meta(turn),
+    )
+
+    messages = db.list_tchatche_messages(session_id)
+    context_window = db.build_tchatche_context_window(messages)
+    sess = db.get_tchatche_session(session_id, entreprise_id=entreprise_id) or {}
+
+    return jsonify(
+        {
+            'success': True,
+            **turn,
+            'session_id': session_id,
+            'context_window': context_window,
+            'context_summary': sess.get('context_summary'),
+            'message_count': len(messages),
+        }
+    )
+
+
+def _tchatche_turn_meta(turn: dict[str, Any]) -> dict[str, Any]:
+    """Metadonnees legeres stockees avec un message bot."""
+    preds = turn.get('top_predictions') or []
+    slim = []
+    for row in preds[:8]:
+        if not isinstance(row, dict):
+            continue
+        slim.append(
+            {
+                'tag': row.get('tag'),
+                'score': row.get('score'),
+            }
+        )
+    return {'top_predictions': slim}
+
+
+def _tchatche_context_from_db(db: Database, session_id: int, data: dict[str, Any]) -> dict[str, list[str]]:
+    """
+    Fenetre contexte : priorite a l'archive SQL, sinon corps client (ouverture sans session).
+
+    @param db: Database
+    @param session_id: Session existante
+    @param data: Body POST tchatche
+    @returns: recent_replies, recent_tags, recent_user_texts
+    """
+    prior = db.list_tchatche_messages(session_id)
+    ctx = db.build_tchatche_context_window(prior)
+    if ctx['recent_replies'] or ctx['recent_user_texts']:
+        return ctx
+    return {
+        'recent_replies': list(data.get('recent_replies') or [])[-6:],
+        'recent_tags': list(data.get('recent_tags') or [])[-6:],
+        'recent_user_texts': list(data.get('recent_user_texts') or [])[-6:],
+    }
+
+
+@api_facebook_prospection_bp.route('/tchatche/sessions', methods=['GET'])
+@login_required
+def facebook_tchatche_sessions_list():
+    """
+    Archive sandbox pour une entreprise.
+
+    Query : entreprise_id (requis), limit (defaut 25)
+    """
+    try:
+        entreprise_id = int(request.args.get('entreprise_id') or 0)
+    except (TypeError, ValueError):
+        entreprise_id = 0
+    if not entreprise_id:
+        return jsonify({'success': False, 'error': 'entreprise_id requis'}), 400
+    try:
+        limit = max(1, min(50, int(request.args.get('limit') or 25)))
+    except (TypeError, ValueError):
+        limit = 25
+    db = Database()
+    items = db.list_tchatche_sessions(entreprise_id, limit=limit)
+    return jsonify({'success': True, 'items': items})
+
+
+@api_facebook_prospection_bp.route('/tchatche/sessions', methods=['POST'])
+@login_required
+def facebook_tchatche_sessions_create():
+    """
+    Nouvelle session archive (optionnel : message d'ouverture bot).
+
+    Body : { entreprise_id, opening?: { text, intent? } }
+    """
+    data = request.get_json(silent=True) or {}
+    try:
+        entreprise_id = int(data.get('entreprise_id') or 0)
+    except (TypeError, ValueError):
+        entreprise_id = 0
+    if not entreprise_id:
+        return jsonify({'success': False, 'error': 'entreprise_id requis'}), 400
+    db = Database()
+    _, fiche = load_entreprise_reply_vars(entreprise_id)
+    if not fiche:
+        return jsonify({'success': False, 'error': 'Fiche introuvable'}), 404
+    title = str(fiche.get('nom') or 'Sandbox')[:500]
+    session_id = db.create_tchatche_session(
+        entreprise_id,
+        created_by=session.get('user_id'),
+        title=title,
+    )
+    opening = data.get('opening') if isinstance(data.get('opening'), dict) else None
+    if opening and str(opening.get('text') or '').strip():
+        text = str(opening.get('text') or '').strip()
+        tag = str(opening.get('intent') or 'out_presentation').strip()
+        db.add_tchatche_message(
+            session_id,
+            'bot',
+            text,
+            intent_tag=tag,
+            engine='opening',
+            meta={'kind': 'opening'},
+        )
+    messages = db.list_tchatche_messages(session_id)
+    ctx = db.build_tchatche_context_window(messages)
+    sess = db.get_tchatche_session(session_id, entreprise_id=entreprise_id)
+    return jsonify(
+        {
+            'success': True,
+            'session_id': session_id,
+            'session': sess,
+            'messages': messages,
+            'context_window': ctx,
+        }
+    )
+
+
+@api_facebook_prospection_bp.route('/tchatche/sessions/<int:session_id>', methods=['GET'])
+@login_required
+def facebook_tchatche_session_detail(session_id: int):
+    """
+    Charge une session archive + fenetre contexte.
+
+    Query : entreprise_id (requis pour verifier la fiche)
+    """
+    try:
+        entreprise_id = int(request.args.get('entreprise_id') or 0)
+    except (TypeError, ValueError):
+        entreprise_id = 0
+    if not entreprise_id:
+        return jsonify({'success': False, 'error': 'entreprise_id requis'}), 400
+    db = Database()
+    sess = db.get_tchatche_session(session_id, entreprise_id=entreprise_id)
+    if not sess:
+        return jsonify({'success': False, 'error': 'Session introuvable'}), 404
+    messages = db.list_tchatche_messages(session_id)
+    ctx = db.build_tchatche_context_window(messages)
+    return jsonify(
+        {
+            'success': True,
+            'session': sess,
+            'messages': messages,
+            'context_window': ctx,
+        }
+    )
+
+
+@api_facebook_prospection_bp.route('/tchatche/sessions/<int:session_id>/context', methods=['PATCH'])
+@login_required
+def facebook_tchatche_session_context_patch(session_id: int):
+    """
+    Met a jour le resume contexte long (note manuelle ou future IA).
+
+    Body : { entreprise_id, context_summary? }
+    """
+    data = request.get_json(silent=True) or {}
+    try:
+        entreprise_id = int(data.get('entreprise_id') or 0)
+    except (TypeError, ValueError):
+        entreprise_id = 0
+    if not entreprise_id:
+        return jsonify({'success': False, 'error': 'entreprise_id requis'}), 400
+    db = Database()
+    sess = db.get_tchatche_session(session_id, entreprise_id=entreprise_id)
+    if not sess:
+        return jsonify({'success': False, 'error': 'Session introuvable'}), 404
+    summary = data.get('context_summary')
+    if summary is not None:
+        db.touch_tchatche_session(session_id, context_summary=str(summary or ''))
+    sess = db.get_tchatche_session(session_id, entreprise_id=entreprise_id)
+    messages = db.list_tchatche_messages(session_id)
+    ctx = db.build_tchatche_context_window(messages)
+    return jsonify(
+        {
+            'success': True,
+            'session': sess,
+            'context_window': ctx,
+        }
+    )
 
 
 @api_facebook_prospection_bp.route('/tchatche/entreprises', methods=['GET'])
@@ -420,6 +747,41 @@ def facebook_tchatche_entreprises():
             }
         )
     return jsonify({'success': True, 'items': items})
+
+
+@api_facebook_prospection_bp.route('/tchatche/entreprise/<int:entreprise_id>', methods=['GET'])
+@login_required
+def facebook_tchatche_entreprise_context(entreprise_id: int):
+    """
+    Fiche CRM + variables + messages d'ouverture personnalises (intent out_presentation).
+
+    @param entreprise_id: ID entreprise
+    """
+    vars_map, fiche = load_entreprise_reply_vars(entreprise_id)
+    if not fiche:
+        return jsonify({'success': False, 'error': 'Fiche introuvable'}), 404
+    openings: list[dict[str, str]] = []
+    for tpl in templates_for_tag('out_presentation'):
+        text = render_reply_template(tpl, vars_map)
+        if text:
+            openings.append({'text': text, 'intent': 'out_presentation'})
+    return jsonify(
+        {
+            'success': True,
+            'entreprise': {
+                'id': fiche.get('id'),
+                'nom': fiche.get('nom'),
+                'ville': fiche.get('ville'),
+                'website': fiche.get('website'),
+                'telephone': fiche.get('telephone'),
+                'secteur': fiche.get('secteur') or fiche.get('secteur_raw'),
+                'email': fiche.get('email_principal') or fiche.get('email'),
+            },
+            'vars': vars_map,
+            'var_groups': build_var_groups_for_ui(vars_map),
+            'opening_messages': openings[:5],
+        }
+    )
 
 
 @api_facebook_prospection_bp.route('/messenger/conversations/<int:thread_id>/suggestions', methods=['POST'])

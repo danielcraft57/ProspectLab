@@ -512,6 +512,9 @@ FACEBOOK_PROSPECTION_QDRANT_BRAND_ID = (
 ).strip()
 VOCALGUARD_URL = (os.environ.get('VOCALGUARD_URL', 'http://node14.lan:8000') or '').strip().rstrip('/')
 VOCALGUARD_INTERNAL_TOKEN = (os.environ.get('VOCALGUARD_INTERNAL_TOKEN', '') or '').strip()
+# Postgres VocalGuard (tables intents / intent_patterns / intent_responses / intent_embeddings).
+# Meme source que l'app VocalGuard ; Qdrant node15 indexe via intent_embeddings.id.
+VOCALGUARD_DATABASE_URL = (os.environ.get('VOCALGUARD_DATABASE_URL', '') or '').strip()
 
 # File d’enqueue pour le pack « analyse site complet ».
 # Défaut « technical » : les workers existants écoutent déjà cette file (voir CELERY_WORKER_QUEUES).
