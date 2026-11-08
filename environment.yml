@@ -28,7 +28,7 @@ dependencies:
       - matplotlib>=3.8.0
       - python-dotenv==1.0.0
       - celery==5.3.4
-      - redis==5.0.1
+      - redis>=6.1.0,<7
       - probablepeople>=0.5.4
       - nameparser>=1.1.1
       - bcrypt==4.1.2

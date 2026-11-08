@@ -168,8 +168,11 @@ Apres `pip install`, telecharger Chromium pour les captures (obligatoire sur les
 ```bash
 bash /opt/prospectlab/scripts/linux/install_playwright_chromium.sh
 # equivalent :
+# sudo /opt/prospectlab/env/bin/python -m playwright install-deps
 # /opt/prospectlab/env/bin/python -m playwright install chromium
 ```
+
+Si tu vois l'avertissement « Host system is missing dependencies » (libgtk, gstreamer, …), les paquets Debian manquent : `sudo …/python -m playwright install-deps` (inclus dans le script ci-dessus).
 
 Si tu vois `BrowserType.launch: Executable doesn't exist`, c'est que cette etape manque (souvent apres recreate de l'env Conda).
 

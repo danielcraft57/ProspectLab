@@ -23,6 +23,20 @@ echo "[*] Version Playwright Python..."
   exit 1
 }
 
+echo "[*] Paquets systeme (libgtk, gstreamer, etc.)..."
+if command -v sudo >/dev/null 2>&1; then
+  if sudo -n true 2>/dev/null; then
+    sudo "${PYTHON_BIN}" -m playwright install-deps || {
+      echo "[!] install-deps partiel ou echoue - verifiez les paquets manquants"
+    }
+  else
+    echo "[!] sudo sans mot de passe requis: lancez manuellement"
+    echo "    sudo ${PYTHON_BIN} -m playwright install-deps"
+  fi
+else
+  echo "[!] sudo absent - lancez en root: ${PYTHON_BIN} -m playwright install-deps"
+fi
+
 echo "[*] Telechargement Chromium (headless shell)..."
 "${PYTHON_BIN}" -m playwright install chromium
 

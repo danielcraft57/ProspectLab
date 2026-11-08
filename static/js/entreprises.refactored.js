@@ -155,11 +155,24 @@
     }
 
     /**
-     * En cas d'échec du logo stocké : on affiche les initiales (plus de fallback .ico / DDG).
+     * Fallback logo : image BDD -> favicon direct -> DuckDuckGo -> initiales.
      * @param {HTMLImageElement} img
      */
     function handleEntrepriseLogoImgError(img) {
-        if (!img) return;
+        if (!img || !img.dataset) return;
+        const ddg = img.dataset.fallbackDdg || '';
+        const direct = img.dataset.fallbackDirect || '';
+        const step = parseInt(String(img.dataset.fallbackStep || '0'), 10);
+        if (step <= 0 && direct) {
+            img.dataset.fallbackStep = '1';
+            img.src = direct;
+            return;
+        }
+        if (step <= 1 && ddg) {
+            img.dataset.fallbackStep = '2';
+            img.src = ddg;
+            return;
+        }
         img.style.display = 'none';
         const ph = img.nextElementSibling;
         if (ph) ph.style.display = 'flex';
@@ -390,6 +403,10 @@
     };
     /** @type {Record<number, ReturnType<typeof setTimeout>>} */
     const geminiChipTimeouts = {};
+    /** @type {Record<number, ReturnType<typeof setInterval>>} */
+    const geminiChipPollIntervals = {};
+    /** Vision Gemini : rotation cles + file peuvent depasser 15 min */
+    const GEMINI_CHIP_UI_TIMEOUT_MS = 28 * 60 * 1000;
     /** @type {Record<number, ReturnType<typeof setTimeout>>} */
     const facebookChipTimeouts = {};
     /** Evite double toast quota (event dedie + complete). */
@@ -1972,11 +1989,15 @@
             </div>
         `;
         
+        const domain = getDisplayDomain(entreprise.website || mainImage || '');
         const initials = getInitials(entreprise.nom || '');
-        // Pas de fallback live favicon.ico / DuckDuckGo : sites morts = spam 404 console.
-        // On n'affiche une image que si le scraping a déjà stocké logo / favicon / og_image.
         const safeMainImage = sanitizeEntrepriseLogoUrl(mainImage);
-        const cardLogoSrc = safeMainImage;
+        const fallbackDdg = faviconFallbackUrl(domain, 'ddg');
+        const fallbackDirect = faviconDirectUrl(domain);
+        const cardLogoSrc = safeMainImage || fallbackDirect || fallbackDdg;
+        const cardLogoFallbackStep = safeMainImage ? '0' : (fallbackDirect ? '1' : '2');
+        const attrDdg = Formatters.escapeHtml(fallbackDdg);
+        const attrDirect = Formatters.escapeHtml(fallbackDirect);
 
         const isSelected = selectedEntreprises.has(entreprise.id);
 
@@ -1991,7 +2012,9 @@
                             class="card-logo"
                             loading="lazy"
                             referrerpolicy="no-referrer"
-                            data-fallback-step="9"
+                            data-fallback-step="${cardLogoFallbackStep}"
+                            data-fallback-ddg="${attrDdg}"
+                            data-fallback-direct="${attrDirect}"
                             onload="this.nextElementSibling && (this.nextElementSibling.style.display='none')"
                             onerror="handleEntrepriseLogoImgError(this)"
                         >` : ''}
@@ -2225,10 +2248,15 @@
                 }
             }
         }
+        const rowDomain = getDisplayDomain(entreprise.website || rowMainImage || '');
         const rowInitials = getInitials(entreprise.nom || '');
-        // Image uniquement si déjà en base (logo/favicon/og). Pas d'appel live .ico / DDG.
         const rowSafeImage = sanitizeEntrepriseLogoUrl(rowMainImage);
-        const rowLogoSrc = rowSafeImage;
+        const rowFallbackDdg = faviconFallbackUrl(rowDomain, 'ddg');
+        const rowFallbackDirect = faviconDirectUrl(rowDomain);
+        const rowLogoSrc = rowSafeImage || rowFallbackDirect || rowFallbackDdg;
+        const rowLogoFallbackStep = rowSafeImage ? '0' : (rowFallbackDirect ? '1' : '2');
+        const rowAttrDdg = Formatters.escapeHtml(rowFallbackDdg);
+        const rowAttrDirect = Formatters.escapeHtml(rowFallbackDirect);
 
         const isSelected = selectedEntreprises.has(entreprise.id);
 
@@ -2250,7 +2278,9 @@
                         class="row-logo-img"
                         loading="lazy"
                         referrerpolicy="no-referrer"
-                        data-fallback-step="9"
+                        data-fallback-step="${rowLogoFallbackStep}"
+                        data-fallback-ddg="${rowAttrDdg}"
+                        data-fallback-direct="${rowAttrDirect}"
                         onload="if (this.nextElementSibling) this.nextElementSibling.style.display='none';"
                         onerror="handleEntrepriseLogoImgError(this)"
                     >` : ''}
@@ -2696,6 +2726,50 @@
      * @param {number} entrepriseId
      * @param {boolean} isLoading
      */
+    /**
+     * Si le rapport est deja en BDD (WS coupe ou rechargement Gunicorn), repare l'UI.
+     * @param {number} entrepriseId
+     * @returns {Promise<boolean>} true si un rapport a ete trouve
+     */
+    async function tryRecoverGeminiReportFromApi(entrepriseId) {
+        const eid = Number(entrepriseId);
+        if (!eid || !chipLoadingState.gemini.has(eid)) return false;
+        try {
+            const res = await fetch(`/api/entreprise/${eid}/gemini-report`, { credentials: 'same-origin' });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) return false;
+            const latest = data && data.latest;
+            if (!latest || (latest.overall_score == null && !latest.report)) return false;
+            setRowChipLoading('gemini', eid, false);
+            const nom = getEntrepriseNom(eid);
+            const sc = latest.overall_score != null ? `Score ${latest.overall_score}/100` : 'OK';
+            Notifications.show(
+                nom + ' — Rapport Gemini disponible (' + sc + '). Le temps reel etait coupe : rapport recupere depuis le serveur.',
+                'success',
+                'fa-robot'
+            );
+            document.querySelectorAll(`.row-chip-gemini[data-entreprise-id="${eid}"]`).forEach((el) => {
+                el.classList.remove('is-missing', 'is-heuristic', 'is-loading');
+                el.classList.add('is-ready');
+                el.title = 'Rapport Gemini OK (cliquer pour relancer)';
+                const icon = el.querySelector('i');
+                if (icon) icon.className = 'fas fa-robot';
+            });
+            refreshEntrepriseFromServer(eid);
+            if (Number(eid) === Number(currentModalEntrepriseId)) {
+                const btn = document.getElementById('gemini-report-start-btn');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-robot"></i> Lancer l\'analyse complete';
+                }
+                loadGeminiFullReport(eid);
+            }
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
     function setRowChipLoading(kind, entrepriseId, isLoading) {
         const eid = Number(entrepriseId);
         if (!eid || (kind !== 'screenshots' && kind !== 'gemini' && kind !== 'facebook')) return;
@@ -2708,15 +2782,25 @@
                 clearTimeout(geminiChipTimeouts[eid]);
                 delete geminiChipTimeouts[eid];
             }
+            if (geminiChipPollIntervals[eid]) {
+                clearInterval(geminiChipPollIntervals[eid]);
+                delete geminiChipPollIntervals[eid];
+            }
             if (isLoading) {
                 // Nouveau run : autorise un nouveau toast quota
                 geminiQuotaToastSeen.delete(eid);
-                geminiChipTimeouts[eid] = setTimeout(() => {
+                geminiChipPollIntervals[eid] = setInterval(() => {
+                    tryRecoverGeminiReportFromApi(eid);
+                }, 45 * 1000);
+                geminiChipTimeouts[eid] = setTimeout(async () => {
                     if (!chipLoadingState.gemini.has(eid)) return;
+                    const recovered = await tryRecoverGeminiReportFromApi(eid);
+                    if (recovered) return;
                     setRowChipLoading('gemini', eid, false);
                     const nom = getEntrepriseNom(eid);
                     Notifications.show(
-                        nom + ' — Rapport Gemini : pas de retour serveur (timeout). Réessaie ou recharge la page.',
+                        nom + ' — Rapport Gemini : pas de retour temps reel apres ~28 min. '
+                            + 'Gemini peut encore tourner en arriere-plan : rouvre la fiche ou reclique dans quelques minutes.',
                         'warning',
                         'fa-hourglass-end'
                     );
@@ -2725,7 +2809,7 @@
                         btn.disabled = false;
                         btn.innerHTML = '<i class="fas fa-robot"></i> Lancer l\'analyse complete';
                     }
-                }, 8 * 60 * 1000);
+                }, GEMINI_CHIP_UI_TIMEOUT_MS);
             }
         }
 
