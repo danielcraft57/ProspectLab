@@ -294,6 +294,26 @@ class ScraperManager(DatabaseBase):
                 scraper_id = cursor.lastrowid
         
         logger.debug(f'save_scraper: scraper_id={scraper_id}, total_images={total_images}, nb_images_list={len(images) if images else 0}')
+
+        reachability = None
+        meta_obj = metadata
+        if isinstance(meta_obj, str) and meta_obj.strip():
+            try:
+                meta_obj = json.loads(meta_obj)
+            except Exception:
+                meta_obj = None
+        if isinstance(meta_obj, dict):
+            reachability = meta_obj.get('homepage_reachability')
+        if entreprise_id and isinstance(reachability, dict):
+            try:
+                from services.http_reachability import sync_reachability_tags
+                sync_reachability_tags(self, cursor, int(entreprise_id), reachability)
+            except Exception as reach_exc:
+                logger.warning(
+                    'Tag HTTP non pose pour entreprise %s: %s',
+                    entreprise_id,
+                    reach_exc,
+                )
         
         # Sauvegarder les données normalisées dans les tables séparées (au lieu de JSON)
         try:

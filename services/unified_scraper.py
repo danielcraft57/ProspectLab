@@ -17,6 +17,7 @@ from typing import Dict, List, Optional, Callable, Set, Any
 from datetime import datetime
 from functools import lru_cache
 from services.logging_config import setup_logger
+from services.http_reachability import outcome_from_exception, outcome_from_status
 
 # Configurer le logger pour écrire dans scraping_tasks.log
 logger = setup_logger(__name__, 'scraping_tasks.log', level=logging.INFO)
@@ -54,13 +55,29 @@ def merge_scraper_metadata_for_storage(
     metadata: Optional[Dict[str, Any]],
     external_links: Optional[List[Dict[str, Any]]],
     scraped_location: Optional[Dict[str, Any]] = None,
+    homepage_reachability: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Fusionne les liens externes et l'indice de localisation dans le JSON `metadata` en base."""
+    """
+    Fusionne liens externes, lieu et joignabilite de la page d'accueil dans `metadata`.
+
+    @param metadata: Metadonnees deja extraites
+    @param external_links: Liens hors site
+    @param scraped_location: Adresse detectee
+    @param homepage_reachability: Resultat HTTP de la page d'accueil (ok, status_code, tag)
+    @returns: Dict pret a etre stocke en JSON
+    """
     md = dict(metadata) if isinstance(metadata, dict) else {}
     if external_links:
         md['external_links'] = external_links
     if scraped_location:
         md['scraped_location'] = scraped_location
+    if isinstance(homepage_reachability, dict) and homepage_reachability:
+        md['homepage_reachability'] = {
+            'ok': bool(homepage_reachability.get('ok')),
+            'status_code': homepage_reachability.get('status_code'),
+            'kind': homepage_reachability.get('kind'),
+            'tag': homepage_reachability.get('tag'),
+        }
     return md
 
 
@@ -123,6 +140,7 @@ class UnifiedScraper:
         self._seen_form_keys: Set[str] = set()  # Clés (action_url|method) pour dédupliquer les formulaires entre pages
         self.external_links_by_url: Dict[str, Dict] = {}  # url normalisée -> détail (liens hors site)
         self._location_hits: List[Dict[str, Any]] = []  # indices d'adresse / geo (toutes pages)
+        self.homepage_reachability: Optional[Dict[str, Any]] = None  # HTTP de la page d'accueil
         
         # État du scraping
         self.visited_urls: Set[str] = set()
@@ -213,17 +231,23 @@ class UnifiedScraper:
             }
         }
 
-    def _fetch_with_protocol_fallback(self, url: str, timeout: int = 15) -> Optional[requests.Response]:
+    def _fetch_with_protocol_fallback(self, url: str, timeout: int = 15):
         """
-        Récupère une page avec fallback http/https en cas de blocage (403/401, etc.).
-        Ne lève pas d'exception : renvoie None si toutes les tentatives échouent.
+        Recupere une page avec repli http/https (403/401, timeout, DNS).
+
+        Ne leve pas d'exception. Le deuxieme element decrit la joignabilite
+        (code 404, 502, timeout, dns...) pour le tag entreprise.
+
+        @param url: URL demandee
+        @param timeout: Timeout en secondes
+        @returns: (reponse ou None, dict joignabilite)
         """
+        failed = outcome_from_status(0, 'URL illisible')
         try:
             parsed = urlparse(url)
         except Exception:
-            return None
+            return None, failed
 
-        # Normaliser si aucun schéma
         if not parsed.scheme:
             url = 'https://' + url
             parsed = urlparse(url)
@@ -234,30 +258,30 @@ class UnifiedScraper:
         elif parsed.scheme == 'https':
             candidates.append('http://' + parsed.netloc + (parsed.path or ''))
 
-        last_error: Optional[Exception] = None
+        last_outcome = outcome_from_status(0, 'aucune reponse')
         for idx, candidate in enumerate(candidates):
             try:
-                resp = requests.get(candidate, headers=self.headers, timeout=timeout)
-                resp.raise_for_status()
-                return resp
-            except requests.HTTPError as e:
-                last_error = e
-                status = e.response.status_code if e.response is not None else None
-                logger.warning(f'[scraper] HTTP {status} pour {candidate}')
-                if idx == 0 and status in (401, 403) and idx + 1 < len(candidates):
-                    # tenter le protocole alternatif
+                resp = requests.get(candidate, headers=self.headers, timeout=timeout, allow_redirects=True)
+                code = int(getattr(resp, 'status_code', 0) or 0)
+                outcome = outcome_from_status(code)
+                outcome['final_url'] = getattr(resp, 'url', candidate)
+                if outcome.get('ok'):
+                    return resp, outcome
+                last_outcome = outcome
+                logger.warning(f'[scraper] HTTP {code} pour {candidate}')
+                if idx == 0 and code in (401, 403) and idx + 1 < len(candidates):
                     continue
-                break
+                return None, last_outcome
             except Exception as e:
-                last_error = e
-                logger.warning(f'[scraper] Erreur récupération {candidate}: {e}')
+                last_outcome = outcome_from_exception(e)
+                last_outcome['final_url'] = candidate
+                logger.warning(f'[scraper] Erreur recuperation {candidate}: {e}')
                 if idx + 1 < len(candidates):
                     continue
                 break
 
-        if last_error:
-            logger.error(f'[scraper] Échec de récupération pour {url}: {last_error}')
-        return None
+        logger.error(f'[scraper] Echec de recuperation pour {url}: {last_outcome.get("tag")}')
+        return None, last_outcome
     
     def is_same_domain(self, url: str) -> bool:
         """Vérifie si l'URL appartient au même domaine"""
@@ -1321,7 +1345,13 @@ class UnifiedScraper:
             self.last_request_time[domain] = time.time()
             
             # Utiliser le helper avec fallback http/https
-            response = self._fetch_with_protocol_fallback(url, timeout=15)
+            response, fetch_outcome = self._fetch_with_protocol_fallback(url, timeout=15)
+            if depth == 0:
+                recorded = dict(fetch_outcome or {})
+                recorded['url'] = url
+                with self.lock:
+                    if not self.homepage_reachability:
+                        self.homepage_reachability = recorded
             if response is None:
                 # On journalise et on arrête proprement pour cette URL sans casser tout le scraping
                 logger.warning(f'[scraper] Impossible de récupérer {url}, page ignorée')
@@ -1796,6 +1826,9 @@ class UnifiedScraper:
         # Générer le résumé de l'entreprise
         resume = self.generate_company_summary()
         
+        if not self.homepage_reachability:
+            self.homepage_reachability = outcome_from_status(0, 'pas de reponse de la page d accueil')
+
         # Log final du nombre de pages avec OG collectées
         logger.info(f'[UnifiedScraper] Scraping terminé pour {self.base_url}: {len(self.og_data_by_page)} page(s) avec OG collectées sur {len(self.visited_urls)} page(s) visitées')
         
@@ -1849,5 +1882,6 @@ class UnifiedScraper:
             'people_with_title': len([p for p in self.people if p.get('title')]),
             'resume': resume,
             'scraped_location': scraped_location,
+            'homepage_reachability': self.homepage_reachability,
         }
 

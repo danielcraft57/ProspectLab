@@ -660,7 +660,7 @@
         chipsContainer.innerHTML = activeTagFilters.map(tag => `
             <span class="tags-filter-chip" data-tag="${Formatters.escapeHtml(tag)}">
                 <i class="fas fa-tag" aria-hidden="true"></i>
-                <span>${Formatters.escapeHtml(tag)}</span>
+                <span>${Formatters.escapeHtml(formatEntrepriseTagLabel(tag))}</span>
                 <button type="button" class="tags-filter-chip-remove" aria-label="Retirer le tag" data-remove-tag="${Formatters.escapeHtml(tag)}">
                     <i class="fas fa-times"></i>
                 </button>
@@ -681,7 +681,11 @@
             .map(item => (typeof item === 'string' ? { value: item, count: null } : item))
             .filter(item => item && item.value && !activeTagFilters.includes(item.value));
         const filtered = query
-            ? available.filter(item => item.value.toLowerCase().includes(query))
+            ? available.filter(item => {
+                const value = String(item.value || '').toLowerCase();
+                const label = formatEntrepriseTagLabel(item.value).toLowerCase();
+                return value.includes(query) || label.includes(query);
+            })
             : available;
         if (!filtered.length) {
             container.classList.remove('hidden');
@@ -693,8 +697,9 @@
         container.innerHTML = filtered.slice(0, maxToShow).map(item => {
             const value = item.value;
             const count = item.count;
+            const shown = formatEntrepriseTagLabel(value);
             return `<button type="button" class="tag-suggestion" data-tag="${Formatters.escapeHtml(value)}">
-                <span>${Formatters.escapeHtml(value)}</span>
+                <span>${Formatters.escapeHtml(shown === value ? value : shown)}</span>
                 ${typeof count === 'number' ? `<small>${count}</small>` : ''}
             </button>`;
         }).join('');
@@ -1503,6 +1508,30 @@
         `;
     }
     
+    /**
+     * Libelle lisible d'un tag (filtres et pastilles).
+     * @param {string} tag
+     * @returns {string}
+     */
+    function formatEntrepriseTagLabel(tag) {
+        if (!tag) return '';
+        if (tag === 'site_injoignable') return 'Ne répond pas';
+        if (tag === 'fort_potentiel_refonte') return 'Fort potentiel refonte';
+        if (tag === 'perf_lente') return 'Site lent';
+        if (tag === 'perf:low') return 'Perf faible';
+        if (tag === 'perf:good') return 'Perf OK';
+        if (typeof tag === 'string' && tag.startsWith('http:')) {
+            const code = tag.slice('http:'.length);
+            if (/^\d{3}$/.test(code)) return code;
+            if (code === 'timeout') return 'Timeout';
+            if (code === 'dns') return 'DNS';
+            if (code === 'ssl') return 'SSL';
+            if (code === 'injoignable') return 'Injoignable';
+            return code;
+        }
+        return tag;
+    }
+
     function buildOpportunityTagHtml(entreprise) {
         const niveau = entreprise && typeof entreprise.opportunite === 'string'
             ? entreprise.opportunite.trim()
@@ -1527,6 +1556,7 @@
                 .sort((a, b) => {
                     const priority = (t) => {
                         if (!t) return 999;
+                        if (t === 'site_injoignable' || String(t).startsWith('http:')) return 0;
                         if (t === 'fort_potentiel_refonte') return 1;
                         if (t === 'risque_cyber_eleve') return 2;
                         if (t === 'seo_a_ameliorer') return 3;
@@ -1546,7 +1576,9 @@
                 const isCms = typeof tag === 'string' && tag.startsWith('cms:');
                 const isFramework = typeof tag === 'string' && tag.startsWith('framework:');
                 const isPerf = typeof tag === 'string' && tag.startsWith('perf:');
+                const isHttp = typeof tag === 'string' && (tag.startsWith('http:') || tag === 'site_injoignable');
                 const extra =
+                    isHttp ? ' tag-http' :
                     tag === 'fort_potentiel_refonte' ? ' tag-refonte' :
                     tag === 'risque_cyber_eleve' ? ' tag-risk' :
                     tag === 'seo_a_ameliorer' ? ' tag-seo' :
@@ -1612,7 +1644,9 @@
                         label = 'Autre langue';
                         break;
                     default:
-                        if (isCms) {
+                        if (isHttp) {
+                            label = formatEntrepriseTagLabel(tag);
+                        } else if (isCms) {
                             label = 'CMS: ' + tag.slice('cms:'.length);
                         } else if (isFramework) {
                             label = 'FW: ' + tag.slice('framework:'.length);
@@ -1814,6 +1848,7 @@
                 .sort((a, b) => {
                     const priority = (t) => {
                         if (!t) return 999;
+                        if (t === 'site_injoignable' || String(t).startsWith('http:')) return 0;
                         if (t === 'fort_potentiel_refonte') return 1;
                         if (t === 'risque_cyber_eleve') return 2;
                         if (t === 'seo_a_ameliorer') return 3;
@@ -1833,7 +1868,9 @@
                 const isCms = typeof tag === 'string' && tag.startsWith('cms:');
                 const isFramework = typeof tag === 'string' && tag.startsWith('framework:');
                 const isPerf = typeof tag === 'string' && tag.startsWith('perf:');
+                const isHttp = typeof tag === 'string' && (tag.startsWith('http:') || tag === 'site_injoignable');
                 const extra =
+                    isHttp ? ' tag-http' :
                     tag === 'fort_potentiel_refonte' ? ' tag-refonte' :
                     tag === 'risque_cyber_eleve' ? ' tag-risk' :
                     tag === 'seo_a_ameliorer' ? ' tag-seo' :
@@ -1899,7 +1936,9 @@
                         label = 'Autre langue';
                         break;
                     default:
-                        if (isCms) {
+                        if (isHttp) {
+                            label = formatEntrepriseTagLabel(tag);
+                        } else if (isCms) {
                             label = 'CMS: ' + tag.slice('cms:'.length);
                         } else if (isFramework) {
                             label = 'FW: ' + tag.slice('framework:'.length);

@@ -1004,7 +1004,18 @@ class TechnicalAnalyzer:
         headers_presence = multipage.get('headers_presence', set())
         security_score = self._compute_global_security_score(base_results, headers_presence)
 
-        page_perfs = [p.get('performance_score') for p in multipage.get('pages', []) if p.get('performance_score') is not None]
+        page_perfs = []
+        for page in multipage.get('pages', []) or []:
+            if not isinstance(page, dict):
+                continue
+            code = page.get('status_code')
+            score = page.get('performance_score')
+            try:
+                code_int = int(code) if code is not None else 0
+            except (TypeError, ValueError):
+                code_int = 0
+            if 200 <= code_int < 400 and isinstance(score, (int, float)):
+                page_perfs.append(score)
         performance_score = int(sum(page_perfs) / len(page_perfs)) if page_perfs else None
 
         summary['security_score'] = security_score

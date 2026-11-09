@@ -97,6 +97,7 @@ class OpportunityCalculator:
             'ne_pas_contacter': (6.0, 'Tag ne_pas_contacter'),
             'spam': (4.0, 'Risque de plainte spam'),
             'client': (3.0, 'Déjà client / hors cible'),
+            'site_injoignable': (8.0, 'Site qui ne répond pas'),
         }
 
         for key, (pts, label) in positive_keywords.items():

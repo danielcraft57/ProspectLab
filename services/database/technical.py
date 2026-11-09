@@ -169,14 +169,19 @@ class TechnicalManager(DatabaseBase):
         }
         has_strong = any(sig in indicators for sig in strong_signals)
 
-        low_scores = 0
-        if isinstance(security_score, (int, float)) and security_score < 50:
-            low_scores += 1
-        if isinstance(performance_score, (int, float)) and performance_score < 50:
-            low_scores += 1
-        has_refonte_potential = has_strong or (low_scores >= 2)
+        # Uniquement des signaux forts (vieille stack, HTTP nu, copyright ancien).
+        # Deux scores bas ne suffisent plus : ca taguait presque tout le monde,
+        # y compris les sites qui ne repondent pas.
+        has_refonte_potential = has_strong
         if site_age_score is not None and site_age_score >= 4:
             has_refonte_potential = True
+        try:
+            from services.http_reachability import outcome_from_pages
+            reach = outcome_from_pages(data.get('pages') or [])
+            if reach is not None and not reach.get('ok'):
+                has_refonte_potential = False
+        except Exception:
+            pass
 
         # Enrichir les données brutes pour exploitation ultérieure
         if tech_data is not None:
@@ -285,6 +290,29 @@ class TechnicalManager(DatabaseBase):
             )
         except Exception as e:
             logger.warning(f"Erreur lors de la mise à jour des tags d'obsolescence pour entreprise {entreprise_id}: {e}")
+
+    def _sync_homepage_reachability_tags(self, cursor, entreprise_id, tech_data):
+        """
+        Pose le tag HTTP (404, 502, timeout...) a partir des pages techniques.
+
+        @param cursor: Curseur SQL de la transaction en cours
+        @param entreprise_id: ID entreprise
+        @param tech_data: Donnees techniques, avec la cle pages
+        """
+        if not entreprise_id:
+            return
+        try:
+            from services.http_reachability import outcome_from_pages, sync_reachability_tags
+            outcome = outcome_from_pages((tech_data or {}).get('pages') or [])
+            if outcome is None:
+                return
+            sync_reachability_tags(self, cursor, entreprise_id, outcome)
+        except Exception as exc:
+            logger.warning(
+                'Tag HTTP (analyse technique) non pose pour entreprise %s: %s',
+                entreprise_id,
+                exc,
+            )
     
     def save_technical_analysis(self, entreprise_id, url, tech_data):
         """
@@ -522,9 +550,25 @@ class TechnicalManager(DatabaseBase):
                     fw_tag = safe_lower(effective_framework)
                     add_tag(f'framework:{fw_tag}')
 
-                # Performance
+                # Performance : seulement si la page d'accueil a vraiment repondu.
+                # Un echec HTTP donnait un score 0, donc « Perf faible » partout.
                 effective_perf = perf_value if isinstance(perf_value, (int, float)) else (row and row.get('performance_score'))
-                if isinstance(effective_perf, (int, float)):
+                homepage_ok = True
+                try:
+                    from services.http_reachability import outcome_from_pages
+                    reach = outcome_from_pages((tech_data or {}).get('pages') or [])
+                    if reach is not None:
+                        homepage_ok = bool(reach.get('ok'))
+                except Exception:
+                    homepage_ok = True
+                if not homepage_ok:
+                    tags_set.discard('perf:low')
+                    tags_set.discard('perf:good')
+                    tags_set.discard('perf_lente')
+                    tags_set.discard('fort_potentiel_refonte')
+                elif isinstance(effective_perf, (int, float)):
+                    tags_set.discard('perf:low')
+                    tags_set.discard('perf:good')
                     if effective_perf < 40:
                         add_tag('perf:low')
                     elif effective_perf >= 70:
@@ -723,6 +767,7 @@ class TechnicalManager(DatabaseBase):
         if entreprise_id:
             self._persist_entreprise_site_age(cursor, entreprise_id, tech_data)
             self._update_entreprise_obsolescence_tags(cursor, entreprise_id, indicators, has_refonte_potential)
+            self._sync_homepage_reachability_tags(cursor, entreprise_id, tech_data)
 
         if entreprise_id and analysis_id:
             try:
@@ -1197,6 +1242,7 @@ class TechnicalManager(DatabaseBase):
             indicators, has_refonte_potential = self._compute_obsolescence_indicators(tech_data, url)
             self._persist_entreprise_site_age(cursor, entreprise_id, tech_data)
             self._update_entreprise_obsolescence_tags(cursor, entreprise_id, indicators, has_refonte_potential)
+            self._sync_homepage_reachability_tags(cursor, entreprise_id, tech_data)
 
         if entreprise_id and analysis_id:
             try:

@@ -1106,6 +1106,13 @@ body[data-theme="dark"] .group-dropdown-section-create .group-create-input {
     border: 1px solid #f87171;
 }
 
+.tag-http {
+    background: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #ef4444;
+    font-weight: 700;
+}
+
 .tag-opportunity {
     font-weight: 600;
 }

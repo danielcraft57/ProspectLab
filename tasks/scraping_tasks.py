@@ -501,6 +501,7 @@ def run_scrape_emails_inline(
                 results.get('metadata'),
                 results.get('external_links'),
                 results.get('scraped_location'),
+                results.get('homepage_reachability'),
             )
             metadata_total = len(metadata_value) if isinstance(metadata_value, dict) else 0
 
@@ -982,6 +983,7 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
                     results.get('metadata'),
                     results.get('external_links'),
                     results.get('scraped_location'),
+                    results.get('homepage_reachability'),
                 )
                 metadata_total = len(metadata_value) if isinstance(metadata_value, dict) else 0
                 

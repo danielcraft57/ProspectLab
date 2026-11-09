@@ -1963,7 +1963,11 @@ class EntrepriseManager(DatabaseBase):
                     details = tech.get('technical_details')
                     if isinstance(details, dict):
                         main_lang = details.get('main_language')
-            if perf_lente:
+            site_down = any(
+                isinstance(t, str) and (t == 'site_injoignable' or t.startswith('http:'))
+                for t in tags
+            )
+            if perf_lente and not site_down:
                 tags.append('perf_lente')
             if site_sans_https:
                 tags.append('site_sans_https')
@@ -2081,6 +2085,88 @@ class EntrepriseManager(DatabaseBase):
         updated = int(getattr(cursor, 'rowcount', 0) or 0) > 0
         conn.close()
         return updated
+
+    def backfill_reachability_tags(self):
+        """
+        Pose les tags HTTP sur les fiches deja en base.
+
+        Source 1 : derniere analyse technique (status de la premiere page).
+        Source 2 : scraping termine sans aucune page visitee (site mort, sans analyse).
+
+        @returns: Compteurs from_technical, from_scrape, skipped
+        """
+        from services.http_reachability import outcome_from_stored_page, sync_reachability_tags
+
+        stats = {'from_technical': 0, 'from_scrape': 0, 'skipped': 0}
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            self.execute_sql(
+                cursor,
+                '''
+                SELECT entreprise_id, status_code, details
+                FROM (
+                    SELECT a.entreprise_id AS entreprise_id,
+                           p.status_code AS status_code,
+                           p.details AS details,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY a.entreprise_id
+                               ORDER BY a.date_analyse DESC, p.id ASC
+                           ) AS rn
+                    FROM analysis_technique_pages p
+                    INNER JOIN analyses_techniques a ON a.id = p.analysis_id
+                    WHERE a.entreprise_id IS NOT NULL
+                ) ranked
+                WHERE ranked.rn = 1
+                ''',
+            )
+            for row in cursor.fetchall():
+                entreprise_id = row['entreprise_id'] if hasattr(row, 'keys') else row[0]
+                status_code = row['status_code'] if hasattr(row, 'keys') else row[1]
+                details = row['details'] if hasattr(row, 'keys') else row[2]
+                outcome = outcome_from_stored_page(status_code, details)
+                if outcome is None:
+                    stats['skipped'] += 1
+                    continue
+                if sync_reachability_tags(self, cursor, int(entreprise_id), outcome):
+                    stats['from_technical'] += 1
+
+            self.execute_sql(
+                cursor,
+                '''
+                SELECT s.entreprise_id AS entreprise_id
+                FROM scrapers s
+                WHERE s.scraper_type = 'unified_scraper'
+                  AND s.entreprise_id IS NOT NULL
+                  AND COALESCE(s.visited_urls, 0) = 0
+                  AND COALESCE(s.duration, 0) > 1
+                  AND NOT EXISTS (
+                      SELECT 1 FROM analyses_techniques a
+                      WHERE a.entreprise_id = s.entreprise_id
+                  )
+                ''',
+            )
+            unreachable = {
+                'ok': False,
+                'status_code': None,
+                'kind': 'error',
+                'tag': 'http:injoignable',
+            }
+            seen = set()
+            for row in cursor.fetchall():
+                entreprise_id = row['entreprise_id'] if hasattr(row, 'keys') else row[0]
+                if not entreprise_id or entreprise_id in seen:
+                    continue
+                seen.add(entreprise_id)
+                if sync_reachability_tags(self, cursor, int(entreprise_id), unreachable):
+                    stats['from_scrape'] += 1
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+        return stats
     
     def update_entreprise_notes(self, entreprise_id, notes):
         """
@@ -4814,24 +4900,6 @@ class EntrepriseManager(DatabaseBase):
             except Exception:
                 pass
 
-            # Performance dérivée
-            try:
-                self.execute_sql(cursor, '''
-                    SELECT
-                        SUM(CASE WHEN performance_score IS NOT NULL AND performance_score < 40 THEN 1 ELSE 0 END) as low_count,
-                        SUM(CASE WHEN performance_score IS NOT NULL AND performance_score >= 70 THEN 1 ELSE 0 END) as good_count
-                    FROM entreprises
-                ''')
-                perf_row = cursor.fetchone()
-                if perf_row:
-                    low_count = row_get(perf_row, 'low_count') or 0
-                    good_count = row_get(perf_row, 'good_count') or 0
-                    # match avec technical.py: perf:low / perf:good
-                    tags_count['perf:low'] = int(low_count)
-                    tags_count['perf:good'] = int(good_count)
-            except Exception:
-                pass
-
             # Blog / contact_form / ecommerce
             try:
                 self.execute_sql(cursor, '''
@@ -4852,6 +4920,17 @@ class EntrepriseManager(DatabaseBase):
             # 3) Tags "connus" (pour lesquels on veut aussi proposer une suggestion à 0)
             # On évite d'y remettre cms:* / framework:* / perf:* car on les dérive déjà du résumé technique ci-dessus.
             important_tags = [
+                "site_injoignable",
+                "http:404",
+                "http:410",
+                "http:500",
+                "http:502",
+                "http:503",
+                "http:504",
+                "http:timeout",
+                "http:dns",
+                "http:ssl",
+                "http:injoignable",
                 "refonte",
                 "fort_potentiel_refonte",
                 "https",
