@@ -331,6 +331,7 @@ def analyze_entreprise_batch_task(
                                     scraper_data.get('metadata'),
                                     scraper_data.get('external_links'),
                                     scraper_data.get('scraped_location'),
+                                    scraper_data.get('homepage_reachability'),
                                 )
                                 metadata_total = len(metadata_value) if isinstance(metadata_value, dict) else 0
 
@@ -1006,6 +1007,7 @@ def analyze_entreprise_task(self, filepath, output_path, max_workers=4, delay=0.
                                             scraper_data.get('metadata'),
                                             scraper_data.get('external_links'),
                                             scraper_data.get('scraped_location'),
+                                            scraper_data.get('homepage_reachability'),
                                         )
                                         metadata_total = len(metadata_value) if isinstance(metadata_value, dict) else 0
                                         
