@@ -3,15 +3,26 @@
 from services.http_reachability import (
     outcome_from_error_message,
     outcome_from_status,
+    resolve_reachability_from_pages,
     sync_reachability_tags,
 )
 
 
 def test_status_codes():
     assert outcome_from_status(200)['ok'] is True
+    assert outcome_from_status(403)['ok'] is True
     assert outcome_from_status(404)['tag'] == 'http:404'
     assert outcome_from_status(502)['tag'] == 'http:502'
     assert outcome_from_status(503)['ok'] is False
+
+
+def test_one_ok_page_among_errors():
+    pages = [
+        {'url': 'https://exemple.fr/lien-mort', 'status_code': 404},
+        {'url': 'https://exemple.fr/', 'status_code': 200},
+    ]
+    out = resolve_reachability_from_pages(pages, preferred_url='https://exemple.fr')
+    assert out['ok'] is True
 
 
 def test_timeout_and_dns():
@@ -60,6 +71,7 @@ def test_sync_clears_http_tags_when_site_answers():
 
 if __name__ == '__main__':
     test_status_codes()
+    test_one_ok_page_among_errors()
     test_timeout_and_dns()
     test_sync_replaces_noise_tags_on_502()
     test_sync_clears_http_tags_when_site_answers()

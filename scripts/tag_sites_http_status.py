@@ -21,7 +21,7 @@ def main():
     db = Database()
     stats = db.backfill_reachability_tags()
     print(
-        'Termine. Analyses techniques: {from_technical}, '
+        'Termine. Techniques: {from_technical}, corriges via scrape: {cleared_from_scrape}, '
         'scrapings vides: {from_scrape}, sans info: {skipped}'.format(**stats)
     )
 

@@ -304,6 +304,16 @@ class ScraperManager(DatabaseBase):
                 meta_obj = None
         if isinstance(meta_obj, dict):
             reachability = meta_obj.get('homepage_reachability')
+        try:
+            from services.http_reachability import outcome_from_scrape_evidence, sync_reachability_tags
+
+            evidence = outcome_from_scrape_evidence(
+                visited_urls, total_emails, reachability if isinstance(reachability, dict) else None
+            )
+            if evidence is not None:
+                reachability = evidence
+        except Exception:
+            pass
         if entreprise_id and isinstance(reachability, dict):
             try:
                 from services.http_reachability import sync_reachability_tags

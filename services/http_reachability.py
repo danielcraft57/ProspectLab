@@ -27,6 +27,27 @@ NOISE_TAGS_WHEN_UNREACHABLE = frozenset({
 
 SITE_UNREACHABLE_TAG = 'site_injoignable'
 
+# Le serveur repond : succes, redirections, ou protection (WAF). Pas « site mort ».
+REACHABLE_STATUS_CODES = frozenset({401, 403})
+
+
+def is_site_reachable_status(status_code: Any) -> bool:
+    """
+    True si le serveur a repondu (meme en 403 bot/WAF).
+
+    @param status_code: Code HTTP ou None
+    @returns: Joignable au sens ProspectLab (pas tag « Ne repond pas »)
+    """
+    try:
+        code = int(status_code)
+    except (TypeError, ValueError):
+        return False
+    if 200 <= code < 400:
+        return True
+    if code in REACHABLE_STATUS_CODES:
+        return True
+    return False
+
 
 def _fail(status_code: Optional[int], kind: str, tag: str, detail: str = '') -> dict:
     """
@@ -61,7 +82,7 @@ def outcome_from_status(status_code: Any, detail: str = '') -> dict:
         code = int(status_code)
     except (TypeError, ValueError):
         return _fail(None, 'error', 'http:injoignable', detail or 'code HTTP illisible')
-    if 200 <= code < 400:
+    if is_site_reachable_status(code):
         return {
             'ok': True,
             'status_code': code,
@@ -97,7 +118,9 @@ def outcome_from_error_message(message: str) -> dict:
         or 'errno 11001' in msg
     ):
         return _fail(None, 'dns', 'http:dns', message)
-    code_match = re.search(r'\b([45]\d{2})\b', message or '')
+    code_match = re.search(r'(?:HTTPError|status code|http)\s*[=:]?\s*([45]\d{2})\b', msg, re.I)
+    if not code_match:
+        code_match = re.search(r'\b([45][0-9]{2})\b', message or '')
     if code_match:
         return outcome_from_status(int(code_match.group(1)), message)
     return _fail(None, 'connection', 'http:injoignable', message)
@@ -121,46 +144,146 @@ def outcome_from_exception(exc: BaseException) -> dict:
     return outcome_from_error_message(str(exc))
 
 
-def outcome_from_pages(pages: Any) -> Optional[dict]:
-    """
-    Lit la premiere page analysee (page d'accueil) et en sort un resultat.
+def _normalize_page_dict(raw: Any) -> Optional[dict]:
+    """Parse une ligne page technique (dict ou JSON string)."""
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else None
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return None
 
-    @param pages: Liste de pages (analyse technique)
-    @returns: Dict, ou None si on n'a aucune info fiable
+
+def _page_url_key(page: dict) -> str:
+    return str(page.get('url') or page.get('page_url') or '').strip().lower()
+
+
+def resolve_reachability_from_pages(pages: Any, preferred_url: Optional[str] = None) -> Optional[dict]:
+    """
+    Decide si le site repond a partir de toutes les pages d'une analyse.
+
+    Une seule page en 200/304/403 suffit : on ne se base plus sur la
+    premiere ligne BDD (souvent une 404 de sous-lien).
+
+    @param pages: Liste de pages (technique ou scrape)
+    @param preferred_url: URL d'accueil attendue (analyses_techniques.url)
+    @returns: Dict joignabilite, ou None
     """
     if not isinstance(pages, list) or not pages:
         return None
-    first = pages[0]
-    if not isinstance(first, dict):
+    pref = (preferred_url or '').strip().lower().rstrip('/')
+    normalized: list[dict] = []
+    for item in pages:
+        p = _normalize_page_dict(item)
+        if p:
+            normalized.append(p)
+    if not normalized:
         return None
-    if first.get('status_code') is not None:
-        return outcome_from_status(first.get('status_code'), str(first.get('error') or ''))
-    err = first.get('error')
+
+    def _matches_preferred(p: dict) -> bool:
+        if not pref:
+            return False
+        u = _page_url_key(p).rstrip('/')
+        return u == pref or u.startswith(pref + '/')
+
+    for p in normalized:
+        sc = p.get('status_code')
+        if sc is not None and is_site_reachable_status(sc):
+            ok = outcome_from_status(sc)
+            ok['detail'] = (_page_url_key(p) or '')[:240]
+            return ok
+
+    errors: list[tuple[Optional[int], dict]] = []
+    for p in normalized:
+        sc = p.get('status_code')
+        if sc is not None:
+            try:
+                code = int(sc)
+            except (TypeError, ValueError):
+                continue
+            if code >= 400:
+                errors.append((code, p))
+        elif p.get('error'):
+            errors.append((None, p))
+
+    if not errors:
+        return None
+
+    # Erreur sur l'URL d'accueil en priorite
+    errors.sort(
+        key=lambda pair: (
+            0 if _matches_preferred(pair[1]) else 1,
+            0 if pair[0] and pair[0] >= 500 else 1,
+            pair[0] if pair[0] is not None else 999,
+        ),
+    )
+    code, page = errors[0]
+    if code is not None:
+        return outcome_from_status(code, str(page.get('error') or ''))
+    err = page.get('error')
     if err:
         return outcome_from_error_message(str(err))
     return None
 
 
+def outcome_from_pages(pages: Any, preferred_url: Optional[str] = None) -> Optional[dict]:
+    """
+    Alias : analyse multipages complete.
+
+    @param pages: Liste de pages
+    @param preferred_url: URL racine optionnelle
+    @returns: Dict ou None
+    """
+    return resolve_reachability_from_pages(pages, preferred_url=preferred_url)
+
+
 def outcome_from_stored_page(status_code: Any, details: Any) -> Optional[dict]:
     """
-    Meme lecture, depuis une ligne analysis_technique_pages deja en base.
+    Compatibilite : une seule ligne BDD (eviter si possible, preferer toutes les pages).
 
     @param status_code: Colonne status_code
-    @param details: JSON de la page (peut contenir error)
-    @returns: Dict, ou None si la ligne ne dit rien
+    @param details: JSON de la page
+    @returns: Dict ou None
     """
+    page = _normalize_page_dict(details) or {}
     if status_code is not None and str(status_code).strip() != '':
-        return outcome_from_status(status_code)
-    payload = details
-    if isinstance(payload, str) and payload.strip():
+        page.setdefault('status_code', status_code)
+    return resolve_reachability_from_pages([page] if page else [], preferred_url=page.get('url'))
+
+
+def outcome_from_scrape_evidence(
+    visited_urls: Any,
+    total_emails: Any = 0,
+    homepage_reachability: Any = None,
+) -> Optional[dict]:
+    """
+    Si le scraping a vraiment recupere du contenu, le site repond.
+
+    @param visited_urls: Nombre ou liste d'URLs avec reponse HTML
+    @param total_emails: Emails trouves
+    @param homepage_reachability: Metadata scrape precedente
+    @returns: Dict ok, ou None pour laisser la metadata decider
+    """
+    visited = 0
+    if isinstance(visited_urls, list):
+        visited = len(visited_urls)
+    elif visited_urls is not None:
         try:
-            payload = json.loads(payload)
-        except (json.JSONDecodeError, TypeError):
-            payload = {'error': payload}
-    if isinstance(payload, dict):
-        err = payload.get('error')
-        if err:
-            return outcome_from_error_message(str(err))
+            visited = int(visited_urls)
+        except (TypeError, ValueError):
+            visited = 0
+    try:
+        emails = int(total_emails or 0)
+    except (TypeError, ValueError):
+        emails = 0
+    if emails > 0:
+        return outcome_from_status(200, 'emails_scrapes')
+    if isinstance(homepage_reachability, dict) and homepage_reachability.get('ok'):
+        return dict(homepage_reachability)
+    # visited_urls seul n'est pas suffisant (on ajoute l'URL meme quand le GET echoue)
     return None
 
 

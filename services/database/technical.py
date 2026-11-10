@@ -177,7 +177,10 @@ class TechnicalManager(DatabaseBase):
             has_refonte_potential = True
         try:
             from services.http_reachability import outcome_from_pages
-            reach = outcome_from_pages(data.get('pages') or [])
+            reach = outcome_from_pages(
+                data.get('pages') or [],
+                preferred_url=(tech_data or {}).get('url'),
+            )
             if reach is not None and not reach.get('ok'):
                 has_refonte_potential = False
         except Exception:
@@ -303,7 +306,11 @@ class TechnicalManager(DatabaseBase):
             return
         try:
             from services.http_reachability import outcome_from_pages, sync_reachability_tags
-            outcome = outcome_from_pages((tech_data or {}).get('pages') or [])
+            td = tech_data or {}
+            outcome = outcome_from_pages(
+                td.get('pages') or [],
+                preferred_url=td.get('url') or td.get('canonical_url'),
+            )
             if outcome is None:
                 return
             sync_reachability_tags(self, cursor, entreprise_id, outcome)
