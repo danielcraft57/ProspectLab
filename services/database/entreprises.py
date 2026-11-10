@@ -1348,6 +1348,26 @@ class EntrepriseManager(DatabaseBase):
             params.append(analyse_id)
 
         if filters:
+            if filters.get('ids_in'):
+                raw_ids = filters['ids_in']
+                id_list: list[int] = []
+                if isinstance(raw_ids, str):
+                    for part in str(raw_ids).split(','):
+                        part = part.strip()
+                        if part.isdigit():
+                            id_list.append(int(part))
+                elif isinstance(raw_ids, (list, tuple, set)):
+                    for x in raw_ids:
+                        try:
+                            xi = int(x)
+                            if xi > 0:
+                                id_list.append(xi)
+                        except (TypeError, ValueError):
+                            continue
+                if id_list:
+                    placeholders = ','.join(['?' for _ in id_list])
+                    inner_query += f' AND e.id IN ({placeholders})'
+                    params.extend(id_list)
             # Score sécu = colonne sur entreprises : filtrer AVANT has_email / EXISTS coûteux
             if has_security_filters:
                 if EntrepriseManager._truthy_filter(filters, 'security_null'):
@@ -1585,6 +1605,52 @@ class EntrepriseManager(DatabaseBase):
         if with_total:
             return entreprises, total
         return entreprises
+
+    def filter_entreprise_ids_matching_filters(self, analyse_id=None, filters=None, ids=None, chunk_size=150):
+        """
+        Retourne les IDs qui correspondent encore aux filtres courants.
+
+        Utilise pour aligner la selection bulk quand les criteres changent.
+
+        @param analyse_id: Filtre analyse optionnel
+        @param filters: Memes cles que get_entreprises
+        @param ids: IDs selectionnes a verifier
+        @param chunk_size: Taille des lots IN (...)
+        @returns: Liste d'entiers
+        """
+        if not ids:
+            return []
+        id_list: list[int] = []
+        for x in ids:
+            try:
+                xi = int(x)
+                if xi > 0:
+                    id_list.append(xi)
+            except (TypeError, ValueError):
+                continue
+        if not id_list:
+            return []
+        base = dict(filters or {})
+        base.pop('ids_in', None)
+        matched: list[int] = []
+        chunk = max(1, min(int(chunk_size or 150), 400))
+        for i in range(0, len(id_list), chunk):
+            part = id_list[i : i + chunk]
+            scoped = dict(base)
+            scoped['ids_in'] = part
+            rows = self.get_entreprises(
+                analyse_id=analyse_id,
+                filters=scoped,
+                limit=len(part),
+                offset=0,
+                include_og=False,
+                with_total=False,
+            )
+            for row in rows:
+                rid = row.get('id') if isinstance(row, dict) else None
+                if rid is not None:
+                    matched.append(int(rid))
+        return matched
 
     def _build_filtered_entreprises_subquery_from(self, analyse_id=None, filters=None):
         """

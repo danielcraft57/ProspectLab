@@ -1175,6 +1175,32 @@
         if (btnOff) btnOff.style.display = on ? 'inline-flex' : 'none';
     }
 
+    /**
+     * Retire de la selection les entreprises qui ne passent plus les filtres actifs.
+     */
+    async function reconcileBulkSelectionWithFilters() {
+        if (!selectedEntreprises.size) return;
+        if (!window.EntreprisesAPI || typeof EntreprisesAPI.pruneSelectionIds !== 'function') {
+            return;
+        }
+        try {
+            const before = selectedEntreprises.size;
+            const ids = Array.from(selectedEntreprises);
+            const kept = await EntreprisesAPI.pruneSelectionIds(ids, getCurrentFilters(), initialAnalyseId);
+            const keepSet = new Set(kept.map((x) => Number(x)));
+            ids.forEach((id) => {
+                if (!keepSet.has(Number(id))) {
+                    selectedEntreprises.delete(id);
+                }
+            });
+            if (selectedEntreprises.size !== before) {
+                updateBulkSelectionUI();
+            }
+        } catch (e) {
+            console.warn('[entreprises] reconcile selection:', e);
+        }
+    }
+
     /** Charge les entreprises avec les filtres courants (côté serveur, pagination). */
     async function loadEntreprises() {
         try {
@@ -1195,6 +1221,7 @@
                 filteredEntreprises = [...items];
                 totalEntreprises = items.length;
                 setCommercialTopUi(true);
+                await reconcileBulkSelectionWithFilters();
                 renderEntreprises();
                 refreshKanbanStrip();
                 return;
@@ -1215,6 +1242,7 @@
                 } catch (e) {}
                 return loadEntreprises();
             }
+            await reconcileBulkSelectionWithFilters();
             renderEntreprises();
             refreshKanbanStrip();
         } catch (error) {
