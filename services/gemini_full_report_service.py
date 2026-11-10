@@ -773,7 +773,7 @@ def build_full_report_for_entreprise(
     @returns: Dict success, report, meta
     """
     from services.website_audit_data import build_audit_pipeline
-    from utils.url_utils import canonical_website_https_url
+    from utils.url_utils import normalize_url_for_analysis
 
     def _emit(msg: str, pct: Optional[int] = None) -> None:
         if not progress_cb:
@@ -789,7 +789,7 @@ def build_full_report_for_entreprise(
     if not entreprise:
         return {'success': False, 'error': 'Entreprise introuvable', 'entreprise_id': eid}
 
-    website = canonical_website_https_url(entreprise.get('website'))
+    website = normalize_url_for_analysis(entreprise.get('website'))
     if not website:
         return {'success': False, 'error': 'Aucun website valide', 'entreprise_id': eid}
 

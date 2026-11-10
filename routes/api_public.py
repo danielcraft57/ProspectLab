@@ -13,7 +13,7 @@ import re
 from typing import Optional
 from urllib.parse import urlparse
 
-from utils.url_utils import canonical_website_https_url
+from utils.url_utils import canonical_website_https_url, normalize_url_for_analysis
 from services.public_api_response_cache import public_response_cache
 from services.logging_config import setup_logger
 
@@ -441,10 +441,24 @@ def _get_allowed_entreprise_statuses() -> list[str]:
         ]
 
 def _normalize_url_for_analysis(raw: str) -> str | None:
-    """URL HTTPS canonique (sans www.) — alignée sur la dédup domaine en base."""
+    """URL navigable pour analyses (redirections suivies, fallback canonical https)."""
     if raw is None:
         return None
-    return canonical_website_https_url(str(raw).strip() or None)
+    return normalize_url_for_analysis(str(raw).strip() or None)
+
+
+def _load_pending_audit_job(pending_id: Optional[str], website_raw: str):
+    """Charge un job en pause (clef fichier = canonical ou URL resolue)."""
+    from services.website_audit_pending import load_pending_agent_job
+
+    lookup = canonical_website_https_url(website_raw) if website_raw else None
+    pending = load_pending_agent_job(pending_id=pending_id, website=lookup)
+    if pending or not website_raw:
+        return pending
+    resolved = normalize_url_for_analysis(website_raw.strip())
+    if resolved and resolved.rstrip('/') != (lookup or '').rstrip('/'):
+        pending = load_pending_agent_job(pending_id=pending_id, website=resolved)
+    return pending
 
 
 def _get_entreprise_id_for_website(database: Database, website: str) -> int | None:
@@ -2635,12 +2649,7 @@ def _enqueue_audit_complete_resume(
     email_raw: str = '',
     extra_instructions: Optional[str] = None,
 ):
-    from services.website_audit_pending import load_pending_agent_job
-
-    pending = load_pending_agent_job(
-        pending_id=pending_id,
-        website=canonical_website_https_url(website_raw) if website_raw else None,
-    )
+    pending = _load_pending_audit_job(pending_id, website_raw)
     if not pending:
         return None, (
             jsonify({
@@ -2671,7 +2680,9 @@ def _enqueue_audit_complete_resume(
 
     existing_tid = get_audit_resume_task_id(pid) or (pending.get('resume_celery_task_id') or '').strip()
     if existing_tid and _resume_celery_still_running(existing_tid):
-        website = canonical_website_https_url((pending.get('website') or website_raw or '').strip())
+        website = normalize_url_for_analysis(
+            (pending.get('website') or website_raw or '').strip()
+        )
         recipient = _normalize_public_email(email_raw or pending.get('recipient_email') or '')
         body = {
             'success': True,
@@ -2698,7 +2709,9 @@ def _enqueue_audit_complete_resume(
             409,
         )
 
-    website = canonical_website_https_url((pending.get('website') or website_raw or '').strip())
+    website = normalize_url_for_analysis(
+        (pending.get('website') or website_raw or '').strip()
+    )
     recipient = _normalize_public_email(email_raw or pending.get('recipient_email') or '')
     if not website or not recipient:
         return None, (jsonify({'success': False, 'error': 'website et email requis'}), 400)

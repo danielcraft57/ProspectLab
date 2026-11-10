@@ -15,7 +15,7 @@ import socket
 import requests
 from urllib.parse import urlparse
 
-from utils.url_utils import canonical_website_https_url, normalize_website_domain
+from utils.url_utils import normalize_url_for_analysis, normalize_website_domain
 
 api_extended_bp = Blueprint('api_extended', __name__, url_prefix='/api')
 
@@ -24,10 +24,10 @@ database = Database()
 export_manager = ExportManager()
 
 def _normalize_url_for_analysis(raw: str) -> str | None:
-    """URL HTTPS canonique (sans www.) — alignée sur la dédup domaine en base."""
+    """URL navigable pour analyses (redirections suivies)."""
     if raw is None:
         return None
-    return canonical_website_https_url(str(raw).strip() or None)
+    return normalize_url_for_analysis(str(raw).strip() or None)
 
 
 def _get_entreprise_id_for_website(database: Database, website: str) -> int | None:
