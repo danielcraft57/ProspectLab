@@ -1441,6 +1441,26 @@ class EntrepriseManager(DatabaseBase):
             params.append(analyse_id)
 
         if filters:
+            if filters.get('ids_in'):
+                raw_ids = filters['ids_in']
+                id_list: list[int] = []
+                if isinstance(raw_ids, str):
+                    for part in str(raw_ids).split(','):
+                        part = part.strip()
+                        if part.isdigit():
+                            id_list.append(int(part))
+                elif isinstance(raw_ids, (list, tuple, set)):
+                    for x in raw_ids:
+                        try:
+                            xi = int(x)
+                            if xi > 0:
+                                id_list.append(xi)
+                        except (TypeError, ValueError):
+                            continue
+                if id_list:
+                    placeholders = ','.join(['?' for _ in id_list])
+                    inner_query += f' AND e.id IN ({placeholders})'
+                    params.extend(id_list)
             # Score sécu = colonne sur entreprises : filtrer AVANT has_email / EXISTS coûteux
             if has_security_filters:
                 if EntrepriseManager._truthy_filter(filters, 'security_null'):
@@ -1763,6 +1783,52 @@ class EntrepriseManager(DatabaseBase):
         if with_total:
             return entreprises, total
         return entreprises
+
+    def filter_entreprise_ids_matching_filters(self, analyse_id=None, filters=None, ids=None, chunk_size=150):
+        """
+        Retourne les IDs qui correspondent encore aux filtres courants.
+
+        Utilise pour aligner la selection bulk quand les criteres changent.
+
+        @param analyse_id: Filtre analyse optionnel
+        @param filters: Memes cles que get_entreprises
+        @param ids: IDs selectionnes a verifier
+        @param chunk_size: Taille des lots IN (...)
+        @returns: Liste d'entiers
+        """
+        if not ids:
+            return []
+        id_list: list[int] = []
+        for x in ids:
+            try:
+                xi = int(x)
+                if xi > 0:
+                    id_list.append(xi)
+            except (TypeError, ValueError):
+                continue
+        if not id_list:
+            return []
+        base = dict(filters or {})
+        base.pop('ids_in', None)
+        matched: list[int] = []
+        chunk = max(1, min(int(chunk_size or 150), 400))
+        for i in range(0, len(id_list), chunk):
+            part = id_list[i : i + chunk]
+            scoped = dict(base)
+            scoped['ids_in'] = part
+            rows = self.get_entreprises(
+                analyse_id=analyse_id,
+                filters=scoped,
+                limit=len(part),
+                offset=0,
+                include_og=False,
+                with_total=False,
+            )
+            for row in rows:
+                rid = row.get('id') if isinstance(row, dict) else None
+                if rid is not None:
+                    matched.append(int(rid))
+        return matched
 
     def _build_filtered_entreprises_subquery_from(self, analyse_id=None, filters=None):
         """
@@ -2273,41 +2339,103 @@ class EntrepriseManager(DatabaseBase):
 
         @returns: Compteurs from_technical, from_scrape, skipped
         """
-        from services.http_reachability import outcome_from_stored_page, sync_reachability_tags
+        from services.http_reachability import (
+            outcome_from_scrape_evidence,
+            outcome_from_status,
+            resolve_reachability_from_pages,
+            sync_reachability_tags,
+        )
 
-        stats = {'from_technical': 0, 'from_scrape': 0, 'skipped': 0}
+        stats = {'from_technical': 0, 'from_scrape': 0, 'skipped': 0, 'cleared_from_scrape': 0}
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
             self.execute_sql(
                 cursor,
                 '''
-                SELECT entreprise_id, status_code, details
+                SELECT analysis_id, entreprise_id, tech_url
                 FROM (
-                    SELECT a.entreprise_id AS entreprise_id,
-                           p.status_code AS status_code,
-                           p.details AS details,
+                    SELECT a.id AS analysis_id,
+                           a.entreprise_id AS entreprise_id,
+                           a.url AS tech_url,
                            ROW_NUMBER() OVER (
                                PARTITION BY a.entreprise_id
-                               ORDER BY a.date_analyse DESC, p.id ASC
+                               ORDER BY a.date_analyse DESC, a.id DESC
                            ) AS rn
-                    FROM analysis_technique_pages p
-                    INNER JOIN analyses_techniques a ON a.id = p.analysis_id
+                    FROM analyses_techniques a
                     WHERE a.entreprise_id IS NOT NULL
                 ) ranked
                 WHERE ranked.rn = 1
                 ''',
             )
-            for row in cursor.fetchall():
-                entreprise_id = row['entreprise_id'] if hasattr(row, 'keys') else row[0]
-                status_code = row['status_code'] if hasattr(row, 'keys') else row[1]
-                details = row['details'] if hasattr(row, 'keys') else row[2]
-                outcome = outcome_from_stored_page(status_code, details)
+            analyses = cursor.fetchall() or []
+            for row in analyses:
+                if hasattr(row, 'keys'):
+                    analysis_id = row['analysis_id']
+                    entreprise_id = row['entreprise_id']
+                    tech_url = row.get('tech_url')
+                else:
+                    analysis_id, entreprise_id, tech_url = row[0], row[1], row[2]
+                self.execute_sql(
+                    cursor,
+                    '''
+                    SELECT page_url, status_code, details
+                    FROM analysis_technique_pages
+                    WHERE analysis_id = ?
+                    ORDER BY id ASC
+                    ''',
+                    (analysis_id,),
+                )
+                pages = []
+                for prow in cursor.fetchall() or []:
+                    if hasattr(prow, 'keys'):
+                        page_url = prow.get('page_url')
+                        status_code = prow.get('status_code')
+                        details = prow.get('details')
+                    else:
+                        page_url, status_code, details = prow[0], prow[1], prow[2]
+                    page = {'url': page_url, 'status_code': status_code}
+                    if details:
+                        try:
+                            extra = json.loads(details) if isinstance(details, str) else details
+                            if isinstance(extra, dict):
+                                page.update(extra)
+                        except Exception:
+                            pass
+                    pages.append(page)
+                outcome = resolve_reachability_from_pages(pages, preferred_url=tech_url)
                 if outcome is None:
                     stats['skipped'] += 1
                     continue
                 if sync_reachability_tags(self, cursor, int(entreprise_id), outcome):
                     stats['from_technical'] += 1
+
+            # Scraping avec contenu : le site a repondu meme si la home a echoue une fois
+            self.execute_sql(
+                cursor,
+                '''
+                SELECT entreprise_id,
+                       MAX(COALESCE(total_emails, 0)) AS total_emails,
+                       MAX(COALESCE(visited_urls, 0)) AS visited_urls
+                FROM scrapers
+                WHERE scraper_type = 'unified_scraper'
+                  AND entreprise_id IS NOT NULL
+                GROUP BY entreprise_id
+                HAVING MAX(COALESCE(total_emails, 0)) > 0
+                    OR MAX(COALESCE(total_phones, 0)) > 0
+                ''',
+            )
+            for row in cursor.fetchall() or []:
+                if hasattr(row, 'keys'):
+                    entreprise_id = row['entreprise_id']
+                    total_emails = row.get('total_emails')
+                    visited_urls = row.get('visited_urls')
+                else:
+                    entreprise_id, total_emails, visited_urls = row[0], row[1], row[2]
+                evidence = outcome_from_scrape_evidence(visited_urls, total_emails)
+                if evidence and evidence.get('ok'):
+                    if sync_reachability_tags(self, cursor, int(entreprise_id), evidence):
+                        stats['cleared_from_scrape'] += 1
 
             self.execute_sql(
                 cursor,
@@ -2316,6 +2444,8 @@ class EntrepriseManager(DatabaseBase):
                 FROM scrapers s
                 WHERE s.scraper_type = 'unified_scraper'
                   AND s.entreprise_id IS NOT NULL
+                  AND COALESCE(s.total_emails, 0) = 0
+                  AND COALESCE(s.total_phones, 0) = 0
                   AND COALESCE(s.visited_urls, 0) = 0
                   AND COALESCE(s.duration, 0) > 1
                   AND NOT EXISTS (
@@ -2324,12 +2454,7 @@ class EntrepriseManager(DatabaseBase):
                   )
                 ''',
             )
-            unreachable = {
-                'ok': False,
-                'status_code': None,
-                'kind': 'error',
-                'tag': 'http:injoignable',
-            }
+            unreachable = outcome_from_status(0, 'scraping_sans_page')
             seen = set()
             for row in cursor.fetchall():
                 entreprise_id = row['entreprise_id'] if hasattr(row, 'keys') else row[0]

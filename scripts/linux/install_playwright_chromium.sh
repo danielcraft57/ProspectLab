@@ -40,11 +40,19 @@ fi
 echo "[*] Telechargement Chromium (headless shell)..."
 "${PYTHON_BIN}" -m playwright install chromium
 
-echo "[*] Verification binaire..."
-"${PYTHON_BIN}" - <<'PY'
+echo "[*] Verification binaire (Chromium complet, pas headless_shell sur ARM)..."
+PYTHONPATH="${PROJECT_DIR}" "${PYTHON_BIN}" - <<'PY'
 from playwright.sync_api import sync_playwright
+from tasks.screenshot_tasks import _chromium_launch_kwargs
+
+launch_kw = _chromium_launch_kwargs()
+print("[*] launch kwargs:", {k: v for k, v in launch_kw.items() if k != 'args'})
 with sync_playwright() as p:
-    browser = p.chromium.launch(headless=True)
+    browser = p.chromium.launch(**launch_kw)
+    ctx = browser.new_context(viewport={'width': 800, 'height': 600})
+    page = ctx.new_page()
+    page.goto("about:blank")
+    ctx.close()
     browser.close()
 print("[OK] Chromium Playwright demarre correctement")
 PY

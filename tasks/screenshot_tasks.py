@@ -7,12 +7,15 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 from io import BytesIO
+import os
 from pathlib import Path
+import platform
 import time
 from urllib.parse import urlparse
 
 from celery_app import celery
 from config import (
+    CHROME_PATH,
     WEBSITE_SCREENSHOT_BLOCK_TRACKERS,
     WEBSITE_SCREENSHOT_CLEANUP_BATCH_SIZE,
     WEBSITE_SCREENSHOT_CAPTURE_FORMAT,
@@ -44,7 +47,7 @@ from config import (
 )
 from services.database import Database
 from services.logging_config import setup_logger
-from utils.url_utils import canonical_website_https_url
+from utils.url_utils import canonical_website_https_url, normalize_url_for_analysis
 
 logger = setup_logger(__name__, 'screenshot_tasks.log')
 
@@ -56,7 +59,89 @@ _CHROMIUM_LAUNCH_ARGS = (
     '--mute-audio',
     '--no-first-run',
     '--disable-background-networking',
+    '--disable-gpu',
+    '--disable-software-rasterizer',
+    '--no-sandbox',
 )
+
+_ARM64_MACHINE_MARKERS = frozenset({'aarch64', 'arm64', 'armv7l', 'armv8l'})
+
+
+def _playwright_browsers_root() -> Path:
+    """Repertoire ms-playwright (cache Playwright)."""
+    raw = (os.environ.get('PLAYWRIGHT_BROWSERS_PATH') or '').strip()
+    if raw:
+        return Path(raw).expanduser()
+    return Path.home() / '.cache' / 'ms-playwright'
+
+
+def _is_arm_linux() -> bool:
+    return platform.system() == 'Linux' and platform.machine().lower() in _ARM64_MACHINE_MARKERS
+
+
+def _find_bundled_full_chromium() -> str | None:
+    """
+    Binaire Chromium complet (pas chrome-headless-shell).
+
+    Sur Raspberry Pi, le headless shell plante souvent (SIGILL / SwiftShader).
+    """
+    root = _playwright_browsers_root()
+    if not root.is_dir():
+        return None
+    candidates: list[Path] = []
+    for folder in root.glob('chromium-*'):
+        if 'headless_shell' in folder.name:
+            continue
+        exe = folder / 'chrome-linux' / 'chrome'
+        if exe.is_file():
+            candidates.append(exe)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda p: p.parent.parent.name, reverse=True)
+    return str(candidates[0])
+
+
+def _resolve_chromium_executable() -> str | None:
+    """
+    Choix du binaire pour eviter chrome-headless-shell sur ARM.
+
+    Priorite : PLAYWRIGHT_CHROMIUM_EXECUTABLE, CHROME_PATH (.env), bundle Playwright, apt chromium.
+    """
+    override = (os.environ.get('PLAYWRIGHT_CHROMIUM_EXECUTABLE') or '').strip()
+    if override and Path(override).is_file():
+        return override
+    if CHROME_PATH and Path(CHROME_PATH).is_file():
+        return CHROME_PATH
+    bundled = _find_bundled_full_chromium()
+    if bundled:
+        return bundled
+    if _is_arm_linux():
+        for candidate in (
+            '/usr/bin/chromium',
+            '/usr/bin/chromium-browser',
+        ):
+            if Path(candidate).is_file():
+                return candidate
+    return None
+
+
+def _chromium_launch_kwargs() -> dict:
+    """
+    Options launch Playwright : executable complet sur Linux ARM.
+
+    @returns: dict passe a chromium.launch()
+    """
+    kw: dict = {'headless': True, 'args': list(_CHROMIUM_LAUNCH_ARGS), 'timeout': 45_000}
+    exe = _resolve_chromium_executable()
+    if exe and (_is_arm_linux() or os.environ.get('PLAYWRIGHT_FORCE_FULL_CHROMIUM', '').lower() in ('1', 'true', 'yes')):
+        kw['executable_path'] = exe
+        logger.debug('Playwright chromium executable_path=%s', exe)
+    elif exe and not _is_arm_linux():
+        # x86 : laisser le shell par defaut sauf si CHROME_PATH / override explicite
+        if (os.environ.get('PLAYWRIGHT_CHROMIUM_EXECUTABLE') or '').strip() or CHROME_PATH:
+            kw['executable_path'] = exe
+            logger.debug('Playwright chromium executable_path=%s', exe)
+    return kw
 
 # Sous-chaînes d’URL (analytics / pub) — bloque surtout scripts / pixels, accélère le chargement.
 _TRACKER_URL_MARKERS: tuple[str, ...] = (
@@ -359,7 +444,7 @@ def _run_screenshots_sequential(
     total = len(devices)
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True, args=list(_CHROMIUM_LAUNCH_ARGS))
+        browser = playwright.chromium.launch(**_chromium_launch_kwargs())
         try:
             for idx, device in enumerate(devices, start=1):
                 device_type = device['type']
@@ -455,7 +540,7 @@ def _run_screenshots_parallel(
         from playwright.async_api import async_playwright
 
         async with async_playwright() as ap:
-            browser = await ap.chromium.launch(headless=True, args=list(_CHROMIUM_LAUNCH_ARGS))
+            browser = await ap.chromium.launch(**_chromium_launch_kwargs())
             try:
 
                 async def capture_one(device: dict) -> dict:
@@ -574,9 +659,15 @@ def website_screenshot_task(
     full_page = False
 
     t0 = time.monotonic()
-    website = canonical_website_https_url(url)
+    website = normalize_url_for_analysis(url)
     if not website:
         raise ValueError('URL invalide pour screenshot')
+    if website.rstrip('/') != (canonical_website_https_url(url) or '').rstrip('/'):
+        logger.info(
+            'Screenshot URL resolue via redirects: input=%s -> final=%s',
+            url,
+            website,
+        )
 
     eid = int(entreprise_id)
     aid = int(analysis_id) if analysis_id is not None else None

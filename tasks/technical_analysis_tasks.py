@@ -11,6 +11,7 @@ from celery_app import celery
 from services.technical_analyzer import TechnicalAnalyzer
 from services.database import Database
 from services.logging_config import setup_logger
+from utils.url_utils import normalize_url_for_analysis
 import logging
 
 # Configurer le logger pour cette tâche (niveau INFO pour limiter le bruit)
@@ -35,6 +36,11 @@ def technical_analysis_task(self, url, entreprise_id=None, enable_nmap=False):
         >>> result = technical_analysis_task.delay('https://example.com', entreprise_id=1)
     """
     try:
+        input_url = url
+        url = normalize_url_for_analysis(url) or url
+        if url != input_url:
+            logger.info('Analyse technique: URL resolue %s -> %s', input_url, url)
+
         logger.info(f'Demarrage de l analyse technique pour {url} (entreprise_id={entreprise_id}, enable_nmap={enable_nmap})')
         
         self.update_state(
@@ -95,8 +101,13 @@ def advanced_technical_analysis_task(self, url):
     Analyse technique avancée (SSL, robots.txt, services tiers).
     """
     try:
+        input_url = url
+        nav_url = normalize_url_for_analysis(url) or url
+        if nav_url != input_url:
+            logger.info('Analyse technique avancee: URL resolue %s -> %s', input_url, nav_url)
+
         self.update_state(state='PROGRESS', meta={'progress': 5, 'message': 'Analyse SSL...'})
-        parsed = url if url.startswith(('http://', 'https://')) else f'https://{url}'
+        parsed = nav_url if nav_url.startswith(('http://', 'https://')) else f'https://{nav_url}'
         domain = parsed.split('//', 1)[1].split('/')[0]
         ssl_info = analyze_ssl_certificate(domain)
 
@@ -108,7 +119,7 @@ def advanced_technical_analysis_task(self, url):
         try:
             import requests
             from bs4 import BeautifulSoup
-            resp = requests.get(parsed, timeout=10)
+            resp = requests.get(parsed, timeout=10, allow_redirects=True)
             if resp.status_code == 200:
                 soup = BeautifulSoup(resp.text, 'html.parser')
                 services_info = detect_third_party_services(soup, resp.text)

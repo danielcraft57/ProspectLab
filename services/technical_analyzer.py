@@ -994,6 +994,13 @@ class TechnicalAnalyzer:
         """
         Analyse complète: page principale + multi-pages léger, avec scoring global.
         """
+        from utils.url_utils import normalize_url_for_analysis
+
+        resolved = normalize_url_for_analysis(url)
+        if resolved and resolved.rstrip('/') != str(url or '').rstrip('/'):
+            logger.info('TechnicalAnalyzer: URL resolue %s -> %s', url, resolved)
+            url = resolved
+
         base_results = self.analyze_technical_details(url, enable_nmap=enable_nmap)
         # Audit Lighthouse (SEO, performance, accessibilité) si Node/npx disponible
         try:

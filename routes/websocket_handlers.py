@@ -212,6 +212,64 @@ def _sleep_before_monitor_poll(countdown_sec: int) -> None:
         _ws_sleep(min(float(countdown_sec), 120.0))
 
 
+def _session_owns_celery_task(session_id: str, celery_task_id) -> bool:
+    """
+    Vérifie si le monitor WebSocket est encore le propriétaire actif de la tâche Celery.
+
+    Quand une nouvelle analyse est lancée sur le même sid, ``active_tasks[session_id]``
+    est remplacé : les anciens monitors doivent s'arrêter sans réémettre complete/error
+    (sinon toasts en double pour un même job ou pour un job déjà remplacé).
+
+    @param session_id: request.sid au moment du lancement
+    @param celery_task_id: ID Celery capturé au démarrage du monitor
+    @returns: True si le monitor peut encore émettre
+    """
+    if not session_id or celery_task_id is None:
+        return False
+    with tasks_lock:
+        cur = active_tasks.get(session_id)
+        if not cur:
+            return False
+        stored = cur.get('task_id')
+        if stored is None:
+            return True
+        return str(stored) == str(celery_task_id)
+
+
+def _duplicate_same_entreprise_job(session_id: str, task_type: str, entreprise_id) -> bool:
+    """
+    Indique si une tâche du même type est déjà active pour la même entreprise sur ce sid.
+
+    @param session_id: Socket.IO sid
+    @param task_type: scraping, technical, seo, etc.
+    @param entreprise_id: ID entreprise
+    @returns: True si doublon à ignorer
+    """
+    if session_id is None or entreprise_id is None:
+        return False
+    try:
+        eid = int(entreprise_id)
+    except Exception:
+        return False
+    with tasks_lock:
+        cur = active_tasks.get(session_id)
+        if not cur or cur.get('type') != task_type:
+            return False
+        try:
+            cur_eid = int(cur.get('entreprise_id')) if cur.get('entreprise_id') is not None else None
+        except Exception:
+            cur_eid = None
+        return cur_eid == eid and bool(cur.get('task_id'))
+
+
+def _clear_active_task_if_owner(session_id: str, celery_task_id) -> None:
+    """Retire active_tasks[session_id] seulement si le task_id correspond encore."""
+    with tasks_lock:
+        cur = active_tasks.get(session_id)
+        if cur and str(cur.get('task_id')) == str(celery_task_id):
+            del active_tasks[session_id]
+
+
 def _start_monitor_background(socketio, target):
     """
     Lance le suivi Celery (poll + emit) sans threading.Thread.
@@ -1468,6 +1526,23 @@ def register_websocket_handlers(socketio, app):
             if not url:
                 safe_emit(socketio, 'scraping_error', {'error': 'URL requise', 'entreprise_id': entreprise_id}, room=notify_rooms)
                 return
+
+            if _duplicate_same_entreprise_job(session_id, 'scraping', entreprise_id):
+                with tasks_lock:
+                    tid = (active_tasks.get(session_id) or {}).get('task_id')
+                logger.info(
+                    '[Socket.IO] start_scraping ignoré (déjà actif) sid=%s entreprise_id=%s task_id=%s',
+                    session_id,
+                    entreprise_id,
+                    tid,
+                )
+                safe_emit(socketio, 'scraping_started', {
+                    'message': 'Scraping déjà en cours...',
+                    'task_id': tid,
+                    'entreprise_id': entreprise_id,
+                    'already_running': True,
+                }, room=notify_rooms)
+                return
             
             if not broker_ping_ok():
                 if _scraping_dev_fallback_enabled():
@@ -1478,7 +1553,11 @@ def register_websocket_handlers(socketio, app):
                         entreprise_id,
                     )
                     with tasks_lock:
-                        active_tasks[session_id] = {'task_id': 'local-scraping', 'type': 'scraping'}
+                        active_tasks[session_id] = {
+                            'task_id': 'local-scraping',
+                            'type': 'scraping',
+                            'entreprise_id': entreprise_id,
+                        }
                     safe_emit(
                         socketio,
                         'scraping_started',
@@ -1565,8 +1644,13 @@ def register_websocket_handlers(socketio, app):
                 return
         
             # Stocker la tâche
+            monitored_task_id = task.id
             with tasks_lock:
-                active_tasks[session_id] = {'task_id': task.id, 'type': 'scraping'}
+                active_tasks[session_id] = {
+                    'task_id': monitored_task_id,
+                    'type': 'scraping',
+                    'entreprise_id': entreprise_id,
+                }
 
             logger.info(
                 '[Socket.IO] scraping enfilée task_id=%s entreprise_id=%s countdown=%.2fs queue=scraping_interactive url=%s',
@@ -1582,8 +1666,10 @@ def register_websocket_handlers(socketio, app):
             def monitor_task():
                 try:
                     while True:
+                        if not _session_owns_celery_task(session_id, monitored_task_id):
+                            return
                         try:
-                            task_result = celery.AsyncResult(task.id)
+                            task_result = celery.AsyncResult(monitored_task_id)
                             if task_result.state == 'PROGRESS':
                                 meta = _celery_progress_meta_as_dict(task_result.info)
                                 safe_emit(socketio, 'scraping_progress', {
@@ -1591,33 +1677,42 @@ def register_websocket_handlers(socketio, app):
                                     'entreprise_id': entreprise_id
                                 }, room=notify_rooms)
                             elif task_result.state == 'SUCCESS':
+                                if not _session_owns_celery_task(session_id, monitored_task_id):
+                                    return
                                 result = _celery_success_result_as_dict(task_result.result)
                                 res_block = (result or {}).get('results') or {}
                                 payload = _flatten_scrape_socket_payload(res_block, entreprise_id)
                                 safe_emit(socketio, 'scraping_complete', payload, room=notify_rooms)
                                 with tasks_lock:
-                                    if session_id in active_tasks:
+                                    cur = active_tasks.get(session_id)
+                                    if cur and str(cur.get('task_id')) == str(monitored_task_id):
                                         del active_tasks[session_id]
                                 break
                             elif task_result.state == 'FAILURE':
+                                if not _session_owns_celery_task(session_id, monitored_task_id):
+                                    return
                                 safe_emit(socketio, 'scraping_error', {
                                     'error': str(task_result.info),
                                     'entreprise_id': entreprise_id
                                 }, room=notify_rooms)
                                 with tasks_lock:
-                                    if session_id in active_tasks:
+                                    cur = active_tasks.get(session_id)
+                                    if cur and str(cur.get('task_id')) == str(monitored_task_id):
                                         del active_tasks[session_id]
                                 break
                         except Exception as e:
+                            if not _session_owns_celery_task(session_id, monitored_task_id):
+                                return
                             safe_emit(socketio, 'scraping_error', {
                                 'error': f'Erreur lors du suivi de la tâche: {str(e)}',
                                 'entreprise_id': entreprise_id
                             }, room=notify_rooms)
                             with tasks_lock:
-                                if session_id in active_tasks:
+                                cur = active_tasks.get(session_id)
+                                if cur and str(cur.get('task_id')) == str(monitored_task_id):
                                     del active_tasks[session_id]
                             break
-                        time.sleep(1)
+                        _ws_sleep(_WS_MONITOR_POLL_SEC)
                 except Exception as e:
                     safe_emit(socketio, 'scraping_error', {
                         'error': f'Erreur dans le suivi: {str(e)}'
@@ -1678,6 +1773,17 @@ def register_websocket_handlers(socketio, app):
             if not url:
                 safe_emit(socketio, 'osint_analysis_error', {'error': 'URL requise', 'entreprise_id': entreprise_id}, room=notify_rooms)
                 return
+
+            if _duplicate_same_entreprise_job(session_id, 'osint', entreprise_id):
+                with tasks_lock:
+                    tid = (active_tasks.get(session_id) or {}).get('task_id')
+                safe_emit(socketio, 'osint_analysis_started', {
+                    'message': 'Analyse OSINT déjà en cours...',
+                    'task_id': tid,
+                    'entreprise_id': entreprise_id,
+                    'already_running': True,
+                }, room=notify_rooms)
+                return
             
             if not broker_ping_ok():
                 logger.warning(
@@ -1730,8 +1836,14 @@ def register_websocket_handlers(socketio, app):
                 return
             
             # Stocker la tâche
+            monitored_task_id = task.id
             with tasks_lock:
-                active_tasks[session_id] = {'task_id': task.id, 'type': 'osint', 'url': url}
+                active_tasks[session_id] = {
+                    'task_id': monitored_task_id,
+                    'type': 'osint',
+                    'url': url,
+                    'entreprise_id': entreprise_id,
+                }
 
             logger.info(
                 '[Socket.IO] osint enfilée task_id=%s entreprise_id=%s countdown=%.2fs queue=osint url=%s',
@@ -1749,8 +1861,10 @@ def register_websocket_handlers(socketio, app):
                     _sleep_before_monitor_poll(cd)
                     last_meta = None
                     while True:
+                        if not _session_owns_celery_task(session_id, monitored_task_id):
+                            return
                         try:
-                            task_result = celery.AsyncResult(task.id)
+                            task_result = celery.AsyncResult(monitored_task_id)
                             current_state = task_result.state
                             
                             if current_state == 'PROGRESS':
@@ -1765,6 +1879,8 @@ def register_websocket_handlers(socketio, app):
                                     }, room=notify_rooms)
                                     last_meta = meta
                             elif current_state == 'SUCCESS':
+                                if not _session_owns_celery_task(session_id, monitored_task_id):
+                                    return
                                 result = _celery_success_result_as_dict(task_result.result)
                                 safe_emit(socketio, 'osint_analysis_complete', {
                                     'success': True,
@@ -1774,27 +1890,25 @@ def register_websocket_handlers(socketio, app):
                                     'summary': result.get('summary', {}) if result else {},
                                     'updated': result.get('updated', False) if result else False
                                 }, room=notify_rooms)
-                                with tasks_lock:
-                                    if session_id in active_tasks:
-                                        del active_tasks[session_id]
+                                _clear_active_task_if_owner(session_id, monitored_task_id)
                                 break
                             elif current_state == 'FAILURE':
+                                if not _session_owns_celery_task(session_id, monitored_task_id):
+                                    return
                                 safe_emit(socketio, 'osint_analysis_error', {
                                     'error': str(task_result.info),
                                     'entreprise_id': entreprise_id
                                 }, room=notify_rooms)
-                                with tasks_lock:
-                                    if session_id in active_tasks:
-                                        del active_tasks[session_id]
+                                _clear_active_task_if_owner(session_id, monitored_task_id)
                                 break
                         except Exception as e:
+                            if not _session_owns_celery_task(session_id, monitored_task_id):
+                                return
                             safe_emit(socketio, 'osint_analysis_error', {
                                 'error': f'Erreur lors du suivi de la tâche: {str(e)}',
                                 'entreprise_id': entreprise_id
                             }, room=notify_rooms)
-                            with tasks_lock:
-                                if session_id in active_tasks:
-                                    del active_tasks[session_id]
+                            _clear_active_task_if_owner(session_id, monitored_task_id)
                             break
                         _ws_sleep(_WS_MONITOR_POLL_SEC)
                 except Exception as e:
@@ -1863,6 +1977,17 @@ def register_websocket_handlers(socketio, app):
             if not url:
                 safe_emit(socketio, 'pentest_analysis_error', {'error': 'URL requise', 'entreprise_id': entreprise_id}, room=notify_rooms)
                 return
+
+            if _duplicate_same_entreprise_job(session_id, 'pentest', entreprise_id):
+                with tasks_lock:
+                    tid = (active_tasks.get(session_id) or {}).get('task_id')
+                safe_emit(socketio, 'pentest_analysis_started', {
+                    'message': 'Analyse Pentest déjà en cours...',
+                    'task_id': tid,
+                    'entreprise_id': entreprise_id,
+                    'already_running': True,
+                }, room=notify_rooms)
+                return
             
             if not broker_ping_ok():
                 logger.warning(
@@ -1922,8 +2047,14 @@ def register_websocket_handlers(socketio, app):
                 return
             
             # Stocker la tâche
+            monitored_task_id = task.id
             with tasks_lock:
-                active_tasks[session_id] = {'task_id': task.id, 'type': 'pentest', 'url': url}
+                active_tasks[session_id] = {
+                    'task_id': monitored_task_id,
+                    'type': 'pentest',
+                    'url': url,
+                    'entreprise_id': entreprise_id,
+                }
 
             logger.info(
                 '[Socket.IO] pentest enfilée task_id=%s entreprise_id=%s countdown=%.2fs queue=pentest url=%s',
@@ -1941,8 +2072,10 @@ def register_websocket_handlers(socketio, app):
                     _sleep_before_monitor_poll(cd)
                     last_meta = None
                     while True:
+                        if not _session_owns_celery_task(session_id, monitored_task_id):
+                            return
                         try:
-                            task_result = celery.AsyncResult(task.id)
+                            task_result = celery.AsyncResult(monitored_task_id)
                             current_state = task_result.state
                             
                             if current_state == 'PROGRESS':
@@ -1954,6 +2087,8 @@ def register_websocket_handlers(socketio, app):
                                     }, room=notify_rooms)
                                     last_meta = meta
                             elif current_state == 'SUCCESS':
+                                if not _session_owns_celery_task(session_id, monitored_task_id):
+                                    return
                                 result = _celery_success_result_as_dict(task_result.result)
                                 safe_emit(socketio, 'pentest_analysis_complete', {
                                     'success': True,
@@ -1964,27 +2099,25 @@ def register_websocket_handlers(socketio, app):
                                     'risk_score': result.get('risk_score', 0) if result else 0,
                                     'updated': result.get('updated', False) if result else False
                                 }, room=notify_rooms)
-                                with tasks_lock:
-                                    if session_id in active_tasks:
-                                        del active_tasks[session_id]
+                                _clear_active_task_if_owner(session_id, monitored_task_id)
                                 break
                             elif current_state == 'FAILURE':
+                                if not _session_owns_celery_task(session_id, monitored_task_id):
+                                    return
                                 safe_emit(socketio, 'pentest_analysis_error', {
                                     'error': str(task_result.info),
                                     'entreprise_id': entreprise_id
                                 }, room=notify_rooms)
-                                with tasks_lock:
-                                    if session_id in active_tasks:
-                                        del active_tasks[session_id]
+                                _clear_active_task_if_owner(session_id, monitored_task_id)
                                 break
                         except Exception as e:
+                            if not _session_owns_celery_task(session_id, monitored_task_id):
+                                return
                             safe_emit(socketio, 'pentest_analysis_error', {
                                 'error': f'Erreur lors du suivi de la tâche: {str(e)}',
                                 'entreprise_id': entreprise_id
                             }, room=notify_rooms)
-                            with tasks_lock:
-                                if session_id in active_tasks:
-                                    del active_tasks[session_id]
+                            _clear_active_task_if_owner(session_id, monitored_task_id)
                             break
                         _ws_sleep(_WS_MONITOR_POLL_SEC)
                 except Exception as e:
@@ -2054,6 +2187,17 @@ def register_websocket_handlers(socketio, app):
             if not url:
                 safe_emit(socketio, 'seo_analysis_error', {'error': 'URL requise', 'entreprise_id': entreprise_id}, room=notify_rooms)
                 return
+
+            if _duplicate_same_entreprise_job(session_id, 'seo', entreprise_id):
+                with tasks_lock:
+                    tid = (active_tasks.get(session_id) or {}).get('task_id')
+                safe_emit(socketio, 'seo_analysis_started', {
+                    'message': 'Analyse SEO déjà en cours...',
+                    'task_id': tid,
+                    'entreprise_id': entreprise_id,
+                    'already_running': True,
+                }, room=notify_rooms)
+                return
             
             if not broker_ping_ok():
                 app.logger.warning('[Socket.IO] start_seo_analysis: broker Redis injoignable sid=%s', session_id)
@@ -2088,8 +2232,14 @@ def register_websocket_handlers(socketio, app):
                 task.id, entreprise_id, cd, url,
             )
             # Stocker la tâche
+            monitored_task_id = task.id
             with tasks_lock:
-                active_tasks[session_id] = {'task_id': task.id, 'type': 'seo', 'url': url}
+                active_tasks[session_id] = {
+                    'task_id': monitored_task_id,
+                    'type': 'seo',
+                    'url': url,
+                    'entreprise_id': entreprise_id,
+                }
             
             safe_emit(socketio, 'seo_analysis_started', {'message': 'Analyse SEO démarrée...', 'task_id': task.id, 'entreprise_id': entreprise_id}, room=notify_rooms)
             
@@ -2099,8 +2249,10 @@ def register_websocket_handlers(socketio, app):
                     _sleep_before_monitor_poll(cd)
                     last_meta = None
                     while True:
+                        if not _session_owns_celery_task(session_id, monitored_task_id):
+                            return
                         try:
-                            task_result = celery.AsyncResult(task.id)
+                            task_result = celery.AsyncResult(monitored_task_id)
                             current_state = task_result.state
                             
                             if current_state == 'PROGRESS':
@@ -2112,6 +2264,8 @@ def register_websocket_handlers(socketio, app):
                                     }, room=notify_rooms)
                                     last_meta = meta
                             elif current_state == 'SUCCESS':
+                                if not _session_owns_celery_task(session_id, monitored_task_id):
+                                    return
                                 result = _celery_success_result_as_dict(task_result.result)
                                 safe_emit(socketio, 'seo_analysis_complete', {
                                     'success': True,
@@ -2122,27 +2276,25 @@ def register_websocket_handlers(socketio, app):
                                     'score': result.get('score', 0) if result else 0,
                                     'updated': result.get('updated', False) if result else False
                                 }, room=notify_rooms)
-                                with tasks_lock:
-                                    if session_id in active_tasks:
-                                        del active_tasks[session_id]
+                                _clear_active_task_if_owner(session_id, monitored_task_id)
                                 break
                             elif current_state == 'FAILURE':
+                                if not _session_owns_celery_task(session_id, monitored_task_id):
+                                    return
                                 safe_emit(socketio, 'seo_analysis_error', {
                                     'error': str(task_result.info),
                                     'entreprise_id': entreprise_id
                                 }, room=notify_rooms)
-                                with tasks_lock:
-                                    if session_id in active_tasks:
-                                        del active_tasks[session_id]
+                                _clear_active_task_if_owner(session_id, monitored_task_id)
                                 break
                         except Exception as e:
+                            if not _session_owns_celery_task(session_id, monitored_task_id):
+                                return
                             safe_emit(socketio, 'seo_analysis_error', {
                                 'error': f'Erreur lors du suivi de la tâche: {str(e)}',
                                 'entreprise_id': entreprise_id
                             }, room=notify_rooms)
-                            with tasks_lock:
-                                if session_id in active_tasks:
-                                    del active_tasks[session_id]
+                            _clear_active_task_if_owner(session_id, monitored_task_id)
                             break
                         _ws_sleep(_WS_MONITOR_POLL_SEC)
                 except Exception as e:
@@ -2173,7 +2325,11 @@ def register_websocket_handlers(socketio, app):
             url = data.get('url')
             entreprise_id = data.get('entreprise_id')
             enable_nmap = data.get('enable_nmap', False)
-            enable_screenshot = data.get('enable_screenshot', True)
+            from config import ENABLE_TECHNICAL_AUTO_SCREENSHOT
+            if data.get('enable_screenshot') is None:
+                enable_screenshot = ENABLE_TECHNICAL_AUTO_SCREENSHOT
+            else:
+                enable_screenshot = bool(data.get('enable_screenshot'))
             session_id = request.sid
 
             notify_rooms = freeze_notify_rooms(session_id)
@@ -2209,6 +2365,17 @@ def register_websocket_handlers(socketio, app):
 
             if not url:
                 safe_emit(socketio, 'technical_analysis_error', {'error': 'URL requise', 'entreprise_id': entreprise_id}, room=notify_rooms)
+                return
+
+            if _duplicate_same_entreprise_job(session_id, 'technical', entreprise_id):
+                with tasks_lock:
+                    tid = (active_tasks.get(session_id) or {}).get('task_id')
+                safe_emit(socketio, 'technical_analysis_started', {
+                    'message': 'Analyse technique déjà en cours...',
+                    'task_id': tid,
+                    'entreprise_id': entreprise_id,
+                    'already_running': True,
+                }, room=notify_rooms)
                 return
 
             if not broker_ping_ok():
@@ -2264,8 +2431,14 @@ def register_websocket_handlers(socketio, app):
                     )
 
             # Stocker la tâche
+            monitored_task_id = task.id
             with tasks_lock:
-                active_tasks[session_id] = {'task_id': task.id, 'type': 'technical', 'url': url}
+                active_tasks[session_id] = {
+                    'task_id': monitored_task_id,
+                    'type': 'technical',
+                    'url': url,
+                    'entreprise_id': entreprise_id,
+                }
 
             logger.info(
                 '[Socket.IO] technical enfilée task_id=%s entreprise_id=%s countdown=%.2fs queue=technical url=%s',
@@ -2288,8 +2461,10 @@ def register_websocket_handlers(socketio, app):
                     _sleep_before_monitor_poll(cd)
                     last_meta = None
                     while True:
+                        if not _session_owns_celery_task(session_id, monitored_task_id):
+                            return
                         try:
-                            task_result = celery.AsyncResult(task.id)
+                            task_result = celery.AsyncResult(monitored_task_id)
                             current_state = task_result.state
 
                             if current_state == 'PROGRESS':
@@ -2301,6 +2476,8 @@ def register_websocket_handlers(socketio, app):
                                     }, room=notify_rooms)
                                     last_meta = meta
                             elif current_state == 'SUCCESS':
+                                if not _session_owns_celery_task(session_id, monitored_task_id):
+                                    return
                                 result = _celery_success_result_as_dict(task_result.result)
                                 safe_emit(socketio, 'technical_analysis_complete', {
                                     'success': True,
@@ -2309,27 +2486,25 @@ def register_websocket_handlers(socketio, app):
                                     'entreprise_id': entreprise_id,
                                     'results': result.get('results', {}) if result else {}
                                 }, room=notify_rooms)
-                                with tasks_lock:
-                                    if session_id in active_tasks:
-                                        del active_tasks[session_id]
+                                _clear_active_task_if_owner(session_id, monitored_task_id)
                                 break
                             elif current_state == 'FAILURE':
+                                if not _session_owns_celery_task(session_id, monitored_task_id):
+                                    return
                                 safe_emit(socketio, 'technical_analysis_error', {
                                     'error': str(task_result.info),
                                     'entreprise_id': entreprise_id
                                 }, room=notify_rooms)
-                                with tasks_lock:
-                                    if session_id in active_tasks:
-                                        del active_tasks[session_id]
+                                _clear_active_task_if_owner(session_id, monitored_task_id)
                                 break
                         except Exception as e:
+                            if not _session_owns_celery_task(session_id, monitored_task_id):
+                                return
                             safe_emit(socketio, 'technical_analysis_error', {
                                 'error': f'Erreur lors du suivi de la tâche: {str(e)}',
                                 'entreprise_id': entreprise_id
                             }, room=notify_rooms)
-                            with tasks_lock:
-                                if session_id in active_tasks:
-                                    del active_tasks[session_id]
+                            _clear_active_task_if_owner(session_id, monitored_task_id)
                             break
                         _ws_sleep(_WS_MONITOR_POLL_SEC)
                 except Exception as e:

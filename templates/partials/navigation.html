@@ -21,13 +21,25 @@
                     </div>
                 </div>
                 <div class="nav-sound-control" data-nav-sound-control>
-                    <button type="button" class="nav-sound-toggle-btn" data-notifications-sound-toggle aria-label="Sons des notifications activés" title="Couper / activer les sons">
+                    <button
+                        type="button"
+                        class="nav-sound-toggle-btn"
+                        data-notifications-sound-toggle
+                        aria-label="Sons des notifications"
+                        title="Activer ou couper les sons"
+                    >
                         <i class="fa-solid fa-volume-high" data-notifications-sound-icon aria-hidden="true"></i>
                     </button>
-                    <label class="nav-sound-volume-label" for="nav-notifications-sound-volume">
-                        <span class="visually-hidden">Volume des notifications</span>
-                        <input type="range" id="nav-notifications-sound-volume" class="nav-sound-volume-range" min="0" max="100" value="35" data-notifications-sound-volume aria-label="Volume des notifications">
-                    </label>
+                    <input
+                        type="range"
+                        class="nav-sound-volume"
+                        data-notifications-sound-volume
+                        min="0"
+                        max="100"
+                        value="70"
+                        aria-label="Volume des notifications"
+                        title="Volume des notifications"
+                    />
                 </div>
                 <div class="nav-theme-toggle">
                     <button type="button" class="theme-toggle-btn" aria-label="Thème : automatique" title="Thème auto · suit le système">

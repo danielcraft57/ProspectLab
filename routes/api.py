@@ -431,6 +431,34 @@ def entreprises():
         return jsonify({'error': str(e)}), 500
 
 
+@api_bp.route('/entreprises/prune-selection', methods=['POST'])
+@login_required
+def entreprises_prune_selection():
+    """
+    API: IDs selectionnes qui correspondent encore aux filtres actifs.
+
+    Body JSON: ids (liste), filters (dict), analyse_id (optionnel).
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        raw_ids = data.get('ids') or []
+        analyse_id = data.get('analyse_id')
+        if analyse_id is not None:
+            try:
+                analyse_id = int(analyse_id)
+            except (TypeError, ValueError):
+                analyse_id = None
+        filters = data.get('filters') if isinstance(data.get('filters'), dict) else {}
+        matching = database.filter_entreprise_ids_matching_filters(
+            analyse_id=analyse_id,
+            filters=filters,
+            ids=raw_ids,
+        )
+        return jsonify({'ids': matching})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @api_bp.route('/groupes-entreprises', methods=['GET', 'POST'])
 @login_required
 def groupes_entreprises():

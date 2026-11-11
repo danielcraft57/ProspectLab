@@ -355,6 +355,17 @@
     transition: opacity 160ms ease;
 }
 
+/* Rafraîchissement avec KPI déjà en cache : pas de flou global, léger indicateur sur les chiffres */
+.dashboard-refreshing .stat-number {
+    opacity: 0.88;
+    transition: opacity 160ms ease;
+}
+
+.dashboard-refreshing .chart-card,
+.dashboard-refreshing .dashboard-card {
+    opacity: 0.92;
+}
+
 .dashboard-highlight {
     animation: dashboardPulse 680ms ease-out 1;
 }

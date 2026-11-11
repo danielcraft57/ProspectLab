@@ -328,6 +328,10 @@ CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes max par tâche
 CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # 25 minutes avant arrêt doux
 # Nombre de workers Celery (4 en dev, 6 en prod par défaut)
 CELERY_WORKERS = int(os.environ.get('CELERY_WORKERS', '4'))
+# Sur Pi / petit worker : éviter 2 tâches (technique + screenshot) par clic en masse.
+ENABLE_TECHNICAL_AUTO_SCREENSHOT = os.environ.get(
+    'ENABLE_TECHNICAL_AUTO_SCREENSHOT', 'true'
+).lower() in ('1', 'true', 'yes', 'on')
 # Étalement des sous-tâches lancées en masse (scraping multi-sites, etc.) : countdown = index * valeur
 CELERY_BULK_STAGGER_SEC = float(os.environ.get('CELERY_BULK_STAGGER_SEC', '0.75'))
 # Index Redis global (WebSocket) pris modulo cette valeur pour éviter un countdown énorme

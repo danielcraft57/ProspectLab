@@ -33,6 +33,26 @@ _SCRAPE_ANALYSIS_BATCH_SIZE = max(1, int(os.environ.get('SCRAPE_ANALYSIS_BATCH_S
 _SCRAPE_ANALYSIS_BATCH_RETRY_MAX = max(0, int(os.environ.get('SCRAPE_ANALYSIS_BATCH_RETRY_MAX', '1')))
 
 
+def _prepare_website_url_for_pipeline(raw: object, *, log_prefix: str = '') -> Optional[str]:
+    """
+    Valide et résout une URL BDD avant scraping / analyses liées.
+
+    @param raw: Valeur ``website``
+    @param log_prefix: Préfixe des logs (contexte analyse)
+    @returns: URL navigable ou None
+    """
+    from utils.url_utils import canonical_website_https_url, coerce_website_to_navigable_url
+
+    before = str(raw or '').strip()
+    website_str = coerce_website_to_navigable_url(raw)
+    if not website_str:
+        return None
+    canon = canonical_website_https_url(before)
+    if canon and website_str.rstrip('/') != canon.rstrip('/'):
+        logger.info('%sURL resolue redirects: %s -> %s', log_prefix, before, website_str)
+    return website_str
+
+
 # Verrou global optionnel (désactivé par défaut) : si activé, un seul scrape à la fois sur tout le cluster.
 # Par défaut : parallélisme = Celery worker (--concurrency) + étalement côté enqueue, comme avant.
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -774,28 +794,15 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
             website = row.get('website')
         else:
             entreprise_id, nom, website = row
-        website_str = str(website or '').strip()
         entreprise_name = nom or 'Entreprise inconnue'
-
-        # Valider l'URL de base
-        if website_str and website_str != 'website':
-            try:
-                from urllib.parse import urlparse
-                parsed = urlparse(website_str)
-                if parsed.scheme and parsed.netloc:
-                    # URL valide
-                    pass
-                else:
-                    # Essayer d'ajouter http:// si c'est juste un domaine
-                    if '.' in website_str and ' ' not in website_str:
-                        website_str = f'https://{website_str}'
-                        logger.info(f'[Scraping Analyse {analysis_id}] URL corrigée: {website_str}')
-                    else:
-                        logger.warning(f'[Scraping Analyse {analysis_id}] URL invalide ignorée: {website_str}')
-                        website_str = None
-            except Exception as e:
-                logger.warning(f'[Scraping Analyse {analysis_id}] Erreur validation URL {website_str}: {e}')
-                website_str = None
+        raw_website = str(website or '').strip()
+        log_pfx = f'[Scraping Analyse {analysis_id}] '
+        website_str = _prepare_website_url_for_pipeline(
+            raw_website,
+            log_prefix=log_pfx,
+        )
+        if raw_website and not website_str:
+            logger.warning(f'{log_pfx}URL invalide ignorée: {raw_website}')
 
         if website_str:
             try:
@@ -879,9 +886,12 @@ def scrape_analysis_task(self, analysis_id: int, max_depth: int = 2, max_workers
         
         current_index = idx + 1
         entreprise_name = nom or 'Entreprise inconnue'
-        website_str = str(website or '').strip()
-        
+        raw_website = str(website or '').strip()
+        log_pfx = f'[Scraping Analyse {analysis_id}] '
+        website_str = _prepare_website_url_for_pipeline(raw_website, log_prefix=log_pfx)
         if not website_str:
+            if raw_website:
+                logger.warning(f'{log_pfx}URL invalide ignorée: {raw_website}')
             continue
         
         logger.info(f'[Scraping Analyse {analysis_id}] {current_index}/{total} - {entreprise_name} ({website_str})')

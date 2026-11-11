@@ -1,194 +1,228 @@
 /**
  * Système de notifications (Originator du pattern Memento).
  * L'état est sauvegardé/restauré via MementoCaretaker.
- * Sons courts via Web Audio (succès, erreur, attente, warning) + volume réglable.
  */
 
 (function(window) {
     'use strict';
 
     const CARETAKER_KEY = 'notifications';
-    const SOUND_SETTINGS_KEY = 'prospectlab_notification_sounds_v1';
     const MAX_ITEMS = 100;
-    const BULK_SESSION_TIMEOUT_MS = 45 * 60 * 1000;
+    const LS_SOUND_ENABLED = 'prospectlab_notification_sounds_enabled';
+    const LS_SOUND_VOLUME = 'prospectlab_notification_sounds_volume';
 
     /**
-     * Moteur audio léger (beeps synthétisés, pas de fichiers externes).
+     * Bips Web Audio (pas de fichiers externes).
      */
     const NotificationSoundEngine = {
         _ctx: null,
-        _unlocked: false,
 
         /**
          * @returns {AudioContext|null}
          */
         _getContext() {
-            if (this._ctx) return this._ctx;
+            if (typeof window === 'undefined') return null;
             const Ctx = window.AudioContext || window.webkitAudioContext;
             if (!Ctx) return null;
-            try {
-                this._ctx = new Ctx();
-            } catch (e) {
-                return null;
+            if (!this._ctx) {
+                try {
+                    this._ctx = new Ctx();
+                } catch (e) {
+                    return null;
+                }
+            }
+            if (this._ctx.state === 'suspended') {
+                this._ctx.resume().catch(() => {});
             }
             return this._ctx;
         },
 
         /**
-         * Débloque l'audio après un geste utilisateur (politique navigateur).
-         * @returns {Promise<void>}
+         * @param {number} freq Hz
+         * @param {number} start s
+         * @param {number} duration s
+         * @param {number} volume 0-1
+         * @param {string} [waveform]
          */
-        async unlock() {
+        _tone(freq, start, duration, volume, waveform) {
             const ctx = this._getContext();
             if (!ctx) return;
-            if (ctx.state === 'suspended') {
-                try {
-                    await ctx.resume();
-                } catch (e) {}
-            }
-            this._unlocked = ctx.state === 'running';
-        },
-
-        /**
-         * Joue une note sinusoïdale amortie.
-         * @param {number} frequency
-         * @param {number} startTime
-         * @param {number} durationSec
-         * @param {number} gainPeak
-         * @param {AudioContext} ctx
-         * @param {GainNode} master
-         */
-        _tone(frequency, startTime, durationSec, gainPeak, ctx, master) {
             const osc = ctx.createOscillator();
-            const g = ctx.createGain();
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(frequency, startTime);
-            g.gain.setValueAtTime(0.0001, startTime);
-            g.gain.exponentialRampToValueAtTime(Math.max(gainPeak, 0.0001), startTime + 0.012);
-            g.gain.exponentialRampToValueAtTime(0.0001, startTime + durationSec);
-            osc.connect(g);
-            g.connect(master);
-            osc.start(startTime);
-            osc.stop(startTime + durationSec + 0.02);
+            const gain = ctx.createGain();
+            osc.type = waveform || 'sine';
+            osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
+            gain.gain.setValueAtTime(0.0001, ctx.currentTime + start);
+            gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, volume), ctx.currentTime + start + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + duration);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(ctx.currentTime + start);
+            osc.stop(ctx.currentTime + start + duration + 0.05);
         },
 
         /**
-         * Profils sonores par catégorie.
-         * @param {'success'|'error'|'warning'|'waiting'|'info'} category
-         * @param {number} volume01
+         * Joue un motif selon le type de notification.
+         * @param {string} kind success|error|warning|info|pending
+         * @param {number} volume 0-1
          */
-        play(category, volume01) {
-            if (!NotificationsSoundSettings.isEnabled()) return;
-            const ctx = this._getContext();
-            if (!ctx) return;
-            const vol = Math.max(0, Math.min(1, Number(volume01) || 0));
-            if (vol <= 0) return;
-
-            const run = () => {
-                const t0 = ctx.currentTime + 0.01;
-                const master = ctx.createGain();
-                master.gain.setValueAtTime(vol * 0.22, t0);
-                master.connect(ctx.destination);
-
-                if (category === 'success') {
-                    this._tone(523.25, t0, 0.11, 1, ctx, master);
-                    this._tone(659.25, t0 + 0.1, 0.14, 0.85, ctx, master);
-                    this._tone(783.99, t0 + 0.2, 0.18, 0.7, ctx, master);
-                } else if (category === 'error') {
-                    this._tone(220, t0, 0.16, 1, ctx, master);
-                    this._tone(185, t0 + 0.12, 0.22, 0.9, ctx, master);
-                } else if (category === 'warning') {
-                    this._tone(440, t0, 0.09, 1, ctx, master);
-                    this._tone(392, t0 + 0.11, 0.09, 0.85, ctx, master);
-                    this._tone(440, t0 + 0.22, 0.12, 0.75, ctx, master);
-                } else if (category === 'waiting') {
-                    this._tone(330, t0, 0.08, 0.7, ctx, master);
-                    this._tone(392, t0 + 0.14, 0.1, 0.55, ctx, master);
-                } else {
-                    this._tone(880, t0, 0.06, 0.45, ctx, master);
-                }
-            };
-
-            if (ctx.state === 'suspended') {
-                ctx.resume().then(run).catch(function() {});
+        play(kind, volume) {
+            const vol = typeof volume === 'number' ? volume : 0.7;
+            const k = kind || 'info';
+            if (k === 'success') {
+                this._tone(523.25, 0, 0.12, vol);
+                this._tone(659.25, 0.13, 0.12, vol);
+                this._tone(783.99, 0.26, 0.16, vol);
+            } else if (k === 'error') {
+                this._tone(220, 0, 0.18, vol, 'square');
+                this._tone(165, 0.2, 0.22, vol * 0.9, 'square');
+            } else if (k === 'warning') {
+                this._tone(440, 0, 0.08, vol * 0.85, 'triangle');
+                this._tone(440, 0.11, 0.08, vol * 0.85, 'triangle');
+                this._tone(440, 0.22, 0.1, vol * 0.85, 'triangle');
+            } else if (k === 'pending') {
+                this._tone(392, 0, 0.1, vol * 0.75);
+                this._tone(523.25, 0.12, 0.14, vol * 0.7);
             } else {
-                run();
+                this._tone(880, 0, 0.09, vol * 0.55);
             }
         }
     };
 
-    const NotificationsSoundSettings = {
-        _enabled: true,
-        _volume: 0.35,
-
-        load() {
-            try {
-                const raw = window.localStorage.getItem(SOUND_SETTINGS_KEY);
-                if (!raw) return;
-                const data = JSON.parse(raw);
-                if (typeof data.enabled === 'boolean') this._enabled = data.enabled;
-                if (typeof data.volume === 'number') {
-                    this._volume = Math.max(0, Math.min(1, data.volume));
-                }
-            } catch (e) {}
-        },
-
-        persist() {
-            try {
-                window.localStorage.setItem(SOUND_SETTINGS_KEY, JSON.stringify({
-                    enabled: this._enabled,
-                    volume: this._volume
-                }));
-            } catch (e) {}
-        },
-
-        isEnabled() {
-            return !!this._enabled;
-        },
-
-        setEnabled(value) {
-            this._enabled = !!value;
-            this.persist();
-            try {
-                document.dispatchEvent(new CustomEvent('notifications:sound-settings', {
-                    detail: { enabled: this._enabled, volume: this._volume }
-                }));
-            } catch (e) {}
-        },
-
-        getVolume() {
-            return this._volume;
-        },
-
+    const soundSettings = {
         /**
-         * @param {number} volume01 - entre 0 et 1
+         * @returns {boolean}
          */
-        setVolume(volume01) {
-            this._volume = Math.max(0, Math.min(1, Number(volume01) || 0));
-            this.persist();
+        isEnabled() {
             try {
-                document.dispatchEvent(new CustomEvent('notifications:sound-settings', {
-                    detail: { enabled: this._enabled, volume: this._volume }
-                }));
+                const raw = window.localStorage.getItem(LS_SOUND_ENABLED);
+                if (raw === null) return true;
+                return raw === '1' || raw === 'true';
+            } catch (e) {
+                return true;
+            }
+        },
+        /**
+         * @param {boolean} enabled
+         */
+        setEnabled(enabled) {
+            try {
+                window.localStorage.setItem(LS_SOUND_ENABLED, enabled ? '1' : '0');
             } catch (e) {}
         },
-
-        getVolumePercent() {
-            return Math.round(this._volume * 100);
+        /**
+         * @returns {number} 0-1
+         */
+        getVolume() {
+            try {
+                const raw = window.localStorage.getItem(LS_SOUND_VOLUME);
+                const n = raw != null ? parseFloat(raw) : 0.7;
+                if (!Number.isFinite(n)) return 0.7;
+                return Math.max(0, Math.min(1, n));
+            } catch (e) {
+                return 0.7;
+            }
         },
-
+        /**
+         * @returns {number} 0-100
+         */
+        getVolumePercent() {
+            return Math.round(this.getVolume() * 100);
+        },
+        /**
+         * @param {number} percent 0-100
+         */
         setVolumePercent(percent) {
-            this.setVolume(Math.max(0, Math.min(100, Number(percent) || 0)) / 100);
+            const p = Math.max(0, Math.min(100, Number(percent) || 0));
+            try {
+                window.localStorage.setItem(LS_SOUND_VOLUME, String(p / 100));
+            } catch (e) {}
         }
     };
 
-    NotificationsSoundSettings.load();
+    /** @type {{ pending: Set<string>, success: number, errors: number, total: number, kind: string }|null} */
+    let activeBulkSoundSession = null;
+
+    /**
+     * @param {string} type
+     * @param {string|null} icon
+     * @returns {string}
+     */
+    function resolveSoundKind(type, icon) {
+        const ic = String(icon || '');
+        if (/fa-(spinner|hourglass|play-circle|layer-group|spider|camera)\b/.test(ic)) {
+            return 'pending';
+        }
+        return type || 'info';
+    }
+
+    const bulkSound = {
+        /**
+         * Enregistre un lot (>3 jobs) pour un seul bip de fin.
+         * @param {string[]} keys ex. "12:seo"
+         * @param {string} kind analysis|scraping|screenshots
+         */
+        register(keys, kind) {
+            const list = (keys || []).filter(Boolean);
+            if (!list.length) return;
+            activeBulkSoundSession = {
+                pending: new Set(list),
+                success: 0,
+                errors: 0,
+                total: list.length,
+                kind: kind || 'analysis'
+            };
+        },
+        /**
+         * @param {string} key
+         * @returns {boolean} true si le son du toast doit etre muet
+         */
+        isTracked(key) {
+            return !!(activeBulkSoundSession && activeBulkSoundSession.pending.has(key));
+        },
+        /**
+         * Fin d'un job du lot : compte et joue le son de synthese si terminé.
+         * @param {string} key
+         * @param {boolean} ok
+         * @returns {boolean} true si fait partie du lot (son individuel a couper)
+         */
+        noteJobComplete(key, ok) {
+            if (!activeBulkSoundSession || !activeBulkSoundSession.pending.has(key)) {
+                return false;
+            }
+            activeBulkSoundSession.pending.delete(key);
+            if (ok) {
+                activeBulkSoundSession.success += 1;
+            } else {
+                activeBulkSoundSession.errors += 1;
+            }
+            if (activeBulkSoundSession.pending.size > 0) {
+                return true;
+            }
+            const session = activeBulkSoundSession;
+            activeBulkSoundSession = null;
+            let summaryType = 'success';
+            if (session.errors >= session.total) {
+                summaryType = 'error';
+            } else if (session.errors > 0) {
+                summaryType = 'warning';
+            }
+            const labels = {
+                analysis: 'Analyses',
+                scraping: 'Scrapings',
+                screenshots: 'Captures screenshots'
+            };
+            const label = labels[session.kind] || 'Tâches';
+            Notifications.playSoundForType(
+                summaryType,
+                `${label} : ${session.success} OK` + (session.errors ? `, ${session.errors} en échec` : '')
+            );
+            return true;
+        }
+    };
 
     const Notifications = {
         _items: [],
         _counter: 0,
-        /** @type {{ pending: number, errors: number, ids: Set<number>, timeoutId: number|null, initialTotal: number }|null} */
-        _bulkSoundSession: null,
 
         /** Crée un Memento de l'état actuel (Originator). */
         createMemento() {
@@ -229,7 +263,6 @@
                 if (m) window.MementoCaretaker.save(CARETAKER_KEY, m);
             }
         },
-
         /**
          * Icônes par défaut selon le type
          */
@@ -242,136 +275,50 @@
             };
             return icons[type] || icons.info;
         },
+        soundSettings,
+        bulkSound,
 
         /**
-         * Catégorie sonore dérivée du type et de l'icône (attente = spinners / sabliers).
+         * Joue un bip (hors toast) si les sons sont activés.
          * @param {string} type
-         * @param {string|null} icon
-         * @returns {'success'|'error'|'warning'|'waiting'|'info'}
+         * @param {string} [message] toast optionnel de synthese
          */
-        _soundCategoryFor(type, icon) {
-            const t = String(type || 'info');
-            if (t === 'success') return 'success';
-            if (t === 'error') return 'error';
-            if (t === 'warning') return 'warning';
-            const ic = String(icon || '');
-            if (/fa-spinner|fa-hourglass|fa-clock|fa-list-ol|fa-play-circle|fa-camera|fa-spider|fa-layer-group/i.test(ic)) {
-                return 'waiting';
+        playSoundForType(type, message) {
+            if (!soundSettings.isEnabled()) return;
+            NotificationSoundEngine.play(resolveSoundKind(type, null), soundSettings.getVolume());
+            if (message) {
+                this.show(message, type, null, { skipSound: true });
             }
-            return 'info';
         },
 
         /**
-         * Joue un son si autorisé par les options.
-         * @param {string} type
-         * @param {string|null} icon
-         * @param {object} options
+         * Son de test (navbar).
+         * @param {string} [type]
          */
-        _maybePlaySound(type, icon, options) {
-            const opts = options || {};
-            if (opts.sound === false) return;
-            const category = opts.soundCategory || this._soundCategoryFor(type, icon);
-            NotificationSoundEngine.play(category, NotificationsSoundSettings.getVolume());
-        },
-
-        /**
-         * Démarre une session bulk : un son d'attente au lancement, un seul son de synthèse à la fin.
-         * @param {{ total: number, entrepriseIds: number[] }} config
-         */
-        startBulkSoundSession(config) {
-            const total = Math.max(0, Number(config && config.total) || 0);
-            if (total <= 3) return;
-            const ids = Array.isArray(config && config.entrepriseIds)
-                ? config.entrepriseIds.map(function(x) { return Number(x); }).filter(function(n) { return n > 0; })
-                : [];
-            if (this._bulkSoundSession && this._bulkSoundSession.timeoutId) {
-                clearTimeout(this._bulkSoundSession.timeoutId);
-            }
-            this._bulkSoundSession = {
-                pending: total,
-                errors: 0,
-                ids: new Set(ids),
-                initialTotal: total,
-                timeoutId: null
-            };
-            const self = this;
-            this._bulkSoundSession.timeoutId = window.setTimeout(function() {
-                if (!self._bulkSoundSession) return;
-                NotificationSoundEngine.play('warning', NotificationsSoundSettings.getVolume());
-                self._bulkSoundSession = null;
-            }, BULK_SESSION_TIMEOUT_MS);
-            NotificationSoundEngine.unlock();
-            NotificationSoundEngine.play('waiting', NotificationsSoundSettings.getVolume());
-        },
-
-        /**
-         * Applique les options son bulk sur une notif liée à une entreprise.
-         * @param {number|null|undefined} entrepriseId
-         * @param {object} options - objet muté sur place
-         */
-        applyBulkSoundOptions(entrepriseId, options) {
-            const session = this._bulkSoundSession;
-            if (!session) return;
-            const eid = Number(entrepriseId);
-            if (!eid || !session.ids.has(eid)) return;
-            options.sound = false;
-        },
-
-        /**
-         * À appeler sur les événements terminaux (succès / erreur) d'une entreprise en bulk.
-         * @param {number|null|undefined} entrepriseId
-         * @param {string} type
-         */
-        notifyBulkTerminalEvent(entrepriseId, type) {
-            const session = this._bulkSoundSession;
-            if (!session) return;
-            const eid = Number(entrepriseId);
-            if (!eid || !session.ids.has(eid)) return;
-            if (String(type) === 'error') session.errors += 1;
-            session.pending -= 1;
-            if (session.pending > 0) return;
-            if (session.timeoutId) {
-                clearTimeout(session.timeoutId);
-            }
-            let finalCategory = 'success';
-            if (session.errors >= session.initialTotal) {
-                finalCategory = 'error';
-            } else if (session.errors > 0) {
-                finalCategory = 'warning';
-            }
-            NotificationSoundEngine.play(finalCategory, NotificationsSoundSettings.getVolume());
-            this._bulkSoundSession = null;
-        },
-
-        /**
-         * Prévisualisation depuis le panneau réglages.
-         * @param {string} [category]
-         */
-        playTestSound(category) {
-            NotificationSoundEngine.unlock();
-            NotificationSoundEngine.play(category || 'success', NotificationsSoundSettings.getVolume());
+        playTestSound(type) {
+            NotificationSoundEngine.play(resolveSoundKind(type || 'success', null), soundSettings.getVolume());
         },
 
         /**
          * Affiche une notification (toast)
          * @param {string} message
          * @param {string} type - 'info', 'success', 'error', 'warning'
-         * @param {string} [icon] - classe FontAwesome (ex: 'fa-play-circle') ou null pour l'icône par défaut
-         * @param {object} [options] - sound, soundCategory, bulkTerminal, entrepriseId
+         * @param {string|Object} [icon] - classe FontAwesome ou options { silent, skipSound }
+         * @param {Object} [options] - { silent: pas de son, skipSound: pas de son (toast seulement) }
          */
         show(message, type = 'info', icon = null, options = null) {
-            let opts = options && typeof options === 'object' ? options : {};
-            const iconClass = icon || this.getDefaultIcon(type);
-
-            if (opts.entrepriseId != null) {
-                this.applyBulkSoundOptions(opts.entrepriseId, opts);
+            let iconClass;
+            let opts = options || {};
+            if (icon && typeof icon === 'object' && !Array.isArray(icon)) {
+                opts = icon;
+                iconClass = this.getDefaultIcon(type);
+            } else {
+                iconClass = icon || this.getDefaultIcon(type);
             }
-            if (opts.bulkTerminal && opts.entrepriseId != null) {
-                this.notifyBulkTerminalEvent(opts.entrepriseId, type);
+
+            if (!opts.skipSound && !opts.silent && soundSettings.isEnabled()) {
+                NotificationSoundEngine.play(resolveSoundKind(type, iconClass), soundSettings.getVolume());
             }
-
-            this._maybePlaySound(type, iconClass, opts);
-
             let container = document.getElementById('notifications-toast-container');
             if (!container) {
                 container = document.createElement('div');
@@ -391,6 +338,7 @@
                 </div>
             `;
 
+            // Enregistrer dans l'historique
             const item = {
                 id: Date.now() + '-' + Math.random().toString(36).slice(2),
                 message: String(message),
@@ -420,7 +368,7 @@
                 }, 250);
             }, 3500);
         },
-
+        
         /**
          * Retourne la couleur selon le type
          * @param {string} type
@@ -465,20 +413,16 @@
             try {
                 document.dispatchEvent(new CustomEvent('notifications:cleared'));
             } catch (e) {}
-        },
-
-        /** Réglages sonores (volume, activation). */
-        soundSettings: NotificationsSoundSettings,
-
-        /** Moteur audio (tests avancés). */
-        soundEngine: NotificationSoundEngine
+        }
     };
-
+    
+    // Restauration d'état via le Caretaker (pattern Memento)
     if (window.MementoCaretaker) {
         const memento = window.MementoCaretaker.load(CARETAKER_KEY);
         if (memento) {
             Notifications.restoreFromMemento(memento);
         } else {
+            // Migration depuis l'ancienne clé
             try {
                 const raw = window.localStorage.getItem('prospectlab_notifications_v1');
                 if (raw) {
@@ -496,3 +440,4 @@
 
     window.Notifications = Notifications;
 })(window);
+

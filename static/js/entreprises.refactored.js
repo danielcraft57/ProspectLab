@@ -749,6 +749,48 @@
                 refreshEntrepriseFromServer(eid);
             },
         });
+
+/**
+     * Lot bulk : un bip de synthese a la fin (pas un bip par job).
+     * @param {{ id: number, t?: string }[]} jobs
+     * @param {'analysis'|'scraping'|'screenshots'} kind
+     */
+    function registerBulkSoundSessionFromJobs(jobs, kind) {
+        if (!window.Notifications || !Notifications.bulkSound || !Array.isArray(jobs)) return;
+        const keys = jobs.map((j) => {
+            if (kind === 'scraping') return `${j.id}:scraping`;
+            if (kind === 'screenshots') return `${j.id}:screenshots`;
+            return `${j.id}:${j.t}`;
+        });
+        Notifications.bulkSound.register(keys, kind);
+    }
+
+    /**
+     * Toast entreprise avec son coupe si le job fait partie d'un lot bulk.
+     * @param {string} message
+     * @param {string} type
+     * @param {string|null} icon
+     * @param {string|null} bulkKey
+     * @param {boolean} [ok=true]
+     */
+    /** Evite les toasts en double (listeners WS empiles ou re-emits serveur). */
+    const _entrepriseJobToastDedupe = new Map();
+
+    function showEntrepriseJobNotification(message, type, icon, bulkKey, ok) {
+        const dedupeKey = bulkKey || (type + ':' + message);
+        const now = Date.now();
+        const last = _entrepriseJobToastDedupe.get(dedupeKey);
+        if (last != null && now - last < 4500) {
+            return;
+        }
+        _entrepriseJobToastDedupe.set(dedupeKey, now);
+
+        const bulk = window.Notifications && Notifications.bulkSound;
+        const silent = !!(bulkKey && bulk && bulk.isTracked(bulkKey));
+        Notifications.show(message, type, icon, { silent });
+        if (bulkKey && bulk) {
+            bulk.noteJobComplete(bulkKey, ok !== false);
+        }
     }
     
     /** Evite deux start_scraping si les listeners modal se cumulent. */
@@ -1450,6 +1492,32 @@
         if (btnOff) btnOff.style.display = on ? 'inline-flex' : 'none';
     }
 
+    /**
+     * Retire de la selection les entreprises qui ne passent plus les filtres actifs.
+     */
+    async function reconcileBulkSelectionWithFilters() {
+        if (!selectedEntreprises.size) return;
+        if (!window.EntreprisesAPI || typeof EntreprisesAPI.pruneSelectionIds !== 'function') {
+            return;
+        }
+        try {
+            const before = selectedEntreprises.size;
+            const ids = Array.from(selectedEntreprises);
+            const kept = await EntreprisesAPI.pruneSelectionIds(ids, getCurrentFilters(), initialAnalyseId);
+            const keepSet = new Set(kept.map((x) => Number(x)));
+            ids.forEach((id) => {
+                if (!keepSet.has(Number(id))) {
+                    selectedEntreprises.delete(id);
+                }
+            });
+            if (selectedEntreprises.size !== before) {
+                updateBulkSelectionUI();
+            }
+        } catch (e) {
+            console.warn('[entreprises] reconcile selection:', e);
+        }
+    }
+
     /** Charge les entreprises avec les filtres courants (côté serveur, pagination). */
     async function loadEntreprises() {
         try {
@@ -1470,6 +1538,7 @@
                 filteredEntreprises = [...items];
                 totalEntreprises = items.length;
                 setCommercialTopUi(true);
+                await reconcileBulkSelectionWithFilters();
                 renderEntreprises();
                 refreshKanbanStrip();
                 return;
@@ -1490,6 +1559,7 @@
                 } catch (e) {}
                 return loadEntreprises();
             }
+            await reconcileBulkSelectionWithFilters();
             renderEntreprises();
             refreshKanbanStrip();
         } catch (error) {
@@ -3029,7 +3099,11 @@
         }
 
         if (analysisType === 'technique') {
-            socket.emit('start_technical_analysis', { url, entreprise_id: entrepriseId });
+            socket.emit('start_technical_analysis', {
+                url,
+                entreprise_id: entrepriseId,
+                enable_screenshot: options.enable_screenshot === true,
+            });
         } else if (analysisType === 'seo') {
             socket.emit('start_seo_analysis', { url, entreprise_id: entrepriseId, use_lighthouse: true });
         } else if (analysisType === 'osint') {
@@ -3717,7 +3791,7 @@
                                 'info',
                                 'fa-layer-group'
                             );
-                            registerBulkSoundSessionFromJobs(jobs);
+                            registerBulkSoundSessionFromJobs(jobs, 'analysis');
                         }
                         if (skippedNoUrl > 0) {
                             Notifications.show(
@@ -3728,7 +3802,10 @@
                         jobs.forEach((job, i) => {
                             setTimeout(() => {
                                 // Une notif globale au-dessus si > 3 ; sinon une notif par lancement.
-                                triggerAnalysisRelaunch(job.id, job.t, { notify: jobs.length <= 3 });
+                                triggerAnalysisRelaunch(job.id, job.t, {
+                                    notify: jobs.length <= 3,
+                                    enable_screenshot: false,
+                                });
                             }, i * staggerMs);
                         });
                     } else if (action === 'launch-scraping') {
@@ -3758,7 +3835,7 @@
                                 'info',
                                 'fa-layer-group'
                             );
-                            registerBulkSoundSessionFromJobs(jobs);
+                            registerBulkSoundSessionFromJobs(jobs, 'scraping');
                         }
                         if (skippedNoUrl > 0) {
                             Notifications.show(
@@ -3805,7 +3882,7 @@
                                 'info',
                                 'fa-camera'
                             );
-                            registerBulkSoundSessionFromJobs(jobs);
+                            registerBulkSoundSessionFromJobs(jobs, 'screenshots');
                         }
                         if (skippedNoUrl > 0) {
                             Notifications.show(
@@ -6264,8 +6341,29 @@
         if (!s) return;
         // Rebind si le socket a été recréé (force polling / reconnect) — sinon complete/error
         // n'arrivent plus et les spinners tournent sans notif.
-        if (window._entrepriseModalWsListenersSetup && window._entrepriseModalWsBoundSocket === s) return;
+        if (s.__entrepriseModalWsBound === true && window._entrepriseModalWsBoundSocket === s) {
+            return;
+        }
         window._entrepriseModalWsBoundSocket = s;
+
+        if (s.__entrepriseModalWsHandlers && typeof s.off === 'function') {
+            Object.keys(s.__entrepriseModalWsHandlers).forEach((ev) => {
+                const fn = s.__entrepriseModalWsHandlers[ev];
+                if (fn) {
+                    s.off(ev, fn);
+                }
+            });
+        }
+        const handlers = {};
+        /**
+         * Enregistre un listener idempotent (off + on) pour eviter les doublons de toasts.
+         * @param {string} ev
+         * @param {function} fn
+         */
+        const bindWs = (ev, fn) => {
+            handlers[ev] = fn;
+            bindWs(ev, fn);
+        };
 
         const eidOf = (data) => {
             if (!data || data.entreprise_id == null || data.entreprise_id === '') return null;
@@ -6273,12 +6371,12 @@
             return Number.isFinite(n) && n > 0 ? n : null;
         };
 
-        s.on('technical_analysis_started', function(data) {
+        bindWs('technical_analysis_started', function(data) {
             const eid = eidOf(data);
             if (eid == null) return;
             setScoreRelaunchLoading(eid, 'technique', true);
         });
-        s.on('technical_analysis_complete', function(data) {
+        bindWs('technical_analysis_complete', function(data) {
             const eid = eidOf(data);
             if (eid == null) return;
             setScoreRelaunchLoading(eid, 'technique', false);
@@ -6287,18 +6385,30 @@
                 scheduleApplyFilters();
             }
             const nom = getEntrepriseNom(eid);
-            showEntrepriseNotification(eid, nom + ' — Analyse technique terminée', 'success', 'fa-check-circle', { bulkTerminal: true });
+            showEntrepriseJobNotification(
+                nom + ' — Analyse technique terminée',
+                'success',
+                'fa-check-circle',
+                `${eid}:technique`,
+                true
+            );
             if (eid === currentModalEntrepriseId) {
                 setTimeout(() => loadTechnicalAnalysis(currentModalEntrepriseId, { skipClear: true }), 400);
                 setTimeout(() => loadMetricEvolutionTab(currentModalEntrepriseId), 650);
             }
         });
-        s.on('technical_analysis_error', function(data) {
+        bindWs('technical_analysis_error', function(data) {
             const eid = eidOf(data);
             if (eid != null) {
                 setScoreRelaunchLoading(eid, 'technique', false);
                 const nom = getEntrepriseNom(eid);
-                showEntrepriseNotification(eid, nom + ' — ' + (data.error || 'Erreur analyse technique'), 'error', 'fa-exclamation-circle', { bulkTerminal: true });
+                showEntrepriseJobNotification(
+                    nom + ' — ' + (data.error || 'Erreur analyse technique'),
+                    'error',
+                    'fa-exclamation-circle',
+                    `${eid}:technique`,
+                    false
+                );
             } else if (data && data.error) {
                 Notifications.show(data.error, 'error', 'fa-exclamation-circle');
             }
@@ -6306,12 +6416,12 @@
                 loadTechnicalAnalysis(currentModalEntrepriseId);
             }
         });
-        s.on('seo_analysis_started', function(data) {
+        bindWs('seo_analysis_started', function(data) {
             const eid = eidOf(data);
             if (eid == null) return;
             setScoreRelaunchLoading(eid, 'seo', true);
         });
-        s.on('seo_analysis_complete', function(data) {
+        bindWs('seo_analysis_complete', function(data) {
             const eid = eidOf(data);
             if (eid == null) return;
             setScoreRelaunchLoading(eid, 'seo', false);
@@ -6320,18 +6430,30 @@
                 scheduleApplyFilters();
             }
             const nom = getEntrepriseNom(eid);
-            showEntrepriseNotification(eid, nom + ' — Analyse SEO terminée', 'success', 'fa-check-circle', { bulkTerminal: true });
+            showEntrepriseJobNotification(
+                nom + ' — Analyse SEO terminée',
+                'success',
+                'fa-check-circle',
+                `${eid}:seo`,
+                true
+            );
             if (eid === currentModalEntrepriseId) {
                 setTimeout(() => loadSEOAnalysis(currentModalEntrepriseId, { skipClear: true }), 400);
                 setTimeout(() => loadMetricEvolutionTab(currentModalEntrepriseId), 650);
             }
         });
-        s.on('seo_analysis_error', function(data) {
+        bindWs('seo_analysis_error', function(data) {
             const eid = eidOf(data);
             if (eid != null) {
                 setScoreRelaunchLoading(eid, 'seo', false);
                 const nom = getEntrepriseNom(eid);
-                showEntrepriseNotification(eid, nom + ' — ' + (data.error || 'Erreur analyse SEO'), 'error', 'fa-exclamation-circle', { bulkTerminal: true });
+                showEntrepriseJobNotification(
+                    nom + ' — ' + (data.error || 'Erreur analyse SEO'),
+                    'error',
+                    'fa-exclamation-circle',
+                    `${eid}:seo`,
+                    false
+                );
             } else if (data && data.error) {
                 Notifications.show(data.error, 'error', 'fa-exclamation-circle');
             }
@@ -6339,11 +6461,17 @@
                 loadSEOAnalysis(currentModalEntrepriseId);
             }
         });
-        s.on('osint_analysis_complete', function(data) {
+        bindWs('osint_analysis_complete', function(data) {
             const eid = eidOf(data);
             if (eid != null) {
                 const nom = getEntrepriseNom(eid);
-                showEntrepriseNotification(eid, nom + ' — Analyse OSINT terminée', 'success', 'fa-check-circle', { bulkTerminal: true });
+                showEntrepriseJobNotification(
+                    nom + ' — Analyse OSINT terminée',
+                    'success',
+                    'fa-check-circle',
+                    `${eid}:osint`,
+                    true
+                );
                 if (isEntrepriseCurrentlyRendered(eid)) {
                     scheduleApplyFilters();
                 }
@@ -6352,11 +6480,17 @@
                 loadOSINTAnalysis(currentModalEntrepriseId);
             }
         });
-        s.on('osint_analysis_error', function(data) {
+        bindWs('osint_analysis_error', function(data) {
             const eid = eidOf(data);
             if (eid != null) {
                 const nom = getEntrepriseNom(eid);
-                showEntrepriseNotification(eid, nom + ' — ' + (data.error || 'Erreur analyse OSINT'), 'error', 'fa-exclamation-circle', { bulkTerminal: true });
+                showEntrepriseJobNotification(
+                    nom + ' — ' + (data.error || 'Erreur analyse OSINT'),
+                    'error',
+                    'fa-exclamation-circle',
+                    `${eid}:osint`,
+                    false
+                );
             } else if (data && data.error) {
                 Notifications.show(data.error, 'error', 'fa-exclamation-circle');
             }
@@ -6364,12 +6498,12 @@
                 loadOSINTAnalysis(currentModalEntrepriseId);
             }
         });
-        s.on('pentest_analysis_started', function(data) {
+        bindWs('pentest_analysis_started', function(data) {
             const eid = eidOf(data);
             if (eid == null) return;
             setScoreRelaunchLoading(eid, 'pentest', true);
         });
-        s.on('pentest_analysis_complete', function(data) {
+        bindWs('pentest_analysis_complete', function(data) {
             const eid = eidOf(data);
             if (eid == null) return;
             setScoreRelaunchLoading(eid, 'pentest', false);
@@ -6378,17 +6512,29 @@
                 scheduleApplyFilters();
             }
             const nom = getEntrepriseNom(eid);
-            showEntrepriseNotification(eid, nom + ' — Analyse Pentest terminée', 'success', 'fa-check-circle', { bulkTerminal: true });
+            showEntrepriseJobNotification(
+                nom + ' — Analyse Pentest terminée',
+                'success',
+                'fa-check-circle',
+                `${eid}:pentest`,
+                true
+            );
             if (eid === currentModalEntrepriseId) {
                 setTimeout(() => loadPentestAnalysis(currentModalEntrepriseId, { skipClear: true }), 400);
             }
         });
-        s.on('pentest_analysis_error', function(data) {
+        bindWs('pentest_analysis_error', function(data) {
             const eid = eidOf(data);
             if (eid != null) {
                 setScoreRelaunchLoading(eid, 'pentest', false);
                 const nom = getEntrepriseNom(eid);
-                showEntrepriseNotification(eid, nom + ' — ' + (data.error || 'Erreur analyse Pentest'), 'error', 'fa-exclamation-circle', { bulkTerminal: true });
+                showEntrepriseJobNotification(
+                    nom + ' — ' + (data.error || 'Erreur analyse Pentest'),
+                    'error',
+                    'fa-exclamation-circle',
+                    `${eid}:pentest`,
+                    false
+                );
             } else if (data && data.error) {
                 Notifications.show(data.error, 'error', 'fa-exclamation-circle');
             }
@@ -6397,19 +6543,19 @@
             }
         });
 
-        s.on('scraping_started', function(data) {
+        bindWs('scraping_started', function(data) {
             const entrepriseId = data && data.entreprise_id != null ? data.entreprise_id : currentModalEntrepriseId;
             if (entrepriseId == null) return;
             setScrapingRelaunchLoading(entrepriseId, true, 'Scraping démarré...');
         });
 
-        s.on('scraping_progress', function(data) {
+        bindWs('scraping_progress', function(data) {
             const entrepriseId = data && data.entreprise_id != null ? data.entreprise_id : currentModalEntrepriseId;
             if (entrepriseId == null) return;
             setScrapingRelaunchLoading(entrepriseId, true, (data && data.message) ? data.message : 'Scraping en cours...');
         });
 
-        s.on('scraping_complete', function(data) {
+        bindWs('scraping_complete', function(data) {
             const entrepriseId = data && data.entreprise_id != null ? data.entreprise_id : currentModalEntrepriseId;
             if (entrepriseId == null) return;
             setScrapingRelaunchLoading(entrepriseId, false);
@@ -6417,7 +6563,13 @@
                 scheduleApplyFilters();
             }
             const nom = getEntrepriseNom(entrepriseId);
-            showEntrepriseNotification(entrepriseId, nom + ' — Scraping terminé', 'success', 'fa-check-circle', { bulkTerminal: true });
+            showEntrepriseJobNotification(
+                nom + ' — Scraping terminé',
+                'success',
+                'fa-check-circle',
+                `${entrepriseId}:scraping`,
+                true
+            );
             if (entrepriseId === currentModalEntrepriseId) {
                 refreshEntrepriseFromServer(entrepriseId).then(() => {
                     try { loadScrapingResults(entrepriseId); } catch (e) {}
@@ -6427,15 +6579,21 @@
             }
         });
 
-        s.on('scraping_error', function(data) {
+        bindWs('scraping_error', function(data) {
             const entrepriseId = data && data.entreprise_id != null ? data.entreprise_id : currentModalEntrepriseId;
             if (entrepriseId == null) return;
             setScrapingRelaunchLoading(entrepriseId, false);
             const nom = getEntrepriseNom(entrepriseId);
-            showEntrepriseNotification(entrepriseId, nom + ' — ' + (data && data.error ? data.error : 'Erreur scraping'), 'error', 'fa-exclamation-circle', { bulkTerminal: true });
+            showEntrepriseJobNotification(
+                nom + ' — ' + (data && data.error ? data.error : 'Erreur scraping'),
+                'error',
+                'fa-exclamation-circle',
+                `${entrepriseId}:scraping`,
+                false
+            );
         });
 
-        s.on('screenshot_capture_started', function(data) {
+        bindWs('screenshot_capture_started', function(data) {
             const entrepriseId = data && data.entreprise_id != null ? data.entreprise_id : currentModalEntrepriseId;
             if (entrepriseId == null) return;
             setRowChipLoading('screenshots', entrepriseId, true);
@@ -6446,7 +6604,7 @@
             showEntrepriseNotification(entrepriseId, nom + ' — Capture screenshots démarrée', 'info', 'fa-camera');
         });
 
-        s.on('screenshot_capture_progress', function(data) {
+        bindWs('screenshot_capture_progress', function(data) {
             const entrepriseId = data && data.entreprise_id != null ? data.entreprise_id : currentModalEntrepriseId;
             if (entrepriseId == null || entrepriseId !== currentModalEntrepriseId) return;
             const device = data && data.device ? ` (${data.device})` : '';
@@ -6455,11 +6613,17 @@
             setInfoScreenshotsLoading(true, `${msg}${device}${pct ? ` — ${pct}` : ''}`);
         });
 
-        s.on('screenshot_capture_complete', function(data) {
+        bindWs('screenshot_capture_complete', function(data) {
             const entrepriseId = data && data.entreprise_id != null ? data.entreprise_id : currentModalEntrepriseId;
             if (entrepriseId == null) return;
             const nom = getEntrepriseNom(entrepriseId);
-            showEntrepriseNotification(entrepriseId, nom + ' — Screenshots mis à jour', 'success', 'fa-check-circle', { bulkTerminal: true });
+            showEntrepriseJobNotification(
+                nom + ' — Screenshots mis à jour',
+                'success',
+                'fa-check-circle',
+                `${entrepriseId}:screenshots`,
+                true
+            );
             setRowChipLoading('screenshots', entrepriseId, false);
             document.querySelectorAll(`.row-chip-screenshots[data-entreprise-id="${entrepriseId}"]`).forEach((el) => {
                 el.classList.remove('is-missing');
@@ -6475,12 +6639,18 @@
             }
         });
 
-        s.on('screenshot_capture_error', function(data) {
+        bindWs('screenshot_capture_error', function(data) {
             const entrepriseId = data && data.entreprise_id != null ? data.entreprise_id : currentModalEntrepriseId;
             const err = data && data.error ? data.error : 'Erreur capture screenshots';
             if (entrepriseId != null) {
                 const nom = getEntrepriseNom(entrepriseId);
-                showEntrepriseNotification(entrepriseId, nom + ' — ' + err, 'error', 'fa-exclamation-circle', { bulkTerminal: true });
+                showEntrepriseJobNotification(
+                    nom + ' — ' + err,
+                    'error',
+                    'fa-exclamation-circle',
+                    `${entrepriseId}:screenshots`,
+                    false
+                );
                 setRowChipLoading('screenshots', entrepriseId, false);
             } else {
                 Notifications.show(err, 'error', 'fa-exclamation-circle');
@@ -6496,7 +6666,7 @@
             }
         });
 
-        s.on('gemini_report_started', function(data) {
+        bindWs('gemini_report_started', function(data) {
             if (!data || data.entreprise_id == null) return;
             const eid = data.entreprise_id;
             setRowChipLoading('gemini', eid, true);
@@ -6521,7 +6691,7 @@
             }
         });
 
-        s.on('gemini_report_quota', function(data) {
+        bindWs('gemini_report_quota', function(data) {
             if (!data || data.entreprise_id == null) return;
             const eid = Number(data.entreprise_id);
             const msg = (data && data.message)
@@ -6532,13 +6702,13 @@
             }
         });
 
-        s.on('gemini_queue_halted', function(data) {
+        bindWs('gemini_queue_halted', function(data) {
             const msg = (data && (data.message || data.reason))
                 || 'Quota Gemini epuise — file annulee.';
             haltAllPendingGeminiUi(msg, data && data.aborted_ids);
         });
 
-        s.on('gemini_report_progress', function(data) {
+        bindWs('gemini_report_progress', function(data) {
             if (!data || data.entreprise_id == null) return;
             const eid = Number(data.entreprise_id);
             const msg = String((data && data.message) || '');
@@ -6564,7 +6734,7 @@
             });
         });
 
-        s.on('gemini_report_complete', function(data) {
+        bindWs('gemini_report_complete', function(data) {
             if (!data || data.entreprise_id == null) return;
             const eid = data.entreprise_id;
             const nom = getEntrepriseNom(eid);
@@ -6633,7 +6803,7 @@
             }
         });
 
-        s.on('gemini_mockups_started', function(data) {
+        bindWs('gemini_mockups_started', function(data) {
             if (!data) return;
             if (data.entreprise_id != null
                 && Number(data.entreprise_id) !== Number(currentModalEntrepriseId)) {
@@ -6647,7 +6817,7 @@
             });
         });
 
-        s.on('gemini_mockups_progress', function(data) {
+        bindWs('gemini_mockups_progress', function(data) {
             if (!data || data.entreprise_id == null) return;
             if (Number(data.entreprise_id) !== Number(currentModalEntrepriseId)) return;
             syncGeminiMockupsLogs({
@@ -6657,7 +6827,7 @@
             });
         });
 
-        s.on('gemini_mockups_complete', function(data) {
+        bindWs('gemini_mockups_complete', function(data) {
             const btn = document.getElementById('gemini-mockups-start-btn');
             if (btn) {
                 btn.disabled = false;
@@ -6690,7 +6860,7 @@
             loadGeminiMockups(currentModalEntrepriseId);
         });
 
-        s.on('gemini_mockups_error', function(data) {
+        bindWs('gemini_mockups_error', function(data) {
             const btn = document.getElementById('gemini-mockups-start-btn');
             if (btn) {
                 btn.disabled = false;
@@ -6710,7 +6880,7 @@
             Notifications.show(err, 'error');
         });
 
-        s.on('gemini_report_error', function(data) {
+        bindWs('gemini_report_error', function(data) {
             const eid = data && data.entreprise_id != null ? data.entreprise_id : null;
             const err = data && data.error ? data.error : 'Erreur rapport Gemini';
             const isQuota = !!(data && data.quota_exceeded) || isGeminiQuotaText(err);
@@ -6740,6 +6910,8 @@
                 setGeminiReportStatus(isQuota ? 'Quota Gemini atteint' : err, true);
             }
         });
+        s.__entrepriseModalWsHandlers = handlers;
+        s.__entrepriseModalWsBound = true;
         window._entrepriseModalWsListenersSetup = true;
         if (!window._entrepriseModalWsReconnectHook) {
             window._entrepriseModalWsReconnectHook = true;

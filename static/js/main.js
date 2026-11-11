@@ -404,5 +404,72 @@ document.addEventListener('DOMContentLoaded', function() {
         // Fermer le panneau par défaut au chargement (au cas où le CSS l’afficherait)
         closePanel();
     })();
+
+    /**
+     * Volume et mute des sons de notification (navbar, a cote du theme).
+     */
+    (function initNotificationSoundNav() {
+        const soundToggleBtn = document.querySelector('[data-notifications-sound-toggle]');
+        const soundIcon = document.querySelector('[data-notifications-sound-icon]');
+        const soundVolumeInput = document.querySelector('[data-notifications-sound-volume]');
+
+        if (!soundToggleBtn && !soundVolumeInput) {
+            return;
+        }
+
+        function syncSoundUi() {
+            const ss = window.Notifications && window.Notifications.soundSettings;
+            if (!ss) return;
+            const enabled = ss.isEnabled();
+            const vol = ss.getVolumePercent();
+            if (soundToggleBtn) {
+                soundToggleBtn.classList.toggle('is-muted', !enabled);
+                soundToggleBtn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+                soundToggleBtn.title = enabled ? 'Couper les sons' : 'Activer les sons';
+            }
+            if (soundIcon) {
+                soundIcon.className = enabled
+                    ? 'fa-solid fa-volume-high'
+                    : 'fa-solid fa-volume-xmark';
+            }
+            if (soundVolumeInput) {
+                soundVolumeInput.value = String(vol);
+                soundVolumeInput.disabled = !enabled;
+            }
+        }
+
+        syncSoundUi();
+
+        if (soundToggleBtn) {
+            soundToggleBtn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                const ss = window.Notifications && window.Notifications.soundSettings;
+                if (!ss) return;
+                const next = !ss.isEnabled();
+                ss.setEnabled(next);
+                syncSoundUi();
+                if (next && window.Notifications.playTestSound) {
+                    window.Notifications.playTestSound('info');
+                }
+            });
+        }
+
+        if (soundVolumeInput) {
+            soundVolumeInput.addEventListener('input', function () {
+                const ss = window.Notifications && window.Notifications.soundSettings;
+                if (!ss) return;
+                ss.setVolumePercent(soundVolumeInput.value);
+            });
+            soundVolumeInput.addEventListener('change', function () {
+                const ss = window.Notifications && window.Notifications.soundSettings;
+                if (!ss || !ss.isEnabled()) return;
+                if (window.Notifications.playTestSound) {
+                    window.Notifications.playTestSound('success');
+                }
+            });
+        }
+
+        document.addEventListener('notifications:sound-settings', syncSoundUi);
+    })();
 });
 

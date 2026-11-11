@@ -48,7 +48,7 @@ from services.website_audit_data import (
 )
 from services.website_audit_pending import audit_site_slug, load_pending_agent_job, save_pending_agent_job
 from services.website_audit_pdf import WebsiteAuditPdfGenerator
-from utils.url_utils import canonical_website_https_url
+from utils.url_utils import normalize_url_for_analysis
 
 logger = setup_logger(__name__, 'website_audit_report.log')
 
@@ -1120,7 +1120,7 @@ def website_audit_simple_report_task(
     """Scraping → technique → SEO → pentest → PDF local → email (ou PDF direct si déjà analysé)."""
     db = Database()
     email = _normalize_email(recipient_email)
-    url = canonical_website_https_url((website or '').strip())
+    url = normalize_url_for_analysis((website or '').strip())
     if not url:
         raise ValueError('URL de site invalide')
     if not email:
@@ -1242,7 +1242,7 @@ def website_audit_complete_report_task(
     """Analyse complète (6 modules) → PDF agent Cursor → email."""
     db = Database()
     email = _normalize_email(recipient_email)
-    url = canonical_website_https_url((website or '').strip())
+    url = normalize_url_for_analysis((website or '').strip())
     if not url:
         raise ValueError('URL de site invalide')
     if not email:
@@ -1434,7 +1434,8 @@ def website_audit_complete_resume_task(
         }
     bind_audit_resume_task_id(pid, current_tid)
 
-    url = canonical_website_https_url((pending.get('website') or website or '').strip())
+    raw_site = (pending.get('website') or website or '').strip()
+    url = normalize_url_for_analysis(raw_site)
     email = _normalize_email(recipient_email or pending.get('recipient_email') or '')
     if not url or not email:
         raise ValueError('website et email requis pour la reprise')

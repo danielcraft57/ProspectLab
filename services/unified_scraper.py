@@ -147,6 +147,7 @@ class UnifiedScraper:
         self.external_links_by_url: Dict[str, Dict] = {}  # url normalisée -> détail (liens hors site)
         self._location_hits: List[Dict[str, Any]] = []  # indices d'adresse / geo (toutes pages)
         self.homepage_reachability: Optional[Dict[str, Any]] = None  # HTTP de la page d'accueil
+        self.pages_fetched_ok: int = 0  # GET avec corps HTML recu
         
         # État du scraping
         self.visited_urls: Set[str] = set()
@@ -242,7 +243,7 @@ class UnifiedScraper:
                     return resp, outcome
                 last_outcome = outcome
                 logger.warning(f'[scraper] HTTP {code} pour {candidate}')
-                if idx == 0 and code in (401, 403) and idx + 1 < len(candidates):
+                if idx + 1 < len(candidates):
                     continue
                 return None, last_outcome
             except Exception as e:
@@ -1677,13 +1678,18 @@ class UnifiedScraper:
                 recorded = dict(fetch_outcome or {})
                 recorded['url'] = url
                 with self.lock:
-                    if not self.homepage_reachability:
+                    if fetch_outcome and fetch_outcome.get('ok'):
+                        self.homepage_reachability = recorded
+                    elif not self.homepage_reachability:
                         self.homepage_reachability = recorded
             if response is None:
                 # On journalise et on arrête proprement pour cette URL sans casser tout le scraping
                 logger.warning(f'[scraper] Impossible de récupérer {url}, page ignorée')
                 return
             
+            with self.lock:
+                self.pages_fetched_ok += 1
+
             soup = BeautifulSoup(response.text, 'html.parser')
             text = response.text
 
@@ -2155,7 +2161,10 @@ class UnifiedScraper:
         # Générer le résumé de l'entreprise
         resume = self.generate_company_summary()
         
-        if not self.homepage_reachability:
+        if self.pages_fetched_ok > 0:
+            if not (self.homepage_reachability or {}).get('ok'):
+                self.homepage_reachability = outcome_from_status(200, 'pages_scrapees_avec_succes')
+        elif not self.homepage_reachability:
             self.homepage_reachability = outcome_from_status(0, 'pas de reponse de la page d accueil')
 
         # Log final du nombre de pages avec OG collectées

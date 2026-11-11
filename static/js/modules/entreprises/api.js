@@ -46,6 +46,36 @@
             if (!response.ok) throw new Error('Erreur lors du chargement des entreprises');
             return await response.json();
         },
+
+        /**
+         * Garde uniquement les IDs qui matchent encore les filtres (selection bulk).
+         * @param {number[]} ids - IDs coches
+         * @param {Object} [filters] - Memes filtres que loadAll
+         * @param {number|null} [analyseId] - Filtre analyse optionnel
+         * @returns {Promise<number[]>}
+         */
+        async pruneSelectionIds(ids, filters = {}, analyseId = null) {
+            const payload = {
+                ids: Array.isArray(ids) ? ids : [],
+                filters: filters || {},
+            };
+            if (analyseId !== null && analyseId !== undefined) {
+                const aid = Number(analyseId);
+                if (!Number.isNaN(aid)) {
+                    payload.analyse_id = aid;
+                }
+            }
+            const response = await fetch('/api/entreprises/prune-selection', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            if (!response.ok) {
+                throw new Error('Erreur lors de la synchronisation de la selection');
+            }
+            const data = await response.json();
+            return Array.isArray(data.ids) ? data.ids : [];
+        },
         
         /**
          * Charge les secteurs (groupes) avec effectifs.

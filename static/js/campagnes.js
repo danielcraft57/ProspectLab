@@ -4763,6 +4763,7 @@ function updateWeeklyPlanWeekHint(bounds) {
     var hint = document.getElementById('weekly-plan-week-hint');
     if (!hint || !bounds) return;
     hint.textContent = 'Semaine du ' + formatDateParisShort(bounds.min) + ' au ' + formatDateParisShort(bounds.max) + ' (Europe/Paris)';
+    updateWeeklyPlanWeekPicker(bounds);
 }
 
 function onWeeklyPlanDateChange(ev) {
@@ -4873,6 +4874,7 @@ function initWeeklyPlanModal() {
         refreshBtn.addEventListener('click', function() { loadWeeklyPlansCalendar(); });
     }
     initWeeklyPlanModalDismiss();
+    initWeeklyPlanWeekNav();
 }
 
 function getCalendarWeekRange() {
@@ -5015,6 +5017,125 @@ function getNextWeekMonday(fromDate) {
     return monday;
 }
 
+/**
+ * Lundi (Europe/Paris, date locale) de la semaine contenant la date donnée.
+ * @param {Date|string} fromDate
+ * @returns {Date}
+ */
+function getMondayOfWeek(fromDate) {
+    var d = fromDate instanceof Date ? new Date(fromDate.getTime()) : new Date(String(fromDate || '') + (String(fromDate || '').includes('T') ? '' : 'T12:00:00'));
+    if (isNaN(d.getTime())) {
+        d = new Date();
+    }
+    d.setHours(12, 0, 0, 0);
+    var day = d.getDay();
+    var diff = day === 0 ? -6 : 1 - day;
+    var monday = new Date(d);
+    monday.setDate(d.getDate() + diff);
+    monday.setHours(0, 0, 0, 0);
+    return monday;
+}
+
+/**
+ * Met à jour l'affichage du sélecteur de semaine (lundi).
+ * @param {{ min: string, max: string }} bounds
+ */
+function updateWeeklyPlanWeekPicker(bounds) {
+    var input = document.getElementById('weekly-plan-week-start');
+    if (!input || !bounds) return;
+    input.value = bounds.min;
+}
+
+/**
+ * Recalcule les dates min/max et les jours par défaut des créneaux pour la semaine courante.
+ */
+function applyWeeklyPlanWeekToSlots() {
+    var container = document.getElementById('weekly-plan-slots');
+    if (!container || !weeklyPlanWeekMonday) return;
+    var bounds = getWeeklyPlanWeekBounds(weeklyPlanWeekMonday);
+    updateWeeklyPlanWeekHint(bounds);
+    updateWeeklyPlanWeekPicker(bounds);
+
+    container.querySelectorAll('.weekly-plan-slot').forEach(function(slotEl) {
+        var idx = parseInt(slotEl.getAttribute('data-slot-index'), 10);
+        var defaults = WEEKLY_PLAN_SLOT_DEFAULTS[idx];
+        if (!defaults) return;
+        var slotDate = getDateForWeekday(weeklyPlanWeekMonday, defaults.weekday);
+        var dateVal = formatDateInputValue(slotDate);
+        var dateInput = slotEl.querySelector('.weekly-plan-date');
+        var timeInput = slotEl.querySelector('.weekly-plan-time');
+        if (dateInput) {
+            dateInput.min = bounds.min;
+            dateInput.max = bounds.max;
+            dateInput.value = dateVal;
+            var dateGroup = dateInput.closest('.md-datetime-field');
+            if (dateGroup) updateDatetimeCaption(dateGroup, dateVal, '');
+        }
+        if (timeInput) {
+            var timeGroup = timeInput.closest('.md-datetime-field');
+            if (timeGroup) updateDatetimeCaption(timeGroup, '', timeInput.value);
+        }
+        updateWeeklyPlanSlotLabel(slotEl);
+    });
+    if (!weeklyPlanNomTouched) {
+        suggestWeeklyPlanNom();
+    }
+}
+
+/**
+ * Change la semaine planifiée (lundi de référence).
+ * @param {Date|string} mondayDate
+ */
+function setWeeklyPlanWeekMonday(mondayDate) {
+    weeklyPlanWeekMonday = getMondayOfWeek(mondayDate);
+    applyWeeklyPlanWeekToSlots();
+}
+
+/**
+ * Décale la semaine courante de N semaines.
+ * @param {number} deltaWeeks
+ */
+function shiftWeeklyPlanWeek(deltaWeeks) {
+    if (!weeklyPlanWeekMonday) {
+        weeklyPlanWeekMonday = getNextWeekMonday();
+    }
+    var m = new Date(weeklyPlanWeekMonday);
+    m.setDate(m.getDate() + (deltaWeeks * 7));
+    setWeeklyPlanWeekMonday(m);
+}
+
+/**
+ * Boutons préc./suiv., date lundi, semaine recommandée.
+ */
+function initWeeklyPlanWeekNav() {
+    var toolbar = document.getElementById('weekly-plan-week-toolbar');
+    if (!toolbar || toolbar.dataset.weekNavBound === '1') return;
+    toolbar.dataset.weekNavBound = '1';
+
+    var prevBtn = document.getElementById('weekly-plan-week-prev');
+    var nextBtn = document.getElementById('weekly-plan-week-next');
+    var recoBtn = document.getElementById('weekly-plan-week-reco');
+    var weekStartInput = document.getElementById('weekly-plan-week-start');
+
+    if (prevBtn) {
+        prevBtn.addEventListener('click', function() { shiftWeeklyPlanWeek(-1); });
+    }
+    if (nextBtn) {
+        nextBtn.addEventListener('click', function() { shiftWeeklyPlanWeek(1); });
+    }
+    if (recoBtn) {
+        recoBtn.addEventListener('click', function() {
+            setWeeklyPlanWeekMonday(getNextWeekMonday());
+        });
+    }
+    if (weekStartInput) {
+        weekStartInput.addEventListener('change', function() {
+            if (!weekStartInput.value) return;
+            setWeeklyPlanWeekMonday(weekStartInput.value);
+        });
+    }
+}
+
 function getDateForWeekday(weekMonday, weekday) {
     var d = new Date(weekMonday);
     d.setDate(d.getDate() + (weekday - 1));
@@ -5036,7 +5157,9 @@ function renderWeeklyPlanSlots() {
     var container = document.getElementById('weekly-plan-slots');
     if (!container) return;
 
-    weeklyPlanWeekMonday = getNextWeekMonday();
+    if (!weeklyPlanWeekMonday) {
+        weeklyPlanWeekMonday = getNextWeekMonday();
+    }
     var bounds = getWeeklyPlanWeekBounds(weeklyPlanWeekMonday);
     updateWeeklyPlanWeekHint(bounds);
 
@@ -5124,6 +5247,7 @@ function renderWeeklyPlanSlots() {
     });
 
     suggestWeeklyPlanNom();
+    initWeeklyPlanWeekNav();
 }
 
 async function populateWeeklyPlanGroupes() {
@@ -5192,6 +5316,7 @@ function openWeeklyPlanModal() {
     weeklyPlanDisplayedEntreprisesData = [];
     weeklyPlanRecipientsPreview = null;
     weeklyPlanNomTouched = false;
+    weeklyPlanWeekMonday = null;
 
     var preview = document.getElementById('weekly-plan-recipients-preview');
     if (preview) {

@@ -176,6 +176,8 @@ Si tu vois l'avertissement « Host system is missing dependencies » (libgtk, gs
 
 Si tu vois `BrowserType.launch: Executable doesn't exist`, c'est que cette etape manque (souvent apres recreate de l'env Conda).
 
+Sur Raspberry Pi (aarch64), Playwright utilise par defaut `chrome-headless-shell`, qui peut crasher (`Received signal 4` / `Browser.new_context` ferme). ProspectLab force alors le binaire **Chromium complet** (`chromium-*/chrome-linux/chrome`) ou `CHROME_PATH=/usr/bin/chromium` dans `.env`. Apres deploy : `sudo systemctl restart prospectlab-celery`.
+
 ### 1.5. Configuration de l'environnement
 
 Créer le fichier `.env` de production :
