@@ -3984,6 +3984,86 @@ body[data-theme="dark"] .modal-weekly-plan .md-select option {
     margin-bottom: 10px;
 }
 
+.weekly-plan-week-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 10px 14px;
+    margin-bottom: 10px;
+}
+
+.weekly-plan-week-nav {
+    display: flex;
+    flex: 1 1 280px;
+    align-items: stretch;
+    gap: 8px;
+    min-width: 0;
+}
+
+.weekly-plan-week-nav-main {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: center;
+}
+
+.weekly-plan-week-nav-btn {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: 8px 10px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.2;
+    color: #4338ca;
+    background: #eef2ff;
+    border: 1px solid #c7d2fe;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.weekly-plan-week-nav-btn:hover {
+    background: #e0e7ff;
+    border-color: #a5b4fc;
+}
+
+.weekly-plan-week-start-label {
+    display: block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #64748b;
+    margin: 2px 0 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.weekly-plan-week-start {
+    width: 100%;
+    max-width: 11.5rem;
+    margin: 0 auto;
+}
+
+.weekly-plan-week-reco-btn {
+    flex: 0 0 auto;
+    padding: 8px 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #475569;
+    background: #f8fafc;
+    border: 1px dashed #cbd5e1;
+    border-radius: 10px;
+    cursor: pointer;
+}
+
+.weekly-plan-week-reco-btn:hover {
+    background: #f1f5f9;
+    border-color: #94a3b8;
+    color: #334155;
+}
+
 .weekly-plan-week-hint {
     font-weight: 600;
     color: #4338ca;
@@ -4012,6 +4092,26 @@ body[data-theme="dark"] .weekly-plan-slot-label {
 
 body[data-theme="dark"] .weekly-plan-week-hint {
     color: #a5b4fc;
+}
+
+body[data-theme="dark"] .weekly-plan-week-nav-btn {
+    color: #c7d2fe;
+    background: rgba(67, 56, 202, 0.2);
+    border-color: rgba(129, 140, 248, 0.45);
+}
+
+body[data-theme="dark"] .weekly-plan-week-nav-btn:hover {
+    background: rgba(67, 56, 202, 0.35);
+}
+
+body[data-theme="dark"] .weekly-plan-week-start-label {
+    color: #94a3b8;
+}
+
+body[data-theme="dark"] .weekly-plan-week-reco-btn {
+    color: #cbd5e1;
+    background: rgba(15, 23, 42, 0.6);
+    border-color: #475569;
 }
 
 .weekly-plan-slot-toggle {

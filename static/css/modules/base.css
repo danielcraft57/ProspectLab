@@ -141,6 +141,50 @@ body {
     margin-left: auto;
 }
 
+.nav-sound-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.nav-sound-toggle-btn {
+    background: rgba(15, 23, 42, 0.4);
+    color: #e5e7eb;
+    border: 1px solid rgba(148, 163, 184, 0.6);
+    border-radius: 999px;
+    padding: 0.4rem 0.65rem;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.9rem;
+    transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+}
+
+.nav-sound-toggle-btn:hover {
+    background: rgba(30, 64, 175, 0.85);
+    border-color: rgba(191, 219, 254, 0.9);
+    transform: translateY(-1px);
+}
+
+.nav-sound-toggle-btn.is-muted {
+    color: #94a3b8;
+    opacity: 0.85;
+}
+
+.nav-sound-volume {
+    width: 4.5rem;
+    height: 0.35rem;
+    accent-color: #6366f1;
+    cursor: pointer;
+}
+
+@media (max-width: 640px) {
+    .nav-sound-volume {
+        display: none;
+    }
+}
+
 .nav-theme-toggle .theme-toggle-btn {
     background: rgba(15, 23, 42, 0.4);
     color: #e5e7eb;

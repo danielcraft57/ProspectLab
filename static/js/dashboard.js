@@ -7,6 +7,122 @@
     let currentDaysFilter = '';
     const charts = {};
 
+    /** Cache localStorage des KPI affichés (évite les « - » pendant la latence API). */
+    const DASHBOARD_CACHE_LS = 'prospectlab_dashboard_kpi_cache';
+    const DASHBOARD_CACHE_VERSION = 1;
+    const DASHBOARD_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+    const KPI_NUMBER_IDS = [
+        'stat-total-entreprises',
+        'stat-actifs',
+        'stat-avec-email',
+        'stat-gagnes',
+        'stat-emails-envoyes',
+        'stat-replies',
+        'stat-rdv',
+        'stat-hot',
+    ];
+
+    const KPI_PERCENT_IDS = [
+        'stat-conversion',
+        'stat-open-rate',
+        'stat-click-rate',
+        'stat-reply-rate',
+    ];
+
+    /**
+     * Clé de période pour le cache (filtre jours).
+     * @param {string} days
+     * @returns {string}
+     */
+    function cachePeriodKey(days) {
+        if (days === '' || days == null) return 'all';
+        return String(days);
+    }
+
+    /**
+     * @returns {{ version: number, byPeriod: Object }}
+     */
+    function readDashboardCacheStore() {
+        try {
+            const raw = window.localStorage.getItem(DASHBOARD_CACHE_LS);
+            if (!raw) return { version: DASHBOARD_CACHE_VERSION, byPeriod: {} };
+            const data = JSON.parse(raw);
+            if (!data || data.version !== DASHBOARD_CACHE_VERSION || typeof data.byPeriod !== 'object') {
+                return { version: DASHBOARD_CACHE_VERSION, byPeriod: {} };
+            }
+            return data;
+        } catch (e) {
+            return { version: DASHBOARD_CACHE_VERSION, byPeriod: {} };
+        }
+    }
+
+    /**
+     * @param {{ version: number, byPeriod: Object }} store
+     */
+    function writeDashboardCacheStore(store) {
+        try {
+            window.localStorage.setItem(DASHBOARD_CACHE_LS, JSON.stringify(store));
+        } catch (e) {
+            // quota / mode privé
+        }
+    }
+
+    /**
+     * Affiche les derniers chiffres connus pour la période.
+     * @param {string} daysFilter
+     * @returns {boolean} true si au moins un KPI a été hydraté
+     */
+    function hydrateDashboardFromCache(daysFilter) {
+        const store = readDashboardCacheStore();
+        const entry = store.byPeriod[cachePeriodKey(daysFilter)];
+        if (!entry || !entry.numbers || typeof entry.numbers !== 'object') return false;
+        const age = Date.now() - Number(entry.savedAt || 0);
+        if (!Number.isFinite(age) || age < 0 || age > DASHBOARD_CACHE_MAX_AGE_MS) return false;
+
+        let applied = false;
+        KPI_NUMBER_IDS.forEach((id) => {
+            if (entry.numbers[id] == null) return;
+            setNumber(id, entry.numbers[id], false);
+            applied = true;
+        });
+        KPI_PERCENT_IDS.forEach((id) => {
+            if (entry.numbers[id] == null) return;
+            setPercent(id, entry.numbers[id], false);
+            applied = true;
+        });
+        return applied;
+    }
+
+    /**
+     * Persiste le snapshot des KPI après un fetch réussi.
+     * @param {string} daysFilter
+     * @param {Object} currentKpi
+     * @param {Object} stats
+     */
+    function persistDashboardCache(daysFilter, currentKpi, stats) {
+        const numbers = {
+            'stat-total-entreprises': currentKpi.totalEntreprises,
+            'stat-actifs': currentKpi.actifs,
+            'stat-avec-email': currentKpi.entreprisesAvecEmail,
+            'stat-gagnes': currentKpi.totalGagnes,
+            'stat-conversion': currentKpi.conversion,
+            'stat-emails-envoyes': Number(stats.emails_envoyes || 0),
+            'stat-open-rate': Number(stats.open_rate || 0),
+            'stat-click-rate': Number(stats.click_rate || 0),
+            'stat-replies': Number(stats.reponses || 0),
+            'stat-reply-rate': Number(stats.reply_rate || 0),
+            'stat-rdv': Number(stats.rdv || 0),
+            'stat-hot': Number(stats.hot_leads_count || 0),
+        };
+        const store = readDashboardCacheStore();
+        store.byPeriod[cachePeriodKey(daysFilter)] = {
+            savedAt: Date.now(),
+            numbers,
+        };
+        writeDashboardCacheStore(store);
+    }
+
     function getChartThemeOptions() {
         const isDark = document.body.getAttribute('data-theme') === 'dark';
         const textColor = isDark ? '#e2e8f0' : '#666';
@@ -33,8 +149,13 @@
     }
 
     async function loadStatistics() {
+        const hadCachedKpi = hydrateDashboardFromCache(currentDaysFilter);
         try {
-            document.body.classList.add('dashboard-loading');
+            if (!hadCachedKpi) {
+                document.body.classList.add('dashboard-loading');
+            } else {
+                document.body.classList.add('dashboard-refreshing');
+            }
             const stats = await fetchStatistics(currentDaysFilter || '', 0);
 
             // Sécurité basique
@@ -72,6 +193,8 @@
             setPercent('stat-reply-rate', stats.reply_rate || 0, true);
             setNumber('stat-rdv', stats.rdv || 0, true);
             setNumber('stat-hot', stats.hot_leads_count || 0, true);
+
+            persistDashboardCache(currentDaysFilter, currentKpi, stats);
 
             renderKpiDeltas(currentKpi, previousKpi);
             const insightContext = {
@@ -124,6 +247,7 @@
             console.error('Erreur lors du chargement des statistiques:', error);
         } finally {
             document.body.classList.remove('dashboard-loading');
+            document.body.classList.remove('dashboard-refreshing');
         }
     }
 
@@ -1018,16 +1142,17 @@
         });
     }
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => {
-            setupPeriodSwitch();
-            setupStatCards();
-            loadStatistics();
-        });
-    } else {
+    function bootDashboard() {
         setupPeriodSwitch();
         setupStatCards();
+        hydrateDashboardFromCache(currentDaysFilter);
         loadStatistics();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bootDashboard);
+    } else {
+        bootDashboard();
     }
 })();
 

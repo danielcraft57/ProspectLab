@@ -573,7 +573,26 @@
                             <i class="fa-solid fa-calendar-days" aria-hidden="true"></i>
                             Créneaux de la semaine
                         </div>
-                        <p id="weekly-plan-week-hint" class="form-hint weekly-plan-week-hint"></p>
+                        <div class="weekly-plan-week-toolbar" id="weekly-plan-week-toolbar">
+                            <div class="weekly-plan-week-nav" role="group" aria-label="Choisir la semaine">
+                                <button type="button" class="weekly-plan-week-nav-btn" id="weekly-plan-week-prev" title="Semaine précédente">
+                                    <i class="fa-solid fa-chevron-left" aria-hidden="true"></i>
+                                    <span>Sem. préc.</span>
+                                </button>
+                                <div class="weekly-plan-week-nav-main">
+                                    <p id="weekly-plan-week-hint" class="form-hint weekly-plan-week-hint" aria-live="polite"></p>
+                                    <label for="weekly-plan-week-start" class="weekly-plan-week-start-label">Lundi</label>
+                                    <input type="date" id="weekly-plan-week-start" class="md-input md-input--datetime weekly-plan-week-start" lang="fr-FR" title="Choisir le lundi de la semaine cible">
+                                </div>
+                                <button type="button" class="weekly-plan-week-nav-btn" id="weekly-plan-week-next" title="Semaine suivante">
+                                    <span>Sem. suiv.</span>
+                                    <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+                                </button>
+                            </div>
+                            <button type="button" class="weekly-plan-week-reco-btn" id="weekly-plan-week-reco" title="Revenir à la première semaine avec des créneaux encore possibles">
+                                Semaine recommandée
+                            </button>
+                        </div>
                         <p class="md-select-hint">Active les créneaux souhaités, choisis un modèle et ajuste la date/heure (Europe/Paris).</p>
                         <div id="weekly-plan-slots" class="weekly-plan-slots"></div>
                     </div>
