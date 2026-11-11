@@ -179,6 +179,11 @@ class Database(
             log.warning('Migration tchatche_kb_* non appliquée', exc_info=True)
 
         try:
+            self.ensure_weekly_campaign_plans_tables()
+        except Exception:
+            log.warning('Migration plans_campagne_hebdo non appliquée', exc_info=True)
+
+        try:
             self.ensure_api_tokens_columns()
         except Exception:
             log.warning(

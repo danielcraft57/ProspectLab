@@ -749,8 +749,9 @@
                 refreshEntrepriseFromServer(eid);
             },
         });
+    }
 
-/**
+    /**
      * Lot bulk : un bip de synthese a la fin (pas un bip par job).
      * @param {{ id: number, t?: string }[]} jobs
      * @param {'analysis'|'scraping'|'screenshots'} kind
