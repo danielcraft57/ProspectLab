@@ -6363,7 +6363,12 @@
          */
         const bindWs = (ev, fn) => {
             handlers[ev] = fn;
-            bindWs(ev, fn);
+            if (typeof s.off === 'function') {
+                s.off(ev, fn);
+            }
+            if (typeof s.on === 'function') {
+                s.on(ev, fn);
+            }
         };
 
         const eidOf = (data) => {
