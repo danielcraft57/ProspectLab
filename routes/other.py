@@ -1114,7 +1114,12 @@ def api_create_weekly_plan():
         if not slot_recipients:
             continue
         tpl_name = slot['template_name']
-        campagne_nom = build_weekly_plan_campagne_nom(nom_plan, tpl_name, slot['scheduled_at'])
+        campagne_nom = build_weekly_plan_campagne_nom(
+            nom_plan,
+            tpl_name,
+            slot['scheduled_at'],
+            slot.get('label') or slot.get('slot_label') or '',
+        )
         campaign_params = build_campaign_params(
             recipients=slot_recipients,
             template_id=slot['template_id'],

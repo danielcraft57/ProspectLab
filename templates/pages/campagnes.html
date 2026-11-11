@@ -21,13 +21,59 @@
         <div class="brevo-status-loading">Vérification Brevo…</div>
     </section>
 
-    <div class="campagnes-filters">
-        <div class="campagnes-filters-main">
-            <label for="campagnes-search" class="filter-label">Recherche</label>
-            <div class="campagnes-search-input search-field">
-                <i class="fa-solid fa-magnifying-glass"></i>
-                <input type="text" id="campagnes-search" placeholder="Nom de campagne, sujet, secteur..." autocomplete="off">
+    <section id="weekly-plans-calendar" class="weekly-plans-calendar" aria-label="Calendrier des plans hebdomadaires">
+        <div class="weekly-plans-calendar-header">
+            <div class="weekly-plans-calendar-header-main">
+                <h2>Calendrier des plans</h2>
+                <div class="weekly-plans-calendar-legend" aria-label="Légende des statuts">
+                    <span class="weekly-cal-legend-item is-upcoming"><span class="weekly-cal-legend-dot" aria-hidden="true"></span>À venir</span>
+                    <span class="weekly-cal-legend-item is-live"><span class="weekly-cal-legend-dot" aria-hidden="true"></span>En cours</span>
+                    <span class="weekly-cal-legend-item is-done"><span class="weekly-cal-legend-dot" aria-hidden="true"></span>Terminé</span>
+                    <span class="weekly-cal-legend-item is-past"><span class="weekly-cal-legend-dot" aria-hidden="true"></span>Passé</span>
+                    <span class="weekly-cal-legend-item is-failed"><span class="weekly-cal-legend-dot" aria-hidden="true"></span>Échec</span>
+                </div>
             </div>
+            <div class="weekly-plans-calendar-toolbar">
+                <button type="button" id="weekly-plans-calendar-prev" class="btn-calendar-nav" title="Semaine précédente" aria-label="Semaine précédente">
+                    <i class="fa-solid fa-chevron-left" aria-hidden="true"></i>
+                </button>
+                <span id="weekly-plans-calendar-week-label" class="weekly-plans-calendar-week-label">—</span>
+                <button type="button" id="weekly-plans-calendar-next" class="btn-calendar-nav" title="Semaine suivante" aria-label="Semaine suivante">
+                    <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+                </button>
+                <button type="button" id="weekly-plans-calendar-today" class="btn-calendar-today" title="Revenir à la semaine en cours">Aujourd'hui</button>
+                <button type="button" id="weekly-plans-calendar-refresh" class="btn-calendar-refresh" title="Actualiser">
+                    <i class="fa-solid fa-rotate" aria-hidden="true"></i>
+                </button>
+            </div>
+        </div>
+        <div id="weekly-plans-calendar-body" class="weekly-plans-calendar-body">
+            <div class="weekly-plans-calendar-loading">Chargement du calendrier…</div>
+        </div>
+    </section>
+
+    <div class="campagnes-filters campagnes-filter-bar" id="campagnes-filters">
+        <div class="campagnes-filter-bar-top">
+            <div class="campagnes-search-input search-field">
+                <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                <input type="text" id="campagnes-search" placeholder="Rechercher une campagne…" autocomplete="off" aria-label="Recherche campagnes">
+            </div>
+            <div class="campagnes-filter-bar-aside">
+                <div id="campagnes-results-count" class="campagnes-results-count" aria-live="polite"></div>
+                <button type="button" id="campagnes-filters-reset" class="btn-filters-reset" title="Réinitialiser les filtres">
+                    Réinitialiser
+                </button>
+            </div>
+        </div>
+        <div class="campagnes-quick-filters" id="campagnes-quick-filters" role="group" aria-label="Filtres rapides">
+            <button type="button" class="campagnes-quick-chip is-active" data-quick-filter="active">Actives</button>
+            <button type="button" class="campagnes-quick-chip" data-quick-filter="scheduled">Programmées</button>
+            <button type="button" class="campagnes-quick-chip" data-quick-filter="running">En cours</button>
+            <button type="button" class="campagnes-quick-chip" data-quick-filter="completed">Terminées</button>
+            <button type="button" class="campagnes-quick-chip" data-quick-filter="failed">Échecs</button>
+            <button type="button" class="campagnes-quick-chip" data-quick-filter="plans">Issues d'un plan</button>
+            <button type="button" class="campagnes-quick-chip" data-quick-filter="week">Cette semaine</button>
+            <button type="button" class="campagnes-quick-chip" data-quick-filter="all">Toutes</button>
         </div>
         <div class="campagnes-filters-row">
             <div class="filter-group">
@@ -53,36 +99,14 @@
                     <input type="date" lang="fr-FR" id="campagnes-date-to" class="md-input md-input--datetime">
                 </div>
             </div>
-            <div class="filter-group filter-group-reset">
-                <button type="button" id="campagnes-filters-reset" class="btn-filters-reset">Réinitialiser</button>
-            </div>
         </div>
-        <div id="campagnes-results-count" class="campagnes-results-count"></div>
     </div>
 
-    <section id="weekly-plans-calendar" class="weekly-plans-calendar" aria-label="Calendrier des plans hebdomadaires">
-        <div class="weekly-plans-calendar-header">
-            <h2>Calendrier des plans</h2>
-            <button type="button" id="weekly-plans-calendar-refresh" class="btn-calendar-refresh" title="Actualiser">
-                <i class="fa-solid fa-rotate" aria-hidden="true"></i>
-            </button>
+    <div id="campagnes-grid" class="campagnes-grid" aria-busy="true">
+        <div class="campagnes-loading-state" role="status">
+            <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>
+            <span>Chargement des campagnes…</span>
         </div>
-        <div id="weekly-plans-calendar-body" class="weekly-plans-calendar-body">
-            <div class="weekly-plans-calendar-loading">Chargement du calendrier…</div>
-        </div>
-    </section>
-
-    <section id="weekly-plans-active" class="weekly-plans-active" aria-label="Plans hebdomadaires actifs">
-        <div class="weekly-plans-active-header">
-            <h2>Plans actifs</h2>
-        </div>
-        <div id="weekly-plans-active-body" class="weekly-plans-active-body">
-            <div class="weekly-plans-active-loading">Chargement des plans…</div>
-        </div>
-    </section>
-
-    <div id="campagnes-grid" class="campagnes-grid">
-        <div class="loading">Chargement des campagnes...</div>
     </div>
 </div>
 
@@ -562,7 +586,7 @@
                         <div class="form-group md-field">
                             <label for="weekly-plan-nom">Nom du plan (titre indicatif)</label>
                             <div class="md-field-control">
-                                <input type="text" id="weekly-plan-nom" class="md-input" name="nom" placeholder="Ex: Plan semaine — Formateurs — 26/08–01/09" autocomplete="off">
+                                <input type="text" id="weekly-plan-nom" class="md-input" name="nom" placeholder="Ex: Formateurs · sem. 09/11–15/11" autocomplete="off">
                             </div>
                             <p class="md-select-hint weekly-plan-nom-hint">Ce titre sera repris dans le nom de chaque campagne programmée.</p>
                         </div>

@@ -31,23 +31,25 @@ def build_weekly_plan_campagne_nom(
     plan_nom: str,
     template_name: str,
     scheduled_at: str,
+    slot_label: str = '',
 ) -> str:
     """
     Construit le nom indicatif d'une campagne issue d'un plan hebdomadaire.
 
-    Format : « {nom du plan} — {modèle} — {jj/mm/aaaa} »
+    Format court : « {modèle ou libellé créneau} · {jj/mm/aaaa} » (sans répéter le plan).
 
-    @param plan_nom: Titre indicatif du plan
+    @param plan_nom: Titre du plan (conservé pour compatibilité API, non concaténé)
     @param template_name: Nom du modèle email
     @param scheduled_at: Date/heure programmée (ISO)
+    @param slot_label: Libellé créneau optionnel (prioritaire sur le nom de modèle)
     @returns: Nom de campagne nettoyé
     """
-    plan = clean_email_subject(str(plan_nom or '').strip())
-    tpl = clean_email_subject(str(template_name or '').strip())
+    _ = plan_nom
+    label_src = clean_email_subject(str(slot_label or template_name or '').strip())
     date_fr = format_scheduled_date_fr(scheduled_at)
-    parts = [p for p in (plan, tpl, date_fr) if p]
-    label = clean_email_subject(' — '.join(parts))
-    return label or plan or tpl or 'Campagne planifiée'
+    parts = [p for p in (label_src, date_fr) if p]
+    label = clean_email_subject(' · '.join(parts))
+    return label or label_src or date_fr or 'Campagne planifiée'
 
 
 def default_weekly_plan_nom(groupe_nom: str, week_start: str = '', week_end: str = '') -> str:
@@ -62,8 +64,8 @@ def default_weekly_plan_nom(groupe_nom: str, week_start: str = '', week_end: str
     groupe = clean_email_subject(str(groupe_nom or '').strip()) or 'Groupe'
     if week_start and week_end:
         week = f"{format_scheduled_date_fr(week_start)}–{format_scheduled_date_fr(week_end)}"
-        return clean_email_subject(f"Plan semaine — {groupe} — {week}") or f"Plan semaine — {groupe}"
-    return clean_email_subject(f"Plan semaine — {groupe}") or f"Plan semaine — {groupe}"
+        return clean_email_subject(f"{groupe} · sem. {week}") or groupe
+    return clean_email_subject(groupe) or 'Plan hebdomadaire'
 
 
 def build_slot_pattern_from_slots(slots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -250,6 +252,7 @@ def generate_weekly_plan_campaigns(
             plan.get('nom') or 'Plan',
             tpl_name,
             slot['scheduled_at'],
+            slot.get('label') or '',
         )
 
         campaign_params = {

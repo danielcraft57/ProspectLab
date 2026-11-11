@@ -43,6 +43,7 @@ let campagneModalStep = 1;
 
 // Initialisation
 document.addEventListener('DOMContentLoaded', function() {
+    initCampagnesFilters();
     loadCampagnes();
     loadTemplates();
     initTemplateSelectListener();
@@ -60,13 +61,11 @@ document.addEventListener('DOMContentLoaded', function() {
     initScheduleFields();
     initStep1Search();
     initEntreprisesLazyLoad();
-    initCampagnesFilters();
     initWebSocket();
     initGenerateContactEmailButton();
     loadBrevoStatus();
     initWeeklyPlanModal();
     loadWeeklyPlansCalendar();
-    loadActiveWeeklyPlans();
 });
 
 /**
@@ -263,9 +262,28 @@ function renderBrevoStatus(panel, data) {
         '</div></details>';
 }
 
+/**
+ * Affiche l'état d'attente sur la grille campagnes.
+ * @param {string} [message]
+ */
+function showCampagnesLoadingState(message) {
+    const grid = document.getElementById('campagnes-grid');
+    if (!grid) return;
+    grid.setAttribute('aria-busy', 'true');
+    grid.innerHTML =
+        '<div class="campagnes-loading-state" role="status">' +
+        '<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>' +
+        '<span>' + (message || 'Chargement des campagnes…') + '</span>' +
+        '</div>';
+}
+
 // Charger les campagnes
 async function loadCampagnes(options) {
     options = options || {};
+    const grid = document.getElementById('campagnes-grid');
+    if (!options.silent) {
+        showCampagnesLoadingState();
+    }
     try {
         const mid = window.__MAIL_ACCOUNT_ID__;
         const url = (mid !== null && mid !== undefined)
@@ -274,6 +292,7 @@ async function loadCampagnes(options) {
         const response = await fetch(url);
         const campagnes = await response.json();
         campagnesData = Array.isArray(campagnes) ? campagnes : [];
+        if (grid) grid.setAttribute('aria-busy', 'false');
         if (options.silent) {
             // Polling: maj légère des cartes running sans tout redessiner
             refreshRunningCampagneCardsInPlace();
@@ -288,8 +307,8 @@ async function loadCampagnes(options) {
         syncCampagnesPolling();
     } catch (error) {
         if (options.silent) return;
-        const grid = document.getElementById('campagnes-grid');
         if (grid) {
+            grid.setAttribute('aria-busy', 'false');
             grid.innerHTML =
             '<div class="empty-state"><p>Erreur lors du chargement des campagnes</p></div>';
         }
@@ -301,9 +320,15 @@ async function loadCampagnes(options) {
  * Utilisé pendant le polling (évite le flicker d'un re-render complet).
  */
 function refreshRunningCampagneCardsInPlace() {
+    // Nettoie les jauges injectées par erreur sur le calendrier
+    document.querySelectorAll('.weekly-calendar-event .progress-bar-container').forEach(function(el) {
+        el.remove();
+    });
+
     (campagnesData || []).forEach(function(campagne) {
         var st = getEffectiveCampaignStatus(campagne);
-        var card = document.querySelector('[data-campagne-id="' + campagne.id + '"]');
+        // Uniquement les cartes grille (pas les tuiles calendrier qui partagent data-campagne-id)
+        var card = document.querySelector('.campagne-card[data-campagne-id="' + campagne.id + '"]');
         if (!card) return;
 
         // Mise à jour du premier bloc "Envoyés" si présent
@@ -315,14 +340,16 @@ function refreshRunningCampagneCardsInPlace() {
             }
         }
 
-        if (st !== 'running' && st !== 'scheduled') {
-            // Statut changé côté serveur -> rechargement complet au prochain cycle fort
-            return;
+        var metaMain = card.querySelector('.campagne-meta-main span:last-child');
+        if (metaMain && (st === 'scheduled' || st === 'running')) {
+            metaMain.textContent = formatCampagneCardMeta(campagne);
         }
 
-        var metaMain = card.querySelector('.campagne-meta-main span:last-child');
-        if (metaMain && st === 'scheduled') {
-            metaMain.textContent = formatCampagneCardMeta(campagne);
+        // Pas de jauge pour les programmées (0%) : uniquement pendant un envoi réel
+        if (st !== 'running') {
+            var stray = card.querySelector('.progress-bar-container');
+            if (stray && st === 'scheduled') stray.remove();
+            return;
         }
 
         var dest = Math.max(Number(campagne.total_destinataires) || 1, 1);
@@ -355,9 +382,111 @@ function refreshRunningCampagneCardsInPlace() {
     }
 }
 
+/** Filtre rapide courant (chips). Défaut : actives. */
+let campagnesQuickFilter = 'active';
+
+/** Clé localStorage pour mémoriser les filtres de la page campagnes. */
+const CAMPAGNES_FILTERS_STORAGE_KEY = 'prospectlab_campagnes_filters_v1';
+
+/**
+ * Sauvegarde les filtres choisis (chip, recherche, statut, dates).
+ */
+function saveCampagnesFiltersState() {
+    try {
+        var searchInput = document.getElementById('campagnes-search');
+        var statutSelect = document.getElementById('campagnes-statut-filter');
+        var dateFromInput = document.getElementById('campagnes-date-from');
+        var dateToInput = document.getElementById('campagnes-date-to');
+        var payload = {
+            quick: campagnesQuickFilter || 'active',
+            search: searchInput ? String(searchInput.value || '') : '',
+            statut: statutSelect ? String(statutSelect.value || '') : '',
+            dateFrom: dateFromInput ? String(dateFromInput.value || '') : '',
+            dateTo: dateToInput ? String(dateToInput.value || '') : '',
+        };
+        window.localStorage.setItem(CAMPAGNES_FILTERS_STORAGE_KEY, JSON.stringify(payload));
+    } catch (e) {
+        // ignore quota / mode privé
+    }
+}
+
+/**
+ * Restaure les filtres depuis localStorage.
+ * @returns {boolean} true si un état a été restauré
+ */
+function restoreCampagnesFiltersState() {
+    try {
+        var raw = window.localStorage.getItem(CAMPAGNES_FILTERS_STORAGE_KEY);
+        if (!raw) return false;
+        var data = JSON.parse(raw);
+        if (!data || typeof data !== 'object') return false;
+
+        var searchInput = document.getElementById('campagnes-search');
+        var statutSelect = document.getElementById('campagnes-statut-filter');
+        var dateFromInput = document.getElementById('campagnes-date-from');
+        var dateToInput = document.getElementById('campagnes-date-to');
+        var allowedQuick = {
+            active: 1, scheduled: 1, running: 1, completed: 1, failed: 1, plans: 1, week: 1, all: 1
+        };
+        var quick = allowedQuick[data.quick] ? data.quick : 'active';
+
+        if (searchInput && typeof data.search === 'string') {
+            searchInput.value = data.search;
+        }
+        if (statutSelect && typeof data.statut === 'string') {
+            statutSelect.value = data.statut;
+        }
+        if (dateFromInput && typeof data.dateFrom === 'string') {
+            dateFromInput.value = data.dateFrom;
+        }
+        if (dateToInput && typeof data.dateTo === 'string') {
+            dateToInput.value = data.dateTo;
+        }
+        // Recalcule la plage « cette semaine » à chaque chargement
+        if (quick === 'week') {
+            var monday = getMondayOfWeek(new Date());
+            var sunday = new Date(monday);
+            sunday.setDate(monday.getDate() + 6);
+            if (dateFromInput) dateFromInput.value = formatDateInputValue(monday);
+            if (dateToInput) dateToInput.value = formatDateInputValue(sunday);
+        }
+        setCampagnesQuickFilterActive(quick);
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+/**
+ * Met à jour l'état visuel des chips de filtres rapides.
+ * @param {string} filterKey
+ */
+function setCampagnesQuickFilterActive(filterKey) {
+    campagnesQuickFilter = filterKey || 'active';
+    document.querySelectorAll('#campagnes-quick-filters .campagnes-quick-chip').forEach(function(chip) {
+        var key = chip.getAttribute('data-quick-filter') || '';
+        chip.classList.toggle('is-active', key === campagnesQuickFilter);
+    });
+}
+
+/**
+ * Instantané utile pour filtrer (création ou envoi programmé).
+ * @param {object} campagne
+ * @returns {Date|null}
+ */
+function getCampagneFilterInstant(campagne) {
+    var raw = (campagne && (campagne.scheduled_at || campagne.scheduledAt || campagne.date_creation)) || '';
+    if (!raw) return null;
+    var d = typeof parseCampaignInstant === 'function'
+        ? parseCampaignInstant(raw)
+        : new Date(raw);
+    if (!d || Number.isNaN(d.getTime())) return null;
+    return d;
+}
+
 /**
  * Initialise les filtres/recherche sur la liste des campagnes.
- * Recherche plein texte sur nom/sujet, filtre par statut et plage de dates.
+ * Recherche plein texte, chips rapides, statut et plage de dates.
  */
 function initCampagnesFilters() {
     const searchInput = document.getElementById('campagnes-search');
@@ -365,8 +494,9 @@ function initCampagnesFilters() {
     const dateFromInput = document.getElementById('campagnes-date-from');
     const dateToInput = document.getElementById('campagnes-date-to');
     const resetBtn = document.getElementById('campagnes-filters-reset');
+    const quickRoot = document.getElementById('campagnes-quick-filters');
 
-    if (!searchInput && !statutSelect && !dateFromInput && !dateToInput) {
+    if (!searchInput && !statutSelect && !dateFromInput && !dateToInput && !quickRoot) {
         return;
     }
 
@@ -378,6 +508,9 @@ function initCampagnesFilters() {
 
     if (statutSelect) {
         statutSelect.addEventListener('change', function() {
+            if (statutSelect.value) {
+                setCampagnesQuickFilterActive('all');
+            }
             applyCampagnesFilters();
         });
     }
@@ -391,14 +524,48 @@ function initCampagnesFilters() {
         }
     });
 
+    if (quickRoot && quickRoot.dataset.bound !== '1') {
+        quickRoot.dataset.bound = '1';
+        quickRoot.addEventListener('click', function(ev) {
+            var chip = ev.target && ev.target.closest
+                ? ev.target.closest('.campagnes-quick-chip')
+                : null;
+            if (!chip || !quickRoot.contains(chip)) return;
+            var key = chip.getAttribute('data-quick-filter') || 'all';
+            setCampagnesQuickFilterActive(key);
+            if (statutSelect) {
+                if (key === 'scheduled' || key === 'running' || key === 'completed' || key === 'failed') {
+                    statutSelect.value = key;
+                } else {
+                    statutSelect.value = '';
+                }
+            }
+            if (dateFromInput) dateFromInput.value = '';
+            if (dateToInput) dateToInput.value = '';
+            if (key === 'week') {
+                var monday = getMondayOfWeek(new Date());
+                var sunday = new Date(monday);
+                sunday.setDate(monday.getDate() + 6);
+                if (dateFromInput) dateFromInput.value = formatDateInputValue(monday);
+                if (dateToInput) dateToInput.value = formatDateInputValue(sunday);
+            }
+            applyCampagnesFilters();
+        });
+    }
+
     if (resetBtn) {
         resetBtn.addEventListener('click', function() {
             if (searchInput) searchInput.value = '';
             if (statutSelect) statutSelect.value = '';
             if (dateFromInput) dateFromInput.value = '';
             if (dateToInput) dateToInput.value = '';
+            setCampagnesQuickFilterActive('active');
             applyCampagnesFilters();
         });
+    }
+
+    if (!restoreCampagnesFiltersState()) {
+        setCampagnesQuickFilterActive(campagnesQuickFilter || 'active');
     }
 }
 
@@ -422,6 +589,7 @@ function applyCampagnesFilters() {
     const statut = statutSelect && statutSelect.value ? statutSelect.value : '';
     const dateFromVal = dateFromInput && dateFromInput.value ? dateFromInput.value : '';
     const dateToVal = dateToInput && dateToInput.value ? dateToInput.value : '';
+    const quick = campagnesQuickFilter || 'all';
 
     let filtered = campagnesData.slice();
 
@@ -436,29 +604,136 @@ function applyCampagnesFilters() {
         });
     }
 
-    if (statut) {
+    if (quick === 'active') {
         filtered = filtered.filter(function(campagne) {
-            return campagne.statut === statut;
+            var st = getEffectiveCampaignStatus(campagne);
+            return st === 'scheduled' || st === 'running' || st === 'draft';
+        });
+    } else if (quick === 'plans') {
+        filtered = filtered.filter(function(campagne) {
+            return !!(campagne && campagne.plan_hebdo_id);
+        });
+    } else if (quick === 'scheduled' || quick === 'running' || quick === 'completed' || quick === 'failed') {
+        filtered = filtered.filter(function(campagne) {
+            return getEffectiveCampaignStatus(campagne) === quick;
+        });
+    } else if (statut) {
+        filtered = filtered.filter(function(campagne) {
+            return getEffectiveCampaignStatus(campagne) === statut;
         });
     }
 
-    if (dateFromVal) {
+    if (quick === 'week') {
+        var monday = getMondayOfWeek(new Date());
+        var sunday = new Date(monday);
+        sunday.setDate(monday.getDate() + 6);
+        sunday.setHours(23, 59, 59, 999);
+        var fromMs = monday.getTime();
+        var toMs = sunday.getTime();
+        filtered = filtered.filter(function(campagne) {
+            var inst = getCampagneFilterInstant(campagne);
+            if (!inst) return false;
+            var t = inst.getTime();
+            return t >= fromMs && t <= toMs;
+        });
+    }
+
+    if (dateFromVal && quick !== 'week') {
         const fromDate = new Date(dateFromVal + 'T00:00:00');
         filtered = filtered.filter(function(campagne) {
-            if (!campagne.date_creation) return false;
-            return new Date(campagne.date_creation) >= fromDate;
+            var inst = getCampagneFilterInstant(campagne);
+            if (!inst) return false;
+            return inst >= fromDate;
         });
     }
 
-    if (dateToVal) {
+    if (dateToVal && quick !== 'week') {
         const toDate = new Date(dateToVal + 'T23:59:59');
         filtered = filtered.filter(function(campagne) {
-            if (!campagne.date_creation) return false;
-            return new Date(campagne.date_creation) <= toDate;
+            var inst = getCampagneFilterInstant(campagne);
+            if (!inst) return false;
+            return inst <= toDate;
         });
     }
 
+    filtered.sort(function(a, b) {
+        var ia = getCampagneFilterInstant(a);
+        var ib = getCampagneFilterInstant(b);
+        var ta = ia ? ia.getTime() : 0;
+        var tb = ib ? ib.getTime() : 0;
+        return tb - ta;
+    });
+
+    saveCampagnesFiltersState();
     displayCampagnes(filtered);
+}
+
+/**
+ * Ferme tous les menus d'actions des cartes campagnes.
+ * @param {HTMLElement|null} exceptMenu
+ */
+function closeAllCampagneCardMenus(exceptMenu) {
+    document.querySelectorAll('.campagne-more.is-open').forEach(function(wrap) {
+        if (exceptMenu && wrap === exceptMenu) return;
+        wrap.classList.remove('is-open');
+        var btn = wrap.querySelector('.btn-more');
+        var menu = wrap.querySelector('.campagne-more-menu');
+        if (btn) btn.setAttribute('aria-expanded', 'false');
+        if (menu) menu.hidden = true;
+    });
+}
+
+/**
+ * Bind des menus ⋯ (Stop / Relancer / Supprimer) sur les cartes.
+ * @param {HTMLElement|null} root
+ */
+function bindCampagneCardMenus(root) {
+    if (!root || root.dataset.menuBound === '1') {
+        // Rebind après re-render : on retire le flag pour réattacher
+        if (root) root.dataset.menuBound = '';
+    }
+    if (!root) return;
+    root.dataset.menuBound = '1';
+
+    root.querySelectorAll('.campagne-more').forEach(function(wrap) {
+        var btn = wrap.querySelector('.btn-more');
+        var menu = wrap.querySelector('.campagne-more-menu');
+        var card = wrap.closest('.campagne-card');
+        if (!btn || !menu || !card) return;
+        var campagneId = Number(card.getAttribute('data-campagne-id'));
+
+        btn.addEventListener('click', function(ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            var willOpen = !wrap.classList.contains('is-open');
+            closeAllCampagneCardMenus(willOpen ? wrap : null);
+            wrap.classList.toggle('is-open', willOpen);
+            btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+            menu.hidden = !willOpen;
+        });
+
+        menu.querySelectorAll('.campagne-menu-item').forEach(function(item) {
+            item.addEventListener('click', function(ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                var action = item.getAttribute('data-action');
+                closeAllCampagneCardMenus();
+                if (action === 'stop') cancelCampagne(campagneId);
+                else if (action === 'relaunch') relaunchCampagne(campagneId);
+                else if (action === 'delete') deleteCampagne(campagneId);
+            });
+        });
+    });
+
+    if (!window._campagneCardMenuDocBound) {
+        window._campagneCardMenuDocBound = true;
+        document.addEventListener('click', function() {
+            closeAllCampagneCardMenus();
+        });
+        document.addEventListener('keydown', function(ev) {
+            if (ev.key === 'Escape') closeAllCampagneCardMenus();
+        });
+    }
 }
 
 // Afficher les campagnes
@@ -485,6 +760,21 @@ function displayCampagnes(campagnes) {
         const effectiveStatus = getEffectiveCampaignStatus(campagne);
         const failedCount = Math.max(0, Number(campagne.total_envoyes || 0) - Number(campagne.total_reussis || 0));
         const bouncedCount = Number(campagne.total_bounced || 0);
+        const deliveredBase = (campagne.total_delivered_strict != null
+            ? campagne.total_delivered_strict
+            : (campagne.total_delivered != null ? campagne.total_delivered : campagne.total_envoyes));
+        const sendRate = safeRate(deliveredBase, campagne.total_destinataires);
+        const canStop = ['running', 'scheduled', 'draft'].indexOf(effectiveStatus) !== -1;
+        const canRelaunch = shouldShowRelaunchButton(campagne);
+        var toneClass = 'is-tone-default';
+        if (effectiveStatus === 'completed' || effectiveStatus === 'completed_with_errors') toneClass = 'is-tone-done';
+        else if (effectiveStatus === 'running') toneClass = 'is-tone-live';
+        else if (effectiveStatus === 'scheduled' || effectiveStatus === 'draft') toneClass = 'is-tone-upcoming';
+        else if (effectiveStatus === 'failed') toneClass = 'is-tone-failed';
+        else if (effectiveStatus === 'cancelled' || effectiveStatus === 'canceled' || effectiveStatus === 'stopped') {
+            toneClass = 'is-tone-past';
+        }
+
         var badgesHtml = '';
         if (campagne.plan_hebdo_id) {
             badgesHtml += '<span class="campagne-badge campagne-badge-plan" title="Plan hebdomadaire #' + campagne.plan_hebdo_id + '">Plan #' + campagne.plan_hebdo_id + '</span>';
@@ -495,30 +785,72 @@ function displayCampagnes(campagnes) {
         if (campagne.rotation_mode === 'split') {
             badgesHtml += '<span class="campagne-badge campagne-badge-rotation" title="Rotation A/B/C/D">Rotation</span>';
         }
+        if (failedCount > 0) {
+            badgesHtml += '<span class="campagne-badge campagne-badge-warn" title="Échecs d\'envoi">' + failedCount + ' échec' + (failedCount > 1 ? 's' : '') + '</span>';
+        }
+        if (bouncedCount > 0) {
+            badgesHtml += '<span class="campagne-badge campagne-badge-bounce" title="Bounces">' + bouncedCount + ' bounce' + (bouncedCount > 1 ? 's' : '') + '</span>';
+        }
+
+        var menuItems = '';
+        if (canRelaunch) {
+            menuItems += '<button type="button" class="campagne-menu-item" data-action="relaunch">Relancer</button>';
+        }
+        if (canStop) {
+            menuItems += '<button type="button" class="campagne-menu-item" data-action="stop">Stop</button>';
+        }
+        menuItems += '<button type="button" class="campagne-menu-item is-danger" data-action="delete">Supprimer</button>';
+
+        var openRateVal = typeof campagne.open_rate === 'number' ? campagne.open_rate : null;
+        var clickRateVal = typeof campagne.click_rate === 'number' ? campagne.click_rate : null;
+        var openPct = clampPercent(openRateVal == null ? 0 : openRateVal);
+        var clickPctRaw = clampPercent(clickRateVal == null ? 0 : clickRateVal);
+        var clickPct = Math.max(0, Math.min(clickPctRaw, 100 - openPct));
+        var showSendBar = sendRate > 0 || effectiveStatus === 'running';
+        var statusIcon = 'fa-circle';
+        if (effectiveStatus === 'completed' || effectiveStatus === 'completed_with_errors') statusIcon = 'fa-check';
+        else if (effectiveStatus === 'running') statusIcon = 'fa-spinner';
+        else if (effectiveStatus === 'scheduled') statusIcon = 'fa-clock';
+        else if (effectiveStatus === 'failed') statusIcon = 'fa-triangle-exclamation';
+        else if (effectiveStatus === 'draft') statusIcon = 'fa-pen';
+        else if (effectiveStatus === 'cancelled' || effectiveStatus === 'canceled' || effectiveStatus === 'stopped') {
+            statusIcon = 'fa-ban';
+        }
+
+        var sendKpiHtml = showSendBar
+            ? (
+                '<div class="kpi-line">' +
+                '<div class="kpi-label-row"><span>Envoi</span><strong>' + formatPercent(sendRate) + '</strong></div>' +
+                '<div class="kpi-bar"><span style="width:' + clampPercent(sendRate) + '%"></span></div>' +
+                '</div>'
+            )
+            : (
+                '<div class="kpi-idle" title="Aucun envoi pour le moment">' +
+                '<i class="fa-regular fa-paper-plane" aria-hidden="true"></i>' +
+                '<span>Envoi non démarré</span>' +
+                '</div>'
+            );
+
         return `
-        <div class="campagne-card" data-campagne-id="${campagne.id}" data-task-id="${escapeHtml(campagne.celery_task_id || '')}">
+        <div class="campagne-card ${toneClass}" data-campagne-id="${campagne.id}" data-task-id="${escapeHtml(campagne.celery_task_id || '')}">
             <div class="campagne-header">
-                <h3 class="campagne-title">${escapeHtml(campagne.nom)}</h3>
-                <span class="campagne-statut statut-${effectiveStatus}">${getCampaignStatusLabel(effectiveStatus)}</span>
+                <button type="button" class="campagne-title" title="${escapeHtml(campagne.nom || '')}" onclick="viewCampagne(${campagne.id})">${escapeHtml(formatCampagneCardTitle(campagne.nom))}</button>
+                <span class="campagne-statut statut-${effectiveStatus}" title="${escapeHtml(getCampaignStatusLabel(effectiveStatus))}">
+                    <i class="fa-solid ${statusIcon}" aria-hidden="true"></i>
+                    <span>${getCampaignStatusLabel(effectiveStatus)}</span>
+                </span>
             </div>
             ${badgesHtml ? '<div class="campagne-badges">' + badgesHtml + '</div>' : ''}
             <div class="campagne-meta">
                 <div class="campagne-meta-main">
-                    <span class="campagne-meta-dot"></span>
+                    <span class="campagne-meta-dot" aria-hidden="true"></span>
                     <span>${formatCampagneCardMeta(campagne)}</span>
                 </div>
-                <div class="campagne-meta-timeline">
-                    <span class="meta-pill ${effectiveStatus === 'scheduled' ? 'is-active' : ''}">Créée</span>
-                    <span class="meta-pill ${(campagne.total_envoyes || 0) > 0 ? 'is-active' : ''}">Envoyés</span>
-                    <span class="meta-pill ${(campagne.total_reussis || 0) > 0 ? 'is-active' : ''}">Réussis</span>
-                    <span class="meta-pill ${failedCount > 0 ? 'is-active' : ''}">Échecs</span>
-                    <span class="meta-pill ${bouncedCount > 0 ? 'is-active' : ''}">Bounces</span>
-                </div>
             </div>
-            <div class="campagne-stats">
+            <div class="campagne-stats campagne-stats-compact">
                 <div class="stat-item">
                     <div class="stat-value">${campagne.total_destinataires || 0}</div>
-                    <div class="stat-label">Destinataires</div>
+                    <div class="stat-label">Dest.</div>
                 </div>
                 <div class="stat-item">
                     <div class="stat-value">${campagne.total_envoyes || 0}</div>
@@ -529,52 +861,37 @@ function displayCampagnes(campagnes) {
                     <div class="stat-label">Réussis</div>
                 </div>
             </div>
-            <div class="campagne-kpi-grid">
-                <div class="kpi-line">
+            <div class="campagne-kpi-grid campagne-kpi-compact">
+                ${sendKpiHtml}
+                <div class="kpi-line kpi-engagement">
                     <div class="kpi-label-row">
-                    <span>Envoi</span>
-                    <strong>${formatPercent(safeRate((campagne.total_delivered_strict != null ? campagne.total_delivered_strict : (campagne.total_delivered != null ? campagne.total_delivered : campagne.total_envoyes)), campagne.total_destinataires))}</strong>
+                        <span>Engagement</span>
+                        <span class="kpi-dual-legend">
+                            <span class="kpi-leg is-open">Ouv. <strong data-metric="open-rate">${openRateVal == null ? '-' : formatPercent(openRateVal)}</strong></span>
+                            <span class="kpi-leg is-click">Clic <strong data-metric="click-rate">${clickRateVal == null ? '-' : formatPercent(clickRateVal)}</strong></span>
+                        </span>
                     </div>
-                <div class="kpi-bar"><span style="width:${clampPercent(safeRate((campagne.total_delivered_strict != null ? campagne.total_delivered_strict : (campagne.total_delivered != null ? campagne.total_delivered : campagne.total_envoyes)), campagne.total_destinataires))}%"></span></div>
-                </div>
-                <div class="kpi-line">
-                    <div class="kpi-label-row">
-                        <span>Ouverture</span>
-                    <strong data-metric="open-rate">${typeof campagne.open_rate === 'number' ? formatPercent(campagne.open_rate) : '-'}</strong>
+                    <div class="kpi-bar kpi-dual-bar" title="Ouverture (bleu) puis Clic (orange)">
+                        <span class="kpi-seg kpi-seg-open" data-metric-bar="open-rate" style="width:${openPct}%"></span>
+                        <span class="kpi-seg kpi-seg-click" data-metric-bar="click-rate" style="left:${openPct}%;width:${clickPct}%"></span>
                     </div>
-                <div class="kpi-bar kpi-open"><span data-metric-bar="open-rate" style="width:${clampPercent(typeof campagne.open_rate === 'number' ? campagne.open_rate : 0)}%"></span></div>
-                </div>
-                <div class="kpi-line">
-                    <div class="kpi-label-row">
-                        <span>Clic</span>
-                    <strong data-metric="click-rate">${typeof campagne.click_rate === 'number' ? formatPercent(campagne.click_rate) : '-'}</strong>
-                    </div>
-                <div class="kpi-bar kpi-click"><span data-metric-bar="click-rate" style="width:${clampPercent(typeof campagne.click_rate === 'number' ? campagne.click_rate : 0)}%"></span></div>
                 </div>
             </div>
             <div class="campagne-actions">
-                <button class="btn-action btn-view" onclick="viewCampagne(${campagne.id})">
-                    Voir détails
-                </button>
-                ${shouldShowRelaunchButton(campagne) ? `
-                <button class="btn-action btn-relaunch" onclick="relaunchCampagne(${campagne.id})" title="Relancer si envoi très faible ou campagne en échec">
-                    Relancer
-                </button>
-                ` : ''}
-                ${['running', 'scheduled', 'draft'].indexOf(effectiveStatus) !== -1 ? `
-                <button class="btn-action btn-cancel" onclick="cancelCampagne(${campagne.id})" title="Interrompre l'envoi (les mails déjà partis restent partis)">
-                    Stop
-                </button>
-                ` : ''}
-                <button class="btn-action btn-delete" onclick="deleteCampagne(${campagne.id})">
-                    Supprimer
-                </button>
+                <div class="campagne-more">
+                    <button type="button" class="btn-action btn-more" aria-haspopup="true" aria-expanded="false" title="Plus d'actions">
+                        <i class="fa-solid fa-ellipsis" aria-hidden="true"></i>
+                    </button>
+                    <div class="campagne-more-menu" hidden>
+                        ${menuItems}
+                    </div>
+                </div>
             </div>
             ${effectiveStatus === 'running' ? `
                 <div class="progress-bar-container">
                     <div class="progress-bar">
-                        <div class="progress-fill" style="width: ${Math.round((campagne.total_envoyes / Math.max(campagne.total_destinataires, 1)) * 100)}%">                                                                                           
-                            ${Math.round((campagne.total_envoyes / Math.max(campagne.total_destinataires, 1)) * 100)}%      
+                        <div class="progress-fill" style="width: ${Math.round((campagne.total_envoyes / Math.max(campagne.total_destinataires, 1)) * 100)}%">
+                            ${Math.round((campagne.total_envoyes / Math.max(campagne.total_destinataires, 1)) * 100)}%
                         </div>
                     </div>
                     <div class="progress-text">Envoi en cours...</div>
@@ -582,6 +899,8 @@ function displayCampagnes(campagnes) {
             ` : ''}
         </div>
     `;}).join('');
+
+    bindCampagneCardMenus(grid);
 
     if (countEl) {
         const total = Array.isArray(campagnesData) ? campagnesData.length : campagnes.length;
@@ -630,7 +949,7 @@ async function hydrateCampagneCardsMetrics(campagnes) {
 }
 
 function updateCampagneCardMetrics(campagneId, stats) {
-    const card = document.querySelector('[data-campagne-id="' + campagneId + '"]');
+    const card = document.querySelector('.campagne-card[data-campagne-id="' + campagneId + '"]');
     if (!card || !stats) return;
 
     const openRate = typeof stats.open_rate === 'number' ? stats.open_rate : 0;
@@ -642,8 +961,13 @@ function updateCampagneCardMetrics(campagneId, stats) {
 
     if (openRateEl) openRateEl.textContent = formatPercent(openRate);
     if (clickRateEl) clickRateEl.textContent = formatPercent(clickRate);
-    if (openBarEl) openBarEl.style.width = clampPercent(openRate) + '%';
-    if (clickBarEl) clickBarEl.style.width = clampPercent(clickRate) + '%';
+    var openW = clampPercent(openRate);
+    var clickW = Math.max(0, Math.min(clampPercent(clickRate), 100 - openW));
+    if (openBarEl) openBarEl.style.width = openW + '%';
+    if (clickBarEl) {
+        clickBarEl.style.left = openW + '%';
+        clickBarEl.style.width = clickW + '%';
+    }
 }
 
 // --- Groupes de modèles (catégories) pour les selects ---
@@ -3450,13 +3774,13 @@ function initWebSocket() {
                 monitoredCampagneTaskIds.delete(String(c.celery_task_id));
             }
         });
-        // Mettre à jour l'affichage pour montrer l'erreur
-        const card = document.querySelector(`[data-campagne-id="${data.campagne_id}"]`);
+        // Mettre à jour l'affichage pour montrer l'erreur (carte grille uniquement)
+        const card = document.querySelector(`.campagne-card[data-campagne-id="${data.campagne_id}"]`);
         if (card) {
             const progressContainer = card.querySelector('.progress-bar-container');
             if (progressContainer) {
                 progressContainer.innerHTML = `
-                    <div class="error-message" style="color: #dc3545; padding: 8px; background: #f8d7da; border-radius: 4px; margin-top: 8px;">                                                                                                         
+                    <div class="error-message" style="color: #dc3545; padding: 8px; background: #f8d7da; border-radius: 4px; margin-top: 8px;">
                         Erreur: ${escapeHtml(data.error || 'Erreur inconnue')}
                     </div>
                 `;
@@ -3479,8 +3803,8 @@ function updateCampagneProgress(data) {
     const failed = data.failed || 0;
     const message = data.message || 'Envoi en cours...';
 
-    // Trouver la carte de campagne correspondante
-    const card = document.querySelector(`[data-campagne-id="${campagneId}"]`);
+    // Uniquement la carte grille (évite d'injecter une jauge dans le calendrier)
+    const card = document.querySelector(`.campagne-card[data-campagne-id="${campagneId}"]`);
     if (!card) {
         // Si la carte n'existe pas, recharger les campagnes
         loadCampagnes();
@@ -3719,9 +4043,61 @@ function formatDate(dateString) {
     });
 }
 
+/**
+ * Titre lisible pour les cartes (plans hebdo : on retire le bruit dupliqué).
+ * @param {string} nom
+ * @returns {string}
+ */
+function formatCampagneCardTitle(nom) {
+    if (!nom) return 'Campagne';
+    var s = String(nom).trim();
+    s = s.replace(/^Plan semaine\s*[—\-]\s*/i, '');
+    s = s.replace(/\d{2}\/\d{2}\/\d{4}\s*[—\-]\s*\d{2}\/\d{2}\/\d{4}/g, ' ');
+    s = s.replace(/^(Lun|Mar|Mer|Jeu|Ven|Sam|Dim)\.?\s+\d{1,2}\s+[A-Za-zÀ-ÿ]+\.?\s*[—\-]\s*/i, '');
+    s = s.replace(/\s*[—\-]\s*[—\-]\s*/g, ' — ');
+    s = s.replace(/\s{2,}/g, ' ').trim();
+    var parts = s.split(/\s*[—\-]\s*/).map(function(p) { return p.trim(); }).filter(Boolean);
+    if (parts.length > 2) {
+        s = parts.slice(-2).join(' · ');
+    } else if (parts.length === 2) {
+        s = parts.join(' · ');
+    } else if (parts.length === 1) {
+        s = parts[0];
+    }
+    s = s.replace(/\s*·\s*·\s*/g, ' · ');
+    if (s.length > 72) {
+        s = s.slice(0, 69) + '…';
+    }
+    return s || String(nom);
+}
+
 function formatCampagneCardMeta(campagne) {
+    var status = getEffectiveCampaignStatus(campagne);
+    if (status === 'completed' || status === 'completed_with_errors') {
+        var label = status === 'completed_with_errors' ? 'Terminée avec écarts' : 'Terminée';
+        var ok = Number(campagne && campagne.total_reussis) || 0;
+        var dest = Number(campagne && campagne.total_destinataires) || 0;
+        var tail = dest > 0 ? (' · ' + ok + '/' + dest + ' réussis') : (ok ? (' · ' + ok + ' réussis') : '');
+        var ended = campagne && (campagne.date_modification || campagne.date_fin || campagne.date_creation);
+        return label + ' · ' + formatRelativeDate(ended) + tail;
+    }
+    if (status === 'failed') {
+        return 'Échec · ' + formatRelativeDate(campagne && campagne.date_creation);
+    }
+    if (status === 'running') {
+        var sent = Number(campagne && campagne.total_envoyes) || 0;
+        var total = Number(campagne && campagne.total_destinataires) || 0;
+        if (total > 0) {
+            return 'Envoi en cours · ' + sent + '/' + total;
+        }
+        return 'Envoi en cours';
+    }
+    if (status === 'cancelled' || status === 'canceled' || status === 'stopped') {
+        return 'Interrompue · ' + formatRelativeDate(campagne && campagne.date_creation);
+    }
+
     var scheduledRaw = campagne && (campagne.scheduled_at || campagne.scheduledAt);
-    if (scheduledRaw) {
+    if (scheduledRaw && (status === 'scheduled' || status === 'draft')) {
         var scheduled = parseCampaignInstant(scheduledRaw);
         if (!Number.isNaN(scheduled.getTime())) {
             var now = Date.now();
@@ -3738,10 +4114,9 @@ function formatCampagneCardMeta(campagne) {
             if (diffMs > 0) {
                 return 'Programmé · ' + countdown + ' · ' + clock;
             }
-            return 'Envoi imminent · ' + clock;
+            return 'Créneau passé · en attente d\'envoi · ' + clock;
         }
     }
-    var status = getEffectiveCampaignStatus(campagne);
     if (status === 'scheduled') {
         return 'Programmée · date à confirmer';
     }
@@ -3976,6 +4351,8 @@ const WEEKLY_PLAN_DAY_NAMES = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi'
 
 let weeklyPlanRecipientsPreview = null;
 let weeklyPlanWeekMonday = null;
+/** Lundi affiché dans le calendrier des plans (navigation indépendante de la modale). */
+let calendarViewWeekMonday = null;
 let weeklyPlanNomTouched = false;
 let weeklyPlanModalStep = 1;
 let weeklyPlanEntreprisesData = [];
@@ -4849,10 +5226,10 @@ function suggestWeeklyPlanNom() {
         }
     }
 
-    var bits = ['Plan semaine'];
+    var bits = [];
     if (groupeNom) bits.push(groupeNom);
-    if (weekPart) bits.push(weekPart);
-    nomInput.value = bits.join(' — ');
+    if (weekPart) bits.push('sem. ' + weekPart);
+    nomInput.value = bits.length ? bits.join(' · ') : 'Plan hebdomadaire';
     updateWeeklyPlanModalTitle();
 }
 
@@ -4873,17 +5250,154 @@ function initWeeklyPlanModal() {
     if (refreshBtn) {
         refreshBtn.addEventListener('click', function() { loadWeeklyPlansCalendar(); });
     }
+    initWeeklyPlansCalendarNav();
     initWeeklyPlanModalDismiss();
     initWeeklyPlanWeekNav();
 }
 
+/**
+ * Lundi de référence du calendrier (défaut : semaine en cours).
+ * @returns {Date}
+ */
+function getCalendarViewMonday() {
+    if (!calendarViewWeekMonday) {
+        calendarViewWeekMonday = getMondayOfWeek(new Date());
+    }
+    return calendarViewWeekMonday;
+}
+
+/**
+ * Libellé de la semaine affichée (lun. — dim.).
+ * @param {Date} monday
+ * @returns {string}
+ */
+function formatCalendarWeekLabel(monday) {
+    var bounds = getWeeklyPlanWeekBounds(monday);
+    var start = new Date(bounds.min + 'T12:00:00');
+    var end = new Date(bounds.max + 'T12:00:00');
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return '—';
+    var fmt = function(d) {
+        return d.getDate() + '/' + (d.getMonth() + 1);
+    };
+    return 'Sem. ' + fmt(start) + ' — ' + fmt(end);
+}
+
+/**
+ * Recalcule le libellé semaine dans la barre du calendrier.
+ */
+function updateWeeklyPlansCalendarWeekLabel() {
+    var el = document.getElementById('weekly-plans-calendar-week-label');
+    if (!el) return;
+    el.textContent = formatCalendarWeekLabel(getCalendarViewMonday());
+}
+
+/**
+ * Boutons préc./suiv. et « Aujourd'hui » pour le calendrier.
+ */
+function initWeeklyPlansCalendarNav() {
+    var section = document.getElementById('weekly-plans-calendar');
+    if (!section || section.dataset.calNavBound === '1') return;
+    section.dataset.calNavBound = '1';
+    var prevBtn = document.getElementById('weekly-plans-calendar-prev');
+    var nextBtn = document.getElementById('weekly-plans-calendar-next');
+    var todayBtn = document.getElementById('weekly-plans-calendar-today');
+    if (prevBtn) {
+        prevBtn.addEventListener('click', function() {
+            shiftCalendarViewWeek(-1);
+        });
+    }
+    if (nextBtn) {
+        nextBtn.addEventListener('click', function() {
+            shiftCalendarViewWeek(1);
+        });
+    }
+    if (todayBtn) {
+        todayBtn.addEventListener('click', function() {
+            calendarViewWeekMonday = getMondayOfWeek(new Date());
+            loadWeeklyPlansCalendar();
+        });
+    }
+    updateWeeklyPlansCalendarWeekLabel();
+}
+
+/**
+ * @param {number} deltaWeeks
+ */
+function shiftCalendarViewWeek(deltaWeeks) {
+    var m = new Date(getCalendarViewMonday());
+    m.setDate(m.getDate() + (deltaWeeks * 7));
+    calendarViewWeekMonday = m;
+    loadWeeklyPlansCalendar();
+}
+
+/**
+ * Titre court pour une tuile calendrier.
+ * @param {object} ev
+ * @returns {string}
+ */
+function shortenWeeklyCalendarEventTitle(ev) {
+    var name = (ev && ev.campagne_nom) || (ev && ev.plan_nom) || (ev && ev.template_id) || 'Envoi';
+    name = String(name).replace(/^Plan semaine\s*[—\-]\s*/i, '').trim();
+    if (name.length > 72) {
+        name = name.slice(0, 69) + '…';
+    }
+    return name;
+}
+
+/**
+ * Sous-titre (groupe, volume) sans dupliquer le titre.
+ * @param {object} ev
+ * @returns {string}
+ */
+function weeklyCalendarEventSubtitle(ev) {
+    var parts = [];
+    if (ev && ev.groupe_nom) {
+        parts.push(String(ev.groupe_nom));
+    }
+    if (ev && ev.total_destinataires != null && ev.total_destinataires !== '') {
+        parts.push(String(ev.total_destinataires) + ' dest.');
+    }
+    return parts.join(' · ');
+}
+
+/**
+ * Statut visuel d'un envoi planifié.
+ * @param {object} ev
+ * @returns {{state: string, label: string}}
+ */
+function getWeeklyCalendarEventState(ev) {
+    var st = String((ev && ev.statut) || '').toLowerCase();
+    var scheduled = ev && ev.scheduled_at ? new Date(ev.scheduled_at) : null;
+    var now = Date.now();
+    if (st === 'failed') {
+        return { state: 'is-failed', label: 'Échec' };
+    }
+    if (st === 'completed' || st === 'completed_with_errors') {
+        return { state: 'is-done', label: 'Terminé' };
+    }
+    if (st === 'running') {
+        return { state: 'is-live', label: 'En cours' };
+    }
+    if (scheduled && !isNaN(scheduled.getTime())) {
+        if (scheduled.getTime() < now - (3 * 60 * 1000)) {
+            return { state: 'is-past', label: 'Passé' };
+        }
+        if (scheduled.getTime() <= now + (10 * 60 * 1000)) {
+            return { state: 'is-live', label: 'En cours' };
+        }
+    }
+    return { state: 'is-upcoming', label: 'À venir' };
+}
+
 function getCalendarWeekRange() {
-    var monday = getNextWeekMonday();
+    var monday = getCalendarViewMonday();
     var sunday = new Date(monday);
     sunday.setDate(monday.getDate() + 6);
     sunday.setHours(23, 59, 59, 999);
+    var mondayIso = new Date(monday);
+    mondayIso.setHours(0, 0, 0, 0);
     return {
-        from: monday.toISOString(),
+        from: mondayIso.toISOString(),
         to: sunday.toISOString(),
     };
 }
@@ -4891,6 +5405,7 @@ function getCalendarWeekRange() {
 async function loadWeeklyPlansCalendar() {
     var body = document.getElementById('weekly-plans-calendar-body');
     if (!body) return;
+    updateWeeklyPlansCalendarWeekLabel();
     body.innerHTML = '<div class="weekly-plans-calendar-loading">Chargement du calendrier…</div>';
     try {
         var range = getCalendarWeekRange();
@@ -4901,7 +5416,7 @@ async function loadWeeklyPlansCalendar() {
             return;
         }
         if (!events.length) {
-            body.innerHTML = '<div class="weekly-plans-calendar-empty">Aucun envoi planifié cette semaine via un plan hebdomadaire.</div>';
+            body.innerHTML = '<div class="weekly-plans-calendar-empty">Aucun envoi planifié sur cette semaine.</div>';
             return;
         }
         var days = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
@@ -4913,15 +5428,24 @@ async function loadWeeklyPlansCalendar() {
             if (!byDay[key]) byDay[key] = [];
             byDay[key].push(ev);
         });
-        var monday = getNextWeekMonday();
+        Object.keys(byDay).forEach(function(k) {
+            byDay[k].sort(function(a, b) {
+                return new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime();
+            });
+        });
+        var monday = getCalendarViewMonday();
+        var todayKey = formatDateInputValue(new Date());
         var html = '<div class="weekly-calendar-grid">';
         for (var i = 0; i < 7; i++) {
             var dayDate = new Date(monday);
             dayDate.setDate(monday.getDate() + i);
             var key = formatDateInputValue(dayDate);
             var dayEvents = byDay[key] || [];
-            html += '<div class="weekly-calendar-day">' +
-                '<div class="weekly-calendar-day-title">' + days[i] + ' ' + dayDate.getDate() + '/' + (dayDate.getMonth() + 1) + '</div>' +
+            var isToday = key === todayKey;
+            html += '<div class="weekly-calendar-day' + (isToday ? ' is-today' : '') + '">' +
+                '<div class="weekly-calendar-day-title">' + days[i] + ' <span class="weekly-calendar-day-num">' + dayDate.getDate() + '/' + (dayDate.getMonth() + 1) + '</span>' +
+                (isToday ? '<span class="weekly-calendar-today-pill">Auj.</span>' : '') +
+                '</div>' +
                 '<div class="weekly-calendar-day-events">';
             if (!dayEvents.length) {
                 html += '<span class="weekly-calendar-empty-slot">—</span>';
@@ -4929,17 +5453,42 @@ async function loadWeeklyPlansCalendar() {
                 dayEvents.forEach(function(ev) {
                     var time = new Date(ev.scheduled_at);
                     var timeStr = String(time.getHours()).padStart(2, '0') + ':' + String(time.getMinutes()).padStart(2, '0');
-                    html += '<div class="weekly-calendar-event" title="' + escapeHtml(ev.campagne_nom || ev.plan_nom || '') + '">' +
-                        '<span class="weekly-calendar-event-time">' + timeStr + '</span> ' +
-                        '<span class="weekly-calendar-event-name">' + escapeHtml(ev.plan_nom || ev.campagne_nom || ev.template_id || 'Campagne') + '</span>' +
-                        '<span class="weekly-calendar-event-meta">' + escapeHtml(ev.campagne_nom && ev.plan_nom && ev.campagne_nom !== ev.plan_nom ? ev.campagne_nom : (ev.groupe_nom || '')) + '</span>' +
-                        '</div>';
+                    var visual = getWeeklyCalendarEventState(ev);
+                    var title = shortenWeeklyCalendarEventTitle(ev);
+                    var sub = weeklyCalendarEventSubtitle(ev);
+                    var campagneId = ev.campagne_id != null ? Number(ev.campagne_id) : 0;
+                    html += '<article class="weekly-calendar-event ' + visual.state + '"' +
+                        (campagneId ? ' data-campagne-id="' + campagneId + '"' : '') +
+                        ' title="' + escapeHtml(title) + '">' +
+                        '<div class="weekly-calendar-event-head">' +
+                        '<time class="weekly-calendar-event-time" datetime="' + escapeHtml(ev.scheduled_at) + '">' + timeStr + '</time>' +
+                        '<span class="weekly-calendar-event-badge">' + escapeHtml(visual.label) + '</span>' +
+                        '</div>' +
+                        '<p class="weekly-calendar-event-name">' + escapeHtml(title) + '</p>' +
+                        (sub ? '<p class="weekly-calendar-event-meta">' + escapeHtml(sub) + '</p>' : '') +
+                        '</article>';
                 });
             }
             html += '</div></div>';
         }
         html += '</div>';
         body.innerHTML = html;
+        // Aucune jauge sur le calendrier (évite les barres 0% injectées par erreur)
+        body.querySelectorAll('.progress-bar-container').forEach(function(el) {
+            el.remove();
+        });
+        body.querySelectorAll('.weekly-calendar-event[data-campagne-id]').forEach(function(node) {
+            node.addEventListener('click', function() {
+                var id = node.getAttribute('data-campagne-id');
+                if (!id) return;
+                var card = document.querySelector('.campagne-card[data-campagne-id="' + id + '"]');
+                if (card) {
+                    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    card.classList.add('is-calendar-highlight');
+                    window.setTimeout(function() { card.classList.remove('is-calendar-highlight'); }, 2200);
+                }
+            });
+        });
     } catch (e) {
         body.innerHTML = '<div class="weekly-plans-calendar-empty">Erreur calendrier.</div>';
     }
