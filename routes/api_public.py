@@ -628,9 +628,20 @@ def _normalize_favori_on_entreprise_record(ent):
     return ent
 
 
+def _public_has_gemini_report_query() -> str | None:
+    """Paramètre query pour rapport Gemini (alias legacy ``has_gemini``)."""
+    raw = request.args.get('has_gemini_report')
+    if raw is None or str(raw).strip() == '':
+        raw = request.args.get('has_gemini')
+    return raw
+
+
 def _build_public_entreprises_filters_from_request():
     """
     Construit le dict de filtres entreprises à partir des query params de l'API publique.
+
+    Filtres métier : has_screenshots, has_gemini_report (alias query has_gemini).
+    search : nom, secteur, emails, site web (tokens assez longs), tags, emails scrapés.
 
     @returns: dict|None — None si aucun filtre actif
     """
@@ -661,6 +672,10 @@ def _build_public_entreprises_filters_from_request():
     if favori_raw is not None and str(favori_raw).strip() != '':
         if _truthy_query_flag(favori_raw):
             filters['favori'] = True
+    if _truthy_query_flag(request.args.get('has_screenshots')):
+        filters['has_screenshots'] = 'true'
+    if _truthy_query_flag(_public_has_gemini_report_query()):
+        filters['has_gemini_report'] = 'true'
     phone_line_type = (request.args.get('phone_line_type') or request.args.get('phone_type') or '').strip().lower()
     if phone_line_type in ('mobile', 'portable', 'cell', 'fixed', 'fixe', 'landline'):
         if phone_line_type in ('portable', 'cell'):
@@ -720,18 +735,20 @@ def get_entreprises():
         categorie (str): Filtrer par catégorie métier
         statut (str): Filtrer par statut
         opportunite (str): Filtrer par opportunite / score d'opportunite affiche
-        search (str): Recherche textuelle (nom, website)
+        search (str): Recherche (nom, secteur, email, responsable, adresse, site web, tags, emails scrapés)
         groupe_id (int): Membres d'un groupe ProspectLab
         no_group (bool): Entreprises sans aucun groupe
         has_email (bool): Au moins un email connu
         has_phone (bool): Au moins un téléphone connu
+        has_screenshots (bool): Screenshots publics prêts (pas 404)
+        has_gemini_report (bool): Rapport Gemini enregistré (alias query ``has_gemini``)
         phone_line_type (str): mobile | fixed (portable ou fixe)
         favori (bool): 1 / true / yes — uniquement les entreprises marquées favori
         etape_prospection (str): Filtre pipeline
         include_phones (bool): Ajoute phones[] (principal + scraper) sur chaque fiche
         
     Returns:
-        JSON: Liste des entreprises avec leurs informations (champ favori sur chaque fiche)
+        JSON: Liste avec favori, has_screenshots, has_gemini_report, gemini_report_source sur chaque fiche
     """
     try:
         limit = min(int(request.args.get('limit', 100)), 1000)
@@ -818,7 +835,8 @@ def public_groupe_entreprises(groupe_id):
 
     Query params:
         limit, offset — pagination (comme GET /entreprises)
-        search, statut, has_phone, phone_line_type, has_email, include_phones, etc.
+        search, statut, favori, has_screenshots, has_gemini_report (ou has_gemini),
+        has_phone, phone_line_type, has_email, include_phones, etc.
 
     Args:
         groupe_id (int): Identifiant du groupe

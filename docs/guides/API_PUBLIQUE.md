@@ -117,7 +117,7 @@ Tous les chemins ci‑dessous sont **relatifs** à `/api/public`.
 | **GET** | `/reference/carte-villes` | Entreprises | Villes (presets) + effectif dans un rayon (`rayon_km`) |
 | **GET** | `/entreprises/statuses` | Entreprises | Statuts entreprise supportés (pipeline, délivrabilité) |
 | **GET** | `/campagnes/statuses` | Campagnes | `draft`, `scheduled`, `running`, `completed`, `failed` |
-| **GET** | `/entreprises` | Entreprises | Liste paginée (`limit`, `offset`, `secteur`, `statut`, `search`, `groupe_id`, `has_phone`, `phone_line_type`, `favori`, …) |
+| **GET** | `/entreprises` | Entreprises | Liste paginée (`limit`, `offset`, `secteur`, `statut`, `search`, `groupe_id`, `has_phone`, `phone_line_type`, `favori`, `has_screenshots`, `has_gemini_report`, …) |
 | **GET** | `/groupes` | Entreprises | Liste des groupes ProspectLab (`entreprises_count`) |
 | **GET** | `/groupes/<id>` | Entreprises | Détail d'un groupe |
 | **GET** | `/groupes/<id>/entreprises` | Entreprises | Membres du groupe (pagination + filtres comme `/entreprises`) |
@@ -228,10 +228,12 @@ Paramètres principaux :
 
 - Pagination : `limit` (défaut 100, max 1000), `offset`
 - Segmentation : `secteur`, `categorie`, `statut`, `opportunite`, `etape_prospection`, `search`
+- **Recherche `search`** : nom, secteur, catégorie, email principal, responsable, adresses, emails scrapés ; **site web** (`website`, domaine) pour les mots-clés assez longs (même logique que l’UI) ; **tags** si le token est éligible.
 - Groupes : `groupe_id` (membres d'un groupe), `no_group=1` (sans groupe)
 - Coordonnées : `has_email=1`, `has_phone=1`, `phone_line_type=mobile|fixed` (portable ou fixe)
+- **Assets** : `has_screenshots=1` (captures publiques prêtes), `has_gemini_report=1` ou alias `has_gemini=1` (rapport Gemini stocké)
 - **Favoris** : `favori=1` (ou `true` / `yes`) ne retourne que les entreprises marquées ; chaque fiche expose `favori` (booléen)
-- Chaque fiche liste inclut `telephone`, `display_phone` (principal ou 1er scraper) et `phones_count`
+- Chaque fiche liste inclut `has_screenshots`, `has_gemini_report`, `gemini_report_source`, `telephone`, `display_phone`, `phones_count`
 - `include_phones=1` : ajoute le tableau `phones[]` (comme GET `/entreprises/<id>/phones`)
 
 Pour `statut` : si la valeur est `Gagné`, `Perdu` ou `Relance`, le filtre inclut les statuts événementiels associés ; sinon filtre exact.
@@ -240,7 +242,7 @@ Pour `statut` : si la valeur est `Gagné`, `Perdu` ou `Relance`, le filtre inclu
 
 **GET** `/groupes/<id>` — détail d'un groupe.
 
-**GET** `/groupes/<id>/entreprises` — entreprises du groupe ; accepte les mêmes filtres que `/entreprises` (ex. `?has_phone=1&phone_line_type=mobile`).
+**GET** `/groupes/<id>/entreprises` — entreprises du groupe ; accepte les mêmes filtres que `/entreprises` (ex. `?search=example.com&has_screenshots=1&has_gemini_report=1`).
 
 **GET** `/entreprises/by-website?website=`** — URL ou domaine normalisé.
 

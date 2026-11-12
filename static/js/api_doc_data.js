@@ -110,7 +110,7 @@ const API_DOC_FAMILIES = [
                         params: [
                             { name: 'limit', type: 'int', desc: 'Défaut 100, max 1000' },
                             { name: 'offset', type: 'int', desc: 'Pagination' },
-                            { name: 'search', type: 'str', desc: 'Nom, site, etc.' },
+                            { name: 'search', type: 'str', desc: 'Nom, secteur, email, site web (domaine), tags, emails scrapés…' },
                             { name: 'secteur', type: 'str' },
                             { name: 'categorie', type: 'str', desc: 'Catégorie métier' },
                             { name: 'statut', type: 'str' },
@@ -119,7 +119,10 @@ const API_DOC_FAMILIES = [
                             { name: 'has_email', type: 'bool', desc: '1, true ou yes' },
                             { name: 'has_phone', type: 'bool', desc: 'Au moins un téléphone (principal ou scraper)' },
                             { name: 'phone_line_type', type: 'str', desc: 'mobile (portable) ou fixed (fixe). Alias query phone_type.' },
-                            { name: 'include_phones', type: 'bool', desc: 'Liste complète phones[] par entreprise' }
+                            { name: 'include_phones', type: 'bool', desc: 'Liste complète phones[] par entreprise' },
+                            { name: 'favori', type: 'bool', desc: '1 / true / yes — favoris uniquement' },
+                            { name: 'has_screenshots', type: 'bool', desc: 'Captures desktop/tablet/mobile prêtes (hors 404)' },
+                            { name: 'has_gemini_report', type: 'bool', desc: 'Rapport Gemini enregistré. Alias query `has_gemini`.' }
                         ]
                     }
                 ]
@@ -127,7 +130,7 @@ const API_DOC_FAMILIES = [
             {
                 id: 'entreprises',
                 name: 'Entreprises',
-                categoryDesc: 'Liste, détail, proximité GPS, recherches (site, email, téléphone), filtres coordonnées (email, téléphone portable/fixe), favoris (`favori=1` sur la liste, GET/PATCH/POST `/entreprises/<id>/favori`), groupes (`groupe_id`, `no_group`) ; galerie, emails, campagnes liées. Suppression : DELETE — droit token « suppression entreprises » en plus de la lecture.',
+                categoryDesc: 'Liste, détail, proximité GPS, recherches (site, email, téléphone), filtres `has_screenshots`, `has_gemini_report` (alias `has_gemini`), coordonnées, favoris (`favori=1`, endpoints `/entreprises/<id>/favori`), groupes (`groupe_id`, `no_group`) ; galerie, emails, campagnes. Suppression : DELETE + droit token dédié.',
                 endpoints: [
                     {
                         method: 'GET',
@@ -142,11 +145,13 @@ const API_DOC_FAMILIES = [
                             { name: 'statut', type: 'str' },
                             { name: 'opportunite', type: 'str' },
                             { name: 'etape_prospection', type: 'str' },
-                            { name: 'search', type: 'str', desc: 'Nom, site, tags, emails scrapés…' },
+                            { name: 'search', type: 'str', desc: 'Nom, secteur, email, site web / domaine, tags, emails scrapés (logique UI)' },
                             { name: 'groupe_id', type: 'int', desc: 'Membres d’un groupe ProspectLab' },
                             { name: 'no_group', type: 'bool', desc: 'Entreprises sans aucun groupe (1 / true / yes)' },
                             { name: 'has_email', type: 'bool', desc: 'Au moins un email connu' },
                             { name: 'has_phone', type: 'bool', desc: 'Au moins un téléphone connu' },
+                            { name: 'has_screenshots', type: 'bool', desc: '1 / true / yes — screenshots publics prêts' },
+                            { name: 'has_gemini_report', type: 'bool', desc: '1 / true / yes — rapport Gemini stocké (alias `has_gemini`)' },
                             { name: 'phone_line_type', type: 'str', desc: 'mobile ou fixed (alias phone_type)' },
                             { name: 'include_phones', type: 'bool', desc: 'Ajoute phones[] (principal + scraper) sur chaque fiche' },
                             { name: 'favori', type: 'bool', desc: '1 / true / yes — ne retourne que les favoris (champ favori sur chaque fiche)' }
