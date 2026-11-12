@@ -2140,8 +2140,8 @@
                                 ${isSelected ? 'checked' : ''} 
                                 title="Sélectionner cette entreprise"
                             >
-                        <button class="btn-favori ${entreprise.favori ? 'active' : ''}" data-id="${entreprise.id}" title="Favori">
-                            <i class="fas fa-star"></i>
+                        <button type="button" class="btn-icon btn-favori ${entreprise.favori ? 'active' : ''}" data-id="${entreprise.id}" title="${entreprise.favori ? 'Retirer des favoris' : 'Ajouter aux favoris'}" aria-pressed="${entreprise.favori ? 'true' : 'false'}">
+                            <i class="${entreprise.favori ? 'fas' : 'far'} fa-star" aria-hidden="true"></i>
                         </button>
                         </div>
                     </div>
@@ -2371,7 +2371,7 @@
         const isSelected = selectedEntreprises.has(entreprise.id);
 
         return `
-            <div class="entreprise-row${isSelected ? ' entreprise-selected' : ''}" data-id="${entreprise.id}">
+            <div class="entreprise-row${isSelected ? ' entreprise-selected' : ''}${entreprise.favori ? ' is-favori' : ''}" data-id="${entreprise.id}">
                 <div class="row-logo" aria-hidden="true">
                     <input 
                         type="checkbox" 
@@ -2441,7 +2441,7 @@
                 ${rowScoresSection}
                 <div class="row-actions">
                     <button class="btn-icon btn-groups" data-id="${entreprise.id}" title="Gérer les groupes"><i class="fas fa-layer-group"></i></button>
-                    <button class="btn-favori ${entreprise.favori ? 'active' : ''}" data-id="${entreprise.id}" title="Favori"><i class="fas fa-star"></i></button>
+                    <button type="button" class="btn-icon btn-favori ${entreprise.favori ? 'active' : ''}" data-id="${entreprise.id}" title="${entreprise.favori ? 'Retirer des favoris' : 'Ajouter aux favoris'}" aria-pressed="${entreprise.favori ? 'true' : 'false'}"><i class="${entreprise.favori ? 'fas' : 'far'} fa-star" aria-hidden="true"></i></button>
                     <button class="btn btn-small btn-primary btn-view-details" data-id="${entreprise.id}" title="Voir détails"><i class="fas fa-eye"></i> Détails</button>
                     <button class="btn btn-small btn-danger btn-delete-entreprise" data-id="${entreprise.id}" data-name="${Formatters.escapeHtml(entreprise.nom || 'Sans nom')}" title="Supprimer"><i class="fas fa-trash"></i></button>
                 </div>
@@ -2607,14 +2607,61 @@
         });
     }
     
+    /**
+     * Met à jour l'étoile favori dans la liste / les cartes sans re-render complet.
+     * @param {number} entrepriseId
+     * @param {boolean} isFavori
+     */
+    function syncFavoriUiState(entrepriseId, isFavori) {
+        const favori = !!isFavori;
+        document.querySelectorAll(`.btn-favori[data-id="${entrepriseId}"]`).forEach((btn) => {
+            btn.classList.toggle('active', favori);
+            const icon = btn.querySelector('i.fa-star');
+            if (icon) {
+                icon.classList.remove('far', 'fas', 'fa-regular', 'fa-solid');
+                if (favori) {
+                    icon.classList.add('fas', 'fa-solid');
+                } else {
+                    icon.classList.add('far', 'fa-regular');
+                }
+            }
+            btn.setAttribute('title', favori ? 'Retirer des favoris' : 'Ajouter aux favoris');
+            btn.setAttribute('aria-pressed', favori ? 'true' : 'false');
+        });
+        document.querySelectorAll(`.entreprise-card[data-id="${entrepriseId}"], .entreprise-row[data-id="${entrepriseId}"]`).forEach((node) => {
+            node.classList.toggle('is-favori', favori);
+        });
+        const modalBtn = document.getElementById('modal-toggle-favori');
+        if (modalBtn && currentModalEntrepriseId === entrepriseId) {
+            modalBtn.classList.toggle('active', favori);
+            modalBtn.innerHTML = favori
+                ? '<i class="fas fa-star"></i> Favori'
+                : '<i class="far fa-star"></i> Ajouter aux favoris';
+        }
+    }
+
+    /**
+     * Applique la valeur favori renvoyée par l'API dans la mémoire + le DOM.
+     * @param {number} entrepriseId
+     * @param {boolean} newVal
+     */
+    function applyFavoriState(entrepriseId, newVal) {
+        const favori = !!newVal;
+        [allEntreprises, filteredEntreprises].forEach((arr) => {
+            if (!Array.isArray(arr)) return;
+            const ent = arr.find((e) => e && e.id === entrepriseId);
+            if (ent) ent.favori = favori;
+        });
+        if (currentModalEntrepriseData && currentModalEntrepriseData.id === entrepriseId) {
+            currentModalEntrepriseData.favori = favori;
+        }
+        syncFavoriUiState(entrepriseId, favori);
+    }
+
     async function toggleFavori(entrepriseId) {
         try {
-            await EntreprisesAPI.toggleFavori(entrepriseId);
-            const entreprise = allEntreprises.find(e => e.id === entrepriseId);
-            if (entreprise) {
-                entreprise.favori = !entreprise.favori;
-            }
-            renderEntreprises();
+            const data = await EntreprisesAPI.toggleFavori(entrepriseId);
+            applyFavoriState(entrepriseId, !!(data && data.favori));
             Notifications.show('Favori mis à jour', 'success');
         } catch (error) {
             console.error('Erreur:', error);
@@ -2648,13 +2695,12 @@
                 await openGroupsDropdown(entrepriseId, groupsBtn);
             });
         }
-        const favoriBtn = document.querySelector(`.btn-favori[data-id="${entrepriseId}"]`);
-        if (favoriBtn) {
+        document.querySelectorAll(`.btn-favori[data-id="${entrepriseId}"]`).forEach((favoriBtn) => {
             favoriBtn.addEventListener('click', async (e) => {
                 e.stopPropagation();
                 await toggleFavori(entrepriseId);
             });
-        }
+        });
         
         const viewBtn = document.querySelector(`.btn-view-details[data-id="${entrepriseId}"]`);
         if (viewBtn) {
@@ -7149,14 +7195,8 @@
             favoriBtn.addEventListener('click', async () => {
                 if (!currentModalEntrepriseId) return;
                 try {
-                    await EntreprisesAPI.toggleFavori(currentModalEntrepriseId);
-                    const entreprise = allEntreprises.find(e => e.id === currentModalEntrepriseId);
-                    if (entreprise) {
-                        entreprise.favori = !entreprise.favori;
-                    }
-                    favoriBtn.classList.toggle('active');
-                    favoriBtn.innerHTML = currentModalEntrepriseData.favori ? '<i class="fas fa-star"></i> Favori' : '<i class="far fa-star"></i> Ajouter aux favoris';
-                    currentModalEntrepriseData.favori = !currentModalEntrepriseData.favori;
+                    const data = await EntreprisesAPI.toggleFavori(currentModalEntrepriseId);
+                    applyFavoriState(currentModalEntrepriseId, !!(data && data.favori));
                     Notifications.show('Favori mis à jour', 'success');
                 } catch (error) {
                     console.error('Erreur:', error);

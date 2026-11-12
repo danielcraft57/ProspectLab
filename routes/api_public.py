@@ -621,6 +621,13 @@ def _truthy_query_flag(raw) -> bool:
     return str(raw or '').lower() in ('1', 'true', 'yes')
 
 
+def _normalize_favori_on_entreprise_record(ent):
+    """Expose favori en booléen JSON pour les clients API."""
+    if isinstance(ent, dict) and 'favori' in ent:
+        ent['favori'] = bool(ent.get('favori'))
+    return ent
+
+
 def _build_public_entreprises_filters_from_request():
     """
     Construit le dict de filtres entreprises à partir des query params de l'API publique.
@@ -650,6 +657,10 @@ def _build_public_entreprises_filters_from_request():
         filters['has_email'] = 'true'
     if _truthy_query_flag(request.args.get('has_phone')):
         filters['has_phone'] = 'true'
+    favori_raw = request.args.get('favori')
+    if favori_raw is not None and str(favori_raw).strip() != '':
+        if _truthy_query_flag(favori_raw):
+            filters['favori'] = True
     phone_line_type = (request.args.get('phone_line_type') or request.args.get('phone_type') or '').strip().lower()
     if phone_line_type in ('mobile', 'portable', 'cell', 'fixed', 'fixe', 'landline'):
         if phone_line_type in ('portable', 'cell'):
@@ -687,7 +698,11 @@ def _fetch_public_entreprises_list(limit: int, offset: int, filters=None, includ
     if include_phones and entreprises:
         _batch_attach_phones_to_entreprises(entreprises)
     from utils.helpers import clean_json_dict
-    return clean_json_dict(entreprises), total
+    entreprises = clean_json_dict(entreprises)
+    if isinstance(entreprises, list):
+        for row in entreprises:
+            _normalize_favori_on_entreprise_record(row)
+    return entreprises, total
 
 
 @api_public_bp.route('/entreprises', methods=['GET'])
@@ -711,11 +726,12 @@ def get_entreprises():
         has_email (bool): Au moins un email connu
         has_phone (bool): Au moins un téléphone connu
         phone_line_type (str): mobile | fixed (portable ou fixe)
+        favori (bool): 1 / true / yes — uniquement les entreprises marquées favori
         etape_prospection (str): Filtre pipeline
         include_phones (bool): Ajoute phones[] (principal + scraper) sur chaque fiche
         
     Returns:
-        JSON: Liste des entreprises avec leurs informations
+        JSON: Liste des entreprises avec leurs informations (champ favori sur chaque fiche)
     """
     try:
         limit = min(int(request.args.get('limit', 100)), 1000)
@@ -907,6 +923,127 @@ def get_entreprise_statuses():
         'success': True,
         'data': _get_allowed_entreprise_statuses(),
     })
+
+
+def _coerce_json_bool(value):
+    """Interprète un booléen JSON ou string (true/false, 1/0)."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return bool(value)
+    s = str(value).strip().lower()
+    if s in ('1', 'true', 'yes', 'on'):
+        return True
+    if s in ('0', 'false', 'no', 'off'):
+        return False
+    return None
+
+
+def _update_entreprise_favori_public(entreprise_id: int, *, favori=None, toggle: bool = False):
+    """
+    Met à jour le drapeau favori d'une entreprise (toggle ou valeur explicite).
+
+    @param entreprise_id: ID entreprise
+    @param favori: True/False si définition explicite (PATCH)
+    @param toggle: Si True, inverse l'état actuel (POST sans body)
+    @returns: Response Flask
+    """
+    try:
+        entreprise = database.get_entreprise(entreprise_id)
+        if not entreprise:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable'}), 404
+
+        if toggle or favori is None:
+            new_favori = database.toggle_favori(entreprise_id)
+        else:
+            new_favori = database.set_favori(entreprise_id, bool(favori))
+
+        entreprise_updated = database.get_entreprise(entreprise_id)
+        from utils.helpers import clean_json_dict
+        entreprise_updated = clean_json_dict(entreprise_updated)
+        _normalize_favori_on_entreprise_record(entreprise_updated)
+
+        return jsonify({
+            'success': True,
+            'entreprise_id': int(entreprise_id),
+            'favori': bool(new_favori),
+            'data': entreprise_updated,
+        })
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 404
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@api_public_bp.route('/entreprises/<int:entreprise_id>/favori', methods=['GET'])
+@api_token_required
+@require_api_permission('entreprises')
+@public_response_cache(20)
+def get_entreprise_favori_public(entreprise_id: int):
+    """
+    API publique : lecture du drapeau favori (endpoint léger).
+
+    Returns:
+        JSON: { success, entreprise_id, favori }
+    """
+    try:
+        entreprise = database.get_entreprise(entreprise_id)
+        if not entreprise:
+            return jsonify({'success': False, 'error': 'Entreprise introuvable'}), 404
+        return jsonify({
+            'success': True,
+            'entreprise_id': int(entreprise_id),
+            'favori': bool(entreprise.get('favori')),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@api_public_bp.route('/entreprises/<int:entreprise_id>/favori', methods=['POST'])
+@api_token_required
+@require_api_permission('entreprises')
+def toggle_entreprise_favori_public(entreprise_id: int):
+    """
+    API publique : bascule favori (même logique que l'UI ProspectLab).
+
+    Body JSON optionnel : si ``favori`` est fourni (bool), force la valeur ; sinon toggle.
+    """
+    payload = request.get_json(silent=True) or {}
+    if 'favori' in payload:
+        coerced = _coerce_json_bool(payload.get('favori'))
+        if coerced is None:
+            return jsonify({
+                'success': False,
+                'error': 'Le champ "favori" doit être un booléen (true/false).',
+            }), 400
+        return _update_entreprise_favori_public(entreprise_id, favori=coerced)
+    return _update_entreprise_favori_public(entreprise_id, toggle=True)
+
+
+@api_public_bp.route('/entreprises/<int:entreprise_id>/favori', methods=['PATCH', 'PUT'])
+@api_token_required
+@require_api_permission('entreprises')
+def set_entreprise_favori_public(entreprise_id: int):
+    """
+    API publique : définit explicitement le favori.
+
+    Body JSON (requis) : { "favori": true | false }
+    """
+    payload = request.get_json(silent=True) or {}
+    if 'favori' not in payload:
+        return jsonify({
+            'success': False,
+            'error': 'Le champ "favori" est requis (true ou false).',
+        }), 400
+    coerced = _coerce_json_bool(payload.get('favori'))
+    if coerced is None:
+        return jsonify({
+            'success': False,
+            'error': 'Le champ "favori" doit être un booléen (true/false).',
+        }), 400
+    return _update_entreprise_favori_public(entreprise_id, favori=coerced)
 
 
 @api_public_bp.route('/entreprises/<int:entreprise_id>/statut', methods=['PATCH', 'POST'])
@@ -1103,6 +1240,7 @@ def get_entreprise(entreprise_id):
 
         from utils.helpers import clean_json_dict
         entreprise = clean_json_dict(entreprise)
+        _normalize_favori_on_entreprise_record(entreprise)
 
         return jsonify({
             'success': True,

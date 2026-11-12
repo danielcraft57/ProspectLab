@@ -643,7 +643,7 @@ def scrape_emails_task(self, url, max_depth=3, max_workers=5, max_time=300,
         def progress_callback(message):
             self.update_state(state='PROGRESS', meta={'message': message})
 
-        return run_scrape_emails_inline(
+        out = run_scrape_emails_inline(
             url=url,
             max_depth=max_depth,
             max_workers=max_workers,
@@ -656,8 +656,24 @@ def scrape_emails_task(self, url, max_depth=3, max_workers=5, max_time=300,
             entreprise_id=entreprise_id,
             progress_callback=progress_callback,
         )
+        try:
+            from utils.ws_scrape_payload import emit_scraping_outcome_from_worker
+
+            emit_scraping_outcome_from_worker(out)
+        except Exception:
+            pass
+        return out
     except Exception as e:
         logger.error(f'Erreur lors du scraping de {url}: {e}', exc_info=True)
+        try:
+            from utils.celery_socketio_emit import emit_from_celery_worker
+
+            emit_from_celery_worker(
+                'scraping_error',
+                {'error': str(e), 'entreprise_id': entreprise_id},
+            )
+        except Exception:
+            pass
         raise
     finally:
         if lock_acquired:

@@ -61,35 +61,10 @@ def _scraping_dev_fallback_enabled() -> bool:
 
 
 def _flatten_scrape_socket_payload(results, entreprise_id=None):
-    """
-    Aplatit le dict « results » du scraper pour l’UI (totaux + listes attendues par displayAllScrapingResults).
-    """
-    if not isinstance(results, dict):
-        results = {}
-    r = results
-    emails_raw = r.get('emails') or []
-    emails_list = []
-    for e in emails_raw:
-        if isinstance(e, dict) and e.get('email'):
-            emails_list.append(e['email'])
-        elif isinstance(e, str):
-            emails_list.append(e)
-    return {
-        'success': True,
-        'entreprise_id': entreprise_id,
-        'total_emails': r.get('total_emails', len(emails_raw)),
-        'total_people': r.get('total_people', 0),
-        'total_phones': r.get('total_phones', 0),
-        'emails': emails_list,
-        'people': r.get('people') or [],
-        'phones': r.get('phones') or [],
-        'social_links': r.get('social_links') or {},
-        'technologies': r.get('technologies') or {},
-        'metadata': r.get('metadata') or {},
-        'images': r.get('images') or [],
-        'scraped_location': r.get('scraped_location'),
-        'results': r,
-    }
+    """Délègue au helper partagé (worker Celery + handlers WS)."""
+    from utils.ws_scrape_payload import flatten_scrape_socket_payload
+
+    return flatten_scrape_socket_payload(results, entreprise_id)
 
 
 def _gemini_result_is_quota(result) -> bool:
@@ -166,6 +141,9 @@ database = Database()
 # Dictionnaires pour stocker les tâches actives
 active_tasks = {}
 tasks_lock = threading.Lock()
+# Monitors WS enregistrés (session + task_id) : plusieurs jobs par onglet sans tuer les anciens polls
+_celery_ws_monitors = set()
+_celery_ws_monitors_lock = threading.Lock()
 
 
 def _celery_progress_meta_as_dict(info):
@@ -212,13 +190,33 @@ def _sleep_before_monitor_poll(countdown_sec: int) -> None:
         _ws_sleep(min(float(countdown_sec), 120.0))
 
 
+def _celery_monitor_token(session_id: str, celery_task_id) -> str:
+    """Clé stable pour un monitor (session Socket.IO + id tâche Celery)."""
+    return f'{session_id or ""}\x1e{str(celery_task_id or "")}'
+
+
+def _register_ws_celery_monitor(session_id: str, celery_task_id) -> None:
+    """Enregistre un monitor Celery pour ce sid (plusieurs jobs en parallèle sur le même onglet)."""
+    if not session_id or celery_task_id is None:
+        return
+    with _celery_ws_monitors_lock:
+        _celery_ws_monitors.add(_celery_monitor_token(session_id, celery_task_id))
+
+
+def _unregister_ws_celery_monitor(session_id: str, celery_task_id) -> None:
+    """Retire le monitor une fois complete/error."""
+    if not session_id or celery_task_id is None:
+        return
+    with _celery_ws_monitors_lock:
+        _celery_ws_monitors.discard(_celery_monitor_token(session_id, celery_task_id))
+
+
 def _session_owns_celery_task(session_id: str, celery_task_id) -> bool:
     """
-    Vérifie si le monitor WebSocket est encore le propriétaire actif de la tâche Celery.
+    Vérifie si ce monitor peut encore émettre complete/error.
 
-    Quand une nouvelle analyse est lancée sur le même sid, ``active_tasks[session_id]``
-    est remplacé : les anciens monitors doivent s'arrêter sans réémettre complete/error
-    (sinon toasts en double pour un même job ou pour un job déjà remplacé).
+    Priorité au registre par task_id (scraping / analyses en parallèle sur le même sid).
+    Repli sur ``active_tasks`` pour les monitors legacy sans enregistrement.
 
     @param session_id: request.sid au moment du lancement
     @param celery_task_id: ID Celery capturé au démarrage du monitor
@@ -226,6 +224,10 @@ def _session_owns_celery_task(session_id: str, celery_task_id) -> bool:
     """
     if not session_id or celery_task_id is None:
         return False
+    token = _celery_monitor_token(session_id, celery_task_id)
+    with _celery_ws_monitors_lock:
+        if token in _celery_ws_monitors:
+            return True
     with tasks_lock:
         cur = active_tasks.get(session_id)
         if not cur:
@@ -270,24 +272,39 @@ def _clear_active_task_if_owner(session_id: str, celery_task_id) -> None:
             del active_tasks[session_id]
 
 
-def _start_monitor_background(socketio, target):
+def _start_monitor_background(socketio, target, session_id=None, celery_task_id=None):
     """
     Lance le suivi Celery (poll + emit) sans threading.Thread.
 
     Sous Gunicorn -k eventlet, un thread OS séparé ne peut pas émettre vers le client Socket.IO
     de façon fiable : pas de seo_analysis_progress / *_complete. start_background_task utilise
     le même modèle async que le serveur (eventlet.spawn, etc.).
+
+    @param session_id: sid Socket.IO (enregistre le monitor pour ne pas couper les jobs parallèles)
+    @param celery_task_id: id tâche Celery suivie par ``target``
     """
     if socketio is None or target is None:
         return
+
+    def _run_monitor():
+        registered = False
+        if session_id and celery_task_id is not None:
+            _register_ws_celery_monitor(session_id, celery_task_id)
+            registered = True
+        try:
+            target()
+        finally:
+            if registered:
+                _unregister_ws_celery_monitor(session_id, celery_task_id)
+
     try:
         sb = getattr(socketio, 'start_background_task', None)
         if callable(sb):
-            sb(target)
+            sb(_run_monitor)
             return
     except Exception:
         logger.debug('start_background_task indisponible, fallback thread', exc_info=True)
-    t = threading.Thread(target=target, daemon=True)
+    t = threading.Thread(target=_run_monitor, daemon=True)
     t.start()
 
 
@@ -1443,7 +1460,12 @@ def register_websocket_handlers(socketio, app):
                         'error': f'Erreur dans le suivi: {str(e)}'
                     }, room=notify_rooms)
             
-            _start_monitor_background(socketio, monitor_task)
+            _start_monitor_background(
+                socketio,
+                monitor_task,
+                session_id=session_id,
+                celery_task_id=task.id,
+            )
         except Exception as e:
             # Erreur générale dans le handler
             try:
@@ -1718,7 +1740,12 @@ def register_websocket_handlers(socketio, app):
                         'error': f'Erreur dans le suivi: {str(e)}'
                     }, room=notify_rooms)
             
-            _start_monitor_background(socketio, monitor_task)
+            _start_monitor_background(
+                socketio,
+                monitor_task,
+                session_id=session_id,
+                celery_task_id=monitored_task_id,
+            )
         except Exception as e:
             try:
                 safe_emit(socketio, 'scraping_error', {
@@ -1917,7 +1944,12 @@ def register_websocket_handlers(socketio, app):
                         'entreprise_id': entreprise_id
                     }, room=notify_rooms)
             
-            _start_monitor_background(socketio, monitor_task)
+            _start_monitor_background(
+                socketio,
+                monitor_task,
+                session_id=session_id,
+                celery_task_id=monitored_task_id,
+            )
         except Exception as e:
             try:
                 safe_emit(socketio, 'osint_analysis_error', {
@@ -2126,7 +2158,12 @@ def register_websocket_handlers(socketio, app):
                         'entreprise_id': entreprise_id
                     }, room=notify_rooms)
             
-            _start_monitor_background(socketio, monitor_task)
+            _start_monitor_background(
+                socketio,
+                monitor_task,
+                session_id=session_id,
+                celery_task_id=monitored_task_id,
+            )
         except Exception as e:
             try:
                 safe_emit(socketio, 'pentest_analysis_error', {
@@ -2303,7 +2340,12 @@ def register_websocket_handlers(socketio, app):
                         'entreprise_id': entreprise_id
                     }, room=notify_rooms)
             
-            _start_monitor_background(socketio, monitor_task)
+            _start_monitor_background(
+                socketio,
+                monitor_task,
+                session_id=session_id,
+                celery_task_id=monitored_task_id,
+            )
         except Exception as e:
             try:
                 safe_emit(socketio, 'seo_analysis_error', {
@@ -2513,7 +2555,12 @@ def register_websocket_handlers(socketio, app):
                         'entreprise_id': entreprise_id
                     }, room=notify_rooms)
 
-            _start_monitor_background(socketio, monitor_task)
+            _start_monitor_background(
+                socketio,
+                monitor_task,
+                session_id=session_id,
+                celery_task_id=monitored_task_id,
+            )
         except Exception as e:
             try:
                 safe_emit(socketio, 'technical_analysis_error', {
@@ -2650,7 +2697,12 @@ def register_websocket_handlers(socketio, app):
                         room=notify_rooms,
                     )
 
-            _start_monitor_background(socketio, monitor_task)
+            _start_monitor_background(
+                socketio,
+                monitor_task,
+                session_id=session_id,
+                celery_task_id=task.id,
+            )
         except Exception as e:
             try:
                 safe_emit(socketio, 'screenshot_capture_error', {'error': f'Erreur lors du démarrage de la capture: {str(e)}'}, room=request.sid)
@@ -2976,7 +3028,12 @@ def register_websocket_handlers(socketio, app):
                         room=notify_rooms,
                     )
 
-            _start_monitor_background(socketio, monitor_task)
+            _start_monitor_background(
+                socketio,
+                monitor_task,
+                session_id=session_id,
+                celery_task_id=task.id,
+            )
         except Exception as e:
             try:
                 safe_emit(
@@ -3127,7 +3184,12 @@ def register_websocket_handlers(socketio, app):
                         room=notify_rooms,
                     )
 
-            _start_monitor_background(socketio, monitor_task)
+            _start_monitor_background(
+                socketio,
+                monitor_task,
+                session_id=session_id,
+                celery_task_id=task.id,
+            )
         except Exception as e:
             try:
                 safe_emit(
@@ -3245,7 +3307,12 @@ def register_websocket_handlers(socketio, app):
                     'campagne_id': campagne_id,
                 }
 
-            _start_monitor_background(socketio, monitor_task)
+            _start_monitor_background(
+                socketio,
+                monitor_task,
+                session_id=session_id,
+                celery_task_id=task_id,
+            )
         except Exception as e:
             try:
                 safe_emit(socketio, 'campagne_error', {
@@ -3568,7 +3635,12 @@ def register_websocket_handlers(socketio, app):
             with tasks_lock:
                 active_tasks[session_id] = {'type': 'full_website_analysis', 'task_id': task_id}
 
-            _start_monitor_background(socketio, monitor_task)
+            _start_monitor_background(
+                socketio,
+                monitor_task,
+                session_id=session_id,
+                celery_task_id=task_id,
+            )
         except Exception as e:
             try:
                 safe_emit(

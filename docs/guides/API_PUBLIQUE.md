@@ -117,12 +117,15 @@ Tous les chemins ci‑dessous sont **relatifs** à `/api/public`.
 | **GET** | `/reference/carte-villes` | Entreprises | Villes (presets) + effectif dans un rayon (`rayon_km`) |
 | **GET** | `/entreprises/statuses` | Entreprises | Statuts entreprise supportés (pipeline, délivrabilité) |
 | **GET** | `/campagnes/statuses` | Campagnes | `draft`, `scheduled`, `running`, `completed`, `failed` |
-| **GET** | `/entreprises` | Entreprises | Liste paginée (`limit`, `offset`, `secteur`, `statut`, `search`, `groupe_id`, `has_phone`, `phone_line_type`, …) |
+| **GET** | `/entreprises` | Entreprises | Liste paginée (`limit`, `offset`, `secteur`, `statut`, `search`, `groupe_id`, `has_phone`, `phone_line_type`, `favori`, …) |
 | **GET** | `/groupes` | Entreprises | Liste des groupes ProspectLab (`entreprises_count`) |
 | **GET** | `/groupes/<id>` | Entreprises | Détail d'un groupe |
 | **GET** | `/groupes/<id>/entreprises` | Entreprises | Membres du groupe (pagination + filtres comme `/entreprises`) |
 | **GET** | `/entreprises/proches` | Entreprises | Proximité GPS (`latitude`, `longitude`, `rayon_km`, `limit`, `secteur`) |
-| **GET** | `/entreprises/<id>` | Entreprises | Détail entreprise |
+| **GET** | `/entreprises/<id>` | Entreprises | Détail entreprise (`favori` booléen) |
+| **GET** | `/entreprises/<id>/favori` | Entreprises | Drapeau favori seul (`{ favori }`) |
+| **POST** | `/entreprises/<id>/favori` | Entreprises | Toggle favori (body optionnel `{ "favori": true\|false }`) |
+| **PATCH**/**PUT** | `/entreprises/<id>/favori` | Entreprises | Définit `{ "favori": true\|false }` |
 | **DELETE** | `/entreprises/<id>` | Entreprises + `entreprises_delete` | Suppression PERMANENTE (cascades de données liées incluses) |
 | **GET** | `/entreprises/by-website` | Entreprises | Recherche par site (`website`) |
 | **GET** | `/entreprises/by-email` | Entreprises + emails | Recherche par email (`include_emails`) |
@@ -227,6 +230,7 @@ Paramètres principaux :
 - Segmentation : `secteur`, `categorie`, `statut`, `opportunite`, `etape_prospection`, `search`
 - Groupes : `groupe_id` (membres d'un groupe), `no_group=1` (sans groupe)
 - Coordonnées : `has_email=1`, `has_phone=1`, `phone_line_type=mobile|fixed` (portable ou fixe)
+- **Favoris** : `favori=1` (ou `true` / `yes`) ne retourne que les entreprises marquées ; chaque fiche expose `favori` (booléen)
 - Chaque fiche liste inclut `telephone`, `display_phone` (principal ou 1er scraper) et `phones_count`
 - `include_phones=1` : ajoute le tableau `phones[]` (comme GET `/entreprises/<id>/phones`)
 
@@ -584,6 +588,30 @@ Mapping recommandé (raccourcis **POST**) :
 **PATCH** ou **POST** `/entreprises/<id>/statut` — corps : `{ "statut": "...", "note": "..." }` avec une valeur parmi **`GET /entreprises/statuses`**.
 
 Body optionnel sur les POST : `{ "note": "..." }`.
+
+### Favoris
+
+- **`GET /entreprises/<id>/favori`** — `{ "success": true, "entreprise_id": 123, "favori": true }`
+- **`POST /entreprises/<id>/favori`** — bascule l’étoile si le corps est vide ; avec `{ "favori": false }`, force la valeur
+- **`PATCH`** ou **`PUT /entreprises/<id>/favori`** — corps requis : `{ "favori": true | false }`
+
+Réponse type après écriture :
+
+```json
+{
+  "success": true,
+  "entreprise_id": 123,
+  "favori": true,
+  "data": { "...": "fiche entreprise complète" }
+}
+```
+
+Liste des favoris :
+
+```bash
+curl -H "Authorization: Bearer VOTRE_TOKEN" \
+  "https://votre-domaine/api/public/entreprises?favori=1&limit=100"
+```
 
 ---
 

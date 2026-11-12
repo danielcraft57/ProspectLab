@@ -4069,8 +4069,19 @@ class EntrepriseManager(DatabaseBase):
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        self.execute_sql(cursor,'SELECT favori FROM entreprises WHERE id = ?', (entreprise_id,))
-        current = cursor.fetchone()[0]
+        self.execute_sql(cursor, 'SELECT favori FROM entreprises WHERE id = ?', (entreprise_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            raise ValueError(f'Entreprise introuvable: id={entreprise_id}')
+        if isinstance(row, dict):
+            current = row.get('favori', 0)
+        else:
+            try:
+                current = row[0]
+            except (TypeError, KeyError, IndexError):
+                current = row['favori']
+        current = 1 if current else 0
         new_value = 0 if current else 1
         
         self.execute_sql(cursor,'UPDATE entreprises SET favori = ? WHERE id = ?', (new_value, entreprise_id))
@@ -4078,6 +4089,30 @@ class EntrepriseManager(DatabaseBase):
         conn.close()
         
         return new_value == 1
+
+    def set_favori(self, entreprise_id, favori: bool) -> bool:
+        """
+        Définit le statut favori sans basculer.
+
+        @param entreprise_id: ID de l'entreprise
+        @param favori: True pour marquer favori, False pour retirer
+        @returns: Valeur persistée (bool)
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self.execute_sql(cursor, 'SELECT id FROM entreprises WHERE id = ?', (entreprise_id,))
+        if not cursor.fetchone():
+            conn.close()
+            raise ValueError(f'Entreprise introuvable: id={entreprise_id}')
+        new_value = 1 if favori else 0
+        self.execute_sql(
+            cursor,
+            'UPDATE entreprises SET favori = ? WHERE id = ?',
+            (new_value, entreprise_id),
+        )
+        conn.commit()
+        conn.close()
+        return bool(new_value)
     
     def get_nearby_entreprises(self, latitude, longitude, radius_km=10, secteur=None, limit=50):
         """

@@ -1594,10 +1594,30 @@ body[data-theme="dark"] .row-chip-facebook.is-loading i {
     transform: translateY(-1px);
 }
 
-.entreprise-row .btn-favori.active {
+.entreprise-row .btn-icon.btn-favori {
+    opacity: 1;
+    font-size: 1rem;
+}
+
+.entreprise-row .btn-icon.btn-favori:not(.active) {
+    color: #94a3b8;
+}
+
+.entreprise-row .btn-icon.btn-favori:not(.active):hover {
     color: #f59e0b;
-    background: #fef3c7;
+    background: #fffbeb;
+    border-color: #fde68a;
+}
+
+.entreprise-row .btn-icon.btn-favori.active {
+    color: #f59e0b;
+    background: linear-gradient(145deg, #fffbeb 0%, #fef3c7 100%);
     border-color: #fcd34d;
+    box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.25);
+}
+
+.entreprise-row.is-favori {
+    box-shadow: inset 3px 0 0 #f59e0b;
 }
 
 .entreprise-row .btn-view-details,
@@ -1885,10 +1905,25 @@ body[data-theme="dark"] .entreprise-row .btn-icon:hover {
     color: #e2e8f0;
 }
 
-body[data-theme="dark"] .entreprise-row .btn-favori.active {
-    background: rgba(245, 158, 11, 0.2);
+body[data-theme="dark"] .entreprise-row .btn-icon.btn-favori:not(.active) {
+    color: #64748b;
+}
+
+body[data-theme="dark"] .entreprise-row .btn-icon.btn-favori:not(.active):hover {
+    color: #fbbf24;
+    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(251, 191, 36, 0.35);
+}
+
+body[data-theme="dark"] .entreprise-row .btn-icon.btn-favori.active {
+    background: linear-gradient(145deg, rgba(245, 158, 11, 0.22) 0%, rgba(251, 191, 36, 0.12) 100%);
     border-color: #f59e0b;
     color: #fbbf24;
+    box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.2);
+}
+
+body[data-theme="dark"] .entreprise-row.is-favori {
+    box-shadow: inset 3px 0 0 #f59e0b;
 }
 
 /* Section des scores avec graphiques circulaires */

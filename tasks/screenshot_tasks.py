@@ -92,36 +92,69 @@ def _find_bundled_full_chromium() -> str | None:
     for folder in root.glob('chromium-*'):
         if 'headless_shell' in folder.name:
             continue
-        exe = folder / 'chrome-linux' / 'chrome'
-        if exe.is_file():
-            candidates.append(exe)
+        # Playwright ARM64 : chrome-linux-arm64/chrome (pas chrome-linux/chrome)
+        for sub in ('chrome-linux-arm64', 'chrome-linux'):
+            exe = folder / sub / 'chrome'
+            if exe.is_file():
+                candidates.append(exe)
+                break
     if not candidates:
         return None
     candidates.sort(key=lambda p: p.parent.parent.name, reverse=True)
     return str(candidates[0])
 
 
+def _is_debian_chromium_wrapper(path: str) -> bool:
+    """True pour /usr/bin/chromium (script shell) qui casse si PATH systemd est minimal."""
+    p = Path(path)
+    return p.name in ('chromium', 'chromium-browser') and p.parent == Path('/usr/bin')
+
+
+def _arm_system_chromium_candidates() -> tuple[str, ...]:
+    """Binaires Chromium Debian (Raspberry Pi), pas les wrappers /usr/bin."""
+    return (
+        '/usr/lib/chromium/chromium',
+        '/usr/lib/chromium-browser/chromium-browser',
+    )
+
+
+def _use_system_chromium_on_arm() -> bool:
+    """Sur Pi, le Chromium paquet Debian n'est pas toujours compatible avec le driver Playwright."""
+    return os.environ.get('PLAYWRIGHT_USE_SYSTEM_CHROMIUM', '').lower() in ('1', 'true', 'yes')
+
+
 def _resolve_chromium_executable() -> str | None:
     """
-    Choix du binaire pour eviter chrome-headless-shell sur ARM.
+    Binaire Chromium pour Playwright.
 
-    Priorite : PLAYWRIGHT_CHROMIUM_EXECUTABLE, CHROME_PATH (.env), bundle Playwright, apt chromium.
+    Sur ARM (Pi) : par defaut **aucun** executable_path → headless shell Playwright
+    (version alignee sur le paquet `playwright`). Le Chromium Debian ou un vieux bundle
+    ms-playwright provoquent SIGILL ou TargetClosedError.
+
+    Forcer : PLAYWRIGHT_CHROMIUM_EXECUTABLE, PLAYWRIGHT_FORCE_FULL_CHROMIUM + bundle,
+    ou PLAYWRIGHT_USE_SYSTEM_CHROMIUM + CHROME_PATH /usr/lib/chromium/chromium.
     """
     override = (os.environ.get('PLAYWRIGHT_CHROMIUM_EXECUTABLE') or '').strip()
     if override and Path(override).is_file():
         return override
-    if CHROME_PATH and Path(CHROME_PATH).is_file():
+    force_full = os.environ.get('PLAYWRIGHT_FORCE_FULL_CHROMIUM', '').lower() in ('1', 'true', 'yes')
+    if force_full:
+        bundled = _find_bundled_full_chromium()
+        if bundled:
+            return bundled
+    if _is_arm_linux():
+        if _use_system_chromium_on_arm():
+            if CHROME_PATH and Path(CHROME_PATH).is_file() and not _is_debian_chromium_wrapper(CHROME_PATH):
+                return CHROME_PATH
+            for candidate in _arm_system_chromium_candidates():
+                if Path(candidate).is_file():
+                    return candidate
+        return None
+    if CHROME_PATH and Path(CHROME_PATH).is_file() and not _is_debian_chromium_wrapper(CHROME_PATH):
         return CHROME_PATH
     bundled = _find_bundled_full_chromium()
     if bundled:
         return bundled
-    if _is_arm_linux():
-        for candidate in (
-            '/usr/bin/chromium',
-            '/usr/bin/chromium-browser',
-        ):
-            if Path(candidate).is_file():
-                return candidate
     return None
 
 
@@ -133,14 +166,12 @@ def _chromium_launch_kwargs() -> dict:
     """
     kw: dict = {'headless': True, 'args': list(_CHROMIUM_LAUNCH_ARGS), 'timeout': 45_000}
     exe = _resolve_chromium_executable()
-    if exe and (_is_arm_linux() or os.environ.get('PLAYWRIGHT_FORCE_FULL_CHROMIUM', '').lower() in ('1', 'true', 'yes')):
+    if exe:
         kw['executable_path'] = exe
         logger.debug('Playwright chromium executable_path=%s', exe)
-    elif exe and not _is_arm_linux():
-        # x86 : laisser le shell par defaut sauf si CHROME_PATH / override explicite
-        if (os.environ.get('PLAYWRIGHT_CHROMIUM_EXECUTABLE') or '').strip() or CHROME_PATH:
-            kw['executable_path'] = exe
-            logger.debug('Playwright chromium executable_path=%s', exe)
+        # SwiftShader du bundle complet Playwright peut SIGILL sur certains Pi.
+        if _is_arm_linux():
+            kw['ignore_default_args'] = ['--enable-unsafe-swiftshader']
     return kw
 
 # Sous-chaînes d’URL (analytics / pub) — bloque surtout scripts / pixels, accélère le chargement.

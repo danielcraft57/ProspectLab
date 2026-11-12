@@ -127,7 +127,7 @@ const API_DOC_FAMILIES = [
             {
                 id: 'entreprises',
                 name: 'Entreprises',
-                categoryDesc: 'Liste, détail, proximité GPS, recherches (site, email, téléphone), filtres coordonnées (email, téléphone portable/fixe), groupes (`groupe_id`, `no_group`) ; galerie, emails, campagnes liées. Suppression : DELETE — droit token « suppression entreprises » en plus de la lecture.',
+                categoryDesc: 'Liste, détail, proximité GPS, recherches (site, email, téléphone), filtres coordonnées (email, téléphone portable/fixe), favoris (`favori=1` sur la liste, GET/PATCH/POST `/entreprises/<id>/favori`), groupes (`groupe_id`, `no_group`) ; galerie, emails, campagnes liées. Suppression : DELETE — droit token « suppression entreprises » en plus de la lecture.',
                 endpoints: [
                     {
                         method: 'GET',
@@ -148,7 +148,8 @@ const API_DOC_FAMILIES = [
                             { name: 'has_email', type: 'bool', desc: 'Au moins un email connu' },
                             { name: 'has_phone', type: 'bool', desc: 'Au moins un téléphone connu' },
                             { name: 'phone_line_type', type: 'str', desc: 'mobile ou fixed (alias phone_type)' },
-                            { name: 'include_phones', type: 'bool', desc: 'Ajoute phones[] (principal + scraper) sur chaque fiche' }
+                            { name: 'include_phones', type: 'bool', desc: 'Ajoute phones[] (principal + scraper) sur chaque fiche' },
+                            { name: 'favori', type: 'bool', desc: '1 / true / yes — ne retourne que les favoris (champ favori sur chaque fiche)' }
                         ]
                     },
                     {
@@ -167,8 +168,32 @@ const API_DOC_FAMILIES = [
                     {
                         method: 'GET',
                         path: '/entreprises/<id>',
-                        desc: 'Détail d’une entreprise.',
+                        desc: 'Détail d’une entreprise (inclut le booléen `favori`).',
                         permission: 'Entreprises'
+                    },
+                    {
+                        method: 'GET',
+                        path: '/entreprises/<id>/favori',
+                        desc: 'Lecture seule du drapeau favori. Réponse : `{ success, entreprise_id, favori }`.',
+                        permission: 'Entreprises'
+                    },
+                    {
+                        method: 'POST',
+                        path: '/entreprises/<id>/favori',
+                        desc: 'Toggle favori (body vide) ou force la valeur avec `{ "favori": true|false }`. Réponse : `{ success, favori, data }`.',
+                        permission: 'Entreprises',
+                        bodyParams: [
+                            { name: 'favori', type: 'bool', required: false, desc: 'Optionnel — absent = toggle' }
+                        ]
+                    },
+                    {
+                        method: 'PATCH',
+                        path: '/entreprises/<id>/favori',
+                        desc: 'Définit explicitement le favori (alias PUT).',
+                        permission: 'Entreprises',
+                        bodyParams: [
+                            { name: 'favori', type: 'bool', required: true, desc: 'true ou false' }
+                        ]
                     },
                     {
                         method: 'DELETE',
