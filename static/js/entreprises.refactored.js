@@ -387,6 +387,7 @@
     let filteredEntreprises = [];   // idem (après éventuels filtres client si on en ajoute)
     let totalEntreprises = 0;       // total tous résultats côté serveur
     let currentModalEntrepriseId = null;
+    let emailCampagnesTabEntrepriseId = null;
     let currentModalEntrepriseData = null;
     /** Dernier scrape unified affiche dans l'onglet scraping (mini-scrape externe). */
     let currentModalLatestScraperId = null;
@@ -4364,6 +4365,7 @@
         const loadSignal = modalLoadAbortController.signal;
 
         currentModalEntrepriseId = requestedId;
+        emailCampagnesTabEntrepriseId = null;
         const modal = document.getElementById('entreprise-modal');
         const modalBody = document.getElementById('modal-entreprise-body');
         const modalTitle = document.getElementById('modal-entreprise-nom');
@@ -5720,6 +5722,157 @@
      * Charge statut pipeline + touchpoints et branche les actions dans la modale.
      * @param {number} entrepriseId
      */
+    /**
+     * Formate une date ISO pour l'onglet campagnes email.
+     * @param {string|null} iso - Horodatage
+     * @returns {string} Texte affichable
+     */
+    function formatEmailEngagementDate(iso) {
+        if (!iso) return '—';
+        try {
+            const d = new Date(iso);
+            if (Number.isNaN(d.getTime())) return Formatters.escapeHtml(String(iso));
+            return Formatters.escapeHtml(d.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }));
+        } catch (e) {
+            return Formatters.escapeHtml(String(iso));
+        }
+    }
+
+    /**
+     * HTML de l'onglet campagnes email (tracking ouvertures / clics).
+     * @param {object} data - Payload GET /api/entreprise/:id/email-engagement
+     * @returns {string} Markup
+     */
+    function renderEmailEngagementHtml(data) {
+        const scheduled = Array.isArray(data.scheduled) ? data.scheduled : [];
+        const emails = Array.isArray(data.emails) ? data.emails : [];
+        const campagnes = Array.isArray(data.campagnes) ? data.campagnes : [];
+
+        let html = '<div class="email-engagement-wrap">';
+        html += '<p class="email-engagement-intro">Tags CRM auto : <code>email_ouvert</code>, <code>email_clique</code>, <code>campagne_&lt;id&gt;_ouvert</code> / <code>_clique</code> / <code>_sans_ouverture</code> (fin de campagne).</p>';
+
+        if (scheduled.length) {
+            html += '<section class="email-engagement-section"><h4><i class="fas fa-clock"></i> Campagnes planifiées (pas encore d\'envoi pour cette fiche)</h4><ul class="email-engagement-scheduled">';
+            scheduled.forEach((c) => {
+                html += `<li><strong>${Formatters.escapeHtml(c.nom || 'Campagne')}</strong> — ${Formatters.escapeHtml(c.statut || '')}`;
+                if (c.scheduled_at) {
+                    html += ` · envoi prévu ${formatEmailEngagementDate(c.scheduled_at)}`;
+                }
+                if (c.sujet) {
+                    html += `<br><span class="muted">${Formatters.escapeHtml(c.sujet)}</span>`;
+                }
+                html += `</li>`;
+            });
+            html += '</ul></section>';
+        }
+
+        if (campagnes.length) {
+            html += '<section class="email-engagement-section"><h4><i class="fas fa-bullhorn"></i> Campagnes liées</h4><div class="email-engagement-campagne-chips">';
+            campagnes.forEach((c) => {
+                const flags = [];
+                if (c.has_click) flags.push('<span class="chip chip-click">Clic</span>');
+                else if (c.has_open) flags.push('<span class="chip chip-open">Ouvert</span>');
+                if (c.statut === 'scheduled') flags.push('<span class="chip chip-scheduled">Planifiée</span>');
+                const campLink = typeof window.viewCampagne === 'function'
+                    ? `<button type="button" class="linklike" onclick="viewCampagne(${Number(c.id)})">${Formatters.escapeHtml(c.nom || ('#' + c.id))}</button>`
+                    : Formatters.escapeHtml(c.nom || ('#' + c.id));
+                html += `<div class="email-engagement-chip">${campLink} <span class="muted">(${Number(c.emails_count) || 0} envoi(s))</span> ${flags.join(' ')}</div>`;
+            });
+            html += '</div></section>';
+        }
+
+        html += '<section class="email-engagement-section"><h4><i class="fas fa-envelope-open-text"></i> Emails envoyés et tracking</h4>';
+        if (!emails.length) {
+            html += '<p class="empty-state">Aucun email enregistré pour cette entreprise.</p>';
+        } else {
+            html += '<div class="email-engagement-table-wrap"><table class="email-engagement-table"><thead><tr>';
+            html += '<th>Campagne</th><th>Sujet</th><th>Envoi</th><th>Statut</th><th>Engagement</th><th></th></tr></thead><tbody>';
+            emails.forEach((mail) => {
+                let badge = '<span class="badge badge-secondary">Envoyé</span>';
+                if (mail.statut === 'bounced') badge = '<span class="badge badge-danger">Bounce</span>';
+                else if (mail.has_clicked) badge = '<span class="badge badge-click">Clic</span>';
+                else if (mail.has_opened) badge = '<span class="badge badge-open">Ouvert</span>';
+                const read = mail.avg_read_time_seconds != null
+                    ? `${mail.avg_read_time_seconds}s lecture`
+                    : (mail.prefetch_hits ? `${mail.prefetch_hits} hit(s) auto` : '—');
+                html += `<tr class="email-engagement-row"><td>${Formatters.escapeHtml(mail.campagne_nom || '—')}</td>`;
+                html += `<td>${Formatters.escapeHtml(mail.sujet || '—')}</td>`;
+                html += `<td>${formatEmailEngagementDate(mail.date_envoi)}</td>`;
+                html += `<td>${badge}</td>`;
+                html += `<td class="email-engagement-metrics">${Formatters.escapeHtml(read)}</td>`;
+                html += `<td><button type="button" class="btn btn-outline btn-small" data-email-detail-toggle>Détail</button></td></tr>`;
+                html += '<tr class="email-engagement-detail-row"><td colspan="6">';
+                html += '<div class="email-engagement-events">';
+                if (!mail.events || !mail.events.length) {
+                    html += '<p class="muted">Aucun événement de tracking (pixel non déclenché ou bloqué).</p>';
+                } else {
+                    html += '<ul class="email-engagement-event-list">';
+                    mail.events.forEach((ev) => {
+                        const sum = ev.summary || {};
+                        const autoTag = sum.automatic
+                            ? '<span class="badge badge-warn">Automatique / suspect</span>'
+                            : '<span class="badge badge-ok">Probablement humain</span>';
+                        html += `<li><strong>${formatEmailEngagementDate(ev.date_event)}</strong> — ${Formatters.escapeHtml(sum.label || ev.event_type || '')} ${autoTag}`;
+                        if (sum.reason) {
+                            html += `<br><span class="muted">${Formatters.escapeHtml(sum.reason)}</span>`;
+                        }
+                        if (ev.ip_address) {
+                            html += `<br><span class="muted">IP ${Formatters.escapeHtml(ev.ip_address)}</span>`;
+                        }
+                        html += '</li>';
+                    });
+                    html += '</ul>';
+                }
+                if (mail.first_open_at) {
+                    html += `<p class="muted">1re ouverture comptée : ${formatEmailEngagementDate(mail.first_open_at)}</p>`;
+                }
+                if (mail.last_click_at) {
+                    html += `<p class="muted">Dernier clic : ${formatEmailEngagementDate(mail.last_click_at)}</p>`;
+                }
+                html += '</div></td></tr>';
+            });
+            html += '</tbody></table></div>';
+        }
+        html += '</section></div>';
+        return html;
+    }
+
+    /**
+     * Charge l'onglet campagnes email (tracking + planifiées).
+     * @param {number} entrepriseId - ID entreprise
+     */
+    async function loadEmailCampagnesTab(entrepriseId) {
+        const root = document.getElementById('entreprise-email-campagnes-container');
+        if (!root) return;
+        if (emailCampagnesTabEntrepriseId === entrepriseId && root.querySelector('.email-engagement-wrap')) {
+            return;
+        }
+        emailCampagnesTabEntrepriseId = entrepriseId;
+        root.innerHTML = '<p class="loading">Chargement des campagnes et du tracking…</p>';
+        try {
+            const response = await fetch(`/api/entreprise/${entrepriseId}/email-engagement`);
+            const json = await response.json();
+            if (!json.success) {
+                throw new Error(json.error || 'Chargement impossible');
+            }
+            root.innerHTML = renderEmailEngagementHtml(json.data || {});
+            root.querySelectorAll('[data-email-detail-toggle]').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    const row = btn.closest('tr');
+                    const detail = row && row.nextElementSibling;
+                    if (!detail) return;
+                    const panel = detail.querySelector('.email-engagement-events');
+                    if (panel) {
+                        panel.classList.toggle('is-open');
+                    }
+                });
+            });
+        } catch (err) {
+            console.error(err);
+            root.innerHTML = `<p class="empty-state">Erreur : ${Formatters.escapeHtml(err.message || String(err))}</p>`;
+        }
+    }
+
     async function loadProspectionTab(entrepriseId) {
         const container = document.getElementById('entreprise-prospection-container');
         if (!container || !window.EntreprisesAPI) return;
@@ -5975,6 +6128,7 @@
                         <button class="tab-btn" data-tab="images">Images (${nbImages})</button>
                         <button class="tab-btn" data-tab="pages">Pages (${nbPages})</button>
                         <button class="tab-btn" data-tab="facebook">Facebook</button>
+                        <button class="tab-btn" data-tab="email-campagnes">Campagnes email</button>
                         <button class="tab-btn" data-tab="scraping">Résultats scraping</button>
                         <button class="tab-btn" data-tab="gemini-report">Rapport Gemini</button>
                         <button class="tab-btn" data-tab="gemini-mockups" title="Echantillons DanielCraft + generation IA">Maquettes</button>
@@ -6144,6 +6298,12 @@
                     <div class="tab-panel" id="tab-facebook" style="display:none;">
                         <div id="entreprise-facebook-container" class="facebook-tab-content">
                             <p class="empty-state">Ouvrez cet onglet pour charger Facebook.</p>
+                        </div>
+                    </div>
+
+                    <div class="tab-panel" id="tab-email-campagnes" style="display:none;">
+                        <div id="entreprise-email-campagnes-container" class="email-engagement-tab">
+                            <p class="empty-state">Ouvrez cet onglet pour charger l'historique des emails et le tracking.</p>
                         </div>
                     </div>
 
@@ -7660,6 +7820,15 @@
             facebookTabBtn.addEventListener('click', () => {
                 if (currentModalEntrepriseId && window.EntrepriseFacebookTab) {
                     window.EntrepriseFacebookTab.load(currentModalEntrepriseId);
+                }
+            });
+        }
+
+        const emailCampagnesTabBtn = document.querySelector('.tab-btn[data-tab="email-campagnes"]');
+        if (emailCampagnesTabBtn) {
+            emailCampagnesTabBtn.addEventListener('click', () => {
+                if (currentModalEntrepriseId) {
+                    loadEmailCampagnesTab(currentModalEntrepriseId);
                 }
             });
         }

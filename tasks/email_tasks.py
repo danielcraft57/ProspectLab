@@ -619,6 +619,12 @@ def send_campagne_task(self, campagne_id, recipients, template_id=None, subject=
                 total_reussis=total_sent
             )
 
+            if final_statut in ('completed', 'completed_with_errors') and total_sent > 0:
+                try:
+                    campagne_manager.sync_campagne_engagement_tags(campagne_id)
+                except Exception as tag_exc:
+                    logger.warning('[Campagne %s] sync_campagne_engagement_tags: %s', campagne_id, tag_exc)
+
             # En fin de campagne: le passage auto en "Perdu" est désactivé par défaut,
             # car il peut fausser fortement le pipeline quand le tracking open/click
             # est partiellement bloqué (Apple MPP, anti-trackers, clients mail).

@@ -4,7 +4,64 @@ Contient toutes les méthodes liées aux campagnes email
 """
 
 import json
+import logging
 from .base import DatabaseBase
+
+_CAMPAIGN_TAG_LOGGER = logging.getLogger(__name__)
+
+
+def _decode_tracking_event_data(raw):
+    """Parse event_data JSON stocké en base."""
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    try:
+        parsed = json.loads(str(raw))
+        return parsed if isinstance(parsed, dict) else {'raw': raw}
+    except Exception:
+        return {'raw': str(raw)[:500]}
+
+
+def _tracking_event_summary(event_type: str, meta: dict) -> dict:
+    """
+    Résumé lisible d'un événement de tracking (modal entreprise).
+
+    @param event_type: Type brut (open, click, prefetch, read_time, …)
+    @param meta: Dict event_data décodé
+    @returns: dict avec label, suspect, prefetch, read_time_seconds
+    """
+    meta = meta or {}
+    suspect = bool(meta.get('suspect') or meta.get('bot'))
+    prefetch = bool(meta.get('prefetch')) or event_type == 'prefetch'
+    read_sec = meta.get('read_time')
+    try:
+        read_sec = float(read_sec) if read_sec is not None else None
+    except (TypeError, ValueError):
+        read_sec = None
+
+    if event_type == 'click':
+        label = 'Clic sur un lien'
+    elif event_type == 'read_time':
+        label = f'Temps de lecture ~{int(read_sec)}s' if read_sec is not None else 'Temps de lecture'
+    elif event_type in ('prefetch',) or prefetch:
+        label = 'Chargement automatique (prefetch / scan anti-spam)'
+    elif event_type == 'open':
+        if suspect:
+            label = 'Ouverture signalée (proxy, bot ou client incertain)'
+        else:
+            label = 'Ouverture'
+    else:
+        label = str(event_type or 'événement')
+
+    return {
+        'label': label,
+        'suspect': suspect,
+        'prefetch': prefetch,
+        'automatic': prefetch or suspect,
+        'read_time_seconds': read_sec,
+        'reason': meta.get('reason'),
+    }
 
 
 class CampagneManager(DatabaseBase):
@@ -1061,7 +1118,11 @@ class CampagneManager(DatabaseBase):
             conn.close()
             return None
 
-        self.execute_sql(cursor,'SELECT id, entreprise_id, date_envoi FROM emails_envoyes WHERE tracking_token = ?', (tracking_token,))
+        self.execute_sql(
+            cursor,
+            'SELECT id, entreprise_id, date_envoi, campagne_id FROM emails_envoyes WHERE tracking_token = ?',
+            (tracking_token,),
+        )
         row = cursor.fetchone()
         if not row:
             import logging
@@ -1073,15 +1134,18 @@ class CampagneManager(DatabaseBase):
         email_id = None
         entreprise_id = None
         date_envoi = None
+        campagne_id = None
         try:
             if isinstance(row, dict):
                 email_id = row.get('id')
                 entreprise_id = row.get('entreprise_id')
                 date_envoi = row.get('date_envoi')
+                campagne_id = row.get('campagne_id')
             else:
                 email_id = row[0]
                 entreprise_id = row[1]
                 date_envoi = row[2] if len(row) > 2 else None
+                campagne_id = row[3] if len(row) > 3 else None
         except Exception:
             email_id = None
 
@@ -1193,6 +1257,8 @@ class CampagneManager(DatabaseBase):
                         allowed_previous={'Nouveau', 'À qualifier'}
                     )
                     self._add_entreprise_tag_safe(entreprise_id, 'email_ouvert')
+                    if campagne_id:
+                        self._add_entreprise_tag_safe(entreprise_id, f'campagne_{int(campagne_id)}_ouvert')
                 elif event_type == 'click':
                     # Un clic est un signal d'intention très fort:
                     # on passe en "Relance" pour traiter le prospect comme chaud.
@@ -1202,6 +1268,8 @@ class CampagneManager(DatabaseBase):
                         allowed_previous={'Nouveau', 'À qualifier', 'Relance', 'À rappeler'}
                     )
                     self._add_entreprise_tag_safe(entreprise_id, 'email_clique')
+                    if campagne_id:
+                        self._add_entreprise_tag_safe(entreprise_id, f'campagne_{int(campagne_id)}_clique')
         except Exception:
             # Ne pas impacter le tracking en cas de souci
             pass
@@ -1653,6 +1721,196 @@ class CampagneManager(DatabaseBase):
             'avg_read_time': avg_read_time,
             'stats_by_type': stats_by_type,
             'emails': emails
+        }
+
+    def sync_campagne_engagement_tags(self, campagne_id: int) -> dict:
+        """
+        Tags CRM par campagne en fin d'envoi (filtres liste / relances).
+
+        Pour chaque entreprise destinataire : campagne_{id}_clique, _ouvert,
+        ou _sans_ouverture si envoi OK mais aucun open/click « réel ».
+
+        @param campagne_id: ID campagne terminée
+        @returns: Compteurs {tagged_open, tagged_click, tagged_no_open}
+        """
+        cid = int(campagne_id)
+        stats = self.get_campagne_tracking_stats(cid)
+        emails = stats.get('emails') or []
+        counters = {'tagged_open': 0, 'tagged_click': 0, 'tagged_no_open': 0}
+        for row in emails:
+            eid = row.get('entreprise_id')
+            if not eid:
+                continue
+            if row.get('statut') == 'bounced':
+                continue
+            if row.get('has_clicked'):
+                self._add_entreprise_tag_safe(eid, f'campagne_{cid}_clique')
+                counters['tagged_click'] += 1
+            elif row.get('has_opened'):
+                self._add_entreprise_tag_safe(eid, f'campagne_{cid}_ouvert')
+                counters['tagged_open'] += 1
+            elif str(row.get('statut') or '').lower() in ('sent', 'delivered', ''):
+                self._add_entreprise_tag_safe(eid, f'campagne_{cid}_sans_ouverture')
+                counters['tagged_no_open'] += 1
+        _CAMPAIGN_TAG_LOGGER.info('sync_campagne_engagement_tags campagne=%s %s', cid, counters)
+        return counters
+
+    def get_entreprise_email_engagement(self, entreprise_id: int, *, email_limit: int = 80) -> dict:
+        """
+        Historique email + tracking pour la modale entreprise.
+
+        @param entreprise_id: ID entreprise
+        @param email_limit: Nombre max d'emails envoyés détaillés
+        @returns: campagnes, emails (événements), campagnes_planifiees
+        """
+        eid = int(entreprise_id)
+        campagnes = self.list_campagnes(entreprise_id=eid, limit=200, offset=0)
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        self.execute_sql(
+            cursor,
+            '''
+            SELECT ee.*,
+                   c.nom AS campagne_nom,
+                   c.statut AS campagne_statut,
+                   c.scheduled_at AS campagne_scheduled_at,
+                   c.sujet AS campagne_sujet
+            FROM emails_envoyes ee
+            LEFT JOIN campagnes_email c ON c.id = ee.campagne_id
+            WHERE ee.entreprise_id = ?
+            ORDER BY COALESCE(ee.date_envoi, ee.id) DESC
+            LIMIT ?
+            ''',
+            (eid, int(email_limit)),
+        )
+        email_rows = [dict(r) for r in cursor.fetchall()]
+        email_ids = [int(r['id']) for r in email_rows if r.get('id') is not None]
+
+        events_by_email: dict[int, list] = {i: [] for i in email_ids}
+        if email_ids:
+            placeholders = ','.join(['?'] * len(email_ids))
+            try:
+                self.execute_sql(
+                    cursor,
+                    f'''
+                    SELECT id, email_id, event_type, event_data, ip_address, user_agent, date_event
+                    FROM email_tracking_events
+                    WHERE email_id IN ({placeholders})
+                    ORDER BY date_event ASC
+                    ''',
+                    email_ids,
+                )
+                for ev_row in cursor.fetchall():
+                    ev = dict(ev_row)
+                    eid_mail = int(ev.get('email_id'))
+                    meta = _decode_tracking_event_data(ev.get('event_data'))
+                    summary = _tracking_event_summary(str(ev.get('event_type') or ''), meta)
+                    ev['event_data_parsed'] = meta
+                    ev['summary'] = summary
+                    events_by_email.setdefault(eid_mail, []).append(ev)
+            except Exception:
+                _CAMPAIGN_TAG_LOGGER.warning('Chargement tracking engagement entreprise %s', eid, exc_info=True)
+
+        conn.close()
+
+        enriched_emails = []
+        for row in email_rows:
+            mail_id = int(row['id'])
+            evts = events_by_email.get(mail_id) or []
+            real_opens = sum(
+                1 for e in evts
+                if e.get('event_type') == 'open' and not (e.get('summary') or {}).get('prefetch')
+            )
+            real_clicks = sum(1 for e in evts if e.get('event_type') == 'click')
+            prefetch_hits = sum(
+                1 for e in evts
+                if e.get('event_type') in ('prefetch',) or (e.get('summary') or {}).get('prefetch')
+            )
+            read_times = [
+                (e.get('summary') or {}).get('read_time_seconds')
+                for e in evts
+                if e.get('event_type') == 'read_time'
+                and (e.get('summary') or {}).get('read_time_seconds') is not None
+            ]
+            avg_read = round(sum(read_times) / len(read_times), 1) if read_times else None
+            first_open = next(
+                (e.get('date_event') for e in evts if e.get('event_type') == 'open'),
+                None,
+            )
+            last_click = next(
+                (e.get('date_event') for e in reversed(evts) if e.get('event_type') == 'click'),
+                None,
+            )
+            enriched_emails.append({
+                'id': mail_id,
+                'campagne_id': row.get('campagne_id'),
+                'campagne_nom': row.get('campagne_nom'),
+                'campagne_statut': row.get('campagne_statut'),
+                'campagne_scheduled_at': row.get('campagne_scheduled_at'),
+                'email': row.get('email'),
+                'sujet': row.get('sujet') or row.get('campagne_sujet'),
+                'statut': row.get('statut'),
+                'date_envoi': row.get('date_envoi'),
+                'erreur': row.get('erreur'),
+                'opens_countable': real_opens,
+                'clicks_countable': real_clicks,
+                'prefetch_hits': prefetch_hits,
+                'avg_read_time_seconds': avg_read,
+                'first_open_at': first_open,
+                'last_click_at': last_click,
+                'has_opened': real_opens > 0,
+                'has_clicked': real_clicks > 0,
+                'events': evts,
+            })
+
+        sent_campagne_ids = {int(r.get('campagne_id')) for r in email_rows if r.get('campagne_id')}
+        scheduled_pending = []
+        for c in campagnes:
+            cid = int(c.get('id') or 0)
+            if not cid:
+                continue
+            statut = str(c.get('statut') or '').lower()
+            if cid in sent_campagne_ids:
+                continue
+            if statut not in ('scheduled', 'draft', 'running'):
+                continue
+            scheduled_pending.append({
+                'id': cid,
+                'nom': c.get('nom'),
+                'statut': c.get('statut'),
+                'scheduled_at': c.get('scheduled_at'),
+                'sujet': c.get('sujet'),
+                'total_destinataires': c.get('total_destinataires'),
+            })
+
+        campaign_cards = []
+        for c in campagnes:
+            cid = int(c.get('id') or 0)
+            related = [m for m in enriched_emails if int(m.get('campagne_id') or 0) == cid]
+            campaign_cards.append({
+                'id': cid,
+                'nom': c.get('nom'),
+                'statut': c.get('statut'),
+                'scheduled_at': c.get('scheduled_at'),
+                'emails_count': len(related),
+                'has_open': any(m.get('has_opened') for m in related),
+                'has_click': any(m.get('has_clicked') for m in related),
+            })
+
+        return {
+            'entreprise_id': eid,
+            'campagnes': campaign_cards,
+            'scheduled': scheduled_pending,
+            'emails': enriched_emails,
+            'engagement_tags': [
+                'email_envoye',
+                'email_ouvert',
+                'email_clique',
+                'campagne_<id>_ouvert',
+                'campagne_<id>_clique',
+                'campagne_<id>_sans_ouverture',
+            ],
         }
     
     def create_segment(self, nom, description=None, criteres=None):

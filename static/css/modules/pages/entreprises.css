@@ -5726,3 +5726,139 @@ body[data-theme="dark"] .fb-section__title {
     background: #dbeafe;
     margin-left: auto;
 }
+
+/* Onglet modale : campagnes email / tracking */
+.email-engagement-tab .email-engagement-intro {
+    font-size: 0.88rem;
+    color: #64748b;
+    margin-bottom: 1rem;
+}
+
+.email-engagement-section {
+    margin-bottom: 1.25rem;
+}
+
+.email-engagement-section h4 {
+    font-size: 0.95rem;
+    margin: 0 0 0.65rem 0;
+    color: #334155;
+}
+
+.email-engagement-scheduled {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.email-engagement-scheduled li {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+    background: #f8fafc;
+}
+
+.email-engagement-campagne-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.email-engagement-chip {
+    padding: 0.35rem 0.6rem;
+    border-radius: 8px;
+    background: #eef2ff;
+    font-size: 0.85rem;
+}
+
+.email-engagement-chip .chip {
+    display: inline-block;
+    margin-left: 0.35rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+
+.email-engagement-chip .chip-open {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.email-engagement-chip .chip-click {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.email-engagement-chip .chip-scheduled {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.email-engagement-table-wrap {
+    overflow-x: auto;
+}
+
+.email-engagement-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.email-engagement-table th,
+.email-engagement-table td {
+    padding: 0.45rem 0.5rem;
+    border-bottom: 1px solid #e2e8f0;
+    text-align: left;
+    vertical-align: top;
+}
+
+.email-engagement-events {
+    display: none;
+    padding: 0.5rem 0;
+}
+
+.email-engagement-events.is-open {
+    display: block;
+}
+
+.email-engagement-event-list {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 0.5rem 0;
+}
+
+.email-engagement-event-list li {
+    padding: 0.35rem 0;
+    border-bottom: 1px dashed #e2e8f0;
+}
+
+.badge-open {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.badge-click {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.badge-warn {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.badge-ok {
+    background: #ecfdf5;
+    color: #047857;
+}
+
+.email-engagement-chip .linklike {
+    background: none;
+    border: none;
+    padding: 0;
+    color: #4f46e5;
+    cursor: pointer;
+    font-weight: 600;
+    text-decoration: underline;
+}

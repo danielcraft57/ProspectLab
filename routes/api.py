@@ -721,6 +721,40 @@ def entreprise_detail(entreprise_id):
         return jsonify({'error': str(e)}), 500
 
 
+@api_bp.route('/entreprise/<int:entreprise_id>/email-engagement', methods=['GET'])
+@login_required
+def get_entreprise_email_engagement(entreprise_id: int):
+    """
+    API: emails envoyés, tracking (ouvertures, clics, prefetch) et campagnes planifiées.
+
+    Utilisé par l'onglet Campagnes email de la modale entreprise.
+
+    Args:
+        entreprise_id (int): ID entreprise
+
+    Returns:
+        JSON: engagement (campagnes, emails + événements, file planifiée)
+    """
+    try:
+        from services.database.campagnes import CampagneManager
+        from utils.helpers import clean_json_dict
+
+        limit = min(int(request.args.get('limit', 80)), 200)
+        manager = CampagneManager()
+        payload = manager.get_entreprise_email_engagement(entreprise_id, email_limit=limit)
+        return jsonify({'success': True, 'data': clean_json_dict(payload)})
+    except Exception as exc:
+        import logging
+        import traceback
+        logging.getLogger(__name__).error(
+            'email-engagement entreprise %s: %s\n%s',
+            entreprise_id,
+            exc,
+            traceback.format_exc(),
+        )
+        return jsonify({'success': False, 'error': str(exc)}), 500
+
+
 @api_bp.route('/entreprise/<int:entreprise_id>/groupes', methods=['POST'])
 @login_required
 def add_entreprise_to_groupe(entreprise_id):

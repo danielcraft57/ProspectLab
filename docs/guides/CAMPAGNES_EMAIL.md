@@ -173,8 +173,12 @@ Pour faciliter le filtrage dans les prospects:
 - `email_echec_envoi`
 - `email_ouvert`
 - `email_clique`
+- `campagne_<id>_ouvert` / `campagne_<id>_clique` (à l'ouverture ou au clic, et resynchronisés en fin de campagne)
+- `campagne_<id>_sans_ouverture` (envoi OK, aucune ouverture comptée)
 - `relance`
 - `bounce` + `email_invalide`
+
+Dans la modale **Entreprises → onglet Campagnes email** : historique par message (quand, prefetch automatique, ouverture « humaine » vs suspecte, clics, temps de lecture si `read_time`), plus les campagnes **planifiées** où la fiche est dans le ciblage mais l'email n'est pas encore parti.
 
 ### Règles importantes (anti-spam / qualité)
 
